@@ -11,7 +11,7 @@ import math
 from ..operator_llm.journal import RequestRecord
 from ..operator_llm.stream_recovery import RunPromptJournal, _BorrowedJournal
 from ..execution.recovery_contract import RecoveryContractError, identity
-from ..execution.row_scope import current_row_scope
+from demiflow.execution.row_scope import current_row_scope
 
 
 class NativeEmbeddingRecovery:

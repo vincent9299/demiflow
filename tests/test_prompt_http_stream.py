@@ -103,7 +103,7 @@ def sse_server(monkeypatch):
 @pytest.mark.parametrize('adaptive',[False,True])
 def test_concurrent_rows_pool_reuse_gate_lifetime_and_replay(sse_server,tmp_path,adaptive):
     if adaptive:
-        from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+        from demiflow.services.adaptive_requests import AdaptiveRequestGate
         gate=AdaptiveRequestGate(dict(initial_concurrency=2,max_concurrency=2),state_path=tmp_path/'gate.json')
     else:
         gate=RequestGate(2)

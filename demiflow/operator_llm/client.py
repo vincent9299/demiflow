@@ -274,8 +274,8 @@ class AsyncOperatorLLMClient:
         if verification is not True and verification is not False and verification != 'listed':
             raise ValueError('verify_model must be true, false, or listed')
         self.request_options=request_options(self.options)
-        from demiflow.execution.operator_bindings.dataflow_prompt_journal import RemotePrivatePromptJournal
-        private_remote = isinstance(native_journal, RemotePrivatePromptJournal)
+        from demiflow.execution.contracts.dataflow import PrivatePromptJournalPort
+        private_remote = isinstance(native_journal, PrivatePromptJournalPort)
         if private_remote:
             if (self.options.get('sqlite_journal') != native_journal.declaration
                     or self.options.get('journal_dir')):
@@ -293,8 +293,8 @@ class AsyncOperatorLLMClient:
             # Capability-verified remote native journal is assembled before the
             # http_error_retry guard. A private write journal must not silently
             # dual-write with native recovery; it stays as read-only history.
-            from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
-            if not isinstance(native_journal, RemotePromptJournal):
+            from demiflow.execution.contracts.dataflow import PromptJournalPort
+            if not isinstance(native_journal, PromptJournalPort):
                 raise ValueError('native_journal must be a capability-verified RemotePromptJournal')
             if self.journal is not None:
                 raise ValueError('Native remote journal cannot coexist with a private prompt journal; '
@@ -307,8 +307,8 @@ class AsyncOperatorLLMClient:
             journal = self.journal
             verified = isinstance(journal, SQLitePromptJournal)
             if not verified and journal is not None:
-                from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
-                verified = isinstance(journal, RemotePromptJournal)
+                from demiflow.execution.contracts.dataflow import PromptJournalPort
+                verified = isinstance(journal, PromptJournalPort)
             if (not verified or journal.read_only
                     or type(journal.limit) is not int or journal.limit < 0):
                 raise ValueError('HTTP error retry requires a writable SQLite journal with finite nonnegative max_requests')
@@ -335,7 +335,7 @@ class AsyncOperatorLLMClient:
         if model.provider:self._headers['Accept-Encoding']='identity'
         self._client = None
         self._capacity = 100  # direct-client compatibility; Dataset supplies node concurrency
-        from demiflow.execution.blocking_io import BlockingIOPool
+        from demiflow.services.blocking_io import BlockingIOPool
         self._journal_pool = BlockingIOPool(self.options['io_workers'], name='demiflow-prompt-journal')
         self._prepare_pool = BlockingIOPool(self.options['prepare_workers'], name='demiflow-prompt-prepare')
         self._response_pool = BlockingIOPool(self.options['response_workers'], name='demiflow-prompt-response')
@@ -847,13 +847,13 @@ def create_async_operator_llm_client(model: PromptModel, options=None, max_reque
         return CodexExecPromptClient(model, options, max_requests, native_journal=native_journal)
     if options and 'offline_store' in options:
         if native_journal is not None:
-            from ..execution.dataflow_offline import RemoteOfflinePromptClient
+            from demiflow.operator_llm.offline import RemoteOfflinePromptClient
             return RemoteOfflinePromptClient(model, options, native_journal)
         from .sqlite_offline import SQLiteOfflinePromptClient
         return SQLiteOfflinePromptClient(model, options)
     if options and 'offline_dir' in options:
         if native_journal is not None:
-            from ..execution.dataflow_offline import RemoteOfflinePromptClient
+            from demiflow.operator_llm.offline import RemoteOfflinePromptClient
             return RemoteOfflinePromptClient(model, options, native_journal)
         from .offline import OfflinePromptClient
         return OfflinePromptClient(model, options)

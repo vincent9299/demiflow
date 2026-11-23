@@ -376,9 +376,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                     # Take the recovery journal first and pass it to the factory
                     # so the constructor's http_error_retry guard sees a verified
                     # writable journal; bind_client then installs the scopes.
-                    from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
+                    from demiflow.execution.contracts.dataflow import PromptJournalPort
                     journal = getattr(recovery, 'journal', None)
-                    if isinstance(journal, RemotePromptJournal):
+                    if isinstance(journal, PromptJournalPort):
                         native_journal = journal
                 # Standalone transports retain their original factory call
                 # shape; only an actual native journal requires this binding.
@@ -520,9 +520,10 @@ class PromptActor(BoundOperatorLLMMap):
             store=stores.get(self._runtime.options['object_store'])
             if store is None:
                 raise ValueError('Image output has no native artifact participant')
-            from ..execution.object_sink import check_image_replay,image_request_budget
+            from demiflow.execution.journal.dataflow_authority import check_image_replay
+            from demiflow.execution.contracts.dataflow_codec import image_request_budget
             check_image_replay(action)
-            self._runtime.coordinator._artifact_request_budget=image_request_budget(action)
+            self._runtime.coordinator._artifact_request_budget=image_request_budget(action.action_id)
             store.reserve_capacity(self._operation.max_requests,
                 media_limits(self._runtime.options)['max_image_bytes'],node_id)
             self._runtime.artifact_store=store

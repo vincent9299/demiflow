@@ -863,7 +863,7 @@ def inspect_native_write_receipt(journal, action_id):
     prepared = fact['prepared']['sinks']['write_lance']
     composite = type(prepared) is dict and {'objects', 'rows'} <= set(prepared)
     if composite:
-        from demiflow.execution.object_sink import ObjectRowsSink
+        from demiflow.execution.outputs.object_sink import ObjectRowsSink
         sink = ObjectRowsSink.for_inspection(native_action, sink, prepared)
     receipt = sink.inspect(prepared, commit_write_context(native_action, fact['commit_id']))
     if receipt is None:

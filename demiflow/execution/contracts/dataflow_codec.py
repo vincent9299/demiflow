@@ -1269,3 +1269,7 @@ def private_prompt_rpc_id(command, scope, route):
 def private_embedding_rpc_id(command):
     return identity(['private-embedding-rpc-v1', command.action_id, command.node_id,
                      command.request_key, command.operation, dict(command.options)])
+
+
+def image_request_budget(action_id):
+    return 'image-requests-'+identity(action_id)

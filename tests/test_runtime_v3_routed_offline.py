@@ -89,7 +89,7 @@ def test_routed_offline_same_model_request_uses_each_sealed_store(tmp_path, stor
 
 @pytest.mark.parametrize('injected', [{'route': 'absent'}, {'route': None}, {'path': '/tmp/not-the-sealed-store'}])
 def test_routed_offline_rejects_rpc_store_or_route_override(tmp_path, monkeypatch, injected):
-    from demiflow.execution import dataflow_offline
+    from demiflow.execution.journal import dataflow_offline
     original = dataflow_offline.offline_lookup
     seen = []
     def inject(service, command, record):

@@ -14,14 +14,25 @@ from demiflow.execution.contracts.dataflow_codec import private_prompt_rpc_id as
 _OPERATIONS = frozenset({'lookup', 'reserve', 'reserve_http_retry', 'response', 'failed', 'references'})
 
 
-class RemotePrivatePromptJournal(RemotePromptJournal):
+from demiflow.execution.contracts.dataflow import PrivatePromptJournalPort
+
+
+class RemotePrivatePromptJournal(RemotePromptJournal, PrivatePromptJournalPort):
     def __init__(self, *, services, action, node_id, declaration, route, maximum):
         super().__init__(port=services.journal, action=action, bounds=services.bounds)
         self._bind(node_id, services.store)
-        self.declaration, self.route = dict(declaration), route
+        self._declaration, self._route = dict(declaration), route
         self.read_only = declaration.get('read_only', False)
         self.limit = declaration.get('max_requests', maximum)
         self.timeout_s = min(self.timeout_s, declaration.get('timeout_s', 30))
+
+    @property
+    def declaration(self):
+        return self._declaration
+
+    @property
+    def route(self):
+        return self._route
 
     def _command(self, operation, request, *, value_ref=None, reservation=None, options=None):
         from demiflow.execution.row_scope import current_row_scope

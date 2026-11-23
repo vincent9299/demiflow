@@ -192,7 +192,7 @@ class CommitCoordinator:
                 fault_point("after_sink_receipt", context.commit_id)
         # Every publication call has returned; only its removed private staging
         # registrations are eligible. Durable receipts and prepared data stay.
-        from .object_sink import ObjectRowsSink
+        from demiflow.execution.outputs.object_sink import ObjectRowsSink
         for sink in sinks.values():
             participants = ([sink.rows, *sink.object_sinks.values()]
                             if type(sink) is ObjectRowsSink else [sink])

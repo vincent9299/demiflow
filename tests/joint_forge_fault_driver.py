@@ -69,7 +69,7 @@ elif mode == 'execute':
         RECOVERY_LIMITS.update(checkpoint_rows=128, checkpoint_interval_ms=60000)
     from demiflow.execution.run_context import current_run
     import demiflow.execution.commit as protocol
-    from demiflow.execution.object_sink import ObjectSink
+    from demiflow.execution.outputs.object_sink import ObjectSink
     def pause(commit_id=None, run=None):
         run = run or current_run()
         fact = run.journal.execution_commit(commit_id) if commit_id else None

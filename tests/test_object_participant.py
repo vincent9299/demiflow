@@ -17,7 +17,7 @@ import demiflow
 from demiflow import data
 from demiflow.data.datasink import WriteContext
 from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.object_sink import ObjectRowsSink
+from demiflow.execution.outputs.object_sink import ObjectRowsSink
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, RunRef, UnresolvedCommit
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal

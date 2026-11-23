@@ -4,52 +4,27 @@ This adapter stages binary artifacts, not model requests/results. It has no
 HTTP, image execution, scheduling or recovery engine. The first slice owns
     only this run's namespace under a stable logical object destination.
 """
-import hashlib
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 import json
-import os
 from pathlib import Path
-import stat
-import uuid
 import threading
 
-from ..data.datasink import Datasink
-from ..objects import LocalObjectStore
+from demiflow.data.datasink import Datasink
+from demiflow.objects import LocalObjectStore
 from demiflow.execution.outputs.block_sink import BlockSink, storage_usage
-from .recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
+from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
+from demiflow.execution.storage.object_resources import object_name, stage_object, verify_object
+from demiflow.execution.contracts.dataflow_codec import image_request_budget
+from demiflow.execution.contracts.dataflow import BoundImageWriter
 
 
 def fault_point(name, commit_id):
     """Internal test seam, never a caller-selected recovery mode."""
 
 
-def image_request_budget(action):
-    return 'image-requests-'+identity(action.action_id)
-
-
-def check_image_replay(action):
-    """One action watermark in the existing prepared artifact descriptor.
-
-    Legacy participants use the action watermark. Native row-local prompt
-    participants reconcile each occurrence through the existing model journal.
-    """
-    if getattr(action, "native_image_effects", False):
-        return  # Each occurrence is reconciled from the same native commit journal.
-    with action.context._object_resource_lock:
-        if not getattr(action,'replaying',False) or getattr(action,'_image_replay_checked',False):return
-        confirmed=0
-        for fact in action.context.journal.execution_commits(action.action_id):
-            if fact['prepared'] is None:continue
-            for prepared in fact['prepared']['sinks'].values():
-                objects=prepared.get('objects',{})
-                if type(objects) is dict:confirmed=max(confirmed,objects.get('image_requests',0))
-        charged=action.context.journal.budget_consumed(image_request_budget(action))
-        if charged!=confirmed:
-            raise UnresolvedCommit('Image external result is unresolved; automatic regeneration is forbidden')
-        action._image_replay_checked=True
-
-
-class ObjectSink(Datasink):
+class ObjectSink(Datasink, BoundImageWriter):
     """One action's immutable blobs; bytes and metadata have separate quotas."""
     def __init__(self, action, *, logical_root=None, sink_id='objects', max_object_bytes=32*1024**2, max_objects=128,
                  object_action_id=None):
@@ -76,11 +51,9 @@ class ObjectSink(Datasink):
         self._synced_directories = OrderedDict()
 
     def recovery_identity(self):
-        return dict(format=1, logical_root=self.resource['logical_root'], root=self._name(self.root),
+        return dict(format=1, logical_root=self.resource['logical_root'], root=object_name(self.resource, self.root),
                     max_object_bytes=self.maximum, max_objects=self.count)
 
-    def _name(self,path):
-        return str(Path('materializations')/('@objects-'+self.resource['root_id'])/Path(path).relative_to(self.resource['physical_root']))
 
     def write(self, blocks, context):
         raise RecoveryContractError('Objects require the native commit protocol')
@@ -93,42 +66,34 @@ class ObjectSink(Datasink):
             reservation_id='images-'+identity(node_id),ceiling=self.run.limits['max_scratch_bytes'])
         storage_usage(self.run)
 
+    def store_image(self, raw, options):
+        from demiflow.operator_llm.media import media_limits, image_decode_policy
+        from demiflow.collect.image_decode import decode_image
+        from demiflow.execution.storage.object_resources import validate_image_bytes
+        # Received effects must be persisted even after a cooperative stop.
+        with self.run.persist_admitted_effect():
+            limits = media_limits(options)
+            validate_image_bytes(self.run, raw, limits=limits,
+                decode_policy=lambda: image_decode_policy(limits,
+                    memory_bytes=self.run.limits['max_rss_bytes'], timeout_s=options['timeout_s']),
+                decode=decode_image)
+            return self.stage(raw, admitted=True)
+
     def stage(self, raw, *, admitted=False):
-        self.run.check_stop()
-        if type(raw) is not bytes or len(raw) > self.maximum:
-            raise RecoveryContractError('Object exceeds its encoded byte ceiling')
-        self.run.object_namespace(self.resource['logical_root'])
-        sha = hashlib.sha256(raw).hexdigest()
-        ref = self.store.reference(sha)
-        target = self.root / sha[:2] / sha
-        fact = dict(path=self._name(target), bytes=len(raw), sha256=sha)
-        # Do not adopt files created by another producer, even if they happen
-        # to have the same content name inside this run's directory.
-        with self.run.journal.execution_guard(self.run.fence) as db:
-            owned = db.execute('SELECT 1 FROM runtime_artifacts WHERE path=?', (fact['path'],)).fetchone()
-            if target.exists() and owned is None:
-                raise RecoveryContractError('Object path is not owned by this run')
-        self.run.reserve_output('object_bytes', len(raw), reservation_id='object-' + identity(fact),admitted=admitted)
-        if target.exists():
-            self._verify(fact)
+        reference, fact = stage_object(self.run, raw, root=self.root, resource=self.resource,
+            store=self.store, maximum=self.maximum, synced=self._synced_directories, admitted=admitted)
+        self._record_object(fact['sha256'], fact)
+        return reference.to_dict()
+
+    def reference_name(self, path, sha, *, register=False):
+        """Verify an owned output reference and optionally adopt its receipt."""
+        if path != self.root / sha[:2] / sha:
+            return None
+        fact = dict(path=object_name(self.resource, path), bytes=path.stat().st_size, sha256=sha)
+        verify_object(fact, root=self.root, resource=self.resource, store=self.store, maximum=self.maximum)
+        if register:
             self._record_object(sha, fact)
-            return ref.to_dict()
-        temporary = target.parent / ('.pending-' + uuid.uuid4().hex)
-        self.run.allocate_artifact(target, size=len(raw), atomic=False)
-        self.run.allocate_artifact(temporary, size=len(raw), atomic=False)
-        with self.run.journal.publication_guard(self.run.fence):
-            if any(p.is_symlink() for p in (target, *target.parents)):
-                raise RecoveryContractError('Object path contains a symlink')
-            try:
-                self.store.put(raw, sha256=sha, temporary=temporary, max_bytes=len(raw))
-            except ValueError as exc:
-                raise RecoveryContractError('Object publication content differs') from exc
-            self._verify(fact)
-            from demiflow.execution.storage.object_resources import sync_directories
-            sync_directories(self.resource,target.parent, synced=self._synced_directories)
-        self.run.release_temporaries([temporary, target.with_name(target.name + ".staging")])
-        self._record_object(sha, fact)
-        return ref.to_dict()
+        return fact['path']
 
     def _record_object(self, sha, fact):
         with self._objects_lock:
@@ -143,47 +108,6 @@ class ObjectSink(Datasink):
         for fact in entries(self.run, prepared['objects']):
             self._record_object(fact['sha256'], fact)
 
-    def _verify(self, fact):
-        if type(fact) is not dict or set(fact) != {'path', 'bytes', 'sha256'}:
-            raise RecoveryContractError('Invalid object descriptor')
-        sha, size = fact['sha256'], fact['bytes']
-        try:
-            self.store.reference(sha)
-        except (TypeError, ValueError) as exc:
-            raise RecoveryContractError('Invalid object checksum') from exc
-        expected = self.root / sha[:2] / sha
-        if fact['path'] != self._name(expected):
-            raise RecoveryContractError('Object reference escapes its owner')
-        if type(size) is not int or not 0 <= size <= self.maximum:
-            raise RecoveryContractError('Object descriptor exceeds byte ceiling')
-        # Held directory descriptors prevent parent substitution into symlinks.
-        parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            for part in expected.parts[1:-1]:
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-                os.close(parent)
-                parent = child
-            descriptor = os.open(expected.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
-        except OSError as exc:
-            raise UnresolvedCommit('Object is missing or inaccessible') from exc
-        finally:
-            os.close(parent)
-        with os.fdopen(descriptor, 'rb') as source:
-            before = os.fstat(source.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_size != size:
-                raise RecoveryContractError('Object size differs')
-            digest, consumed = hashlib.sha256(), 0
-            while chunk := source.read(min(65536, size-consumed+1)):
-                consumed += len(chunk)
-                if consumed > size:
-                    raise RecoveryContractError('Object size changed during inspection')
-                digest.update(chunk)
-            after = os.fstat(source.fileno())
-        if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
-            raise RecoveryContractError('Object changed during inspection')
-        if consumed != size or digest.hexdigest() != sha:
-            raise RecoveryContractError('Object checksum differs')
 
     def _validate(self, prepared):
         from demiflow.execution.storage.object_resources import inspect_namespace
@@ -207,7 +131,7 @@ class ObjectSink(Datasink):
                 raise RecoveryContractError('Prepared object page exceeds ceiling')
             hashes = []
             for fact in page:
-                self._verify(fact)
+                verify_object(fact, root=self.root, resource=self.resource, store=self.store, maximum=self.maximum)
                 hashes.append(fact['sha256'])
             if hashes != sorted(set(hashes)):
                 raise RecoveryContractError('Object manifest identity is not canonical')
@@ -239,7 +163,7 @@ class ObjectSink(Datasink):
             prepared = {**self.recovery_identity(), 'objects': self._descriptor(),
                         'image_requests':getattr(self, 'image_requests', None)}
             if prepared['image_requests'] is None:
-                prepared['image_requests'] = self.run.journal.budget_consumed(image_request_budget(self.action))
+                prepared['image_requests'] = self.run.journal.budget_consumed(image_request_budget(self.action.action_id))
             # Seal transfers this generation. Later producers append to fresh
             # pages; reset of this receipt cannot erase their equal-hash rows.
             self.objects, self.manifest = {}, None
@@ -296,7 +220,7 @@ class ObjectSink(Datasink):
         with self._objects_lock:
             sealed = copy(self)
             sealed._objects_lock = threading.RLock()
-            sealed.image_requests = self.run.journal.budget_consumed(image_request_budget(self.action))
+            sealed.image_requests = self.run.journal.budget_consumed(image_request_budget(self.action.action_id))
             self.objects = {}
             self.manifest = None
             return sealed
@@ -306,22 +230,6 @@ class ObjectSink(Datasink):
             if prepared is None:
                 self.objects={}
                 self.manifest=None
-
-
-
-def image_object_specs(plan):
-    """Native resource declarations; no clients or filesystem writes."""
-    from ..operator_llm.native_actor import is_native_prompt_actor
-    from ..operator_llm.media import media_limits
-    specs={}
-    for operation in plan.operations:
-        target=getattr(getattr(operation,'callable',None),'target',None)
-        target=getattr(target,'__self__',target)
-        if is_native_prompt_actor(target) and target._prompt.response_format == 'image':
-            options=target._runtime.options
-            root=options['object_store']
-            specs[root]=max(specs.get(root,0),media_limits(options)['max_image_bytes'])
-    return specs
 
 
 class ObjectRowsSink(Datasink):
@@ -457,3 +365,43 @@ class ObjectRowsSink(Datasink):
 
     def abort(self, prepared, context):
         self.objects.abort(prepared['objects'], context)
+
+
+def bind_image_sinks(graph, *, services, sinks):
+    """Resolve object roots and policy from sealed nodes, never RPC arguments."""
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    declarations, specs = {}, {}
+    for node in graph.nodes:
+        config = node.kernel.configuration
+        if node.kernel.kind != 'prompt' or config.get('response_format') != 'image':
+            continue
+        from demiflow.operator_llm.media import media_limits
+        options = thaw_record_value(config['options'])
+        maximum = media_limits(options)['max_image_bytes']
+        root = options['object_store']
+        specs[root] = max(specs.get(root, 0), maximum)
+        declarations[node.occurrence_id] = options
+    if not specs:
+        return
+    if len(sinks) != 1:
+        raise DataflowError('INVALID_CONTRACT', 'An image action must have one native terminal owner')
+    key, rows = next(iter(sinks.items()))
+    owner = ObjectRowsSink(services.action, object_specs=specs, rows_sink=rows)
+    owner.sink_id = key
+    sinks[key] = owner
+    services.action.object_sinks = owner.object_sinks
+    services.action.native_image_effects = True
+    services.journal_service.bind_image_declarations(declarations)
+    # Per-node admission remains the original ObjectSink authority.
+    for node in graph.nodes:
+        if node.occurrence_id in declarations:
+            options = declarations[node.occurrence_id]
+            maximum = media_limits(options)['max_image_bytes']
+            requests = node.kernel.configuration.get('max_requests')
+            if requests is None:
+                requests = services.action.context.limits['max_requests']
+            owner.object_sinks[options['object_store']].reserve_capacity(requests, maximum, node.occurrence_id)
+
+def row_preparation(sink, prepared):
+    """The confirmed row artifact is inside the original composite protocol."""
+    return prepared['rows'] if isinstance(sink, ObjectRowsSink) else prepared

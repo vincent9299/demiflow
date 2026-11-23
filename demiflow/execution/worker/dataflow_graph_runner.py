@@ -1101,7 +1101,7 @@ class WorkerGraphRunner:
         kernel = self.e._kernels.get((occ, self.partition))
         payload = {'occurrence_id': occ, 'partition_id': self.partition,
                    'metrics': dict(self._metrics[occ])}
-        from demiflow.execution.dataflow_model_observations import worker_model_observations
+        from demiflow.execution.operator_bindings.dataflow_models import worker_model_observations
         models = worker_model_observations(kernel)
         if models is not None:
             payload['model_observations'] = models

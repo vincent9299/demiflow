@@ -59,7 +59,7 @@ def test_stream_progress_comes_from_intermediate_business_frontiers():
 def test_stream_cleanup_preserves_primary_failure_and_runs_each_owner(monkeypatch, drain_failure):
     from types import SimpleNamespace
     from demiflow.execution.journal import run_telemetry as dataflow_api
-    from demiflow.execution import dataflow_model_observations
+    from demiflow.execution.journal import dataflow_model_observations
     from demiflow.execution.journal import dataflow_operator_observations
     from demiflow.execution.action_driver import stream as dataflow_stream
 

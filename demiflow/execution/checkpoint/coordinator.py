@@ -400,7 +400,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("INVALID_CONTRACT", str(exc)) from exc
             confirmed = {}
             for sink_id in sinks:
-                from demiflow.execution.dataflow_images import row_preparation
+                from demiflow.execution.outputs.object_sink import row_preparation
                 prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
@@ -508,7 +508,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("SOURCE_CHANGED", "Recovered source vector disagrees with contributions")
             confirmed = {}
             for sink_id in sinks:
-                from demiflow.execution.dataflow_images import row_preparation
+                from demiflow.execution.outputs.object_sink import row_preparation
                 prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])

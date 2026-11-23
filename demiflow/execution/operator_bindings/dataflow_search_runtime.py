@@ -3,7 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
-from demiflow.execution.blocking_io import BlockingIOPool
+from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.raw_budget import budget_delta, record_admission
 from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, UnresolvedCommit, identity

@@ -7,7 +7,7 @@ import time
 
 from ..objects import LocalObjectStore
 from ..collect.raw_contract import fetch_policy, integer, request as validate_request
-from .blocking_io import BlockingIOPool
+from demiflow.services.blocking_io import BlockingIOPool
 from .commit import CommitCoordinator
 from .raw_budget import RawBudget
 from .raw_objects import RawNamespace, RawObjectSink, _directory

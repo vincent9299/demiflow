@@ -4,7 +4,7 @@ import threading
 import time
 
 from ..data.datasource import Datasource
-from .blocking_io import BlockingIOPool
+from demiflow.services.blocking_io import BlockingIOPool
 from .queue import QueueChannel
 from .queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
 from .recovery_contract import RecoveryContractError, identity, identifier

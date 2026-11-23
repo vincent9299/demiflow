@@ -354,5 +354,5 @@ def stream_observations(execution, stats):
         'mean_s': v['total_ns'] / 1e9 / v['count'] if v['count'] else 0,
     } for name, v in totals.items()}
 
-    from demiflow.execution.dataflow_model_observations import stream_model_observations
+    from demiflow.execution.journal.dataflow_model_observations import stream_model_observations
     stream_model_observations(execution, stats)

@@ -614,7 +614,7 @@ class DataflowExecution:
                         admit_publication=lambda: self._scheduler.admit_publication())
                 else:
                     self._sinks[node.kernel.kind] = make_sink_adapter(node.kernel, services=self._services)
-        from ..dataflow_images import bind_image_sinks
+        from demiflow.execution.outputs.object_sink import bind_image_sinks
         bind_image_sinks(graph, services=self._services, sinks=self._sinks)
         self._graph = graph
         # The legacy graph declaration measures cut_rows in source ordinals.
@@ -1221,7 +1221,7 @@ class DataflowExecution:
             self._node_metrics[(occ, partition)] = metrics
             from demiflow.execution.journal.dataflow_usage import observe_prompt_usage
             observe_prompt_usage(self, event, payload)
-            from ..dataflow_model_observations import observe_models
+            from demiflow.execution.journal.dataflow_model_observations import observe_models
             observe_models(self, event, payload)
             from demiflow.execution.journal.dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)

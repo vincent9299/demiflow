@@ -75,7 +75,7 @@ class StreamLanceCall:
         return value['reference']
 
     def __call__(self, rows):
-        from .row_scope import current_row_scope
+        from demiflow.execution.row_scope import current_row_scope
         scope = current_row_scope()
         if scope is None or len(self.record_ids) != len(rows):
             raise DataflowError('INVALID_CONTRACT', 'Stream writer requires original record membership')

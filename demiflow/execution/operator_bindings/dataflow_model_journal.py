@@ -47,7 +47,10 @@ def _rpc_operation_id(action_id, node_id, key, operation):
     return identity(['native-journal-rpc', action_id, node_id, key, operation])
 
 
-class RemotePromptJournal:
+from demiflow.execution.contracts.dataflow import PromptJournalPort
+
+
+class RemotePromptJournal(PromptJournalPort):
     """Narrow journal surface consumed by the original Prompt/Embedding clients.
 
     Holds the worker port and sealed read-only constraints (max_record_bytes,
@@ -201,6 +204,9 @@ class RemotePromptJournal:
         names = self._rpc(self._command('media_references', record, options={'register': register}))
         return tuple(names)
 
+    def offline_lookup(self, record):
+        return self._rpc(self._command('offline_lookup', record))
+
     def close(self) -> None:
         # Release this worker's waiters only. The driver keeps its sole native
         # journal; another node's confirming request is unaffected.
@@ -259,7 +265,7 @@ class RemotePromptRecovery(NativePromptRecovery):
         self.copy_inputs = predicate is not None
 
     def bind_client(self, client):
-        from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
+        from demiflow.operator_llm.offline import RemoteOfflinePromptClient
         if isinstance(client, RemoteOfflinePromptClient):
             if client.journal is not self.journal:
                 raise RecoveryContractError('Offline input port differs from the bound node')
@@ -355,7 +361,7 @@ def _rebuild_request_gate(actor, concurrency):
     normalized = request_admission_config(policy, concurrency=concurrency)
     if normalized is None:
         return None
-    from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+    from demiflow.services.adaptive_requests import AdaptiveRequestGate
     return AdaptiveRequestGate(normalized)
 
 
@@ -415,10 +421,10 @@ def bind_media_adapter(actor, *, services: RuntimeServices, node_id: str) -> Non
     # The worker holds only the reachable store handle; the driver native object
     # participant owns registration/retention. Original ObjectRef/effect identity
     # is unchanged.
-    from demiflow.execution.dataflow_images import RemoteImageStore
+    from demiflow.execution.operator_bindings.dataflow_images import RemoteImageStore
     actor._runtime.artifact_store = RemoteImageStore(recovery.journal, services.store, options)
     coordinator = actor._runtime.coordinator
     coordinator.bind_execution(action.context, node_id)
     coordinator._native_group_journal = True
-    from demiflow.execution.object_sink import image_request_budget
-    coordinator._artifact_request_budget = image_request_budget(action)
+    from demiflow.execution.contracts.dataflow_codec import image_request_budget
+    coordinator._artifact_request_budget = image_request_budget(action.action_id)

@@ -16,7 +16,7 @@ from PIL import Image
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
 from demiflow.embeddings.payload import EmbeddingProtocolError
-from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+from demiflow.services.adaptive_requests import AdaptiveRequestGate
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 

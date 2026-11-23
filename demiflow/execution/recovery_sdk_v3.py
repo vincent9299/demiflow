@@ -547,7 +547,9 @@ def _contextmanager_original(value, module):
             or not value.__closure__ or len(value.__closure__) != 1
             or value.__closure__[0].cell_contents is not wrapped):
         return None
-    template = contextlib.contextmanager(wrapped)
+    from inspect import isasyncgenfunction
+    factory = contextlib.asynccontextmanager if isasyncgenfunction(wrapped) else contextlib.contextmanager
+    template = factory(wrapped)
     if (identity(code_record(value.__code__)) != identity(code_record(template.__code__))
             or value.__defaults__ != template.__defaults__ or value.__kwdefaults__ != template.__kwdefaults__):
         return None

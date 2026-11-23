@@ -7,7 +7,7 @@ from demiflow import data
 from demiflow.embeddings.runtime import EmbeddingMetrics
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.dataflow_model_observations import validate_summaries, observe_models
+from demiflow.execution.journal.dataflow_model_observations import validate_summaries, observe_models
 from test_embeddings import server
 from test_map_prompt_async import server as prompt_server, prompt
 
@@ -89,7 +89,7 @@ def test_real_prompt_and_embedding_keep_both_observed_models(server, prompt_serv
 
 
 def test_sealed_prompt_route_audit_skip_and_normalized_path_dedup(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_model_observations import finish_journal_audit
+    from demiflow.execution.journal.dataflow_model_observations import finish_journal_audit
     from demiflow.operator_llm import call_ref
     first, second = tmp_path/'calls.sqlite', tmp_path/'skipped.sqlite'
     calls = []

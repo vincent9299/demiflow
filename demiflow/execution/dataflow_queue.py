@@ -40,7 +40,7 @@ from .queue_sinks import QueueResultSink
 from .queue_source import QueueDatasource
 from .raw_fetch import RawFetch
 from .recovery_contract import RecoveryContractError, identity
-from .row_scope import RowScope, set_row_scope
+from demiflow.execution.row_scope import RowScope, set_row_scope
 from .run_context import RunAction, _ACTION
 
 Json = Union[None, bool, int, float, str, list, dict]

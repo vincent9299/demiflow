@@ -161,7 +161,7 @@ def test_shared_actor_uses_one_snapshot_at_last_owner(tmp_path, monkeypatch):
 
 
 def test_one_input_1201_objects_crosses_bounded_manifest_pages(tmp_path):
-    from demiflow.execution.object_sink import ObjectRowsSink
+    from demiflow.execution.outputs.object_sink import ObjectRowsSink
     from demiflow.execution.recovery_contract import SourcePosition
     from demiflow.execution.storage.artifact_manifest import manifest_pages, entries
     from demiflow.objects import ObjectRef

@@ -3,6 +3,9 @@
 All resource identity and allocation authority belongs to the existing RunJournal.
 The one small native owner marker is not a request journal or a cross-run index.
 """
+
+import hashlib
+import uuid
 import os
 import stat
 from pathlib import Path
@@ -120,3 +123,135 @@ def bind_namespace(context, logical_root):
         sync_directories(record,namespace)
     inspect_namespace(record)
     return namespace
+
+
+def object_name(resource, path):
+    return str(Path('materializations')/('@objects-'+resource['root_id'])/Path(path).relative_to(resource['physical_root']))
+
+
+def verify_object(fact, *, root, resource, store, maximum):
+    if type(fact) is not dict or set(fact) != {'path', 'bytes', 'sha256'}:
+        raise RecoveryContractError('Invalid object descriptor')
+    sha, size = fact['sha256'], fact['bytes']
+    try:
+        store.reference(sha)
+    except (TypeError, ValueError) as exc:
+        raise RecoveryContractError('Invalid object checksum') from exc
+    expected = root / sha[:2] / sha
+    if fact['path'] != object_name(resource, expected):
+        raise RecoveryContractError('Object reference escapes its owner')
+    if type(size) is not int or not 0 <= size <= maximum:
+        raise RecoveryContractError('Object descriptor exceeds byte ceiling')
+    # Held directory descriptors prevent parent substitution into symlinks.
+    parent = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in expected.parts[1:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        descriptor = os.open(expected.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    except OSError as exc:
+        raise UnresolvedCommit('Object is missing or inaccessible') from exc
+    finally:
+        os.close(parent)
+    with os.fdopen(descriptor, 'rb') as source:
+        before = os.fstat(source.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size != size:
+            raise RecoveryContractError('Object size differs')
+        digest, consumed = hashlib.sha256(), 0
+        while chunk := source.read(min(65536, size-consumed+1)):
+            consumed += len(chunk)
+            if consumed > size:
+                raise RecoveryContractError('Object size changed during inspection')
+            digest.update(chunk)
+        after = os.fstat(source.fileno())
+    if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise RecoveryContractError('Object changed during inspection')
+    if consumed != size or digest.hexdigest() != sha:
+        raise RecoveryContractError('Object checksum differs')
+
+
+def stage_object(run, raw, *, root, resource, store, maximum, synced, admitted=False):
+    run.check_stop()
+    if type(raw) is not bytes or len(raw) > maximum:
+        raise RecoveryContractError('Object exceeds its encoded byte ceiling')
+    run.object_namespace(resource['logical_root'])
+    sha = hashlib.sha256(raw).hexdigest()
+    ref = store.reference(sha)
+    target = root / sha[:2] / sha
+    fact = dict(path=object_name(resource, target), bytes=len(raw), sha256=sha)
+    # Do not adopt files created by another producer, even if they happen
+    # to have the same content name inside this run's directory.
+    with run.journal.execution_guard(run.fence) as db:
+        owned = db.execute('SELECT 1 FROM runtime_artifacts WHERE path=?', (fact['path'],)).fetchone()
+        if target.exists() and owned is None:
+            raise RecoveryContractError('Object path is not owned by this run')
+    run.reserve_output('object_bytes', len(raw), reservation_id='object-' + identity(fact),admitted=admitted)
+    if target.exists():
+        verify_object(fact, root=root, resource=resource, store=store, maximum=maximum)
+        return ref, fact
+    temporary = target.parent / ('.pending-' + uuid.uuid4().hex)
+    run.allocate_artifact(target, size=len(raw), atomic=False)
+    run.allocate_artifact(temporary, size=len(raw), atomic=False)
+    with run.journal.publication_guard(run.fence):
+        if any(p.is_symlink() for p in (target, *target.parents)):
+            raise RecoveryContractError('Object path contains a symlink')
+        try:
+            store.put(raw, sha256=sha, temporary=temporary, max_bytes=len(raw))
+        except ValueError as exc:
+            raise RecoveryContractError('Object publication content differs') from exc
+        verify_object(fact, root=root, resource=resource, store=store, maximum=maximum)
+        sync_directories(resource,target.parent, synced=synced)
+    run.release_temporaries([temporary, target.with_name(target.name + ".staging")])
+    return ref, fact
+
+
+def validate_image_bytes(run, raw, *, limits, decode_policy, decode):
+    """Validate through bounded owned scratch; retain only the content proof.
+
+    The caller supplies the original content decoder. This owns run files,
+    their budgets, publication fencing, and the existing bounded proof cache.
+    """
+    import tempfile
+    from collections import OrderedDict
+    if len(raw)>limits['max_image_bytes']:raise ValueError('Image exceeds max_image_bytes')
+    # Validation is content/policy specific. Retain only a bounded proof,
+    # never decoded pixels; stage() still verifies the owned immutable blob.
+    validation_key = (hashlib.sha256(raw).hexdigest(), tuple(sorted(limits.items())))
+    with run._object_resource_lock:
+        validated = getattr(run, '_validated_images', None)
+        if validated is None:
+            validated = run._validated_images = OrderedDict()
+        known = validation_key in validated
+        if known:
+            validated.move_to_end(validation_key)
+    if known:
+        return
+    scratch=run.directory/'scratch'
+    scratch.mkdir(parents=True,exist_ok=True)
+    with run.temporary_artifacts() as allocate, tempfile.TemporaryDirectory(prefix='image-pixels-',dir=scratch) as directory:
+        path=Path(directory)/'encoded'
+        allocate(path)
+        run.reserve_artifact_bytes(path, len(raw))
+        with run.journal.publication_guard(run.fence):
+            run.journal.storage_usage()
+            descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+            with os.fdopen(descriptor,'wb') as output:output.write(raw)
+        policy = decode_policy()
+        try:
+            def allocate_decoder(path):
+                allocate(path)
+                # Decoder metadata is independently bounded before the
+                # child process allocates either JSON file.
+                run.reserve_artifact_bytes(path, 32768)
+            decode(path.as_uri(),hashlib.sha256(raw).hexdigest(),policy,
+                temporary_directory=scratch,allocate=allocate_decoder)
+        except OSError as exc:
+            raise ValueError('Invalid image pixels: '+str(exc)) from exc
+        except (MemoryError,RuntimeError) as exc:
+            raise RecoveryContractError('Image decoder resource failure: '+str(exc)) from exc
+    with run._object_resource_lock:
+        validated[validation_key] = True
+        while len(validated) > 256:
+            validated.popitem(last=False)

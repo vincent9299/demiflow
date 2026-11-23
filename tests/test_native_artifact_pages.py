@@ -70,7 +70,7 @@ def test_lazy_materialized_history_verifies_earlier_object_bytes(tmp_path):
     from types import SimpleNamespace
     from demiflow.execution.commit import CommitCoordinator
     from demiflow.execution.executors.local import _CheckpointBlocks
-    from demiflow.execution.object_sink import ObjectRowsSink
+    from demiflow.execution.outputs.object_sink import ObjectRowsSink
     from demiflow.execution.recovery_contract import SourcePosition
     with RunContext.start(tmp_path/'run') as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'object-history'}}) as action:

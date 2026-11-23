@@ -10,7 +10,7 @@ import time
 import uuid
 
 from demiflow.services.request_limits import RequestGate, drain_on_service_stop
-from demiflow.execution.blocking_io import BlockingIOPool
+from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.execution.journal.run_telemetry import CallMetrics
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal

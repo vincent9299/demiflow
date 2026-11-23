@@ -123,7 +123,7 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
                 record_execution_metadata(request, handle._execution)
 
             def finish_audit():
-                from demiflow.execution.dataflow_model_observations import finish_journal_audit
+                from demiflow.execution.journal.dataflow_model_observations import finish_journal_audit
                 finish_journal_audit(handle._execution, stats)
 
             cleanup(observe)

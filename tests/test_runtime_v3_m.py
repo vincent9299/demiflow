@@ -435,8 +435,8 @@ from demiflow.data.plan import (
 )
 from demiflow.embeddings import EmbeddingModel
 from demiflow.embeddings.runtime import EmbeddingActor
-from demiflow.execution.blocking_io import BlockingIOPool
-from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+from demiflow.services.blocking_io import BlockingIOPool
+from demiflow.services.adaptive_requests import AdaptiveRequestGate
 from demiflow.execution.row_scope import RowScope, set_row_scope
 from demiflow.resources.contracts import ResourceProfile
 from demiflow.environment import OperatorEnvironment
@@ -1466,7 +1466,7 @@ def test_m023():
     actor, operation, pack = make_prompt_actor(options={'object_store': 'images'})
     journal.bind_media_adapter(actor, services=services, node_id='node-media')
     assert isinstance(actor._runtime.native_recovery, RemotePromptRecovery)
-    from demiflow.execution.dataflow_images import RemoteImageStore
+    from demiflow.execution.operator_bindings.dataflow_images import RemoteImageStore
     assert isinstance(actor._runtime.artifact_store, RemoteImageStore)
     assert actor._runtime.artifact_store.store is services.store
     assert actor._runtime.artifact_store.journal is actor._runtime.native_recovery.journal
@@ -1554,7 +1554,7 @@ def test_m026(prompt_server, tmp_path):
     assert isinstance(client, AsyncOperatorLLMClient) and client.journal is remote
     # Offline data now uses the same verified native port, never a worker-owned
     # database or a paid HTTP request.
-    from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
+    from demiflow.operator_llm.offline import RemoteOfflinePromptClient
     before = list(port.commands)
     for options in ({'offline_store': {'path': str(tmp_path / 'offline.sqlite')}},
                     {'offline_dir': str(tmp_path / 'offline')}):

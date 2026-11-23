@@ -7,7 +7,7 @@ import pytest
 from demiflow import data
 from demiflow.data.dataset import Dataset
 from demiflow.data.flow_contract import field, scalar
-from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+from demiflow.services.adaptive_requests import AdaptiveRequestGate
 from demiflow.execution.plan_facts import operation_facts
 from demiflow.services.request_limits import RequestGate
 from demiflow.operator_llm.flow_contract import analyze_prompt, normalize_prompt, prompt_facts

@@ -1,6 +1,8 @@
 """Bind worker model instances to their authorized effect and result-cache services."""
 from __future__ import annotations
 
+from demiflow.execution.journal.dataflow_model_observations import validate_summaries, validate_routed_model_summaries
+
 from demiflow.execution.journal.dataflow_usage import empty_usage
 
 
@@ -133,3 +135,54 @@ def worker_prompt_usage(kernel, *, final=False):
         kernel._prompt_usage = totals
         return totals
     return None
+
+
+def _snapshot_actor(actor):
+    gate = actor._runtime.request_gate
+    summary = actor.call_metrics.summary()
+    if gate is not None:
+        summary = {**summary, 'shared_admission': {
+            'requests': gate.admitted, 'peak': gate.peak, 'wait_s': gate.wait_s,
+            **({'adaptive': gate.snapshot()} if hasattr(gate, 'snapshot') else {})}}
+    return summary
+
+def worker_model_observations(kernel, *, final=False):
+    kind = getattr(getattr(kernel, '_spec', None), 'kind', None)
+    if kind not in {'embedding', 'prompt', 'agent'}:
+        return None
+    if getattr(kernel, '_closed', False) and not final:
+        return getattr(kernel, '_model_observations', None)
+    if kernel.pending_calls and not final:
+        return getattr(kernel, '_model_observations', None)
+    from demiflow.embeddings.runtime import EmbeddingActor
+    from demiflow.operator_llm.runtime import PromptActor
+    configuration = kernel._spec.configuration
+    routed = kind == 'prompt' and 'routes' in configuration
+    summaries = []
+    for index, instance in enumerate(kernel._instances):
+        if instance is None:
+            continue
+        actor = kernel._state_owner(instance)
+        if routed:
+            from demiflow.operator_llm.routed import RoutedPromptActor
+            if not isinstance(actor, RoutedPromptActor) or set(actor.actors) != set(configuration['routes']):
+                raise DataflowError('INVALID_CONTRACT', 'routed actor differs from sealed model declaration')
+            for route, child in sorted(actor.actors.items()):
+                if not isinstance(child, PromptActor):
+                    raise DataflowError('INVALID_CONTRACT', 'route does not own a Prompt actor')
+                summaries.append({'instance': index, 'route': route, 'summary': _snapshot_actor(child)})
+        else:
+            expected = EmbeddingActor if kind == 'embedding' else PromptActor
+            if not isinstance(actor, expected):
+                continue
+            summaries.append(_snapshot_actor(actor))
+    if not summaries:
+        return None
+    if routed:
+        result = validate_routed_model_summaries(summaries, configuration=configuration,
+                                  max_bytes=kernel._services.bounds.max_control_bytes)
+    else:
+        result = validate_summaries(summaries, maximum=configuration.get('concurrency', 1),
+                                   max_bytes=kernel._services.bounds.max_control_bytes, kind=kind)
+    kernel._model_observations = result
+    return result

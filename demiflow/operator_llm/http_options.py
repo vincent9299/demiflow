@@ -3,7 +3,7 @@ import math
 import json
 import os
 import re
-from demiflow.execution.inference_options import CALL_OPTION_DEFAULTS, normalize_call_options
+from demiflow.services.inference_options import CALL_OPTION_DEFAULTS, normalize_call_options
 
 
 HTTP_OPTIONS = set(CALL_OPTION_DEFAULTS) | {

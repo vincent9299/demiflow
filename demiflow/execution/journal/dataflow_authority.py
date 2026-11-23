@@ -8,6 +8,9 @@ is delegated to the original storage port.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_codec import image_request_budget
+from demiflow.execution.recovery_contract import UnresolvedCommit
+
 from demiflow.execution.artifacts import resolve_local_artifact
 from demiflow.execution.storage.private_journals import inspect_private_journal as _existing_size, inspect_private_lease_history as _lease_history
 
@@ -145,6 +148,10 @@ class DriverJournalService:
     def bind_bounds(self, bounds: "Bounds") -> None:
         """Bind the effective control window before admitting workers."""
         self._bounds = bounds
+
+    def bind_image_declarations(self, declarations):
+        """Bind the sealed node image options before any worker is admitted."""
+        self._image_declarations = declarations
 
     def bind_stream_writer(self, writer) -> None:
         if writer.action is not self._action:
@@ -565,7 +572,7 @@ class DriverJournalService:
                 raise DataflowError('FENCED', 'Action declares no streaming Lance writer')
             return service.request(command, request)
         if command.operation == 'offline_lookup':
-            from demiflow.execution.dataflow_offline import offline_lookup
+            from demiflow.execution.journal.dataflow_offline import offline_lookup
             return offline_lookup(self, command, request)
         if command.node_id in getattr(self, '_private_embedding_nodes', {}):
             from demiflow.execution.journal.dataflow_embedding_journal import private_embedding_request
@@ -750,7 +757,6 @@ def _native_bind_membership(service, journal, command, request):
 
 
 def _native_stage_image(service, journal, command, request):
-    from demiflow.execution.dataflow_images import stage_image
     return stage_image(service, journal, command, request)
 
 
@@ -871,3 +877,38 @@ def private_storage(service, declared_path):
         raise DataflowError('INVALID_CONTRACT', 'Private SQLite has no original storage reservation')
     _existing_size(path, capacity)
     return path, capacity
+
+
+def stage_image(service, journal, command, request):
+    from demiflow.execution.seal.plan import _artifact_from_json
+    from demiflow.operator_llm.media import store_image, media_limits
+    options = getattr(service, '_image_declarations', {}).get(command.node_id)
+    if options is None or set(request) != {'image_ref'}:
+        raise DataflowError('INVALID_CONTRACT', 'Image command has no sealed image declaration')
+    ref = _artifact_from_json(request['image_ref'])
+    raw = b''.join(service._store.read(ref, max_bytes=media_limits(options)['max_image_bytes']))
+    owner = service._action.object_sinks[options['object_store']]
+    result = store_image(raw, options, store=owner)
+    return NativeJournalReply(command.operation_id, result, None)
+
+
+def check_image_replay(action):
+    """One action watermark in the existing prepared artifact descriptor.
+
+    Legacy participants use the action watermark. Native row-local prompt
+    participants reconcile each occurrence through the existing model journal.
+    """
+    if getattr(action, "native_image_effects", False):
+        return  # Each occurrence is reconciled from the same native commit journal.
+    with action.context._object_resource_lock:
+        if not getattr(action,'replaying',False) or getattr(action,'_image_replay_checked',False):return
+        confirmed=0
+        for fact in action.context.journal.execution_commits(action.action_id):
+            if fact['prepared'] is None:continue
+            for prepared in fact['prepared']['sinks'].values():
+                objects=prepared.get('objects',{})
+                if type(objects) is dict:confirmed=max(confirmed,objects.get('image_requests',0))
+        charged=action.context.journal.budget_consumed(image_request_budget(action.action_id))
+        if charged!=confirmed:
+            raise UnresolvedCommit('Image external result is unresolved; automatic regeneration is forbidden')
+        action._image_replay_checked=True

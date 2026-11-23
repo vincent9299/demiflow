@@ -9,8 +9,8 @@ import json
 import math
 from collections.abc import Mapping
 
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import document
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.recovery_contract import document
 
 _COUNTS = {'call_records', 'reused', 'input_tokens', 'output_tokens', 'records_without_usage', 'errors'}
 _TIMINGS = {'first_byte_s', 'first_event_s', 'first_content_s', 'max_body_gap_s'}
@@ -71,7 +71,7 @@ def validate_summaries(value, *, maximum, max_bytes, kind='embedding'):
 
 
 def _validate_adaptive(value):
-    from .adaptive_requests import DEFAULTS, request_admission_policy
+    from demiflow.services.adaptive_requests import DEFAULTS, request_admission_policy
     counters = {'capacity', 'maximum', 'active', 'peak', 'admitted', 'fresh_responses',
                 'adjustments', 'coalesced_transient_failures', 'deferred_transient_failures',
                 'transient_window_samples', 'transient_window_failures'}
@@ -88,17 +88,10 @@ def _validate_adaptive(value):
         raise DataflowError('INVALID_CONTRACT', 'invalid observed adaptive policy') from error
 
 
-def _snapshot_actor(actor):
-    gate = actor._runtime.request_gate
-    summary = actor.call_metrics.summary()
-    if gate is not None:
-        summary = {**summary, 'shared_admission': {
-            'requests': gate.admitted, 'peak': gate.peak, 'wait_s': gate.wait_s,
-            **({'adaptive': gate.snapshot()} if hasattr(gate, 'snapshot') else {})}}
-    return summary
 
 
-def _validate_routed(value, *, configuration, max_bytes):
+
+def validate_routed_model_summaries(value, *, configuration, max_bytes):
     routes = set(configuration['routes'])
     maximum = configuration.get('concurrency', 1)
     if (not 1 <= len(routes) <= 32 or type(value) is not list or len(value) > maximum * len(routes)):
@@ -120,60 +113,21 @@ def _validate_routed(value, *, configuration, max_bytes):
     return json.loads(document(value, max_bytes))
 
 
-def worker_model_observations(kernel, *, final=False):
-    kind = getattr(getattr(kernel, '_spec', None), 'kind', None)
-    if kind not in {'embedding', 'prompt', 'agent'}:
-        return None
-    if getattr(kernel, '_closed', False) and not final:
-        return getattr(kernel, '_model_observations', None)
-    if kernel.pending_calls and not final:
-        return getattr(kernel, '_model_observations', None)
-    from ..embeddings.runtime import EmbeddingActor
-    from ..operator_llm.runtime import PromptActor
-    configuration = kernel._spec.configuration
-    routed = kind == 'prompt' and 'routes' in configuration
-    summaries = []
-    for index, instance in enumerate(kernel._instances):
-        if instance is None:
-            continue
-        actor = kernel._state_owner(instance)
-        if routed:
-            from ..operator_llm.routed import RoutedPromptActor
-            if not isinstance(actor, RoutedPromptActor) or set(actor.actors) != set(configuration['routes']):
-                raise DataflowError('INVALID_CONTRACT', 'routed actor differs from sealed model declaration')
-            for route, child in sorted(actor.actors.items()):
-                if not isinstance(child, PromptActor):
-                    raise DataflowError('INVALID_CONTRACT', 'route does not own a Prompt actor')
-                summaries.append({'instance': index, 'route': route, 'summary': _snapshot_actor(child)})
-        else:
-            expected = EmbeddingActor if kind == 'embedding' else PromptActor
-            if not isinstance(actor, expected):
-                continue
-            summaries.append(_snapshot_actor(actor))
-    if not summaries:
-        return None
-    if routed:
-        result = _validate_routed(summaries, configuration=configuration,
-                                  max_bytes=kernel._services.bounds.max_control_bytes)
-    else:
-        result = validate_summaries(summaries, maximum=configuration.get('concurrency', 1),
-                                   max_bytes=kernel._services.bounds.max_control_bytes, kind=kind)
-    kernel._model_observations = result
-    return result
+
 
 
 def observe_models(execution, event, payload):
     value = payload.get('model_observations')
     if value is None:
         return
-    from .contracts.dataflow_codec import _thaw_json
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
     value = _thaw_json(value)
     node = next(node for node in execution._graph.nodes if node.occurrence_id == payload['occurrence_id'])
     if node.kernel.kind not in {'embedding', 'prompt', 'agent'}:
         raise DataflowError('FENCED', 'model observations require an assigned model node')
     routed = node.kernel.kind == 'prompt' and 'routes' in node.kernel.configuration
     if routed:
-        value = _validate_routed(value, configuration=node.kernel.configuration,
+        value = validate_routed_model_summaries(value, configuration=node.kernel.configuration,
                                  max_bytes=execution._bounds.max_control_bytes)
     else:
         value = validate_summaries(value, maximum=node.kernel.configuration.get('concurrency', 1),
@@ -223,8 +177,8 @@ def finish_journal_audit(execution, stats):
     if not embeddings and not prompts:
         return
     from itertools import chain
-    from .artifacts import resolve_local_artifact
-    from ..operator_llm.call_ref import journal_totals
+    from demiflow.execution.artifacts import resolve_local_artifact
+    from demiflow.operator_llm.call_ref import journal_totals
     labels = getattr(execution, '_observation_labels', {})
     seen = set()
     declarations = chain(((occ, None, cfg) for occ, cfg in embeddings.items()),

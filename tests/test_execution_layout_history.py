@@ -38,6 +38,9 @@ CARRIERS = {
     'checked': ['CheckedExecution'],
     'managed_native': ['NativeExecution'],
     'run_journal': ['RunJournal'],
+    'adaptive_requests': ['AdaptiveRequestGate'],
+    'blocking_io': ['BlockingIOPool'],
+    'inference_options': ['normalize_call_options'],
 }
 
 
@@ -80,8 +83,12 @@ for fn in [data.local_execution, required_environment, parse_prompt_pack, read_r
     result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
 from demiflow import Dataset
 from demiflow.inference import request_admission_config
-for fn in [Dataset.map_embeddings, request_admission_config]:
-    result['public.' + fn.__name__] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow.execution.blocking_io import BlockingIOPool
+for fn in [Dataset.map_embeddings, request_admission_config, BlockingIOPool.run, BlockingIOPool.drain, BlockingIOPool.aclose]:
+    name = fn.__qualname__ if fn.__qualname__.startswith('BlockingIOPool.') else fn.__name__
+    result['public.' + name] = [base64.b64encode(pickle.dumps(fn, protocol=5)).decode(), describe(fn)]
+from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
+result['offline_class_global'] = base64.b64encode(pickle.dumps(RemoteOfflinePromptClient, protocol=5)).decode()
 result['public.Dataset'] = [base64.b64encode(pickle.dumps(Dataset, protocol=5)).decode(), describe(Dataset)]
 from demiflow.data.result_cache import CachedMap, CachedSyncMap
 for fn in [CachedMap.__call__, CachedMap._io, CachedSyncMap.__call__, CachedSyncMap.__init__]:
@@ -289,6 +296,33 @@ def test_relocated_context_wrapper_authenticates_original_closure(original_carri
         load_payload([raw])
 
 
+@pytest.mark.parametrize('change', ['wrapped', 'globals', 'body'])
+def test_relocated_async_context_wrapper_rejects_forged_function(original_carriers, monkeypatch, change):
+    from types import FunctionType
+    from demiflow.services.adaptive_requests import AdaptiveRequestGate
+    method = AdaptiveRequestGate.enter
+    if change == 'wrapped':
+        monkeypatch.setattr(method, '__wrapped__', lambda: None)
+    elif change == 'globals':
+        forged = FunctionType(method.__code__, dict(method.__globals__), method.__name__,
+                              method.__defaults__, method.__closure__)
+        forged.__dict__.update(method.__dict__)
+        forged.__qualname__, forged.__module__ = method.__qualname__, method.__module__
+        monkeypatch.setattr(AdaptiveRequestGate, 'enter', forged)
+    else:
+        original = method.__wrapped__
+        monkeypatch.setattr(original, '__code__', original.__code__.replace(
+            co_consts=(*original.__code__.co_consts, 'not the original admission')))
+    with pytest.raises(DataflowError, match='audited definition'):
+        load_payload([base64.b64decode(original_carriers['AdaptiveRequestGate'][0])])
+
+
+def test_old_offline_client_global_reads_actual_algorithm_without_old_module_alias(original_carriers):
+    from demiflow.operator_llm.offline import RemoteOfflinePromptClient
+    assert load_payload([base64.b64decode(original_carriers['offline_class_global'])]) is RemoteOfflinePromptClient
+    assert 'demiflow.execution.dataflow_offline' not in sys.modules
+
+
 def test_relocated_commit_class_rejects_changed_body(original_carriers, monkeypatch):
     from demiflow.execution.checkpoint.dataset_commit import DatasetCommit
     method = DatasetCommit.confirm
@@ -338,7 +372,8 @@ def test_original_protocol_rejects_forged_typing_methods(original_carriers, monk
 
 
 @pytest.mark.parametrize('name', ['map_embeddings', 'request_admission_config',
-    'CachedMap.__call__', 'CachedMap._io', 'CachedSyncMap.__call__', 'CachedSyncMap.__init__'])
+    'CachedMap.__call__', 'CachedMap._io', 'CachedSyncMap.__call__', 'CachedSyncMap.__init__',
+    'BlockingIOPool.run', 'BlockingIOPool.drain', 'BlockingIOPool.aclose'])
 @pytest.mark.parametrize('private', [False, True])
 def test_original_public_function_keeps_effective_sdk_pin(original_carriers, name, private):
     encoded, expected = original_carriers['public.' + name]

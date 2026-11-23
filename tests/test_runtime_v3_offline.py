@@ -98,7 +98,7 @@ def test_offline_response_is_bounded_before_reading_into_python(tmp_path, storag
 
 
 def test_offline_worker_cannot_supply_an_unverified_port():
-    from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
+    from demiflow.operator_llm.offline import RemoteOfflinePromptClient
     with pytest.raises(ValueError, match='verified native'):
         RemoteOfflinePromptClient(None, {'offline_dir': '/unused'}, object())
 

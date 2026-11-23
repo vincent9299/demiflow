@@ -104,13 +104,10 @@ class RunPromptJournal(_SQLiteJournalShard):
                 continue
             path, sha = Path(unquote(uri.path)), ref['sha256']
             for store in tuple(self.stores.values()):
-                if path != store.root / sha[:2] / sha:
+                name = store.reference_name(path, sha, register=register)
+                if name is None:
                     continue
-                fact = dict(path=store._name(path), bytes=path.stat().st_size, sha256=sha)
-                store._verify(fact)
-                if register:
-                    store._record_object(sha, fact)
-                names.append(fact['path'])
+                names.append(name)
                 break
         return tuple(names)
 
@@ -266,7 +263,7 @@ class NativePromptRecovery:
         def scoped(request):
             if isinstance(request, _PreparedCall):
                 return request.source
-            from ..execution.row_scope import current_row_scope
+            from demiflow.execution.row_scope import current_row_scope
             scope = current_row_scope()
             if scope is None:
                 raise RecoveryContractError('Native model request lost its source occurrence')

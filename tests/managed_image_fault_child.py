@@ -6,9 +6,9 @@ from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.object_sink import ObjectSink
+from demiflow.execution.outputs.object_sink import ObjectSink
 import demiflow.execution.commit as protocol
-import demiflow.execution.object_sink as objects
+import demiflow.execution.outputs.object_sink as objects
 
 root,window=Path(sys.argv[1]),sys.argv[2]
 prior=RunJournal(root/'run').recovery_identity()

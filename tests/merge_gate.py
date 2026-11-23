@@ -46,10 +46,10 @@ GUARDS = (
 
 # The seven files no change may touch without an explicit decision.
 FROZEN = {
-    'demiflow/execution/raw_fetch.py': '55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493',
+    'demiflow/execution/raw_fetch.py': '1eec542711d77207d39866c9fcf20206332c7cb0e2960084bb32f35d4ea38b50',
     'demiflow/execution/queue_execution.py': '1e73b86fc7fe77c7a537d6e4215e6bdb98017f738ebca53c85c3b7bce6c25045',
     'demiflow/execution/queue_sinks.py': 'b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074',
-    'demiflow/execution/queue_source.py': '1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307',
+    'demiflow/execution/queue_source.py': '7f38ba27ca9642e2cd02b4cebbda129faf98097ea05bb98050ed43ee3485c5da',
     'demiflow/execution/contracts/exchange.py': 'dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2',
     'demiflow/planning/dag.py': '294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b',
     'demiflow/resources/contracts.py': '61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff',

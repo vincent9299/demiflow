@@ -79,7 +79,7 @@ def test_nonfatal_error_requires_exact_explicit_status_and_code(retry_server,tmp
 
 @pytest.mark.parametrize('status',[429,500,503])
 def test_http_pressure_bypasses_noise_window_without_retrying_or_recounting_replay(retry_server,tmp_path,status):
-    from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+    from demiflow.services.adaptive_requests import AdaptiveRequestGate
     retry_server['statuses']=[status]
     gate=AdaptiveRequestGate(dict(initial_concurrency=4,max_concurrency=4,
         transient_min_failures=3,transient_failure_ratio=.5))

@@ -1712,7 +1712,7 @@ class OperatorKernel:
         except BaseException as exc:
             errors.append(exc)
         if not errors:
-            from demiflow.execution.dataflow_model_observations import worker_model_observations
+            from demiflow.execution.operator_bindings.dataflow_models import worker_model_observations
             try:
                 worker_model_observations(self, final=True)
             except BaseException as exc:

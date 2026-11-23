@@ -10,6 +10,8 @@ modules that cannot import execution.
 """
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+
 from collections.abc import Mapping
 
 import math
@@ -2136,3 +2138,59 @@ def shared_binding(configuration, occurrence):
             or value['state_owner'] != value['members'][-1]):
         raise DataflowError('INVALID_CONTRACT', 'Invalid shared actor occurrence binding')
     return {'owner': value['owner'], 'members': list(value['members']), 'state_owner': value['state_owner']}
+
+
+class PromptJournalPort(ABC):
+    """Bound model journal operations; driver still verifies occurrence and lease.
+
+    read_only, limit, max_record_bytes and timeout_s are the original sealed
+    finite constraints. This is not an independently registrable extension API.
+    """
+    read_only: bool
+    limit: int
+    max_record_bytes: int
+    timeout_s: float
+
+    @abstractmethod
+    def lookup(self, request): raise NotImplementedError
+    @abstractmethod
+    def lookup_with_references(self, request): raise NotImplementedError
+    @abstractmethod
+    def reserve(self, request): raise NotImplementedError
+    @abstractmethod
+    def reserve_http_retry(self, request, **kwargs): raise NotImplementedError
+    @abstractmethod
+    def response(self, request, record): raise NotImplementedError
+    @abstractmethod
+    def failed(self, request, error, elapsed): raise NotImplementedError
+    @abstractmethod
+    def references(self, request): raise NotImplementedError
+    @abstractmethod
+    def media_references(self, record, *, register=False): raise NotImplementedError
+    @abstractmethod
+    def offline_lookup(self, record): raise NotImplementedError
+    @abstractmethod
+    def close(self): raise NotImplementedError
+
+class PrivatePromptJournalPort(PromptJournalPort):
+    """Original private-cache declaration and route, not native paid recovery.
+
+    Reserve/retry preserve the private journal's row scope. Native-only
+    operations remain rejected by the actual bound implementation and driver.
+    """
+    @property
+    @abstractmethod
+    def declaration(self): raise NotImplementedError
+    @property
+    @abstractmethod
+    def route(self): raise NotImplementedError
+
+class BoundImageWriter(ABC):
+    """Write already-received image bytes under the bound output's authority.
+
+    Return the original ObjectRef dictionary. Remote writers stage and request;
+    local writers validate/publish under their existing run owner. Neither
+    grants run/database access to the image algorithm.
+    """
+    @abstractmethod
+    def store_image(self, raw, options): raise NotImplementedError

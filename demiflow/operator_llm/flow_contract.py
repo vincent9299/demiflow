@@ -259,7 +259,7 @@ def prompt_facts(actor):
     prompt = resolve_prompt(op.config, op.prompt_name)
 
     prompt_service_declaration(actor)
-    from ..execution.adaptive_requests import AdaptiveRequestGate
+    from demiflow.services.adaptive_requests import AdaptiveRequestGate
     from ..inference import request_admission_config
     declaration = getattr(actor, '_request_policy', None)
     policy = request_admission_config(dict(declaration), concurrency=runtime.concurrency) if declaration is not None else None

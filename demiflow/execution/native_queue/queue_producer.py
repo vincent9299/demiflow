@@ -6,7 +6,7 @@ from pathlib import Path
 
 from demiflow.data import plan as ops
 from demiflow.data.sources import FileSource, ItemsSource, MaterializedSource, LanceSource
-from demiflow.execution.blocking_io import BlockingIOPool
+from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.queue import QueueChannel
 from demiflow.execution.queue_contract import ProducerRef, ProducerWindowLimit, queue_config

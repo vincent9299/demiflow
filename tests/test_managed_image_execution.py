@@ -402,16 +402,18 @@ def test_terminal_batch_byte_budget_checked_before_arrow_allocation(tmp_path,mon
     assert calls==[]
 
 
+from demiflow.execution.operator_bindings.dataflow_model_factory import PromptFactory as OriginalPromptFactory
+
+
 class DelayedNativePromptFactory:
     """A sealed worker fault: delay completion after the real native response."""
     def __new__(cls, operation, settings):
         import asyncio
         import os
         from pathlib import Path
-        from demiflow.execution.operator_bindings.dataflow_model_factory import PromptFactory
-        # Workers import the actual platform factory; the driver's compiler
-        # binding below only substitutes this test declaration in the seal.
-        actor = PromptFactory(operation, settings)
+        # Retain the real constructor before replacing the declaration factory.
+        # Thread workers share the same module as the compiler.
+        actor = OriginalPromptFactory(operation, settings)
         original = actor._runtime.call_with_trace
         root = Path(operation.options['object_store'])
         async def delayed(name, values):
