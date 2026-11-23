@@ -99,6 +99,15 @@ with scope as run:
             result = LocalDatasetExecutor(workers=3).materialize_graph(spec)
             assert result['target_rows'] == {'left': 12, 'right': 12}
             action.complete({'kind': 'graph-materialized'})
+    elif family == 'capture':
+        from historical_business import observed, ObservedSink
+        if operation == 'reject-at-seal':
+            from demiflow.execution.seal import plan
+            def reject(*args, **kwargs):
+                raise ValueError('test rejection inside sealed program verification')
+            plan.verify_action_programs = reject
+        data.range(48).map(observed()).write_datasink(ObservedSink())
+        rows = []
     else:
         rows = data.range(24).take_all()
     (root/'result.json').write_text(json.dumps(rows))
