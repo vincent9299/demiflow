@@ -89,17 +89,38 @@ def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
     return facts
 
 
-def differences(before, after, writes):
+def _ondemand_preview(root, rel, fact):
+    """Load bounded text preview for an actually changed file when snapshot budget ran out."""
+    if root is None or not fact or 'preview' in fact:
+        return fact.get('preview') if fact else None
+    if Path(rel).suffix not in TEXT_SUFFIXES or (fact.get('bytes') or 0) > 16384:
+        return None
+    try:
+        path = safe_path(root, rel, missing=True)
+        if not path.is_file() or path.is_symlink():
+            return None
+        raw = path.read_bytes()
+        if len(raw) > 16384 or hashlib.sha256(raw).hexdigest() != fact.get('sha256'):
+            return None
+        text = raw.decode('utf-8')
+        return text if len(text.splitlines()) <= 512 else None
+    except (OSError, UnicodeError, ValueError):
+        return None
+
+
+def differences(before, after, writes, *, root=None):
     for name in sorted(before.keys() | after.keys()):
         old, new = before.get(name), after.get(name)
         if (old or {}).get('sha256') == (new or {}).get('sha256'): continue
         value = dict(path=name, before={k:v for k,v in (old or {}).items() if k!='preview'} if old else None,
             after={k:v for k,v in (new or {}).items() if k!='preview'} if new else None,
             within_scope=any(name==w or name.startswith(w+'/') for w in writes))
-        if (old is None or 'preview' in old) and (new is None or 'preview' in new):
+        old_preview = '' if old is None else old.get('preview')
+        new_preview = '' if new is None else (new.get('preview') if 'preview' in new else _ondemand_preview(root, name, new))
+        if old_preview is not None and new_preview is not None:
             # <=512 lines each side and <=32 KiB combined source input.
-            chunks = list(difflib.unified_diff((old or {}).get('preview','').splitlines(keepends=True),
-                          (new or {}).get('preview','').splitlines(keepends=True),fromfile='before/'+name,tofile='after/'+name))
+            chunks = list(difflib.unified_diff(old_preview.splitlines(keepends=True),
+                          new_preview.splitlines(keepends=True),fromfile='before/'+name,tofile='after/'+name))
             diff=''.join(chunks)
             if len(diff.encode())<=32768:value['diff']=diff
             else:value['diff_unavailable']='diff_byte_budget'
