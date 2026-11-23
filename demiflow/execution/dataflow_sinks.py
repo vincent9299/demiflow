@@ -535,8 +535,11 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
                             del output
                             batch, size = [], 0
                             batch_resident = check_size(batch, bounds.max_resident_bytes)
+                        # Derived rows may share a source offset (expansion) or cross
+                        # fragments. Contiguity belongs to the authenticated IPC batch.
+                        located = arrow.locate(record) if record.payload_ref == arrow.ref else None
                         if pending is not None and (record.payload_ref != pending[0]
-                                or record.source_position['row_offset'] != pending[4]
+                                or located[1] != pending[4]
                                 or pending[3] >= batch_rows
                                 or pending[5] + record.encoded_bytes > bounds.max_batch_bytes // 2):
                             output = arrow_table(pa.Table.from_batches([pending[1].slice(pending[2], pending[3])]))
@@ -552,13 +555,13 @@ def publication_blocks(manifest, *, store, bounds, batch_rows, publication_works
                                 # before the cache reads or opens the batch.
                                 call(admit_workspace, 12 * record.payload_ref.size_bytes + 16384,
                                      bounds, _frame_retained=stream.buffered_bytes)
-                        native_batch, index = arrow.locate(record)
+                        native_batch, index = located or arrow.locate(record)
                         if pending is None:
-                            pending = [record.payload_ref, native_batch, index, 0, record.source_position['row_offset'], 0]
+                            pending = [record.payload_ref, native_batch, index, 0, index, 0]
                         pending[3] += 1
                         pending[4] += 1
                         pending[5] += record.encoded_bytes
-                        del native_batch, index, record
+                        del native_batch, index, record, located
                         held_record_bytes = 0
                         continue
                     if pending is not None:

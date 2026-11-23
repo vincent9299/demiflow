@@ -158,3 +158,54 @@ def test_public_join_streams_left_only_after_the_entire_right_fits(tmp_path, mon
         assert [r for r in result if r['lk'] is None] == [{'lk': None}]
         assert appends['rk',] == right_count
         assert appends['lk',] == (0 if fits else 3)
+
+
+@pytest.mark.parametrize('how', ['inner', 'semi', 'left', 'anti'])
+def test_public_lance_join_vector_probes_only_true_inner_and_semi_batches(tmp_path, monkeypatch, how):
+    import lance
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    from demiflow.execution.arrow_payload import ArrowBatchCache
+    from demiflow.execution.sealed_plans import load_sealed_plan
+
+    uri = str(tmp_path / 'source.lance')
+    keys = [None, *range(1, 128)]
+    lance.write_dataset(pa.table({'k': keys, 'blob': [bytes([i]) * 1024 for i in range(128)]}), uri)
+    vectors, authenticated, decoded = [], set(), []
+    is_in, locate, row = pc.is_in, ArrowBatchCache.locate, ArrowBatchCache.row
+
+    def vector(column, **kwargs):
+        vectors.append((len(column), set(kwargs['value_set'].to_pylist())))
+        return is_in(column, **kwargs)
+
+    def bind(cache, record):
+        batch, index = locate(cache, record)
+        authenticated.add(record.record_id)
+        return batch, index
+
+    def read(cache, record):
+        decoded.append(record.record_id)
+        return row(cache, record)
+
+    monkeypatch.setattr(pc, 'is_in', vector)
+    monkeypatch.setattr(ArrowBatchCache, 'locate', bind)
+    monkeypatch.setattr(ArrowBatchCache, 'row', read)
+    with RunContext.start(tmp_path/'run', limits={'max_row_bytes': 65536, 'max_batch_bytes': 2 << 20}):
+        with data.local_execution(workers=1, partitions=1, worker_mode='thread'):
+            result = data.read_lance(uri, version=1, batch_size=16).join(
+                data.from_items([{'k': 2}, {'k': 63}, {'k': None}]), on='k', how=how).take_all()
+    physical = load_sealed_plan(tmp_path/'run', 'action-1', version='v3')['physical']
+    source = next(source for source in physical.sources if source.kind == 'lance')
+    member = how in ('inner', 'semi')
+    assert (source.immutable_identity.get('record_carrier_v1') == 'arrow_batch') == member
+    if member:
+        assert vectors == [(16, {2, 63})] * 8
+        assert len(authenticated) == 128
+        assert len(decoded) == 2
+    else:
+        assert not vectors
+    selected = (range(128) if how == 'left' else (2, 63) if member
+                else [index for index in range(128) if index not in (2, 63)])
+    values = {row['k']: row['blob'] for row in result}
+    assert len(result) == len(selected)
+    assert values == {keys[i]: bytes([i]) * 1024 for i in selected}

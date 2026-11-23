@@ -140,6 +140,7 @@ def recover_published_gc(journal, fence, *, deadline=None):
 _REF_FIELDS = {'digest', 'size_bytes', 'store_id', 'key', 'media_type'}
 _LEAVES = {'application/octet-stream', 'application/vnd.demiflow.arrow-schema.v1',
     'application/vnd.demiflow.arrow-batch.v1', 'application/vnd.apache.arrow.stream',
+    'application/vnd.demiflow.mapped-arrow-batch.v1',
     'application/x-demiflow-program-payload-v3', 'text/x-python', 'text/plain'}
 _STRUCTURED = {'application/json',
     'application/x-demiflow-worker-assignment-v3', 'application/x-demiflow-recovery-image-v3',

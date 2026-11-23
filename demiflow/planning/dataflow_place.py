@@ -839,6 +839,26 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                                         publication_workspace_bytes=publication, publication_reservation=reservation)
 
 
+def _join_arrow_snapshots(graph, snapshots, splits, stages):
+    """Keep a fixed Lance probe columnar up to a co-located finite hash join."""
+    # The probe reaches this one worker directly, in source order. A hash
+    # exchange, a UDF, a fork or another consumer may need the original row.
+    if (graph.jobs or len(graph.nodes) != 4 or len(graph.edges) != 3 or len(snapshots) != 2
+            or len(splits) != 2 or len(stages) != 1 or len(stages[0].partitions) != 1):
+        return snapshots
+    from .dataflow_compile import _plain
+    nodes = _node_map(graph)
+    for edge in graph.edges:
+        join = nodes[edge.consumer].kernel
+        if (edge.input_port == 'left' and nodes[edge.producer].kernel.kind == 'lance'
+                and join.kind == 'join' and join.configuration.get('how', 'inner') in ('inner', 'semi')
+                and len(join.configuration.get('on', ())) == 1):
+            return tuple(replace(source, immutable_identity={**_plain(source.immutable_identity),
+                'record_carrier_v1': 'arrow_batch'}) if source.source_id == edge.producer else source
+                         for source in snapshots)
+    return snapshots
+
+
 def compile_physical_dataflow(
     graph: DataflowGraph,
     snapshots: tuple[SourceSnapshot, ...],
@@ -949,7 +969,7 @@ def compile_physical_dataflow(
         exchanges=exchanges,
         residency=residency,
         scopes=scopes,
-        sources=snapshots,
+        sources=_join_arrow_snapshots(graph, snapshots, splits, stages),
         splits=splits,
         policy=policy,
         bounds=bounds,

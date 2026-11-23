@@ -131,6 +131,27 @@ def relational_profile(kind, source, bounds):
     return profile, reducer_memory
 
 
+def _lance_input_carrier(request):
+    from ..data.plan import MapBatchesOp
+    from ..data.sources import LanceSource
+    from ..lance.model import LanceScanSpec, LanceWriteSpec
+    source, operations = request.source, request.plan.operations
+    sink = next((p.value for p in request.programs if p.name == 'write_lance'), None)
+    if (type(source) is not LanceSource or type(source.query) is not LanceScanSpec
+            or source.native_options is not None or type(sink) is not LanceWriteSpec):
+        return None
+    query = source.query
+    if (not operations and sink.mode == 'merge' and query.version is not None
+            and not query.filter and not query.projection and query.limit is None):
+        return FIXED_SCAN_BATCHES
+    if len(operations) == 1 and sink.schema is not None:
+        operation = operations[0]
+        if (type(operation) is MapBatchesOp and operation.batch_format == 'pyarrow'
+                and operation.native_options is None):
+            return 'mapped_arrow.v1'
+    return None
+
+
 def terminal_budget(request, nodes, producer, *, bounds, semantic):
     """Memory contract of the terminal that consumes ``nodes[producer]``.
 
@@ -165,16 +186,10 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         # Queue tasks were settled by their original authority already;
         # this terminal only publishes the result manifest, without Arrow.
         native_publication = publishes_natively(request.sink)
-    if request.kind == 'write_lance' and not request.plan.operations:
-        from ..data.sources import LanceSource
-        from ..lance.model import LanceScanSpec, LanceWriteSpec
-        source = request.source
-        spec = next((p.value for p in request.programs if p.name == 'write_lance'), None)
-        if (type(source) is LanceSource and type(source.query) is LanceScanSpec
-                and source.native_options is None and source.query.version is not None
-                and not source.query.filter and not source.query.projection and source.query.limit is None
-                and type(spec) is LanceWriteSpec and spec.mode == 'merge'):
-            configuration['input_carrier'] = FIXED_SCAN_BATCHES
+    if request.kind == 'write_lance':
+        carrier = _lance_input_carrier(request)
+        if carrier is not None:
+            configuration['input_carrier'] = carrier
     if native_publication:
         from ..execution.dataflow_publication_budget import FIELD, SCHEMA
         # A native consumer can still hold its previous yielded Arrow

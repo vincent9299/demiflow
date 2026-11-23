@@ -532,6 +532,111 @@ def _batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterato
                 close()
 
 
+def _callback_table(records, services, *, zero_copy):
+    """Reassemble the original business batch from validated, consecutive IPC slices."""
+    import pyarrow as pa
+    from ..arrow_payload import _resident_budget
+    from ..arrow_payload import batch_cache
+    cache = batch_cache(services.store, services.bounds, services=services)
+    limit = min(services.bounds.max_batch_bytes,
+                _resident_budget(services.bounds, services))
+    pieces = []
+    retained = 0
+    # Count each backing buffer once per contiguous artifact run. An
+    # interleaving is safe too: a replacement cache may allocate a new parent.
+    previous = None
+    for record in records:
+        services.check_stop()
+        if record.payload_ref != previous:
+            if retained + 4 * record.payload_ref.size_bytes > limit:
+                return None
+            previous = record.payload_ref
+            new_ref = True
+        else:
+            new_ref = False
+        batch, index = cache.locate(record)
+        if new_ref:
+            retained += batch.get_total_buffer_size() + record.payload_ref.size_bytes
+            if retained > limit:
+                return None
+        if pieces and not new_ref and pieces[-1][1] + pieces[-1][2] == index:
+            pieces[-1][2] += 1
+        else:
+            pieces.append([batch, index, 1])
+    table = pa.Table.from_batches([part.slice(start, count) for part, start, count in pieces])
+    # Keep zero-copy slices when there is no room to consolidate. With room,
+    # compact fragmented scans columnwise so the callback and writer receive
+    # one native chunk per column instead of one artifact per input row.
+    if not zero_copy and len(pieces) > 1 and 3 * retained + 256 * len(table.schema) <= limit:
+        table = table.combine_chunks()
+    return table
+
+
+def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained_bytes):
+    """Consume callback outputs once and leave each original occurrence with its ACK owner."""
+    import pyarrow as pa
+    from collections.abc import Iterator
+    from ..arrow_payload import _MAX_ROWS
+    from ..arrow_payload import _resident_budget
+    from ..arrow_payload import store_mapped_arrow
+
+    outputs = result if isinstance(result, Iterator) else (result,)
+    ordinal = 0
+    try:
+        for output in outputs:
+            if isinstance(output, (pa.RecordBatch, pa.Table)):
+                parent_bytes = output.get_total_buffer_size()
+                if retained_bytes + parent_bytes > _resident_budget(services.bounds, services):
+                    raise _err('BUDGET_EXCEEDED', 'Arrow callback input and retained result exceed the worker grant')
+                # Each membership digest costs 67 bytes in the bounded IPC header.
+                max_rows = min(_MAX_ROWS, max(1, (min(8192, services.bounds.max_control_bytes) - 256) // 80))
+                table = pa.Table.from_batches([output]) if isinstance(output, pa.RecordBatch) else output
+                batches = table.to_reader(max_chunksize=max_rows)
+                try:
+                    for chunk in batches:
+                        _check_stop(services)
+                        if not chunk.num_rows:
+                            continue
+                        schema_ref = schemas.put(chunk.schema)
+                        members = [binding(ordinal + i) for i in range(chunk.num_rows)]
+                        carried = store_mapped_arrow(chunk, members, schema_ref, services,
+                            retained_bytes=retained_bytes + parent_bytes)
+                        if carried is None:
+                            # Unsupported types retain their exact historical typed-row validation.
+                            for i, (key, source) in enumerate(members):
+                                row = chunk.slice(i, 1).to_pylist()[0]
+                                record = _output_record(key, source.source_position, row, source.sequence,
+                                                        services, schema_ref=schema_ref)
+                                _check_stop(services)
+                                budget.charge(record)
+                                yield record
+                        else:
+                            for record in carried:
+                                _check_stop(services)
+                                budget.charge(record)
+                                yield record
+                        ordinal += chunk.num_rows
+                finally:
+                    batches.close()
+            else:
+                schema_ref = None
+                def set_schema(value):
+                    nonlocal schema_ref
+                    schema_ref = schemas.put(value)
+                for row in _batch_to_rows(output, 'pyarrow', on_schema=set_schema):
+                    _check_stop(services)
+                    key, source = binding(ordinal)
+                    record = _output_record(key, source.source_position, row, source.sequence,
+                                            services, schema_ref=schema_ref)
+                    budget.charge(record)
+                    yield record
+                    ordinal += 1
+    finally:
+        close = getattr(outputs, 'close', None)
+        if close is not None:
+            close()
+
+
 def invoke_batch(
     spec: KernelSpec,
     records: tuple[Record, ...],
@@ -546,7 +651,6 @@ def invoke_batch(
     _check_stop(services)
     kind = spec.kind
     cfg = spec.configuration
-    rows = [_materialize_row(record, services) for record in records]
     input_bytes = sum(_input_row_bytes(record) for record in records)
     budget = _OutputBudget(spec, services)
     if schemas is None:
@@ -558,6 +662,24 @@ def invoke_batch(
     output_ref = [None]
     expected = cfg.get("predict_output_schema")
     keyed = expected is not None and cfg.get('batch_size', 1) > 1
+    occurrence = spec.configuration.get("occurrence_id")
+
+    def binding(index):
+        if index < len(records):
+            return records[index].record_id, records[index]
+        source = records[-1]
+        return _hash_id([RECORD_DOMAIN, source.record_id, occurrence, index]), source
+
+    if (kind == 'MapBatchesOp' and cfg.get('batch_format') == 'pyarrow' and records
+            and expected is None):
+        from ..arrow_payload import is_arrow_record
+        if all(is_arrow_record(record) for record in records):
+            table = _callback_table(records, services, zero_copy=cfg.get('zero_copy_batch', False))
+            if table is not None:
+                yield from _mapped_arrow_output(instance(table), binding=binding, schemas=schemas,
+                    services=services, budget=budget, retained_bytes=table.get_total_buffer_size())
+                return
+    rows = [_materialize_row(record, services) for record in records]
     if expected is not None:
         import pyarrow as pa
         from ...data.training_schema import PREDICTION_ROW_ID, validate_columns
@@ -651,7 +773,6 @@ def invoke_batch(
     else:
         raise _err("INVALID_CONTRACT", "kind is not a batch kernel", kind=kind)
 
-    occurrence = spec.configuration.get("occurrence_id")
     count = 0
     try:
         for index, out_row in enumerate(out_rows):
@@ -662,17 +783,10 @@ def invoke_batch(
                 if keyed and out_row.pop(PREDICTION_ROW_ID, None) != prediction_ids[index]:
                     raise _err('INVALID_CONTRACT', 'Predictor changed the input occurrence order')
                 count += 1
-            if index < len(records):
-                source = records[index]
-                record_id = source.record_id
-                position = source.source_position
-            else:
-                source = records[-1]
-                record_id = _hash_id([RECORD_DOMAIN, source.record_id, occurrence, index])
-                position = source.source_position
+            record_id, source = binding(index)
             if expected is not None and output_ref[0] is None:
                 validate_columns(pa.RecordBatch.from_pylist([out_row]).schema, expected)
-            out = _output_record(record_id, position, out_row, source.sequence, services,
+            out = _output_record(record_id, source.source_position, out_row, source.sequence, services,
                                  schema_ref=output_ref[0])
             budget.charge(out)
             yield out

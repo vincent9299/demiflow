@@ -246,7 +246,8 @@
    ],
    "how": [
     "execution/contracts/relational_region.py",
-    "execution/kernels/relational_region.py"
+    "execution/kernels/relational_region.py",
+    "planning/dataflow_place.py"
    ],
    "initial": [
     "execution/kernels/relational.py"
@@ -256,6 +257,7 @@
    ],
    "input_carrier": [
     "execution/action_driver/dataflow.py",
+    "execution/arrow_payload.py",
     "execution/dataflow_sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
@@ -351,6 +353,7 @@
     "execution/contracts/relational_region.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/relational_region.py",
+    "planning/dataflow_place.py",
     "planning/dataflow_relational_regions.py"
    ],
    "output": [
