@@ -1,25 +1,20 @@
-"""Delivery-only Prompt caches, using the original driver-owned private SQLite.
+"""Driver-owned sealed private model journals and request admission."""
+from __future__ import annotations
 
-HTTP identities/results remain exclusively in that cache. RunJournal owns
-finite execution admission and result commits. The two databases are not an atomic
-transaction: admission is retained across failures and crash resume is refused.
-"""
-from demiflow.operator_llm.flow_contract import private_prompt_declaration
-from dataclasses import replace
-import math
 import re
-import threading
-
 from demiflow.execution.contracts.dataflow import NativeJournalReply, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal, make_native_action_view, _rebuild_request_gate
 from demiflow.execution.recovery_contract import RecoveryContractError, identity
+import threading
+
+from dataclasses import replace
+from demiflow.execution.contracts.dataflow_codec import private_prompt_rpc_id as _rpc_id
+
 
 _DELIVERY = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'run_stream'})
+
+
 _OPERATIONS = frozenset({'lookup', 'reserve', 'reserve_http_retry', 'response', 'failed', 'references'})
-
-
-
 
 
 def bind_private_prompt_contracts(service, graph):
@@ -59,70 +54,6 @@ def bind_private_prompt_contracts(service, graph):
         'nodes': [{'occurrence': node, 'route': route} for node, route in nodes]})
 
 
-def _rpc_id(command, scope, route):
-    return identity(['private-prompt-rpc-v1', command.action_id, command.node_id,
-                     command.request_key, command.operation, scope, route, dict(command.options)])
-
-
-class RemotePrivatePromptJournal(RemotePromptJournal):
-    def __init__(self, *, services, action, node_id, declaration, route, maximum):
-        super().__init__(port=services.journal, action=action, bounds=services.bounds)
-        self._bind(node_id, services.store)
-        self.declaration, self.route = dict(declaration), route
-        self.read_only = declaration.get('read_only', False)
-        self.limit = declaration.get('max_requests', maximum)
-        self.timeout_s = min(self.timeout_s, declaration.get('timeout_s', 30))
-
-    def _command(self, operation, request, *, value_ref=None, reservation=None, options=None):
-        from demiflow.execution.row_scope import current_row_scope
-        scope = current_row_scope()
-        if scope is None or not re.fullmatch('[0-9a-f]{64}', scope.occurrence):
-            raise DataflowError('INVALID_CONTRACT', 'Private Prompt RPC lost its original row scope')
-        if reservation is not None or operation not in _OPERATIONS:
-            raise DataflowError('INVALID_CONTRACT', 'Private Prompt cannot send native HTTP recovery commands')
-        command = super()._command(operation, request, value_ref=value_ref, options={
-            **(options or {}), 'prompt_route': self.route, 'row_scope': scope.occurrence})
-        return replace(command, operation_id=_rpc_id(command, scope.occurrence, self.route))
-
-    def reserve(self, request):
-        return bool(self._rpc(self._command('reserve', request)))
-
-    def reserve_http_retry(self, request, **kwargs):
-        if set(kwargs) != {'expected_attempt', 'expected_status', 'max_attempts'}:
-            raise DataflowError('INVALID_CONTRACT', 'Private Prompt retry requires the original bounded retry declaration')
-        return bool(self._rpc(self._command('reserve_http_retry', request, options=kwargs)))
-
-
-class _PrivatePromptBinding:
-    row_local = False  # A private cache does not grant native pending-call recovery.
-    copy_inputs = False
-    semantic_owners = ()
-
-    def __init__(self, action, journal):
-        self.action, self.journal = action, journal
-
-    def bind_client(self, client):
-        if client.journal is not self.journal:
-            raise RecoveryContractError('Private Prompt client lost its original bounded driver journal')
-        # Preserve record()/decode() exactly; no native_occurrence is inserted.
-
-
-def bind_private_prompt_adapter(actor, *, services, node_id, configuration, route=None):
-    declared = thaw_record_value(configuration['private_journal'])
-    if (private_prompt_declaration(actor._runtime.options) != declared
-            or actor._operation.max_requests != configuration['max_requests']
-            or getattr(actor._runtime, 'native_recovery', None) is not None):
-        raise RecoveryContractError('Private Prompt actor differs from its sealed declaration')
-    action = make_native_action_view(services, node_id=node_id)
-    journal = RemotePrivatePromptJournal(services=services, action=action, node_id=node_id,
-        declaration=declared, route=route, maximum=configuration['max_requests'])
-    actor._runtime.native_recovery = _PrivatePromptBinding(action, journal)
-    coordinator = actor._runtime.coordinator
-    coordinator.bind_execution(action.context, node_id if route is None else identity(['routed-prompt-route-v1', node_id, route]))
-    coordinator._native_group_journal = True  # driver derives charges; no worker DB
-    actor._runtime.request_gate = _rebuild_request_gate(actor, actor._runtime.concurrency)
-
-
 def is_private_prompt_request(service, command, request):
     nodes = getattr(service, '_private_prompt_nodes', {})
     if (command.node_id, None) in nodes or 'prompt_route' in command.options:
@@ -136,7 +67,7 @@ def is_private_prompt_request(service, command, request):
 
 def _journal(service, node_id, route):
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
-    from demiflow.execution.storage.private_journals import private_storage
+    from demiflow.execution.journal.dataflow_authority import private_storage
     with service._private_prompt_lock:
         if service._closed:
             raise DataflowError('FENCED', 'Private Prompt journal owner is closed')
@@ -154,7 +85,7 @@ def _journal(service, node_id, route):
 
 
 def private_prompt_request(service, command, request):
-    from demiflow.execution.dataflow_authority import _NATIVE_HANDLERS
+    from demiflow.execution.journal.dataflow_authority import _NATIVE_HANDLERS
     route, scope = command.options.get('prompt_route'), command.options.get('row_scope')
     if (command.operation not in _OPERATIONS or command.reservation is not None
             or type(scope) is not str or not re.fullmatch('[0-9a-f]{64}', scope)

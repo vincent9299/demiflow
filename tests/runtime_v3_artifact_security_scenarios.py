@@ -158,7 +158,7 @@ class _NativeTransport:
 
 
 def _assignment_attacks(execution, assignment, root):
-    from demiflow.execution.dataflow_authority import WorkerJournalClient
+    from demiflow.execution.worker.runtime import WorkerJournalClient
     from demiflow.execution.seal.plan import load_worker_programs as _load_programs
     from demiflow.execution.worker.runtime import make_runtime_services
     from demiflow.execution.contracts.dataflow import WorkerEvent

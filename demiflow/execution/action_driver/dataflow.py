@@ -676,13 +676,13 @@ class DataflowExecution:
                 self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from demiflow.execution.kernels.batch_membership import bind_contracts
+        from demiflow.execution.journal.dataflow_authority import bind_batch_contracts as bind_contracts
         bind_contracts(self._services.journal_service, graph, physical)
-        from ..dataflow_embedding_journal import bind_private_embedding_contracts
+        from demiflow.execution.journal.dataflow_embedding_journal import bind_private_embedding_contracts
         bind_private_embedding_contracts(self._services.journal_service, graph)
-        from ..dataflow_prompt_journal import bind_private_prompt_contracts
+        from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
         bind_private_prompt_contracts(self._services.journal_service, graph)
-        from demiflow.execution.storage.private_journals import bind_private_storage
+        from demiflow.execution.journal.dataflow_authority import bind_private_storage
         bind_private_storage(self._services.journal_service)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):

@@ -179,7 +179,7 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
     from demiflow.operator_llm.client import AsyncOperatorLLMClient
     from demiflow.execution.executors import dataflow_api
     from demiflow.execution.scheduler import native_limits as action_limits
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from contextvars import ContextVar
     path = tmp_path / 'calls.sqlite'
     encoded = 'data:image/png;base64,' + 'YWJj' * 400000

@@ -85,7 +85,7 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
             from demiflow.execution.operator_bindings.dataflow_routed_prompt import bind_routed_prompt
             bind_routed_prompt(instance, services=services, node_id=node_id, configuration=spec.configuration)
         elif spec.configuration.get('private_journal') is not None:
-            from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_adapter
+            from demiflow.execution.operator_bindings.dataflow_prompt_journal import bind_private_prompt_adapter
             bind_private_prompt_adapter(instance, services=services, node_id=node_id, configuration=spec.configuration)
         elif spec.configuration.get('response_format') == 'image':
             journal.bind_media_adapter(instance, services=services, node_id=node_id)
@@ -97,7 +97,7 @@ def bind_model_services(instance: CallableInstance, spec: KernelSpec, *, service
         # Embedding owns its NativeEmbeddingRecovery and atomic budget; it has no
         # Prompt coordinator and never borrows bind_client.
         if spec.configuration.get('private_journal') is not None:
-            from demiflow.execution.dataflow_embedding_journal import bind_private_embedding_adapter
+            from demiflow.execution.operator_bindings.dataflow_embedding_journal import bind_private_embedding_adapter
             bind_private_embedding_adapter(instance, services=services, node_id=node_id,
                                             configuration=spec.configuration)
         else:

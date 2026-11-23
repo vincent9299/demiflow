@@ -204,3 +204,6 @@ TASK_KINDS = kinds_with('task')
 
 
 MANAGED_HTTP_DEVICES_FIELD = 'managed_http_devices'
+
+NATIVE_BATCH_SCHEMA = 'demiflow.native_batch_membership.v1'
+NATIVE_BATCH_KINDS = kinds_with("batch_membership")

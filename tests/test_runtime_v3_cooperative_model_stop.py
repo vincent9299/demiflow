@@ -10,7 +10,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import _thaw_json
-from demiflow.execution.dataflow_authority import _ref_to_json
+from demiflow.execution.contracts.dataflow_codec import encode_artifact_reference as _ref_to_json
 from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from demiflow.execution.operator_bindings.dataflow_model_journal import _rpc_operation_id
 from demiflow.execution.kernels.async_instance import AsyncInstance
@@ -52,7 +52,7 @@ def test_async_owner_drains_only_fixed_service_reason(reason, settled):
 @pytest.mark.parametrize('private', [False, True])
 @pytest.mark.parametrize('reason', [COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON])
 def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_response(tmp_path, private, reason):
-    from demiflow.execution.storage.private_journals import bind_private_storage
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
         if private:
             authority._action.declaration['kind'] = 'take_all'

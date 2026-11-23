@@ -5,22 +5,11 @@ before invoking native effects, so a new attempt can replay the same boundary
 without repeating confirmed model requests or regrouping a published write.
 """
 import hashlib
-from demiflow.execution.contracts.dataflow import NativeJournalCommand, NativeJournalReply
+from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_SCHEMA as SCHEMA
+from demiflow.execution.contracts.dataflow import NativeJournalCommand
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.contracts.dataflow_kinds import kinds_with
-from demiflow.execution.recovery_contract import document, identity, identifier
 
-SCHEMA='demiflow.native_batch_membership.v1'
-KINDS=kinds_with('batch_membership')
-
-
-def bind_contracts(service, graph, physical):
-    service._batch_nodes={node.occurrence_id:{
-        'max_batch':int(node.kernel.configuration.get('batch_size') or node.kernel.configuration.get('max_batch')
-                        or node.kernel.configuration.get('default_batch_size') or 256),
-        'partitions':tuple(stage.partitions)}
-        for node in graph.nodes if node.kernel.kind in KINDS
-        for stage in physical.stages if node.occurrence_id in stage.occurrences}
+from demiflow.execution.recovery_contract import document, identity
 
 
 def member(record, bounds):
@@ -85,44 +74,3 @@ class NativeBatchMembership:
         bound=self._request(ordinal,value)
         if bound!=value:
             raise DataflowError('INCOMPATIBLE_HISTORY','Native batch membership differs')
-
-
-def request(service,command,record):
-    declared=getattr(service,'_batch_nodes',{}).get(command.node_id)
-    value=dict(record)
-    if (declared is None or command.options or command.reservation is not None or command.value_ref is not None
-            or set(value)!={'schema','partition','ordinal','members'} or value['schema']!=SCHEMA
-            or value['partition'] not in declared['partitions']
-            or type(value['ordinal']) is not int
-            or not 0<=value['ordinal']<service._action.context.limits['max_commits']):
-        raise DataflowError('INVALID_CONTRACT','Batch membership differs from its sealed native owner')
-    members=value['members']
-    operation=identity([SCHEMA,command.action_id,command.node_id,value['partition'],value['ordinal'],
-                        'read' if members is None else 'bind'])
-    if operation!=command.operation_id:
-        raise DataflowError('INVALID_CONTRACT','Batch membership operation identity differs')
-    key=identity([SCHEMA,command.action_id,command.node_id,value['partition'],value['ordinal']])
-    journal=service._journal
-    existing=journal.source_binding(key)
-    if members is None:
-        return NativeJournalReply(command.operation_id,existing['members'] if existing else None,None)
-    if type(members) is not list or not 1<=len(members)<=declared['max_batch']:
-        raise DataflowError('INVALID_CONTRACT','Native batch membership count exceeds its declaration')
-    for item in members:
-        if type(item) is not list or len(item)!=2:
-            raise DataflowError('INVALID_CONTRACT','Native batch member lacks its payload identity')
-        identifier(item[0]);identifier(item[1])
-        if len(item[1])!=64:raise DataflowError('INVALID_CONTRACT','Native batch member digest is invalid')
-    fact={'schema':SCHEMA,'action':command.action_id,'node':command.node_id,**value}
-    raw=document(fact,service._bounds.max_control_bytes).decode()
-    limits=service._action.context.limits
-    with journal.execution_guard(service._fence) as db:
-        old=db.execute('SELECT document FROM runtime_sources WHERE action_id=?',(key,)).fetchone()
-        if old is not None and old[0]!=raw:
-            raise DataflowError('INCOMPATIBLE_HISTORY','Native batch changed original record membership or payload')
-        journal.reserve_budgets_in_transaction(db,key,{
-            'native_batch_count':(1,limits['max_commits']),
-            'native_batch_records':(len(members),limits['max_output_rows']*service._bounds.max_nodes),
-            'native_batch_metadata':(len(raw.encode()),limits['max_control_bytes'])})
-        db.execute('INSERT OR IGNORE INTO runtime_sources VALUES (?,?)',(key,raw))
-    return NativeJournalReply(command.operation_id,members,None)

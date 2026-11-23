@@ -28,7 +28,7 @@ class CodexExecPromptClient:
             raise ValueError('Unknown Codex execution options')
         if native_journal is not None:
             from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
-            from ..execution.dataflow_prompt_journal import RemotePrivatePromptJournal
+            from demiflow.execution.operator_bindings.dataflow_prompt_journal import RemotePrivatePromptJournal
             if (not isinstance(native_journal, RemotePromptJournal)
                     or isinstance(native_journal, RemotePrivatePromptJournal)
                     or native_journal.read_only or type(native_journal.limit) is not int

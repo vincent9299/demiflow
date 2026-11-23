@@ -8,7 +8,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.executors.dataflow_api import make_action_request
-from demiflow.execution.dataflow_authority import DriverArtifactPort
+from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.recovery_contract import RecoveryContractError
 from demiflow.execution.recovery_contract import identity

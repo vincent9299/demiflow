@@ -274,7 +274,7 @@ class AsyncOperatorLLMClient:
         if verification is not True and verification is not False and verification != 'listed':
             raise ValueError('verify_model must be true, false, or listed')
         self.request_options=request_options(self.options)
-        from demiflow.execution.dataflow_prompt_journal import RemotePrivatePromptJournal
+        from demiflow.execution.operator_bindings.dataflow_prompt_journal import RemotePrivatePromptJournal
         private_remote = isinstance(native_journal, RemotePrivatePromptJournal)
         if private_remote:
             if (self.options.get('sqlite_journal') != native_journal.declaration

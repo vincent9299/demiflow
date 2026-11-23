@@ -355,7 +355,7 @@ def test_real_local_host_verifies_loads_and_activates_map_program(tmp_path):
 
 
 def test_driver_control_repeated_reads_and_unread_reply_backpressure(tmp_path):
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.contracts.dataflow import WorkerEvent
     from demiflow.execution.recovery_contract import identity
     from demiflow.execution.contracts.dataflow_errors import DataflowError

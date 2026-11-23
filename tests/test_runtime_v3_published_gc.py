@@ -195,7 +195,7 @@ def test_concurrent_pin_cannot_cross_exclusive_gc_snapshot(tmp_path,monkeypatch)
 
 def test_stop_flag_does_not_prove_journal_thread_exit():
     import threading
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     gate=threading.Event()
     thread=threading.Thread(target=gate.wait);thread.start()
     service=object.__new__(DriverJournalService)

@@ -13,7 +13,7 @@ from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
 @pytest.fixture
 def lifecycle_authority(local_env):
     from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     run = local_env[0]
     _, bounds = resolve_runtime_policy({}, run.limits, provider='local')

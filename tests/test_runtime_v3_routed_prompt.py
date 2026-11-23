@@ -242,7 +242,7 @@ def test_routed_declaration_refuses_live_or_changed_children(change):
 
 @pytest.mark.parametrize('reason', ['cooperative:operator_stop_file','cooperative:run_cancelled'])
 def test_routed_global_stop_is_not_provider_route_failure(tmp_path,routed_server,monkeypatch,reason):
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.services.request_limits import ServiceStopped
     original=DriverJournalService.native_request
     def stop_after_original_reservation(owner,command,**kwargs):

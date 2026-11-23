@@ -4,7 +4,8 @@ from __future__ import annotations
 import time
 from demiflow.execution.contracts.dataflow import Bounds, DriverServices, RuntimePolicy
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_authority import DriverArtifactPort, DriverJournalService
+from demiflow.execution.storage.staging import DriverArtifactPort
+from demiflow.execution.journal.dataflow_authority import DriverJournalService
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.hosts.configuration import driver_resources, driver_hosts
 

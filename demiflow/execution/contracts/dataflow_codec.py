@@ -10,6 +10,8 @@ output is allocated. Identity formulas (IDENTITY.md) live here exactly once:
 """
 from __future__ import annotations
 
+from demiflow.execution.recovery_contract import document, identity
+
 import math
 from dataclasses import fields, is_dataclass
 from typing import Mapping
@@ -1205,3 +1207,65 @@ def _json_config(value):
     if is_dataclass(value) and not isinstance(value, type):
         return {field.name: _json_config(getattr(value, field.name)) for field in fields(value)}
     raise DataflowError('INVALID_CONTRACT', 'Model configuration must be declarative code/config, not a live object')
+
+
+def decode_artifact_reference(value):
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    if value is None:
+        return None
+    if type(value) is not dict or set(value) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise DataflowError("INVALID_CONTRACT", "artifact ref payload is unsupported")
+    return ArtifactRef(**value)
+
+def encode_artifact_reference(ref):
+    if ref is None:
+        return None
+    return {"digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
+            "key": ref.key, "media_type": ref.media_type}
+
+def validate_control_payload(event: WorkerEvent, bounds: "Bounds") -> None:
+    if event.payload is not None and event.payload_ref is not None:
+        raise DataflowError("INVALID_CONTRACT", "payload and payload_ref are mutually exclusive")
+    if event.payload is None and event.payload_ref is None:
+        raise DataflowError("INVALID_CONTRACT", "event needs payload or payload_ref")
+    if event.payload is not None:
+        from demiflow.execution.contracts.dataflow import thaw_record_value
+        raw = document(thaw_record_value(event.payload))
+        if len(raw) > bounds.max_control_bytes:
+            raise DataflowError("BUDGET_EXCEEDED", "control payload exceeds max_control_bytes")
+
+def decode_effect_command(payload) -> EffectCommand:
+    return EffectCommand(operation_id=payload["operation_id"], kind=payload["kind"],
+                         effect_id=payload["effect_id"], actor_id=payload["actor_id"],
+                         request_digest=payload["request_digest"],
+                         payload_ref=decode_artifact_reference(payload.get("payload_ref")),
+                         budget=payload.get("budget", {}))
+
+def decode_artifact_command(payload) -> ArtifactCommand:
+    return ArtifactCommand(operation_id=payload["operation_id"], kind=payload["kind"],
+                           ref=decode_artifact_reference(payload.get("ref")), owner=payload["owner"],
+                           size_bytes=payload.get("size_bytes", 0))
+
+def decode_queue_command(payload) -> QueueCommand:
+    from demiflow.execution.contracts.dataflow import QueueBinding
+    binding = payload["binding"]
+    return QueueCommand(operation_id=payload["operation_id"], operation=payload["operation"],
+                        binding=QueueBinding(**binding), record_id=payload.get("record_id"),
+                        delivery_ref=decode_artifact_reference(payload.get("delivery_ref")),
+                        row_ref=decode_artifact_reference(payload.get("row_ref")), node_id=payload.get('node_id'))
+
+def decode_native_command(payload) -> NativeJournalCommand:
+    return NativeJournalCommand(operation_id=payload["operation_id"], operation=payload["operation"],
+                                action_id=payload["action_id"], node_id=payload["node_id"],
+                                request_key=payload["request_key"],
+                                request_ref=decode_artifact_reference(payload.get("request_ref")),
+                                value_ref=decode_artifact_reference(payload.get("value_ref")),
+                                reservation=payload.get("reservation"), options=payload.get("options", {}))
+
+def private_prompt_rpc_id(command, scope, route):
+    return identity(['private-prompt-rpc-v1', command.action_id, command.node_id,
+                     command.request_key, command.operation, scope, route, dict(command.options)])
+
+def private_embedding_rpc_id(command):
+    return identity(['private-embedding-rpc-v1', command.action_id, command.node_id,
+                     command.request_key, command.operation, dict(command.options)])

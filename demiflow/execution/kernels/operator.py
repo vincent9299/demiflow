@@ -615,7 +615,8 @@ class OperatorKernel:
                         input_limit = self._services.bounds.max_row_bytes + grant - minimum
                     self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop,
                                                   input_limit=input_limit)
-            from demiflow.execution.kernels.batch_membership import KINDS, NativeBatchMembership
+            from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS as KINDS
+            from demiflow.execution.kernels.batch_membership import NativeBatchMembership
             if self._spec.kind in KINDS:
                 self._batch_membership = NativeBatchMembership(self._services,self._occurrence,self._partition_id)
             if self._image is not None:

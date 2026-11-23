@@ -8,10 +8,17 @@ Activate, the business-input gate, and drain/cancel. Sealed dataflow workers
 run the v3 assignment. Standalone K3 workers only hold their granted authority.
 """
 
+import json
+import threading
+from typing import Mapping
+from demiflow.execution.contracts.dataflow import WorkerEvent, EffectCommand, EffectReply, ArtifactCommand, ArtifactReply, QueueCommand, QueueReply, NativeJournalCommand, NativeJournalReply
+from demiflow.execution.recovery_contract import identifier, identity
+from demiflow.execution.contracts.dataflow_codec import decode_artifact_reference as _ref_from_json, encode_artifact_reference as _ref_to_json
+
 from demiflow.execution.contracts.dataflow import RuntimeServices, WorkerAssignment
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.dataflow_authority import WorkerJournalClient
+
 from demiflow.execution.seal.plan import load_worker_programs, read_execution_constants
 import tempfile
 import time
@@ -408,3 +415,137 @@ def make_runtime_services(assignment: WorkerAssignment, *, transport: "ControlTr
         except BaseException as cleanup:
             failure.add_note('Worker store cleanup failed: ' + str(cleanup))
         raise
+
+
+class WorkerJournalClient:
+    """Bounded typed worker journal port; never opens the driver database (H005-H010,
+    H037, H057, H070)."""
+
+    def __init__(self, *, transport, lease: "WorkerLease", bounds: "Bounds"):
+        self._transport = transport
+        self._lease = lease
+        self._bounds = bounds
+        self._pending: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self._grant_doc = None
+
+    def _grant(self):
+        if self._grant_doc is None:
+            store = getattr(self._transport, "store", None)
+            if store is None:
+                raise DataflowError("INVALID_CONTRACT", "transport exposes no store for the worker grant")
+            raw = b"".join(store.read(self._lease.grant_ref, max_bytes=self._bounds.max_control_bytes))
+            self._grant_doc = json.loads(raw)
+        return self._grant_doc
+
+    def _event(self, kind: str, operation_id: str, payload) -> WorkerEvent:
+        grant = self._grant()
+        return WorkerEvent(schema="demiflow.dataflow_event.v3", kind=kind, operation_id=operation_id,
+                           run_id=grant["run_id"], attempt=grant["attempt"], fence=grant["fence"],
+                           allocation_id=self._lease.allocation_id, boot_id=self._lease.boot_id,
+                           plan_revision=grant.get("plan_revision", 0), scope_id=grant["scope_id"],
+                           controller_epoch=grant.get("controller_epoch", 0),
+                           payload_ref=None, payload=payload)
+
+    def _request(self, kind: str, operation_id: str, payload):
+        identifier(operation_id)
+        deadline_ms = self._bounds.timeout_ms
+        with self._lock:
+            if len(self._pending) >= self._bounds.max_pending_events:
+                raise DataflowError("BUDGET_EXCEEDED", "worker journal pending table is full")
+            self._pending[operation_id] = time.monotonic() + deadline_ms / 1000.0
+        try:
+            reply = self._transport.request(self._event(kind, operation_id, payload), deadline_ms=deadline_ms)
+        finally:
+            with self._lock:
+                self._pending.pop(operation_id, None)
+        if reply.operation_id != operation_id:
+            raise DataflowError("INVALID_CONTRACT", "reply operation_id does not match the request")
+        if reply.status == "error":
+            if reply.payload:
+                from demiflow.execution.contracts.dataflow_failures import restore_failure
+                raise restore_failure(reply.payload)
+            raise DataflowError(reply.error_code or "UNKNOWN_EFFECT", "driver rejected the journal command")
+        if reply.status != "ok":
+            raise DataflowError("UNKNOWN_EFFECT", "journal command did not complete")
+        from demiflow.execution.contracts.dataflow import thaw_record_value
+        return thaw_record_value(reply.payload) if reply.payload is not None else {}
+
+    def effect(self, command: EffectCommand) -> EffectReply:
+        payload = {"operation_id": command.operation_id, "kind": command.kind, "effect_id": command.effect_id,
+                   "actor_id": command.actor_id, "request_digest": command.request_digest,
+                   "payload_ref": _ref_to_json(command.payload_ref), "budget": dict(command.budget)}
+        value = self._request("effect", command.operation_id, payload)
+        return EffectReply(operation_id=value["operation_id"], status=value["status"],
+                           result_ref=_ref_from_json(value.get("result_ref")),
+                           receipt_ref=_ref_from_json(value.get("receipt_ref")))
+
+    def reserve(self, operation_id: str, amounts: Mapping[str, int]) -> None:
+        self._request("reserve", operation_id, {"amounts": dict(amounts)})
+
+    def artifact(self, command: ArtifactCommand) -> ArtifactReply:
+        payload = {"operation_id": command.operation_id, "kind": command.kind,
+                   "ref": _ref_to_json(command.ref), "owner": command.owner, "size_bytes": command.size_bytes}
+        value = self._request("artifact", command.operation_id, payload)
+        return ArtifactReply(operation_id=value["operation_id"], present=value.get("present"),
+                             charged_bytes=value.get("charged_bytes", 0))
+
+    def queue(self, command: QueueCommand) -> QueueReply:
+        from dataclasses import asdict
+        payload = {"operation_id": command.operation_id, "operation": command.operation,
+                   "binding": asdict(command.binding), "record_id": command.record_id,
+                   "delivery_ref": _ref_to_json(command.delivery_ref), "row_ref": _ref_to_json(command.row_ref),
+                   "node_id": command.node_id}
+        value = self._request("queue", command.operation_id, payload)
+        return QueueReply(operation_id=value["operation_id"], status=value["status"],
+                          delivery_ref=_ref_from_json(value.get("delivery_ref")),
+                          row_ref=_ref_from_json(value.get("row_ref")),
+                          native_fact_ref=_ref_from_json(value.get("native_fact_ref")),
+                          retry_after_ms=value.get("retry_after_ms", 0))
+
+    def native_request(self, command: NativeJournalCommand) -> NativeJournalReply:
+        from demiflow.execution.contracts.dataflow_codec import _thaw_json
+        payload = {"operation_id": command.operation_id, "operation": command.operation,
+                   "action_id": command.action_id, "node_id": command.node_id, "request_key": command.request_key,
+                   "request_ref": _ref_to_json(command.request_ref), "value_ref": _ref_to_json(command.value_ref),
+                   "reservation": _thaw_json(command.reservation), "options": _thaw_json(command.options)}
+        value = self._request("native_request", command.operation_id, payload)
+        return NativeJournalReply(operation_id=value["operation_id"], value=_thaw_json(value.get("value")),
+                                  value_ref=_ref_from_json(value.get("value_ref")))
+
+    def read_action(self, action_id: str) -> Mapping[str, object]:
+        identifier(action_id)
+        return self._request("read_action", identity(["read-action-v3", action_id]), {"action_id": action_id})
+
+    def restrict_recovery(self, occurrence_id: str) -> None:
+        identifier(occurrence_id)
+        self._request('restrict_recovery', identity(['restrict-recovery-v3',
+            self._lease.boot_id, occurrence_id]), {'occurrence_id': occurrence_id})
+
+    def read_configuration(self) -> Mapping[str, object]:
+        return self._request("read_configuration", identity(["read-configuration-v3", self._lease.boot_id]), {})
+
+    def check_grant(self) -> None:
+        self.check_lease()
+        self._request("check_grant", identity(["check-grant-v3", self._lease.boot_id]), {})
+
+    def check_lease(self):
+        if self._lease.expires_at_ms <= int(time.time() * 1000):
+            raise DataflowError('FENCED', 'Worker grant has expired')
+
+    def renew_lease(self, command):
+        """A fixed control message, never a worker-requested budget extension."""
+        from dataclasses import replace
+        lease = self._lease
+        expected = {'kind', 'run_id', 'attempt', 'fence', 'allocation_id', 'boot_id', 'expires_at_ms'}
+        if set(command) != expected:
+            raise DataflowError('INVALID_CONTRACT', 'Unsupported lease renewal shape')
+        grant = self._grant()
+        if any(command[key] != grant[key] for key in ('run_id', 'attempt', 'fence')):
+            raise DataflowError('FENCED', 'Lease renewal differs from sealed worker grant')
+        expiry = command['expires_at_ms']
+        if (command['allocation_id'] != lease.allocation_id or command['boot_id'] != lease.boot_id
+                or lease.expires_at_ms <= int(time.time() * 1000) or type(expiry) is not int
+                or expiry <= lease.expires_at_ms):
+            raise DataflowError('FENCED', 'Stale, foreign or expired lease renewal')
+        self._lease = replace(lease, expires_at_ms=expiry)

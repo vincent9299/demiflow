@@ -67,7 +67,7 @@ def bind_routed_prompt(actor, *, services, node_id, configuration):
     action = make_native_action_view(services, node_id=node_id)
     for name, child in actor.actors.items():
         if configuration['routes'][name].get('private_journal') is not None:
-            from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_adapter
+            from demiflow.execution.operator_bindings.dataflow_prompt_journal import bind_private_prompt_adapter
             bind_private_prompt_adapter(child, services=services, node_id=node_id,
                                         configuration=configuration['routes'][name], route=name)
             continue

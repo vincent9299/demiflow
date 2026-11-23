@@ -6,7 +6,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_authority import DriverArtifactPort
+from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution import dataflow_sinks as sinks

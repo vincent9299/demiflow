@@ -175,7 +175,7 @@
     "planning/dataflow_place.py"
    ],
    "batch_size": [
-    "execution/kernels/batch_membership.py",
+    "execution/journal/dataflow_authority.py",
     "execution/kernels/operator.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_configuration.py"
@@ -216,7 +216,7 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "default_batch_size": [
-    "execution/kernels/batch_membership.py",
+    "execution/journal/dataflow_authority.py",
     "execution/kernels/operator.py",
     "planning/dataflow_configuration.py"
    ],
@@ -327,14 +327,14 @@
     "execution/operator_bindings/dataflow_prompt_service.py"
    ],
    "max_batch": [
-    "execution/dataflow_embedding_journal.py",
-    "execution/kernels/batch_membership.py",
-    "execution/kernels/operator.py"
+    "execution/journal/dataflow_authority.py",
+    "execution/kernels/operator.py",
+    "execution/operator_bindings/dataflow_embedding_journal.py"
    ],
    "max_requests": [
-    "execution/dataflow_embedding_journal.py",
     "execution/dataflow_images.py",
-    "execution/dataflow_prompt_journal.py"
+    "execution/operator_bindings/dataflow_embedding_journal.py",
+    "execution/operator_bindings/dataflow_prompt_journal.py"
    ],
    "max_row_bytes": [
     "execution/kernels/operator.py"
@@ -426,9 +426,10 @@
     "planning/dataflow_training.py"
    ],
    "private_journal": [
-    "execution/dataflow_embedding_journal.py",
-    "execution/dataflow_prompt_journal.py",
+    "execution/journal/dataflow_embedding_journal.py",
+    "execution/operator_bindings/dataflow_embedding_journal.py",
     "execution/operator_bindings/dataflow_models.py",
+    "execution/operator_bindings/dataflow_prompt_journal.py",
     "planning/dataflow_models.py"
    ],
    "program": [

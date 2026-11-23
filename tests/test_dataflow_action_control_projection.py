@@ -3,7 +3,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import ControlReply, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_authority import DriverJournalService
+from demiflow.execution.journal.dataflow_authority import DriverJournalService
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RecoveryContractError
 

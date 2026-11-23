@@ -49,7 +49,8 @@ _RAY = D.build_fake_ray()
 sys.modules['ray'] = _RAY
 sys.modules['ray.exceptions'] = _RAY.exceptions
 
-from demiflow.execution import dataflow_authority as AUTH
+from demiflow.execution.journal import dataflow_authority as AUTH
+from demiflow.execution.storage import staging as ARTIFACT_PORT
 from demiflow.execution import dataflow_artifacts as ART
 from demiflow.execution.hosts import dataflow_control as CTRL
 from demiflow.execution import dataflow_hosts as HOSTS
@@ -151,7 +152,7 @@ def driver_env(name):
     with RunContext.start(directory=tmp / 'run', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx:
         action = RunAction(ctx, 'action-1', {'kind': 'test'})
         ctx.journal.bind_execution_action(ctx.fence, 'action-1', {'kind': 'test'})
-        port = AUTH.DriverArtifactPort(action, bounds=BIG)
+        port = ARTIFACT_PORT.DriverArtifactPort(action, bounds=BIG)
         store = RunArtifactStore(root=ctx.directory / '.dataflow-store', store_id='store-1', journal=port, bounds=BIG)
         svc = AUTH.DriverJournalService(action, store=store, bounds=BIG)
         svc.register_worker(mklease(), ())
@@ -197,7 +198,7 @@ def worker_client(replies=None, error=None, expires=None):
     doc = {'run_id': 'run-1', 'attempt': 1, 'fence': 'fence-1', 'plan_revision': 0, 'controller_epoch': 0, 'scope_id': 'scope-1'}
     lease = mklease(expires=expires if expires is not None else int(time.time() * 1000) + 100000)
     t = ClientTransport(GrantStore(doc), replies, error)
-    return AUTH.WorkerJournalClient(transport=t, lease=lease, bounds=BIG), t, lease
+    return WORKER_SERVICES.WorkerJournalClient(transport=t, lease=lease, bounds=BIG), t, lease
 
 
 class FakeConnection:
@@ -992,7 +993,7 @@ def test_h031():
     # charged before writing. Exercise the real authority, not an unmetered port.
     with driver_env('h031-budget') as e:
         small = Bounds(max_spill_bytes=64)
-        port = AUTH.DriverArtifactPort(e.action, bounds=small)
+        port = ARTIFACT_PORT.DriverArtifactPort(e.action, bounds=small)
         bounded = RunArtifactStore(root=e.ctx.directory / '.dataflow-store',
                                    store_id='bounded', journal=port, bounds=small)
         with pytest.raises(DataflowError) as ei:
@@ -1199,11 +1200,11 @@ def test_h074():
     with driver_env('h074') as e:
         ref = e.store.put(iter([b'x']), max_bytes=100, media_type='x')
         cmd = df.ArtifactCommand(operation_id=oid('pin-1'), kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes)
-        assert AUTH.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
-        assert AUTH.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
+        assert ARTIFACT_PORT.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
+        assert ARTIFACT_PORT.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
         with pytest.raises(DataflowError):
-            AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('x'), kind='unknown', ref=ref, owner='o', size_bytes=0), bounds=BIG)
-        rs = AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('rs-1'), kind='reserve_staging', ref=None, owner='o', size_bytes=100), bounds=BIG)
+            ARTIFACT_PORT.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('x'), kind='unknown', ref=ref, owner='o', size_bytes=0), bounds=BIG)
+        rs = ARTIFACT_PORT.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('rs-1'), kind='reserve_staging', ref=None, owner='o', size_bytes=100), bounds=BIG)
         assert rs.charged_bytes == 100
 
 

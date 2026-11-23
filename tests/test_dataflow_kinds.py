@@ -1,4 +1,5 @@
 """The kind table: one row per kernel kind, and every older table is a view of it."""
+from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS
 import subprocess
 import sys
 from pathlib import Path
@@ -118,7 +119,7 @@ def test_every_older_table_is_a_view_of_the_rows():
         'relational': kernels._RELATIONAL_KINDS, 'ordering': kernels._ORDERING_KINDS,
         'aggregate': kernels._AGGREGATE_KINDS, 'stream_group': kernels._STREAM_GROUP_KINDS,
         'instance': operator._INSTANCE_KINDS, 'batch_instance': operator._BATCH_INSTANCE_KINDS,
-        'task': task_scope.TASK_KINDS, 'batch_membership': dataflow_batch_membership.KINDS,
+        'task': task_scope.TASK_KINDS, 'batch_membership': NATIVE_BATCH_KINDS,
         'global_ordering': compiler._ORDERING_KINDS, 'finite_complete': compiler._FINITE_COMPLETE_KINDS,
     }
     for role, view in views.items():

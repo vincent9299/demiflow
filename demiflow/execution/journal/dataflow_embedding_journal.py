@@ -1,27 +1,23 @@
-"""Explicit legacy delivery cache over the original driver-owned SQLite journal.
-
-This is not native HTTP recovery. A run's finite request admission precedes the
-private journal's reservation; failure between those databases conservatively
-retains admission. The original run records attempt-only before any HTTP, so it
-cannot resume that window. Only the private journal owns HTTP intent/results.
-"""
+"""Driver-owned sealed private model journals and request admission."""
 from __future__ import annotations
 
+import re
+from demiflow.execution.contracts.dataflow import NativeJournalReply, thaw_record_value
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.recovery_contract import RecoveryContractError, identity
 import threading
 import time
-import re
 
-from .contracts.dataflow import NativeJournalReply
-from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import RecoveryContractError, identity
 
 _DELIVERY = frozenset({'take', 'take_all', 'take_batch', 'iter_rows', 'iter_batches', 'run_stream'})
+
+
 _OPERATIONS = frozenset({'lookup', 'reserve', 'response', 'failed', 'references'})
 
 
 def bind_private_embedding_contracts(service, graph):
     """Register sealed declarations, never a path supplied by a worker command."""
-    from .contracts.dataflow import thaw_record_value
+    from demiflow.execution.contracts.dataflow import thaw_record_value
     nodes = {node.occurrence_id: thaw_record_value(node.kernel.configuration)
              for node in graph.nodes if node.kernel.kind == 'embedding'
              and node.kernel.configuration.get('private_journal') is not None}
@@ -30,7 +26,7 @@ def bind_private_embedding_contracts(service, graph):
     if service._action.declaration.get('kind') not in _DELIVERY:
         raise RecoveryContractError('Native embedding recovery cannot coexist with a private SQLite journal; '
                                     'explicit private journals require a delivery-only terminal')
-    from .checked import current
+    from demiflow.execution.checked import current
     if current() is not None:
         raise RecoveryContractError('Managed execution requires the native embedding journal')
     if service._native is not None or any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
@@ -50,40 +46,9 @@ def bind_private_embedding_contracts(service, graph):
         'nodes': sorted(nodes)})
 
 
-def bind_private_embedding_adapter(actor, *, services, node_id, configuration):
-    from .contracts.dataflow import thaw_record_value
-    from demiflow.execution.operator_bindings.dataflow_model_journal import make_native_action_view, RemotePrivateEmbeddingJournal
-    declared = thaw_record_value(configuration['private_journal'])
-    if (actor.options.get('sqlite_journal') != declared
-            or actor.max_requests != configuration['max_requests']
-            or actor._native_recovery is not None or actor._journal is not None):
-        raise RecoveryContractError('Private embedding actor differs from its sealed journal declaration')
-    action = make_native_action_view(services, node_id=node_id)
-    actor._journal_binding = RemotePrivateEmbeddingJournal(
-        services=services, action=action, node_id=node_id, declaration=declared)
-    from .row_scope import current_row_scope
-    from demiflow.execution.operator_bindings.dataflow_model_journal import _PRIVATE_EMBEDDING_SCOPE
-    maximum = int(configuration.get('max_batch') or 256)
-    exchange = actor._exchange
-    async def scoped_exchange(request, encoded, timings, *, request_part=0):
-        # _invoke_batch already bound its real members and invocation cursor.
-        # Original byte packing yields at least one input per part, so part is
-        # bounded by the declared batch. Do not add it to the HTTP request.
-        scope = current_row_scope()
-        if (scope is None or not re.fullmatch('[0-9a-f]{64}', scope.occurrence)
-                or type(request_part) is not int or not 0 <= request_part < maximum):
-            raise DataflowError('INVALID_CONTRACT', 'Private embedding batch/request scope is invalid')
-        token = _PRIVATE_EMBEDDING_SCOPE.set((scope.occurrence, request_part))
-        try:
-            return await exchange(request, encoded, timings, request_part=request_part)
-        finally:
-            _PRIVATE_EMBEDDING_SCOPE.reset(token)
-    actor._exchange = scoped_exchange
-
-
 def _journal(service, node_id):
-    from ..operator_llm.sqlite_journal import SQLitePromptJournal
-    from demiflow.execution.storage.private_journals import private_storage
+    from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
+    from demiflow.execution.journal.dataflow_authority import private_storage
     with service._private_embedding_lock:
         if service._closed:
             raise DataflowError('FENCED', 'Private embedding journal owner is closed')
@@ -100,8 +65,8 @@ def _journal(service, node_id):
 
 
 def private_embedding_request(service, command, request):
-    from .dataflow_authority import _NATIVE_HANDLERS
-    from demiflow.execution.operator_bindings.dataflow_model_journal import _private_embedding_rpc_id
+    from demiflow.execution.journal.dataflow_authority import _NATIVE_HANDLERS
+    from demiflow.execution.contracts.dataflow_codec import private_embedding_rpc_id as _private_embedding_rpc_id
     config = service._private_embedding_nodes[command.node_id]
     scope, part = command.options.get('row_scope'), command.options.get('request_part')
     if (command.operation not in _OPERATIONS or command.reservation is not None
@@ -137,8 +102,8 @@ def private_embedding_request(service, command, request):
     node_ceiling = ceiling if config['max_requests'] is None else config['max_requests']
     reservation = identity(['private-embedding-admission', command.action_id,
                             command.node_id, scope, part, command.request_key])
-    from .run_journal import ExecutionBudgetExceeded
-    from ..operator_llm.errors import PromptBudgetExceededError
+    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.operator_llm.errors import PromptBudgetExceededError
     try:
         service._journal.reserve_budgets(service._fence, reservation, {
             'requests': (1, ceiling), 'requests-' + identity(command.node_id): (1, node_ceiling)})

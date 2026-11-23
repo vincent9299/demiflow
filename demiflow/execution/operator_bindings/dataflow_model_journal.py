@@ -9,6 +9,7 @@ second ledger. CALL_RESERVATION is carried explicitly into the reserve command s
 the driver applies budget and request intent in one native savepoint.
 """
 from __future__ import annotations
+from demiflow.execution.contracts.dataflow_codec import private_embedding_rpc_id as _private_embedding_rpc_id
 
 import inspect
 import json
@@ -233,9 +234,7 @@ class RemotePrivateEmbeddingJournal(RemotePromptJournal):
 _PRIVATE_EMBEDDING_SCOPE = ContextVar('private_embedding_original_request_scope', default=None)
 
 
-def _private_embedding_rpc_id(command):
-    return identity(['private-embedding-rpc-v1', command.action_id, command.node_id,
-                     command.request_key, command.operation, dict(command.options)])
+
 
 
 class RemotePromptRecovery(NativePromptRecovery):

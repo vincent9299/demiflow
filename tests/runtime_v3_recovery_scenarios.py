@@ -128,7 +128,7 @@ def _run_child(config):
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), demiflow.__file__
     from demiflow.execution import commit as protocol
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker

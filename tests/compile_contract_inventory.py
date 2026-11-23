@@ -24,7 +24,6 @@ COMPILER = 'planning/dataflow_compile.py'
 REGISTRY = 'planning/dataflow_registry.py'
 KERNELS = 'execution/kernels/dataflow.py'
 OPERATOR = 'execution/kernels/operator.py'
-BATCH_MEMBERSHIP = 'execution/kernels/batch_membership.py'
 TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
 SEAL = 'execution/seal/plan.py'
 KINDS = 'execution/contracts/dataflow_kinds.py'
@@ -158,7 +157,7 @@ def tables():
         'compiler.finite_complete_kinds': compiler.value('_FINITE_COMPLETE_KINDS'),
         'compiler.ordering_kinds': compiler.value('_ORDERING_KINDS'),
         'runtime.task_kinds': kind_table().value('TASK_KINDS'),
-        'runtime.batch_membership_kinds': Constants(BATCH_MEMBERSHIP).value('KINDS'),
+        'runtime.batch_membership_kinds': kind_table().value('NATIVE_BATCH_KINDS'),
         'runtime.instance_kinds': operator.value('_INSTANCE_KINDS'),
         'runtime.batch_instance_kinds': operator.value('_BATCH_INSTANCE_KINDS'),
     }

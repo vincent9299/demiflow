@@ -9,6 +9,7 @@ change to any of them is a visible, deliberate edit rather than drift.
 Nothing here changes behaviour, and no table is duplicated: the inventory is
 derived from the engine's own source every time.
 """
+from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS
 import ast
 
 import compile_contract_inventory as inventory
@@ -178,5 +179,5 @@ def test_source_tables_equal_the_imported_objects():
             ('runtime.instance_kinds', operator._INSTANCE_KINDS),
             ('runtime.batch_instance_kinds', operator._BATCH_INSTANCE_KINDS),
             ('runtime.task_kinds', TASK_KINDS),
-            ('runtime.batch_membership_kinds', dataflow_batch_membership.KINDS)):
+            ('runtime.batch_membership_kinds', NATIVE_BATCH_KINDS)):
         assert set(actual) == set(TABLES[name]), name

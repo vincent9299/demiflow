@@ -287,7 +287,7 @@ def test_live_program_still_checks_real_code_pin(tmp_path):
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.contracts.dataflow import ProgramDeclaration
     from demiflow.execution.storage.objects import RunArtifactStore
-    from demiflow.execution.dataflow_authority import DriverArtifactPort
+    from demiflow.execution.storage.staging import DriverArtifactPort
     from demiflow.execution.seal.plan import (_stage_one_program, verify_dataflow_program,
         _read_json, PROGRAM_MEDIA)
     from demiflow.execution.seal.thread_programs import owner, release
@@ -395,7 +395,7 @@ def test_live_manifest_and_plan_identity_exclude_attempt_fence_and_token(tmp_pat
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.contracts.dataflow import ProgramDeclaration
     from demiflow.execution.storage.objects import RunArtifactStore
-    from demiflow.execution.dataflow_authority import DriverArtifactPort
+    from demiflow.execution.storage.staging import DriverArtifactPort
     from demiflow.execution.seal.plan import _stage_one_program, _read_json, PROGRAM_MEDIA
     from demiflow.execution.seal import thread_programs as live
     from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest

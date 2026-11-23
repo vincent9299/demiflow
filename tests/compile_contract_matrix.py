@@ -12,6 +12,7 @@ changed tree and compare the two files: they must be equal cell for cell.
 Unlike ``compile_contract_inventory`` this imports the engine, so it shows what
 is loaded, not what the source says.
 """
+from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS
 import json
 import sys
 from pathlib import Path
@@ -73,7 +74,7 @@ def matrix():
             'stream_group': kind in kernels._STREAM_GROUP_KINDS,
             'ordering_finish': kind in kernels._ORDERING_KINDS,
             'aggregate_finish': kind in kernels._AGGREGATE_KINDS,
-            'native_batch_membership': kind in dataflow_batch_membership.KINDS,
+            'native_batch_membership': kind in NATIVE_BATCH_KINDS,
             'layout_preserving': kind in preserving,
             'task_scoped': kind in task_scope.TASK_KINDS,
             'sealable_as': {node_kind: sealable(node_kind, kind)
@@ -86,7 +87,7 @@ def matrix():
         'types': {name: type(value).__name__ for name, value in {
             'KERNEL_KINDS': kernels.KERNEL_KINDS, '_UNARY_KINDS': kernels._UNARY_KINDS,
             '_INSTANCE_KINDS': operator._INSTANCE_KINDS, '_BATCH_INSTANCE_KINDS': operator._BATCH_INSTANCE_KINDS,
-            'TASK_KINDS': task_scope.TASK_KINDS, 'KINDS': dataflow_batch_membership.KINDS,
+            'TASK_KINDS': task_scope.TASK_KINDS, 'KINDS': NATIVE_BATCH_KINDS,
             '_TRAITS': compiler._TRAITS, '_NATIVE_TRAITS': compiler._NATIVE_TRAITS,
             '_FINITE_COMPLETE_KINDS': compiler._FINITE_COMPLETE_KINDS, '_ORDERING_KINDS': compiler._ORDERING_KINDS,
             'operator_registry': operators}.items()},
