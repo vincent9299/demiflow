@@ -116,7 +116,7 @@ def test_pipeline_directory_preserves_drafts_late_selection_and_narrow_space(roo
         page.locator('.wb-context-switch').get_by_role('button', name='运行记录', exact=True).click()
         expect(page.locator('.wb-section-navigation:visible')).to_have_count(1)
         expect(page.locator('.wb-flow-navigation')).to_be_visible()
-        page.locator('.wb-context-switch').get_by_role('button', name='当前', exact=True).click()
+        page.locator('.wb-context-switch').get_by_role('button', name='当前配置', exact=True).click()
         expect(flow(page, FIRST)).to_have_attribute('aria-current', 'page')
 
         for width in (390, 320):
@@ -162,7 +162,7 @@ def test_pipeline_run_picker_latest_older_sparse_history_and_empty(root, browser
         expect(picker.locator('option').first).to_contain_text('最新')
         header=page.locator('.wb-pipeline-header')
         expect(header.get_by_role('button',name='刷新状态')).to_be_visible()
-        expect(header.locator('.wb-context-switch').get_by_role('button',name='当前',exact=True)).to_be_visible()
+        expect(header.locator('.wb-context-switch').get_by_role('button',name='当前配置',exact=True)).to_be_visible()
         expect(header.locator('.wb-run-bar > .wb-tag')).to_have_text('待启动')
         expect(page.get_by_role('button',name='性能趋势 · 整次运行')).to_have_attribute('aria-expanded','false')
         expect(page.locator('.wb-run-facts')).to_be_hidden()

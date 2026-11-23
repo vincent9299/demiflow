@@ -163,7 +163,7 @@ def test_flows_tab_never_inherits_run_and_clears_settled_pending_intent(owned_fi
         tab(page,'管道')
         expect_reference(page,run_ref)
 
-        page.locator('.wb-context-switch').get_by_role('button',name='当前',exact=True).click()
+        page.locator('.wb-context-switch').get_by_role('button',name='当前配置',exact=True).click()
         expect(page.locator('.wb-flow-record').first).to_be_visible()
         expect(page.locator('.wb-flow-record').first).to_be_enabled()
         expect(page.locator('.wb-actions').get_by_role('button',name='运行',exact=True)).to_be_visible()
