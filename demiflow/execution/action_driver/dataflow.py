@@ -1320,8 +1320,19 @@ class DataflowExecution:
                             for key, credit in shares.items()):
                         self._source_credit_needs_rotation = True
         elif event.kind == "cut":
-            from ..contracts.dataflow_codec import decode_wire
-            raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))
+            from ..contracts.dataflow_codec import decode_wire, encode_wire
+            if event.payload_ref is not None:
+                raw = b"".join(self._store.read(event.payload_ref, max_bytes=self._bounds.max_control_bytes))
+            else:
+                if set(event.payload) != {'contribution'} or type(event.payload['contribution']) is not str:
+                    raise DataflowError('INVALID_CONTRACT', 'cut event needs its original encoded contribution')
+                from ..recovery_contract import MAX_DOCUMENT_BYTES
+                limit = min(self._bounds.max_control_bytes, MAX_DOCUMENT_BYTES)
+                if len(encode_wire(event, type_name='WorkerEvent', bounds=self._bounds)) > limit:
+                    raise DataflowError('BUDGET_EXCEEDED', 'cut event exceeds the control envelope')
+                raw = event.payload['contribution'].encode('utf-8')
+                if len(raw) > limit // 4:
+                    raise DataflowError('BUDGET_EXCEEDED', 'inline cut exceeds its control allowance')
             contribution = decode_wire(raw, type_name="CutContribution", bounds=self._bounds)
             from ..contracts.dataflow_codec import compute_participant_id
             expected = {compute_participant_id(lease.stage_id, p) for p in lease.partition_ids}
