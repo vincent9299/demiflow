@@ -60,21 +60,21 @@
     select(items[0][0]);return {element,select};
   }
   let navigationSequence=0;
-  function resizableNavigation({layout,sidebar,label,active=true,right=false}) {
+  function resizableNavigation({layout,sidebar,label,active=true,right=false,cssVar='--side-navigation-width',minWidth=140,maxWidth=560,minMain=140}) {
     const handle=$('div',undefined,'side-navigation-resizer'),key='demiflow.navigation-width.'+label;
     const direction=right?-1:1;
     let width=null,drag=null,shield=null,disposed=false;
-    try{const saved=Number(sessionStorage.getItem(key));if(saved>=140&&saved<=560)width=saved;}catch{}
+    try{const saved=Number(sessionStorage.getItem(key));if(saved>=minWidth&&saved<=maxWidth)width=saved;}catch{}
     if(!sidebar.id)sidebar.id='side-navigation-'+(++navigationSequence);
     handle.tabIndex=0;handle.setAttribute('role','separator');handle.setAttribute('aria-orientation','vertical');
     handle.setAttribute('aria-label','调整'+label+'宽度');handle.setAttribute('aria-controls',sidebar.id);
     handle.title='拖动调整宽度；方向键微调；双击恢复默认';layout.classList.add('side-navigation-layout');layout.append(handle);
-    const bounds=()=>({min:140,max:Math.max(140,Math.min(560,layout.clientWidth-140))});
+    const bounds=()=>({min:minWidth,max:Math.max(minWidth,Math.min(maxWidth,layout.clientWidth-minMain))});
     function sync(){
       if(disposed)return;
       handle.hidden=!active||sidebar.hidden;if(handle.hidden)return;
       const {min,max}=bounds();
-      if(width!==null)layout.style.setProperty('--side-navigation-width',Math.max(min,Math.min(max,width))+'px');
+      if(width!==null)layout.style.setProperty(cssVar,Math.max(min,Math.min(max,width))+'px');
       const rect=sidebar.getBoundingClientRect(),parent=layout.getBoundingClientRect();
       handle.style.left=((right?rect.left:rect.right)-parent.left-4)+'px';
       handle.setAttribute('aria-valuemin',min);handle.setAttribute('aria-valuemax',max);handle.setAttribute('aria-valuenow',Math.round(rect.width));
@@ -93,14 +93,14 @@
     };
     handle.onpointermove=event=>{if(drag?.id===event.pointerId)setWidth(drag.width+direction*(event.clientX-drag.x));};
     handle.onpointerup=finish;handle.onpointercancel=finish;handle.onlostpointercapture=finish;
-    handle.ondblclick=()=>{width=null;layout.style.removeProperty('--side-navigation-width');save();sync();};
+    handle.ondblclick=()=>{width=null;layout.style.removeProperty(cssVar);save();sync();};
     handle.onkeydown=event=>{
       if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
       event.preventDefault();const {min,max}=bounds(),now=sidebar.getBoundingClientRect().width;
       setWidth(event.key==='Home'?min:event.key==='End'?max:now+direction*(event.key==='ArrowRight'?1:-1)*(event.shiftKey?40:10));save();
     };
     const observer=new ResizeObserver(sync);observer.observe(layout);observer.observe(sidebar);sync();
-    return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty('--side-navigation-width');sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};
+    return {setActive(value){active=value;if(!active)finish();else if(width===null)layout.style.removeProperty(cssVar);sync();},dispose(){disposed=true;finish();observer.disconnect();handle.remove();}};
   }
   function collapsibleNavigation({layout,sidebar,header,label,initialOpen=true,active=true,narrowQuery=null}) {
     const narrow=narrowQuery&&window.matchMedia(narrowQuery);
@@ -274,8 +274,17 @@
     if (viewState === 'ready' && current?.workspace === workspaceId && pageKind(current) === page) return current;
     const saved=projectTabs.get(workspaceId)?.views;
     if(pipelinePage(page)){
-      const shared=projectTabs.get(workspaceId)?.pipeline||[saved?.get(page),saved?.get('flows'),saved?.get('operators'),saved?.get('monitor')].find(Boolean);
-      return shared?V.validateView({...shared,panel:page}):target(page==='monitor'?'runs':'flows',{panel:page});
+      if(page==='monitor'){
+        const monitorView=saved?.get('monitor');
+        if(monitorView)return V.validateView({...monitorView,panel:'monitor'});
+        const fallback=saved?.get('flows')||saved?.get('operators')||projectTabs.get(workspaceId)?.pipeline;
+        return fallback?.entry?target('flows',{panel:'monitor',entry:fallback.entry}):target('runs',{panel:'monitor'});
+      }
+      const isRunKind=ref=>['run','runs','run_compare'].includes(ref?.kind);
+      const own=saved?.get(page);
+      if(own&&!isRunKind(own))return V.validateView({...own,panel:page});
+      const fallback=[saved?.get('flows'),saved?.get('operators'),projectTabs.get(workspaceId)?.pipeline].find(ref=>ref?.entry);
+      return target('flows',{panel:page,...(fallback?.entry?{entry:fallback.entry}:{})});
     }
     return saved?.get(page) || target(page);
   }

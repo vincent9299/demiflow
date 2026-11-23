@@ -24,8 +24,8 @@ form.development-composer-native:focus-within{box-shadow:none}
 .development-composer-native [hidden]{display:none!important}
 .development-composer-native button{font-family:inherit}
 .development-composer-native button:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px}
-.development-composer-native .dc-card{box-sizing:border-box;width:100%;min-width:0;border-radius:24px;background:#fff;border:1px solid #dedfe2;box-shadow:0 4px 20px #20263306;display:flex;flex-direction:column;gap:12px;padding-top:8px;position:relative;container-type:inline-size}
-.development-composer-native .dc-card:focus-within{border-color:#c5c8cf}
+.development-composer-native .dc-card{box-sizing:border-box;width:100%;min-width:0;border-radius:20px;background:#fff;border:1px solid #e4e4e7;box-shadow:0 2px 12px rgba(9,9,11,.05),0 1px 2px rgba(9,9,11,.03);display:flex;flex-direction:column;gap:10px;padding-top:8px;position:relative;container-type:inline-size;transition:border-color .14s ease,box-shadow .14s ease}
+.development-composer-native .dc-card:focus-within{border-color:#a1a1aa;box-shadow:0 4px 18px rgba(9,9,11,.07),0 0 0 3px rgba(9,9,11,.04)}
 .development-composer-native .dc-input{box-sizing:border-box;display:block;width:100%;min-height:36px;max-height:220px;resize:none;background:transparent;border:0;outline:0!important;box-shadow:none!important;border-radius:0;color:#1f2024;caret-color:#4d6bfe;font:inherit;line-height:24px;padding:4px 14px 0;overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere}
 .development-empty .development-composer-native .dc-input{min-height:52px}
 .development-composer-native .dc-input::placeholder{color:#aaaeb7}
@@ -50,9 +50,9 @@ form.development-composer-native:focus-within{box-shadow:none}
 .development-composer-native .dc-effort{flex-shrink:1000;color:#a7abb3}
 .development-composer-native .dc-model-trigger>svg{flex:none;color:#a7abb3;transition:transform .12s}
 .development-composer-native .dc-model-trigger[aria-expanded=true]>svg{transform:rotate(180deg)}
-.development-composer-native .dc-primary{display:grid;place-items:center;flex:none;width:34px;height:34px;padding:0;border:0;border-radius:50%;background:#4d6bfe;color:#fff;cursor:pointer;transform:translateY(-2px);transition:background-color .1s}
-.development-composer-native .dc-primary:hover:not(:disabled){background:#3e5ce8}
-.development-composer-native .dc-primary:disabled{opacity:.4;cursor:default}
+.development-composer-native .dc-primary{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:#18181b;color:#fff;cursor:pointer;transform:translateY(-2px);transition:background-color .14s ease,transform .1s ease}
+.development-composer-native .dc-primary:hover:not(:disabled){background:#27272a}
+.development-composer-native .dc-primary:disabled{opacity:.32;cursor:default}
 .development-composer-native .dc-menu{position:fixed;z-index:1100;box-sizing:border-box;width:max-content;min-width:min(240px,calc(100vw - 24px));max-width:min(420px,calc(100vw - 24px));max-height:min(360px,calc(100dvh - 24px));overflow:auto;padding:4px;border:1px solid #e5e6e9;border-radius:12px;background:#fff;box-shadow:0 8px 28px #2026331c;color:#202329;font:13px/20px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 .development-composer-native .dc-menu-option{box-sizing:border-box;display:flex;align-items:center;gap:6px;min-width:100%;min-height:34px;width:100%;padding:5px 7px;border:0;border-radius:8px;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
 .development-composer-native .dc-menu-option:hover:not(:disabled),.development-composer-native .dc-menu-option:focus-visible{background:#f2f3f5}
