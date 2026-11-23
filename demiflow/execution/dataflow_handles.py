@@ -479,6 +479,7 @@ class StoredMaterializedHandle:
             store.retain(self._manifest_ref, owner=owner)
             pinned.append(self._manifest_ref)
             manifest = self._read_manifest()
+            witness = store.object_signature(self._manifest_ref) if self._count_proof is not None else None
             blocks = tuple(_artifact_ref(entry) for entry in manifest["blocks"])
             rows = manifest["rows"]
             if result.rows is not None and result.rows != rows:
@@ -486,7 +487,7 @@ class StoredMaterializedHandle:
             from .dataflow_segments import tree_refs
             for block in blocks:
                 for ref in tree_refs(store, block, self._bounds):
-                    self._retain_block(ref)
+                    self._retain_block(ref, witness)
                     pinned_tree_count += 1
             if self._verified_frame_rows != rows:
                 self._count_proof = None
@@ -514,7 +515,7 @@ class StoredMaterializedHandle:
                     pass
             raise
 
-    def _retain_block(self, ref):
+    def _retain_block(self, ref, witness):
         from .dataflow_segments import RECORDS_MEDIA, SEGMENTS_MEDIA
         from .dataflow_record_frames import (decode_document, decode_frame, frame_stream,
                                              line_limit, read_chunk_bytes)
@@ -525,7 +526,11 @@ class StoredMaterializedHandle:
             self._count_proof = None
             self._store.retain(ref, owner=self._owner)
             return
-        before = self._store.object_signature(ref)
+        before = self._store.reusable_signature(ref, witness=witness)
+        if before is None:
+            self._count_proof = None
+            self._store.retain(ref, owner=self._owner)
+            return
         if ref.media_type == SEGMENTS_MEDIA:
             self._store.retain(ref, owner=self._owner)
         else:
@@ -543,7 +548,7 @@ class StoredMaterializedHandle:
                             if len(proof) >= budget // 1024:
                                 self._count_proof = None
                                 return
-                            stamp = self._store.object_signature(dependency)
+                            stamp = self._store.reusable_signature(dependency, witness=witness)
                             if (stamp is None or not self._store.inspect(dependency)
                                     or stamp != self._store.object_signature(dependency)):
                                 self._count_proof = None
@@ -556,7 +561,7 @@ class StoredMaterializedHandle:
                     stream.close()
             self._store.retain_observed(ref, owner=self._owner, observe=observe,
                                         chunk_bytes=read_chunk_bytes(self._bounds))
-        if before is None or before != self._store.object_signature(ref):
+        if before != self._store.object_signature(ref):
             self._count_proof = None
         elif self._count_proof is not None:
             proof[ref] = before
@@ -740,3 +745,4 @@ class StoredMaterializedHandle:
             # An unknown/failed unpin remains retryable. Immutable data and
             # committed owners remain intact throughout a partial release.
             self._released = True
+            self._count_proof = None

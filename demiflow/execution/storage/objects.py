@@ -471,6 +471,20 @@ class RunArtifactStore:
             return None
         return ArtifactProofs.signature(metadata)
 
+    def reusable_signature(self, ref, *, witness):
+        """Establish that a later write cannot share the timestamp of the checksum pass."""
+        import time
+        stamp = self.object_signature(ref)
+        if stamp is None:
+            return None
+        now = time.time_ns()
+        # Artifacts precede their publication. A later ctime already observed on the
+        # same filesystem proves its clock has advanced past this object's write tick.
+        # Otherwise apply the same conservative age window as ArtifactProofs.verify.
+        if witness and stamp[0] == witness[0] and stamp[-1] < witness[-1] <= now:
+            return stamp
+        return stamp if stamp[-1] < now - 2_000_000_000 else None
+
     def retain_observed(self, ref, *, owner, observe, chunk_bytes):
         """Share the existing pin's checksum pass with a bounded content observer."""
         from .lease import shared_access
