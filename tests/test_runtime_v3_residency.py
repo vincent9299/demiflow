@@ -47,7 +47,7 @@ def test_dataset_three_phases_release_only_after_real_exit(tmp_path, monkeypatch
         from copy import deepcopy
         from dataclasses import replace
         from demiflow.execution.contracts.checkpoint import cut_from_json as _cut_from_json, contribution_from_json as _contribution_from_json
-        from demiflow.execution.dataflow_residency import validate_recovered_residency
+        from demiflow.execution.checkpoint.residency import validate_recovered_residency
         from demiflow.execution.contracts.dataflow_errors import DataflowError
         last = states[-1]
         cut = _cut_from_json(last['cut'])

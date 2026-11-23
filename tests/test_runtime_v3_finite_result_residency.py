@@ -35,7 +35,7 @@ def test_finite_result_keeps_original_small_budget_and_resumes_original_seal(tmp
             outputs = [edge for edge in execution._physical.exchanges
                        if set(edge.producer_partitions) & set(stage.partitions)]
             assert outputs and all(edge.mode == 'finite_sealed' for edge in outputs)
-            assert all(edge.channel_id in execution._finite_seals for edge in outputs)
+            assert all(edge.channel_id in execution._exchange.finite_seals for edge in outputs)
             assert execution._bounds.max_resident_bytes == 128 * 1024
             assert execution._bounds.max_state_bytes == 16 * 1024
             sealed.append(execution._physical.plan_id)

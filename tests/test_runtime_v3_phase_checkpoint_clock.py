@@ -19,12 +19,12 @@ def driver(monkeypatch,*,damage=None):
     image=NS(cut=NS(final=False))
     ex._restore_image=image;ex._checkpoint=NS(is_latest_image=lambda candidate: candidate is image and damage != 'unacknowledged')
     ex._active_worker_allocations=set();ex._by_partition={};ex._lease_by_operation={}
-    ex._endpoints={};ex._durable_residency=NS(launched=lambda endpoints, by_partition: (),partition_groups=[('p0',)])
+    ex._endpoints={};ex._durable_residency=NS(active_index=0,launched=lambda endpoints, by_partition: (),partition_groups=[('p0',)])
     ex._phases=[('stage',)];ex._phase_index=0
     stage=NS(stage_id='stage',partitions=('p0',))
     ex._stage_order=lambda:[stage]
     ex._initial_work=lambda stage,partition:NS(operation_id='operation')
-    ex._physical=NS(exchanges=());ex._finite_seals={}
+    ex._physical=NS(exchanges=());ex._exchange.finite_seals={}
     ex._prepare_launch=lambda *args:None
     ex.activations=[]
     endpoint=NS(poll=lambda **kwargs:[],send_business=ex.sent.append,

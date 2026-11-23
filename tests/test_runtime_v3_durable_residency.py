@@ -246,12 +246,11 @@ def test_durable_write_lance_recovers_without_empty_early_publication(tmp_path, 
 @pytest.mark.parametrize('schema', ['demiflow.durable_residency.v1', 'demiflow.durable_residency.v2'])
 def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_durable_residency import DurableResidency
+    from demiflow.execution.action_driver.durable_residency import DurableResidency
     from demiflow.execution.recovery_contract import RecoveryContractError, document
     controller = object.__new__(DurableResidency)
     from demiflow.execution.exchange.deliveries import DeliveryExchange
     controller._bounds = SimpleNamespace(max_state_bytes=65536)
-    controller._finite_seals = {}
     controller._exchange = DeliveryExchange()
     controller._physical = SimpleNamespace(stages=(
         SimpleNamespace(stage_id='stage', partitions=('partition',)),))
@@ -260,7 +259,7 @@ def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     controller.groups = [('stage',)]
     controller.partition_groups = [('partition',)]
     controller.schema = schema
-    controller.visited = controller.completed = controller.edge_eoi = controller.satisfied_inputs = set()
+    controller.visited = controller.completed = set()
     controller._exchange._parked = {'delivery': {'payload': {'ref': 'durable-reference'}, 'consumed': False,
                                        'producer_cut': None, 'consumer_cut': None}}
     size_before = len(document(controller.metadata(False, ())))

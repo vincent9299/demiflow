@@ -1058,9 +1058,9 @@ def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str
         assert channels and execution.finish().complete
         if mode == 'finite_sealed':
             for edge in channels:
-                assert edge.channel_id in execution._finite_seals
+                assert edge.channel_id in execution._exchange.finite_seals
                 # The consumer ran only after every real producer succeeded.
-                ref = execution._finite_seals[edge.channel_id]
+                ref = execution._exchange.finite_seals[edge.channel_id]
                 assert execution._store.inspect(ref)
                 seal = json.loads(b''.join(execution._store.read(ref, max_bytes=execution._bounds.max_control_bytes)))
                 assert set(seal['membership']) == set(edge.producer_partitions)

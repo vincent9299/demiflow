@@ -493,11 +493,11 @@ class DataflowCheckpointCoordinator:
                 if set(c.participant_id for c in contributions) != set(self._participants):
                     raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
             elif residency.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2'):
-                from demiflow.execution.dataflow_durable_residency import validate_recovered
+                from demiflow.execution.checkpoint.residency import validate_durable_residency as validate_recovered
                 validate_recovered(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"], store=self._store)
             else:
-                from demiflow.execution.dataflow_residency import validate_recovered_residency
+                from demiflow.execution.checkpoint.residency import validate_recovered_residency
                 validate_recovered_residency(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"])
             self.residency = residency

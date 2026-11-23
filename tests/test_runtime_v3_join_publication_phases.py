@@ -93,7 +93,7 @@ def _finite_payloads(execution):
     from demiflow.execution.storage.streams import frame_stream
     from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit
     result = []
-    for channel, value in execution._finite_seals.items():
+    for channel, value in execution._exchange.finite_seals.items():
         ref = ArtifactRef(**value) if isinstance(value,dict) else value
         seal = json.loads(b''.join(execution._store.read(ref,max_bytes=execution._bounds.max_control_bytes)))
         for member in seal['producers']:

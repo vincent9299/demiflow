@@ -1,12 +1,7 @@
-"""Finite boundary residency; all durable evidence remains in native commit cuts.
+"""Place sealed resident groups using current completion and channel readiness facts."""
+from __future__ import annotations
 
-Streaming channels retain a live ACK owner and therefore form one resident group.
-A phase may retire only after all its workers finished and its cut was ACKed.
-"""
-from .contracts.dataflow_errors import DataflowError
-from .contracts.dataflow_codec import compute_participant_id
-
-SCHEMA = 'demiflow.finite_residency.v1'
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def value_predecessors(physical):
@@ -31,7 +26,6 @@ def value_predecessors(physical):
         return resolved[job]
     return {stage: set().union(*(row_producers(job, set()) for job in inputs[stage]))
             for stage in row_stages & inputs.keys()}
-
 
 def finite_phases(physical, *, split_durable=False):
     stages = {s.stage_id: s for s in physical.stages}
@@ -64,12 +58,6 @@ def finite_phases(physical, *, split_durable=False):
         for deps in dependencies.values():
             deps.discard(ready)
     return tuple(result)
-
-
-def participants_for(physical, stages):
-    return tuple(compute_participant_id(s.stage_id, p) for s in physical.stages
-                 if s.stage_id in stages for p in s.partitions)
-
 
 def pack_finite_phases(physical, *, fits, prior=None):
     """Admit independent ready cohorts together under the existing envelope.
@@ -122,66 +110,41 @@ def pack_finite_phases(physical, *, fits, prior=None):
         groups = [g for g in groups if not set(g) <= completed]
     return tuple(result)
 
+def partition_phases(physical):
+    """Cycle isolated stage partitions; memory peers remain one live cohort."""
+    stages = {s.stage_id: s for s in physical.stages}
+    result = []
+    for group in finite_phases(physical, split_durable=True):
+        members = tuple(p for sid in group for p in stages[sid].partitions)
+        if len(group) == 1:
+            width = stages[group[0]].replica_target
+            result.extend((group, members[i:i + width]) for i in range(0, len(members), width))
+        else:
+            result.append((group, members))
+    return tuple(result)
 
-def validate_recovered_residency(physical, cut, contributions, residency, *, facts, artifacts, current_commit):
-    """Every inherited contribution must be an unchanged earlier ACKed fact.
 
-    Its origin cut/boot is retained. No synthetic initial worker is admitted.
-    Old v3 cuts without residency continue to require the full participant table.
-    """
-    from demiflow.execution.contracts.checkpoint import contribution_json as _contribution_json, artifact_from_json as _artifact_from_json
-    def reject(message):
-        raise DataflowError('CORRUPT_ARTIFACT', message)
-    if (type(residency) is not dict or set(residency) - {'satisfied_source_splits'} != {
-            'schema', 'active_stages', 'completed_stages', 'phase_complete', 'finite_seals'}
-            or residency['schema'] != SCHEMA or type(residency['phase_complete']) is not bool):
-        reject('invalid residency cut schema')
-    satisfied = residency.get('satisfied_source_splits', [])
-    if (not isinstance(satisfied, list) or any(type(s) is not str for s in satisfied)
-            or len(set(satisfied)) != len(satisfied)
-            or not set(satisfied) <= {s.split_id for s in physical.splits}):
-        reject('residency input completion names undeclared source splits')
-    active, completed = residency['active_stages'], residency['completed_stages']
-    all_stages = {s.stage_id for s in physical.stages}
-    if (not isinstance(active, list) or not active or not isinstance(completed, list)
-            or len(set(active)) != len(active) or len(set(completed)) != len(completed)
-            or set(active) & set(completed) or not set(active + completed) <= all_stages):
-        reject('invalid active/completed residency stages')
-    active_ids = set(participants_for(physical, active))
-    carried_ids = set(participants_for(physical, completed))
-    if (set(cut.participants) != active_ids
-            or {c.participant_id for c in contributions} != active_ids | carried_ids
-            or len(contributions) != len(active_ids | carried_ids)):
-        reject('residency participant set differs from actual stages')
-    if cut.final and (not residency['phase_complete'] or set(active + completed) != all_stages):
-        reject('final residency cut precedes completion of every stage')
-    origins = {}
-    completed_proofs = set()
-    for fact in facts:
-        if fact['commit_id'] == current_commit or fact['sequence'] >= cut.sequence:
+def choose_durable_phase(physical, groups, partition_groups, *, completed, value_inputs,
+                         sources, finite_seals, edge_eoi, waiting_for):
+    # A ready consumer runs promptly, before admitting another source window.
+    for index in reversed(range(len(groups))):
+        group = set(partition_groups[index])
+        if any(value_inputs.get(s, set()) - completed for s in groups[index]):
             continue
-        ref = ((fact.get('prepared') or {}).get('state') or {}).get('dataflow-cut-v3')
-        if ref is None:
+        if group <= completed:
             continue
-        previous = artifacts.read(ref)
-        old_cut = previous.get('cut', {})
-        for c in previous.get('contributions', ()):
-            if c['cut_id'] == old_cut.get('cut_id') and c['participant_id'] in old_cut.get('participants', ()):
-                origins[(c['cut_id'], c['participant_id'])] = c
-        old = previous.get('residency')
-        if old and old.get('phase_complete'):
-            completed_proofs.update(old['active_stages'])
-    if not set(completed) <= completed_proofs:
-        reject('retired stages lack an ACKed completion cut')
-    for contribution in contributions:
-        if contribution.participant_id in active_ids:
-            if contribution.cut_id != cut.cut_id:
-                reject('active contribution belongs to a different cut')
-        elif origins.get((contribution.cut_id, contribution.participant_id)) != _contribution_json(contribution):
-            reject('inherited contribution differs from its original ACKed worker fact')
-    finite_ids = {e.channel_id for e in physical.exchanges if e.mode == 'finite_sealed'}
-    seals = residency['finite_seals']
-    if type(seals) is not dict or not set(seals) <= finite_ids:
-        reject('residency carries an undeclared finite channel')
-    for ref in seals.values():
-        _artifact_from_json(ref)
+        inputs = [edge for edge in physical.exchanges
+                  if set(edge.consumer_partitions) & group and not set(edge.producer_partitions) <= group]
+        if any(edge.mode == 'finite_sealed' and edge.channel_id not in finite_seals for edge in inputs):
+            continue
+        pending = waiting_for(group)
+        eof = bool(inputs) and all(edge.mode == 'finite_sealed' or
+                all((edge.edge_id, p) in edge_eoi for p in edge.producer_partitions) for edge in inputs)
+        if pending or eof:
+            return index
+    for index, group in enumerate(groups):
+        if set(partition_groups[index]) <= completed:
+            continue
+        if any(set(s.occurrences) & sources for s in physical.stages if s.stage_id in group):
+            return index
+    raise DataflowError('RESOURCE_INFEASIBLE', 'no runnable parked stage has input or an authenticated EOI')
