@@ -354,7 +354,7 @@ class DataflowWorkerExecutor:
                     region = RelationalRegionRuntime(region_plan, kernels=members,
                         services=self._finite_services, edges=self._graph.edges)
                     for kernel in members.values():
-                        kernel._relational_region = region
+                        kernel.bind_relational_region(region)
                     self._relational_regions[region_plan.region_id] = region
                 if self._restored_states:
                     for group in set(shared.values()):

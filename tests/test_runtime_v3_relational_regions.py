@@ -390,3 +390,66 @@ def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch
             a.join(b, on='k').join(c, on='k').take_all()
     assert launched == [True]
     assert run.journal.execution_action('action-1')['result'] is None
+
+
+def test_six_public_self_joins_reuse_exact_input_once(tmp_path, monkeypatch):
+    import lance
+    import pyarrow as pa
+    from demiflow.lance import read
+
+    src = str(tmp_path / 'source')
+    lance.write_dataset(pa.table({'k': [0, 1]}), src)
+    scans = []
+    scan = read._iter_scan
+    def observed_scan(*args, **kwargs):
+        for batch in scan(*args, **kwargs):
+            scans.append(batch.num_rows)
+            yield batch
+    monkeypatch.setattr(read, '_iter_scan', observed_scan)
+    with RunContext.start(tmp_path / 'run') as run, data.local_execution(
+            workers=4, partitions=1, worker_mode='thread'):
+        ds = data.read_lance(src, version=1)
+        for _ in range(6):
+            ds = ds.join(ds, on='k')
+        result = ds.take_all()
+        seal = load_sealed_plan(run.directory, 'action-1', version='v3')
+        graph = seal['graph']
+        assert len(seal['physical'].sources) == 1
+        assert len(graph.nodes) == 8
+        assert sum(n.kernel.kind == 'join' for n in graph.nodes) == 6
+    assert sorted(row['k'] for row in result) == [0, 1]
+    assert sum(scans) == 2
+
+
+def test_public_same_key_fold_reuses_keys_only_without_an_intervening_transform(tmp_path, monkeypatch):
+    from collections import Counter
+    from demiflow.execution.kernels import relational, relational_region
+
+    ordered, region = relational._ordered_group_rows, relational_region.RelationalRegionRuntime._ordered_groups
+    actual = Counter()
+    def ordinary(*args, **kwargs):
+        actual['full_record_sort'] += 1
+        yield from ordered(*args, **kwargs)
+    def references(self, *args, **kwargs):
+        actual['key_offset_sort'] += 1
+        yield from region(self, *args, **kwargs)
+    monkeypatch.setattr(relational, '_ordered_group_rows', ordinary)
+    monkeypatch.setattr(relational_region.RelationalRegionRuntime, '_ordered_groups', references)
+
+    for changed in (False, True):
+        actual.clear()
+        path = tmp_path / str(changed)
+        def fold(state, row):
+            with path.open('a') as f:
+                f.write('1\n')
+            return {'k': row['k'], 'v': (state or {}).get('v', '') + row['v']}
+        with RunContext.start(tmp_path / ('run-' + str(changed))), data.local_execution(
+                workers=2, partitions=1, worker_mode='thread'):
+            joined = data.from_items([{'k': 0, 'v': 'a'}, {'k': 1, 'v': 'b'}, {'k': 0, 'v': 'c'}]).join(
+                data.from_items([{'k': 0}, {'k': 1}]), on='k')
+            if changed:
+                joined = joined.map(lambda r: {**r, 'k': 1 - r['k']})
+            result = joined.reduce_by_key('k', fold).take_all()
+        assert {r['k']: r['v'] for r in result} == ({0:'b', 1:'ac'} if changed else {0:'ac', 1:'b'})
+        assert len(path.read_text().splitlines()) == 3
+        assert actual == ({'full_record_sort':1} if changed else {'key_offset_sort':1})

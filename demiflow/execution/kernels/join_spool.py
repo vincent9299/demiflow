@@ -96,13 +96,17 @@ class _Chain:
 
 
 class _Spool:
-    def __init__(self, file, services, *, bounded=False, retained_key=None):
+    def __init__(self, file, services, *, bounded=False, retained_key=None, reuse_groups=False):
         self.file, self.services = file, services
         bounds = services.bounds
         self.document_limit = bounds.max_row_bytes + min(bounds.max_control_bytes, 65536)
         # Leave space for encoded/decoded inputs, two output rows, the codec,
         # hash dictionaries and the caller's transport batch at the same time.
         self.index_limit = max(1, _resident_limit(services) // 16)
+        self.group_budget = self.index_limit // 4 if reuse_groups else 0
+        self.group_key = None
+        self.group_size = 0
+        self.group_documents = {}
         self.bounded = bounded
         self.live_bytes = 0
         self.retained_key = retained_key
@@ -111,7 +115,7 @@ class _Spool:
 
     def negative_filter(self, fields, how):
         if how in ('inner', 'semi') and self.index_limit >= 4096:
-            return JoinKeyFilter(self.index_limit, single_key=len(fields) == 1)
+            return JoinKeyFilter(self.index_limit - self.group_budget, single_key=len(fields) == 1)
         return None
 
     def partition_input(self, records, fields, *, build_filter=None, probe_filter=None):
@@ -237,7 +241,7 @@ class _Spool:
     def release_probe(self):
         self.live_bytes = 0
 
-    def record(self, offset, header):
+    def _document(self, offset, header):
         _check_stop(self.services)
         start = offset + _HEADER.size
         span = _ID_BYTES + header[2] + header[3]
@@ -249,6 +253,39 @@ class _Spool:
         else:
             record_id = self.file.read_at(start, _ID_BYTES).decode('ascii')
             raw = self.file.read_at(start + _ID_BYTES + header[2], header[3])
+        return record_id, raw
+
+    def record(self, offset, header):
+        return self._decode(header, self._document(offset, header))
+
+    def matched_record(self, key, offset, header):
+        if not self.group_budget:
+            return self.record(offset, header)
+        _check_stop(self.services)
+        if self.group_key != key:
+            self.group_documents.clear()
+            self.group_key = None
+            self.group_size = len(key) + 256
+            if self.group_size > self.group_budget:
+                return self.record(offset, header)
+            self.group_key = key
+        cached = self.group_documents.get(offset)
+        if cached is not None:
+            return self._decode(header, cached)
+        size = header[3] + _ID_BYTES + 512
+        if self.group_size + size > self.group_budget:
+            # Once too large it stays disk-backed until the next key. No
+            # unbounded cache for a skewed duplicate group or its output.
+            self.group_documents.clear()
+            self.group_size = self.group_budget
+            return self.record(offset, header)
+        data = self._document(offset, header)
+        self.group_documents[offset] = data
+        self.group_size += size
+        return self._decode(header, data)
+
+    def _decode(self, header, data):
+        record_id, raw = data
         if self.bounded:
             from ..dataflow_record_frames import decode_document
             return decode_document(raw, record_id=record_id, sequence=header[4],
@@ -265,7 +302,7 @@ class _Spool:
 
     def index(self, chain, limit=None):
         table, used = {}, 0
-        limit = self.index_limit if limit is None else limit
+        limit = self.index_limit - self.group_budget if limit is None else limit
         for offset, header in self.entries(chain):
             if not header[2]:
                 continue  # SQL null never matches, including another null.
@@ -287,7 +324,7 @@ def _probe_stream(left, fields, index, *, spool, how, membership):
             continue
         key, _ = entry
         matches = index.get(key, ()) if key else ()
-        yield from match_probe(spool, matches, how, spool.hold_stream_record, record, key)
+        yield from match_probe(spool, key, matches, how, spool.hold_stream_record, record, key)
 
 
 def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=False, retained_key=None, try_small_right=False):
@@ -303,7 +340,7 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=Fal
                                           maximum=bounds.max_open_files)
     with services.store.scratch(max_bytes=bounds.max_spill_bytes,
             max_io_bytes=max(1, _resident_limit(services) // 4)) as file:
-        spool = _Spool(file, services, bounded=bounded, retained_key=retained_key)
+        spool = _Spool(file, services, bounded=bounded, retained_key=retained_key, reuse_groups=try_small_right)
         membership = spool.negative_filter(right_keys, how)
         if try_small_right:
             right_chain = _Chain()
@@ -314,7 +351,8 @@ def join_pairs(left, right, *, left_keys, right_keys, how, services, bounded=Fal
                 membership.finish()
             # The key/offset index and optional membership bitmap share the
             # reserved index budget; the payloads stay on the owned extent.
-            index = spool.index(right_chain, spool.index_limit // 2 if membership else spool.index_limit)
+            available = spool.index_limit - spool.group_budget
+            index = spool.index(right_chain, available // 2 if membership else available)
             if index is not None:
                 yield from _probe_stream(left, left_keys, index, spool=spool, how=how, membership=membership)
                 return

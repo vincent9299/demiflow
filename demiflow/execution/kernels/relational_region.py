@@ -208,7 +208,7 @@ class RelationalRegionRuntime:
             raise _err('RESOURCE_INFEASIBLE', 'relational region needs a scratch file and owner lease')
         self.active = True
         self.counters = {key: 0 for key in self.counters}
-        specs = [self.kernels[o]._spec for o in self.plan.occurrences]
+        specs = [self.kernels[o].spec for o in self.plan.occurrences]
         with store.scratch(max_bytes=bounds.max_spill_bytes,
                            max_io_bytes=max(1, bounds.max_row_bytes * 2)) as file:
             arena = _RegionSpool(file, self.services, specs, self.counters)
@@ -234,7 +234,7 @@ class RelationalRegionRuntime:
                         continue
                     right = entries.get((entry.consumer, 'right'))
                     left = entries.get((entry.consumer, 'left'))
-                    spec = self.kernels[entry.consumer]._spec
+                    spec = self.kernels[entry.consumer].spec
                     # Only complete external inputs can build this filter. An
                     # internal producer's references are built later in order.
                     membership = (arena.negative_filter(right.fields, spec.configuration.get('how', 'inner'))
@@ -251,8 +251,7 @@ class RelationalRegionRuntime:
                 for index, occurrence in enumerate(self.plan.occurrences):
                     spec = specs[index]
                     if self.on_input_member is not None:
-                        self.on_input_member(occurrence, sum(input_size(occurrence, port)
-                            for port in self.kernels[occurrence]._port_order))
+                        self.on_input_member(occurrence, sum(input_size(occurrence, port.name) for port in spec.inputs))
                     if spec.kind in ('reduce', 'groups'):
                         source = relations[(occurrence, 'left')]
                         yield from self._ordered_groups(arena, source, spec)
