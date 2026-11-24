@@ -134,7 +134,7 @@ def test_public_queue_fetch_result_terminal(channel,tmp_path):
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore
     from test_raw_fetch import origin_server,BODY
-    from demiflow.execution.native_queue.queue import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     with origin_server() as (url,calls):
         p=channel.open('p',producer_id='producer',source=source())
         with native_parent(tmp_path) as parent:

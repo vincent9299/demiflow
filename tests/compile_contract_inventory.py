@@ -333,7 +333,7 @@ def implicit_inputs(files=COMPILE_STAGE):
     Not every function in these files runs during compilation; the enclosing
     function is recorded so the two can be told apart.
     """
-    patterns = (r'_dataflow_executor', r'\bcurrent\(\)', r'os\.environ', r'ContextVar\(', r'\.journal\b',
+    patterns = (r"getattr\(request, 'executor'", r'\bcurrent\(\)', r'os\.environ', r'ContextVar\(', r'\.journal\b',
                 r'\.directory\b', r'_local_kernel', r'_block_size')
     found = []
     for relative in files:

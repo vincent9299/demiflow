@@ -8,7 +8,7 @@ from typing import Mapping
 from demiflow.execution.seal.pipeline_sources import uses_lance
 from demiflow.operator_llm import load_referenced_prompt_packs
 from demiflow.operator_llm.errors import PromptProviderUnavailableError
-from demiflow.pipeline import discover_pipeline_definition
+from demiflow.pipeline.discovery import discover_pipeline_definition
 
 
 LANCE_STORAGE_CREDENTIAL_ENV_NAMES=frozenset({

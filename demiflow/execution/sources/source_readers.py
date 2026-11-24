@@ -1596,13 +1596,11 @@ class PinnedKeyPayload:
         import pyarrow as pa
         from demiflow.lance.storage import open_lance_dataset
         from demiflow.execution.contracts.dataflow import thaw_record_value
-        from demiflow.execution.seal.plan import load_sealed_dataflow
 
         self.services = services
-        _, physical, _ = load_sealed_dataflow(services.assignment.sealed,
-            action_id=services.assignment.action_id, store=services.store, bounds=services.bounds)
         source_id = spec.configuration['lance_key_source']
-        snapshot = next((s for s in physical.sources if s.source_id == source_id), None)
+        snapshots = services.source_snapshots
+        snapshot = snapshots.get(source_id) if snapshots is not None else None
         if snapshot is None or snapshot.kind != 'lance':
             raise DataflowError('INCOMPATIBLE_HISTORY', 'exclude_keys requires its sealed Lance snapshot')
         query = thaw_record_value(snapshot.immutable_identity['query'])

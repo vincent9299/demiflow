@@ -20,11 +20,9 @@ BOUNDS = resolve_runtime_policy({}, {}, provider='local')[1]
 
 def _request(dataset, kind='take', arguments=None, executor=None, action_id='inputs'):
     action = type('Action', (), {'action_id': action_id})()
-    if executor is not None:
-        action._dataflow_executor = executor
     return ActionRequest(kind=kind, source=dataset._source, plan=dataset._plan,
                          arguments={'limit': 2} if arguments is None else arguments, sink=None, programs=(),
-                         provider='local', action=action)
+                         provider='local', action=action, executor=executor)
 
 
 def _bytes(compiled):

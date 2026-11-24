@@ -286,10 +286,3 @@ class QueueChannel:
         with self.database.connection() as db:
             row=db.execute('SELECT proof FROM queue_completions WHERE generation=? AND task_id=?',(generation,task_id)).fetchone()
         return json.loads(row[0]) if row else None
-
-
-def __getattr__(name):
-    if name=='QueueResultSink':
-        from demiflow.execution.native_queue.queue_sinks import QueueResultSink
-        return QueueResultSink
-    raise AttributeError(name)

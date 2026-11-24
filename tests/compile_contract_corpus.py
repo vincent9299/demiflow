@@ -715,11 +715,10 @@ def lower_case(name, context):
         limits = BOUNDS[built.get('bounds', 'default')]()
         action_id = 'corpus-' + name.replace('/', '-').replace('@', '-')
         action = type('Action', (), {'action_id': action_id})()
-        if built.get('executor') is not None:
-            action._dataflow_executor = EXECUTORS[built['executor']]()
+        executor = EXECUTORS[built['executor']]() if built.get('executor') is not None else None
         request = ActionRequest(kind=built['kind'], source=source, plan=plan, arguments=built['arguments'],
                                 sink=built.get('sink'), programs=tuple(built.get('programs', ())), provider='local',
-                                action=action)
+                                action=action, executor=executor)
         if built.get('report'):
             token = checked._CURRENT.set(report_for(source, plan, action_id, terminal=built.get('report_terminal', True)))
         return lower_action(request, bounds=limits), limits, source, plan
