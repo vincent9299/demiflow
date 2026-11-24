@@ -20,6 +20,7 @@
 - 回执与状态：`SEARCH_RESULT` 结构及其 `runtime` 字段（仍为 `native-search-1`）；状态分类和暂停规则。
 - 合并：结果的字段、去重、打分和分组顺序。
 - 请求构造：各内置来源的 URL、参数、请求头、Cookie 与 TLS 指纹，包括 `zh-tw` 这类大小写不同的语言写法。
+- 内置来源的设置：目录默认设置逐键相同（包括适配器名 `engine`，如 duckduckgo images 的 `duckduckgo_extra`）；端点、每页条数等选项的名称和覆盖效果不变（如 `base_url`、`api_url`、`rest_v1_summary_url`、`page_size`、`results_per_page`）。
 
 后两项与旧实现的对照证据见上述交付报告和下文“兼容性实测”。
 
@@ -42,6 +43,7 @@
   - 来源级生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`，含义与此前相同：`proxies` 可以是一个 URL，或“模式 → URL 或 URL 列表”的映射；`local_addresses` 可以是一个地址、列表或网段；列表逐请求轮换。
   - 会话级（`SearchConfig.networks` 的出口配置）生效的是 `proxies`、`verify`、`enable_http2`、`source_ips`、`max_redirects`，以及 `networks`（可供来源按名字引用的具名网络）。
   - 来源映射里的 `retries`、`retry_on_http_error`、`request_timeout`、`max_connections`、`using_tor_proxy` 接受但不生效：重试由 demiflow 统一控制，超时用 `timeout_s`，每个工作进程一次只做一个交换，不再校验 Tor 出口；其他未知选项报配置错误。
+- **内置适配器的内部常量**：适配器内部的映射表、选择器和语言表不再是可覆盖的选项，写在来源声明里不起作用。涉及的旧名称：`time_range_dict`（baidu、google、quark）、`time_map`（bing images）、`safesearch_map`（brave）、`time_range_map`（brave、pexels）、`safesearch_args`、`safesearch_cookies`、`search_path_map`（duckduckgo images）、`filter_mapping`、`nokia_useragents`、`skip_countries`、`suggestion_xpath`（google）、`search_string`（openverse）、`pdia_config_start`、`pdia_config_end`（public domain image archive）、`qwant_news_locales`（qwant）、`lang_map`、`list_of_wikipedias`、`wiki_lc_locale_variants`、`wikipedia_article_depth`、`wikipedia_script_variants`（wikipedia）、`content_xpath`、`results_xpath`、`title_xpath`、`url_xpath`、`yandex_supported_langs`（yandex）。wikisearch 的 `base_url` 此前就不参与请求，现已去掉。
 - **`search_source_inventory()`**：返回新结构（`runtime`、`scope`、`sources`、`platform_sources`），由 `tools/build_native_search_inventory.py` 生成。
 - **Pexels**：不再内置 Web 端密钥。页面取不到密钥时，使用来源配置的 `api_key`（名称不变）；没有配置时该来源以 `parse_error` 结束，不发搜索请求。
 - **Unsplash**：内置来源 unsplash 和平台模块 `unsplash_images` 请求的 User-Agent 由 SearXNG 标识改为 DemiFlow 标识。
@@ -57,6 +59,7 @@
 - 旧回执里的 `searx.result_types.*` 结果仍可解码、合并。
 - 由带类型结果产生的 `response_json` 字段集合保持不变（`adapter.main_result`、`image_result`、`key_value`）。
 - 自定义适配器声明的 `language_support` 按声明记录。旧实现对没有内置语言表的来源一律记为 False，于是回执把 `language` 列为被忽略；内置来源的取值与此前相同。
+- 用自定义名称复用内置适配器（来源声明里写 `engine`）时，请求语言按适配器生效。旧实现只在名称或适配器名与某个内置来源同名时才有语言表，因此有三个适配器的结果不同：`bing_images` 此前不带语言参数并把 `language` 记为被忽略，`google_images` 和 `duckduckgo_extra` 此前以 `parse_error`（`KeyError`）结束；现在三者都按请求语言正常搜索。其余适配器（包括业务配置使用的 `engine: google`）与此前相同。
 
 **源码身份与恢复**
 
@@ -94,13 +97,15 @@
   - 响应解析：21 个来源的合成响应。
 - 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
 - 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
-- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 12 组 444 个场景：
+- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 14 组 1,422 个场景：
   - HTTP 层 92 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
   - 超时、会话级出口配置、TLS 与自定义 CA 共 13 个；
   - 网络名 25 个：引用已声明的来源、未声明的目录来源、`ipv4`/`ipv6`、会话级具名网络，以及 yandex images、brave.images、qwant images 默认的网络名；
   - 适配器加载 59 个，SQLite 来源 27 个；
-  - 21 个内置来源、2 个显式 Google 后端和 15 个平台图片模块共 228 个，只把最终目的地换成本机服务。
-  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 313 个场景固化在 `tests/test_native_search_exchange.py`。
+  - 21 个内置来源、2 个显式 Google 后端和 15 个平台图片模块共 228 个，只把最终目的地换成本机服务；
+  - 选项覆盖 142 个：36 个来源的 71 个选项（端点、数值、开关）逐个改值后搜索；
+  - 异常应答 836 个：38 个来源各遇到 11 种应答（HTML、空内容、空对象、空列表、`null`、纯文本、403、429、500、404、跳转到验证页），分“只替换搜索应答”和“替换全部应答”两种范围；回执状态全部相同。
+  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 561 个场景固化在 `tests/test_native_search_exchange.py`。
 - 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用

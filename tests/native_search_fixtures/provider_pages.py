@@ -223,14 +223,39 @@ ROUTES = {
 WIKIPEDIA = {'/api/rest_v1/page/summary/': page('wikipedia'), '/w/rest.php/v1/search/page': page('wikisearch')}
 
 
-def answer(host, path):
-    """The fixed answer for a request to ``host`` and ``path``; unknown destinations get an empty JSON object."""
+# Requests a source makes before its search request: token, cookie, key or proxy address lookups.
+PREPARATION = {('duckduckgo.com', '/'), ('image.baidu.com', '/'), ('www.pexels.com', '/assets/app.js'),
+               ('www.pexels.com', '/'), ('pdimagearchive.org', '/_astro/InfiniteSearch.'),
+               ('pdimagearchive.org', '/search/')}
+# Answers a provider may give instead of results.
+UNEXPECTED = {
+    'html': (200, [('Content-Type', 'text/html')], b'<html><body><p>nothing to see here</p></body></html>'),
+    'emptyobject': (200, JSON, b'{}'),
+    's403': (403, [], b'denied'),
+    's429': (429, [('Retry-After', '7')], b'slow down'),
+    's500': (500, [], b'server error'),
+}
+
+
+def route(host, path):
+    """``((host, path prefix), answer)`` of the route for a request, or ``(None, None)``."""
     if host.endswith('.wikipedia.org'):
         for prefix, reply in WIKIPEDIA.items():
             if path.startswith(prefix):
-                return reply
+                return ('wikipedia.org', prefix), reply
     best = None
     for (route_host, prefix), reply in ROUTES.items():
-        if route_host == host and path.startswith(prefix) and (best is None or len(prefix) > len(best[0])):
-            best = (prefix, reply)
-    return best[1] if best else (200, JSON, b'{}')
+        if route_host == host and path.startswith(prefix) and (best is None or len(prefix) > len(best[0][1])):
+            best = ((route_host, prefix), reply)
+    return best or (None, None)
+
+
+def answer(host, path, unexpected=None):
+    """The fixed answer for a request to ``host`` and ``path``; unknown destinations get an empty JSON object.
+
+    With ``unexpected`` (a key of UNEXPECTED) every request except the preparation requests gets that answer.
+    """
+    key, reply = route(host, path)
+    if unexpected is not None and key not in PREPARATION:
+        return UNEXPECTED[unexpected]
+    return reply if key else (200, JSON, b'{}')

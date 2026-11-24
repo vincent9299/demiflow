@@ -16,14 +16,14 @@ categories = ['general']
 paging = False
 language_support = True
 display_type = ['infobox']
-summary_url = 'https://{host}/api/rest_v1/page/summary/{title}'
+rest_v1_summary_url = 'https://{wiki_netloc}/api/rest_v1/page/summary/{title}'
 INVALID_TITLE = 'https://mediawiki.org/wiki/HyperSwitch/errors/bad_request'
 
 
 def request(query, params):
     if query.islower():
         query = query.title()
-    params['url'] = summary_url.format(host=wikipedia_host(params['locale']), title=quote(query))
+    params['url'] = rest_v1_summary_url.format(wiki_netloc=wikipedia_host(params['locale']), title=quote(query))
     params['raise_for_httperror'] = False
     params['soft_max_redirects'] = 2
 

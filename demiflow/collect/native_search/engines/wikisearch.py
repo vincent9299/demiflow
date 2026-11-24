@@ -35,9 +35,13 @@ def request(query, params):
 
 
 def response(resp):
+    try:
+        answer = resp.json()
+    except ValueError:
+        raise SourceError('wikisearch answer is not JSON') from None
     site = str(resp.url).split('/w/rest.php')[0]
     found = []
-    for page in (resp.json().get('pages') or [])[:page_limit]:
+    for page in (answer.get('pages') or [])[:page_limit]:
         key = page.get('key')
         if key:
             found.append({'url': site + '/wiki/' + key, 'title': page.get('title') or key,

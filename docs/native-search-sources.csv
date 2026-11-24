@@ -12,7 +12,7 @@ baidu images,catalog,baidu,images,True,ok,True,0,False,False,True,online
 brave.images,catalog,brave,images|web,False,ok,False,10,True,True,False,online
 sogou images,catalog,sogou_images,general,True,ok,True,0,False,False,False,online
 quark images,catalog,quark,images,True,ok,True,0,False,False,True,online
-duckduckgo images,catalog,duckduckgo_images,images,False,ok,True,0,True,True,False,online
+duckduckgo images,catalog,duckduckgo_extra,images,False,ok,True,0,True,True,False,online
 qwant images,catalog,qwant,images|web,True,ok,True,5,True,True,False,online
 pinterest,catalog,pinterest,general,False,ok,True,0,False,False,False,online
 wikicommons.images,catalog,wikicommons,images,False,ok,True,0,False,False,False,online

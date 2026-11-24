@@ -6,13 +6,15 @@ redirects, bodies, error statuses, proxies and local addresses in rotation), sou
 network they send through (another source, a catalog source that is not declared, ``ipv4``, a
 session-wide network; yandex images, brave.images and qwant images name one by default), adapter loading
 variants, the SQLite source, and every built-in source and platform image module with only the final
-destination replaced by a loopback server that answers with fixed pages.
+destination replaced by a loopback server that answers with fixed pages; the built-in sources again with
+one option changed in the declaration (endpoints, page sizes, switches), and every source against answers
+a provider may give instead of results (HTML, an empty object, 403, 429, 500).
 
 ``exchange_golden.json`` holds what the previous runtime (main 5673d101; main 41f232fd for the
-network-names suites) did with the same scenarios: receipt status and reason, ignored parameters, HTTP
-receipts, each request as the server received it (including which server: the destination or a proxy)
-and a digest of the merged results. Values that are random or bound to the HTTP library version by
-design (browser User-Agent strings, Qwant's test group) compare by family; see
+network-names, options and answers suites) did with the same scenarios: receipt status and reason,
+ignored parameters, HTTP receipts, each request as the server received it (including which server: the
+destination or a proxy) and a digest of the merged results. Values that are random or bound to the HTTP
+library version by design (browser User-Agent strings, Qwant's test group) compare by family; see
 ``exchange_runner.essentials``.
 """
 import importlib.util
@@ -44,7 +46,7 @@ def essentials(output):
 
 
 SUITES = ['transport', 'outgoing-proxy', 'outgoing-ips', 'network-names', 'network-names-default',
-          'network-names-outgoing', 'sqlite', 'loader', 'named']
+          'network-names-outgoing', 'sqlite', 'loader', 'named', 'options', 'answers']
 
 
 @pytest.mark.parametrize('suite', SUITES)

@@ -392,9 +392,11 @@
         "images"
       ],
       "disabled_default": false,
-      "engine": "duckduckgo_images",
+      "engine": "duckduckgo_extra",
       "load_status": "ok",
-      "options": {},
+      "options": {
+        "ddg_category": "images"
+      },
       "shortcut": "ddi"
     },
     "google": {

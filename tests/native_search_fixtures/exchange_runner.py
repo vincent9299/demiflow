@@ -3,11 +3,11 @@ receipt status, merged results, HTTP receipts, and every request the loopback se
 
 Usage: python exchange_runner.py <suite>
 Suites: transport, outgoing-proxy, outgoing-ips, network-names, network-names-default,
-        network-names-outgoing, sqlite, loader, named
+        network-names-outgoing, sqlite, loader, named, options, answers
 
 ``essentials`` reduces the output to the comparable facts stored in ``exchange_golden.json``; those were
-recorded by running the same scenarios on the previous runtime (main 5673d101; the network-names suites on
-main 41f232fd, the same runtime).
+recorded by running the same scenarios on the previous runtime (main 5673d101; the network-names, options
+and answers suites on main 41f232fd, the same runtime).
 """
 import hashlib
 import json
@@ -400,6 +400,69 @@ def named():
     return items, {**CONFIG, 'max_bytes': 1 << 20, 'max_results': 100}
 
 
+# One option of a built-in source changed in its declaration: (source, option, value, host the option
+# pointed to). Endpoint options get the host override.example, numbers and switches another value.
+OPTION_VARIANTS = [
+    ('bing', 'base_url', 'https://override.example', 'www.bing.com'),
+    ('yandex', 'base_url_images', 'https://override.example/images/search', 'yandex.com'),
+    ('yandex', 'base_url_web', 'https://override.example/search/site/', 'yandex.com'),
+    ('mwmbl', 'api_url', 'https://override.example/api/v1', 'api.mwmbl.org'),
+    ('wikipedia', 'rest_v1_summary_url', 'https://override.example/api/rest_v1/page/summary/{title}',
+     'en.wikipedia.org'),
+    ('bing images', 'base_url', 'https://override.example', 'www.bing.com'),
+    ('yandex images', 'base_url_images', 'https://override.example/images/search', 'yandex.com'),
+    ('yandex images', 'base_url_web', 'https://override.example/search/site/', 'yandex.com'),
+    ('baidu images', 'image_base_url', 'https://override.example/', 'image.baidu.com'),
+    ('baidu images', 'results_per_page', 11, None),
+    ('brave.images', 'base_url', 'https://override.example/', 'search.brave.com'),
+    ('brave.images', 'brave_spellcheck', True, None),
+    ('sogou images', 'base_url', 'https://override.example', 'pic.sogou.com'),
+    ('quark images', 'results_per_page', 11, None),
+    ('qwant images', 'api_url', 'https://override.example/v3/search/', 'api.qwant.com'),
+    ('qwant images', 'base_url', 'https://override.example', 'www.qwant.com'),
+    ('pinterest', 'base_url', 'https://override.example', 'www.pinterest.com'),
+    ('wikicommons.images', 'page_size', 11, None),
+    ('wikicommons.images', 'wc_api_url', 'https://override.example/w/api.php', 'commons.wikimedia.org'),
+    ('public domain image archive', 'page_size', 21, None),
+    ('public domain image archive', 'pdia_base_url', 'https://override.example', 'pdimagearchive.org'),
+    ('pexels', 'base_url', 'https://override.example', 'www.pexels.com'),
+    ('pexels', 'enable_http2', True, None),
+    ('pexels', 'results_per_page', 21, None),
+    ('openverse', 'base_url', 'https://override.example/v1/images/', 'api.openverse.org'),
+    ('openverse', 'page_size', 21, None),
+    ('unsplash', 'base_url', 'https://override.example/', 'unsplash.com'),
+    ('unsplash', 'page_size', 21, None),
+    ('unsplash', 'search_url', 'https://override.example/napi/search/photos?', 'unsplash.com'),
+]
+OPTION_QUERIES = [('oak', {}), ('oak', {'pageno': 2})]
+UNEXPECTED_KINDS = ('html', 'emptyobject', 's403', 's429', 's500')
+
+
+def options(catalog):
+    """One source per option variant: the catalog entry with that option changed. The first variant of a
+    source keeps its name; further ones are declared under another name with the same settings."""
+    items, seen = [], set()
+    for index, (source, option, value, host) in enumerate(OPTION_VARIANTS):
+        declared = {**catalog[source], option: value}
+        if source in seen:
+            declared.update(name=f'variant {index:02d}', shortcut=f'variant {index:02d}')
+        seen.add(source)
+        state = {'label': f'{source} [{option}]', 'alias': {'override.example': host} if host else {}}
+        items.append((declared, [(query, parameters, state) for query, parameters in OPTION_QUERIES]))
+    return items, {**CONFIG, 'max_bytes': 1 << 20, 'max_results': 100}
+
+
+def answers():
+    """Every source asked once per unexpected answer; its preparation requests are answered normally."""
+    items, config = named()
+    found = []
+    for source, _ in items:
+        name = source if isinstance(source, str) else source['name']
+        found.append((source, [('oak', {}, {'label': f'{name} [{kind}]', 'unexpected': kind})
+                               for kind in UNEXPECTED_KINDS]))
+    return found, config
+
+
 # ---------------------------------------------------------------------------- loopback destination for named sources
 
 class ProviderRecords:
@@ -408,7 +471,9 @@ class ProviderRecords:
     def __init__(self):
         from provider_pages import answer
         self.records, self.lock = [], threading.Lock()
-        records, lock = self.records, self.lock
+        # Per run: hosts that stand for another host, and the unexpected answer to give (None: fixed pages).
+        self.state = {'alias': {}, 'unexpected': None}
+        records, lock, state = self.records, self.lock, self.state
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
@@ -424,7 +489,8 @@ class ProviderRecords:
                 with lock:
                     records.append({'host': host, 'method': self.command, 'path': rest, 'body': body.decode('latin-1'),
                                     'headers': [[k, v] for k, v in self.headers.items() if k.lower() != 'host']})
-                status, extra, payload = answer(host, urlsplit(rest).path)
+                status, extra, payload = answer(state['alias'].get(host, host), urlsplit(rest).path,
+                                                state['unexpected'])
                 self.send_response(status)
                 for name, value in extra:
                     self.send_header(name, value)
@@ -442,6 +508,9 @@ class ProviderRecords:
     def route_clients(self):
         """Send every request of the HTTP clients to this server instead of its real destination."""
         route_clients('http://' + self.address, loopback=True)
+
+    def prepare(self, alias=None, unexpected=None, **_):
+        self.state.update(alias=alias or {}, unexpected=unexpected)
 
     def take(self):
         with self.lock:
@@ -477,10 +546,14 @@ def main(suite):
     sys.path.insert(0, str(HERE))  # exchange_probe, exchange_server and provider_pages are modules here
     work = Path(tempfile.mkdtemp(prefix='exchange-'))
     skipped = []
-    if suite == 'named':
+    if suite in ('named', 'options', 'answers'):
         destination = ProviderRecords()
         destination.route_clients()
-        items, config = named()
+        if suite == 'options':
+            from demiflow.collect.native_search.config import catalog
+            items, config = options({entry['name'].lower(): entry for entry in catalog()['engines']})
+        else:
+            items, config = named() if suite == 'named' else answers()
     else:
         from exchange_server import Servers
         destination = Servers()
@@ -517,9 +590,11 @@ def main(suite):
     config = {**config, 'sources': SearchConfig(engines=tuple(declared), language='en').source_configs(),
               'worker_directory': str(work)}
     loaded, errors = worker.bootstrap(config)
-    if suite == 'named':
+    if isinstance(destination, ProviderRecords):
         from provider_pages import BRAVE_DATA
-        loaded['brave.images'].extract_data = lambda *args, **kwargs: BRAVE_DATA
+        for module in loaded.values():
+            if hasattr(module, 'brave_category'):
+                module.extract_data = lambda *args, **kwargs: BRAVE_DATA
     by_name = {source['name']: source for source in config['sources']}
     initialized, runs = set(), []
     for source, queries in items:
@@ -527,7 +602,10 @@ def main(suite):
         if name in declare_errors:
             runs.append({'source': name, 'declare_error': declare_errors[name]})
             continue
-        for query, parameters in queries:
+        for query, parameters, *state in queries:
+            state = state[0] if state else {}
+            if isinstance(destination, ProviderRecords):
+                destination.prepare(**state)
             events.clear()
             destination.take()
             message = {'engine': name, 'query': query,
@@ -550,7 +628,8 @@ def main(suite):
                 except BaseException as exc:
                     merged = {'merge_error': type(exc).__name__}
             runs.append({
-                'source': name, 'query': query, 'parameters': parameters, 'status': result.get('status'),
+                'source': state.get('label', name), 'query': query, 'parameters': parameters,
+                'status': result.get('status'),
                 'reason': result.get('reason'), 'ignored': result.get('ignored_parameters'),
                 'capabilities': results.plain(result.get('capabilities')),
                 'result_count': len(result.get('results') or []),

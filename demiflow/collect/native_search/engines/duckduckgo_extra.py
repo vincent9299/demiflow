@@ -1,4 +1,4 @@
-"""DuckDuckGo image search (``i.js`` JSON, results from Bing).
+"""DuckDuckGo image search (``i.js`` JSON, results from Bing); ``ddg_category`` is ``images``.
 
 Each query needs the ``vqd`` token of DuckDuckGo's search page; it is fetched
 with the same headers and kept for an hour per query and User-Agent in this
