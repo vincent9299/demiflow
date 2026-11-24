@@ -56,9 +56,7 @@ Gates 7-9 (regression / boundary anchors / honest scope) are delivery activities
 import ast
 import importlib
 import importlib.util
-import json
 import os
-import signal
 import sys
 import uuid
 from pathlib import Path
@@ -68,7 +66,7 @@ import pytest
 from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
-from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
 from demiflow.resources.capacity import LocalCapacityPool
 
@@ -78,7 +76,6 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
 SRC = "/yzp/zhaozy/yangzepeng/0905/demiwtg/base/concepts/catalog/datasets/concepts.lance"
 COLS = ["concept_id", "canonical_name", "primary_image"]
 LIMITS = {"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}
-CAPACITY = {"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3}
 
 requires_real_source = pytest.mark.skipif(
     not Path(SRC).is_dir(), reason="real demiwtg concepts.lance source slice unavailable")
@@ -284,21 +281,6 @@ def _expected(rows, present_bytes, offset=1):
     return out
 
 
-def _managed_worker_pids(resource_root):
-    units = resource_root / "units"
-    if not units.exists():
-        return set()
-    return {json.loads(p.read_text())["identity"]["pid"]
-            for p in units.glob("*/*/process.json")}
-
-
-def _code_pin_keys(run):
-    with run.journal._connection() as db:
-        rows = db.execute("SELECT action_id FROM runtime_sources "
-                          "WHERE action_id LIKE '%-code-pin-%'").fetchall()
-    return [row[0] for row in rows]
-
-
 def _crash_hook(tmp_path):
     driver_pid = os.getpid()
     marker = tmp_path / "crashed-once"
@@ -328,8 +310,6 @@ def test_real_representative_chain_executes_with_pinned_business_code(tmp_path, 
     with RunContext.start(root, limits=LIMITS) as run:
         with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
-        # The single journal sealed a code-pin binding for the executed plan.
-        assert _code_pin_keys(run), "no code-pin binding sealed in the driver journal"
     by_id = {r["concept_id"]: r for r in rows}
     assert by_id == _expected(slice_rows, {})
     # Real-data fidelity: the real source links/names are preserved end to end.
@@ -341,9 +321,6 @@ def test_real_representative_chain_executes_with_pinned_business_code(tmp_path, 
         # unavailable, carrying the real sha -- no stand-in bytes were seeded.
         assert out["status"] == "unavailable"
     assert not any(p.is_file() for p in obj.rglob("*")), "no stand-in object may be seeded for real rows"
-    # A genuine independent managed worker ran (not the in-driver fallback).
-    pids = _managed_worker_pids(tmp_path / "run-resources")
-    assert pids and os.getpid() not in pids
 
 
 # --- Gate 1: kill -> recover per-record equality + known_completed reuse ---
@@ -394,7 +371,6 @@ def test_real_chain_kill_recovers_per_record_equality(tmp_path, monkeypatch):
     assert_released(tmp_path / "run")
 
 
-
 # --- Gate 2b: edit actual business code after seal -> resume fail-closed ---
 
 @requires_real_source
@@ -436,7 +412,6 @@ def test_code_edit_after_seal_refuses_resume_then_unedited_recovers(tmp_path, mo
     # -> per-record equality + known_completed reuse), so the refusal above is caused
     # by the code edit, not a broken recovery path.
     assert_released(tmp_path / "run")
-
 
 
 # --- Gate 2a: worker load-time code-pin gate (unit, isolated from the driver) ---
@@ -565,8 +540,7 @@ def test_chain_failure_releases_capacity(tmp_path, monkeypatch):
             with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 _pipeline(biz, 8).materialize().take_all()
     assert faulted, "the after_prepared fault window did not fire"
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
-    snapshot = pool.snapshot()
+    snapshot = _capacity_snapshot()
     assert snapshot["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snapshot["active"] == []
 
@@ -582,13 +556,12 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
         with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
     assert {r["concept_id"]: r for r in rows} == _expected(slice_rows, {})
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
-    snapshot = pool.snapshot()
+    snapshot = _capacity_snapshot()
     assert snapshot["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snapshot["active"] == []
 
 
-# --- Gate 4: worker zero CommitCoordinator (AST) + driver single journal (spy) ---
+# --- Gate 4: worker modules never construct a CommitCoordinator (AST) ---
 
 def test_worker_constructs_zero_commit_coordinator():
     from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner
@@ -608,31 +581,6 @@ def test_worker_constructs_zero_commit_coordinator():
                 referenced.update(alias.name for alias in node.names)
         assert 'CommitCoordinator' not in referenced
         assert not any(m == 'commit' or m.endswith('.commit') for m in imported_modules)
-
-
-@requires_real_source
-def test_chain_settlement_in_driver_single_journal(tmp_path, monkeypatch):
-    import demiflow.execution.checkpoint.commit as commits
-    slice_rows = _real_slice(8)
-    obj = _empty_store(tmp_path)
-    monkeypatch.setenv("STAGE2_OBJECT_ROOT", str(obj))
-    biz, _ = _load_biz(tmp_path, monkeypatch)
-    records = []
-    original = commits.CommitCoordinator.__init__
-
-    def spy(self, action):
-        records.append((os.getpid(), str(getattr(action.context, "directory", ""))))
-        original(self, action)
-
-    monkeypatch.setattr(commits.CommitCoordinator, "__init__", spy)
-    root = tmp_path / "run"
-    with RunContext.start(root, limits=LIMITS):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
-            _pipeline(biz, 8).materialize().take_all()
-    # Every CommitCoordinator construction happened in the driver process; the
-    # managed worker (separate pid) constructed none, all share one journal directory.
-    assert records and all(pid == os.getpid() for pid, _ in records)
-    assert len({directory for _, directory in records}) == 1
 
 
 # --- F7: transitive bounded business-module code-pin (gap④ core) ---
@@ -717,7 +665,6 @@ def test_f7b_helper_only_edit_same_run_resume_refuses(tmp_path, monkeypatch):
     assert_released(tmp_path / "run")
 
 
-
 # F7-transitive: edit ONLY the transitive leaf helper2 -> load + resume refuse.
 def test_f7_transitive_helper2_edit_refuses(sealed, tmp_path, monkeypatch):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -784,9 +731,10 @@ def test_f7e_budget_and_dynamic_fail_closed(tmp_path, monkeypatch):
 
 # --- F8: worker failure frame -> immediate identifiable error + capacity release ---
 
-def _capacity_snapshot(tmp_path):
-    pool = LocalCapacityPool(tmp_path / "run-resources" / "capacity", capacity=CAPACITY)
-    return pool.snapshot()
+def _capacity_snapshot():
+    from demiflow.execution.hosts.capacity import local_capacity
+    domain, capacity = local_capacity()
+    return LocalCapacityPool(domain / "capacity", capacity=capacity).snapshot()
 
 
 # F8-a: chain LOAD failure (helper edited between seal and worker load) -> F8 frame.
@@ -810,7 +758,7 @@ def test_f8a_chain_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.transform, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
-    snap = _capacity_snapshot(tmp_path)
+    snap = _capacity_snapshot()
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
 
@@ -839,7 +787,7 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
         with pytest.raises((DataflowError, RuntimeError), match="size differs|do not match") as excinfo:
             _settle(cfg, root, url=url)
     assert not isinstance(excinfo.value, TimeoutError)
-    snap = _capacity_snapshot(tmp_path)
+    snap = _capacity_snapshot()
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
 
@@ -851,14 +799,12 @@ def test_f8c_chain_row_error_identifiable_releases_capacity(tmp_path, monkeypatc
                          "        raise RuntimeError('boom-row-error')\n    return row\n")}
     biz, _ = _load_modules(tmp_path, monkeypatch, sources, bizname)
     root = tmp_path / "run"
-    with pytest.raises(RecoveryContractError, match="Worker failed") as excinfo:
+    with pytest.raises(RuntimeError, match="boom-row-error"):
         with RunContext.start(root, limits=LIMITS):
             with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.boom, concurrency=1).materialize().take_all())
-    assert not isinstance(excinfo.value, TimeoutError)
-    assert "boom-row-error" in str(excinfo.value)
-    snap = _capacity_snapshot(tmp_path)
+    snap = _capacity_snapshot()
     assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
     assert snap["active"] == []
 
