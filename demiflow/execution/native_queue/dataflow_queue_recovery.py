@@ -5,6 +5,7 @@ original acquisition/final commits alone decide ownership and paid effects.
 """
 from dataclasses import asdict
 import json
+from demiflow.execution.native_queue.queue_commit import acquisition_fact
 from types import SimpleNamespace
 
 from demiflow.execution.contracts.dataflow import ArtifactRef
@@ -93,7 +94,7 @@ def restore_claims(service, value, *, has_cut):
         if entry['receipt_ref'] is not None:
             claim.receipt_row_ref = ArtifactRef(**entry['receipt_ref'])
             claim.receipt_row = service._read_json(claim.receipt_row_ref, max_bytes=service._services.bounds.max_row_bytes)
-            claim.acquisition_fact = service._acquisition_fact(claim.receipt_row)
+            claim.acquisition_fact = acquisition_fact(claim.receipt_row, output=service._fetch.output, channel=source.channel, journal=service._action.context.journal)
         if proof is not None:
             with source.channel.database.connection() as db:
                 claim.final_fact = QueueCommitStore._fact(db, proof['final_commit'])

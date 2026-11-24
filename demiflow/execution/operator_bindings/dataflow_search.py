@@ -106,3 +106,8 @@ class NativeSearchOperations:
                              max_bytes=self._services.bounds.max_control_bytes)
         return QueueReply(command.operation_id, 'confirmed', command.delivery_ref, ref, fact, 0)
 
+
+    def search_metrics(self):
+        """Expose passive observations without leaking the service-owned actors."""
+        from demiflow.execution.journal.run_telemetry import search_metrics
+        return search_metrics(getattr(self, '_searches', {}))
