@@ -840,7 +840,7 @@
  "implicit_inputs": [],
  "input_resolver": [
   "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: context = current()",
-  "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
+  "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request, 'executor', None)),",
   "execution/compiler_support/dataflow_compile_inputs.py::executor_defaults: block_size=getattr(executor, '_block_size', None),",
   "execution/compiler_support/dataflow_compile_inputs.py::executor_defaults: local = getattr(executor, '_local_kernel', None)"
  ],

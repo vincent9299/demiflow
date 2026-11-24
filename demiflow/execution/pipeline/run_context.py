@@ -698,26 +698,6 @@ def bind_iteration(rows):
     return _ContextIterator(rows)
 
 
-def admit_stream(plan, *, source_batch_size=1):
-    """Native resource admission applies equally with or without a checker."""
-    from demiflow.execution.seal.plan_facts import operation_facts
-    from demiflow.planning.dataflow_policy import stream_residency
-    context = current_run()
-    if context is None:
-        raise RecoveryContractError('A stream requires its execution context')
-    if len(plan.operations) > 1024:
-        raise RecoveryContractError('Native operation count exceeds budget')
-    try:
-        facts = [operation_facts(operation) for operation in plan.operations]
-        reservation = stream_residency(facts, context.limits)
-    except ValueError as exc:
-        raise RecoveryContractError(str(exc)) from exc
-    if (type(source_batch_size) is not int or not 1 <= source_batch_size <= 256 or
-            reservation['reserved_bytes'] + source_batch_size * context.limits['max_row_bytes'] > context.limits['memory_bytes']):
-        raise RecoveryContractError('Stream source prefetch exceeds its run memory budget')
-    return reservation
-
-
 _ACTIVE = ContextVar('demiflow_payload_limits', default=None)
 
 def active_limits(run, base):

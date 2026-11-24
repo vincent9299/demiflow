@@ -119,9 +119,9 @@ def make_action_request(executor: "DatasetExecutor", source: SourcePlan, plan: L
         # Reuse the caller's run; bind admission exactly once, never nest a run.
         with run.action(declaration) as created:
             action = created
-    action._dataflow_executor = executor
     return ActionRequest(kind=kind, source=source, plan=plan, arguments=args, sink=sink,
-                         programs=tuple(programs), provider=provider, action=action)
+                         programs=tuple(programs), provider=provider, action=action,
+                         executor=executor)
 
 
 

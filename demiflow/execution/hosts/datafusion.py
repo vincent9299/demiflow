@@ -130,8 +130,8 @@ class DataFusionResult:
         return {'uri': self.uri, 'version': self.version}
 
     def dataset(self):
-        from demiflow import data
-        return data.read_lance(**self.source())
+        from demiflow.data.read_api import read_lance
+        return read_lance(**self.source())
 
 
 def _cgroup_memory(root=Path('/sys/fs/cgroup')):

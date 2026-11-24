@@ -882,7 +882,7 @@ def _lower_request(request: ActionRequest) -> ActionRequest:
         return ActionRequest(
             kind=request.kind, source=ItemsSource(()), plan=LogicalPlan(),
             arguments=request.arguments, sink=request.sink, programs=request.programs,
-            provider=request.provider, action=request.action,
+            provider=request.provider, action=request.action, executor=request.executor,
         )
     return request
 
