@@ -256,3 +256,23 @@ def test_data_sample_limit_guard_and_count_describe():
 
     with pytest.raises(ValueError, match='100'):
         nb_data.project_sample('runs/demo/table.lance', version=1, limit=101)
+
+
+def test_validate_python_accepts_venv_directory_and_resolves_interpreter(tmp_path):
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.projects import registry
+
+    env_dir = tmp_path / 'myenv'
+    (env_dir / 'bin').mkdir(parents=True)
+    py_bin = env_dir / 'bin' / 'python'
+    py_bin.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    py_bin.chmod(0o755)
+
+    assert registry.validate_python(str(env_dir)) == str(py_bin)
+    assert registry.validate_python(str(env_dir) + '/') == str(py_bin)
+    assert registry.validate_python(str(py_bin)) == str(py_bin)
+
+    empty_dir = tmp_path / 'empty_env'
+    empty_dir.mkdir()
+    with pytest.raises(ForgeError, match='bin/python'):
+        registry.validate_python(str(empty_dir))

@@ -288,7 +288,7 @@
     const write=!!body&&!['plan-preview','plan-node-detail','plan-pipeline-source','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
     const cleanup=false;
     const epoch = viewEpoch;
-    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
+    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities','project-python','project-notebook-sandbox'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
     if (url.length > 8192) throw new Error('查询链接超出长度限制，请缩小字段投影');
     const payload=body?V.boundedJSON(body,65536):null;
     const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([readController.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
@@ -905,30 +905,31 @@
       const currentPy=typeof project.python==='string'?project.python.trim():'';
       modeSelect.value=currentPy?'custom':'disabled';
       const pyInput=$('input',undefined,'project-python-input');pyInput.type='text';pyInput.setAttribute('aria-label','项目 Python 解释器路径');
-      pyInput.placeholder='/path/to/project-venv/bin/python';pyInput.value=currentPy;
+      pyInput.placeholder='/path/to/project-venv 或 /path/to/project-venv/bin/python';pyInput.value=currentPy;
       const pyHint=$('p','','muted small project-python-hint');
       const pyMsg=$('p','','small project-python-msg');pyMsg.hidden=true;
       const syncPyUi=()=>{
         const m=modeSelect.value;
         pyInput.hidden=m!=='custom';
         pyHint.textContent=m==='custom'
-          ?'填写该业务项目独立的 venv / conda Python 绝对路径（同时用于开发测试与 Notebook 内核，Notebook 运行需安装 ipykernel；自动支持导入纯 demiflow SDK）。'
+          ?'填写该业务项目独立的 venv / conda 环境目录或 Python 解释器绝对路径（同时用于开发测试与 Notebook 内核，Notebook 运行需安装 ipykernel；自动支持导入纯 demiflow SDK）。'
           :'未配置时不继承工作台平台 Python，开发沙箱不挂载 Python，Notebook 内核也将等待配置项目 Python 后再启动。';
       };
       modeSelect.onchange=syncPyUi;syncPyUi();
       const savePy=button('保存 Python 环境',async()=>{
         const m=modeSelect.value;
         const payloadPy=m==='custom'?pyInput.value.trim():null;
-        if(m==='custom'&&!payloadPy){pyMsg.textContent='请填写 Python 解释器的绝对路径。';pyMsg.dataset.tone='error';pyMsg.hidden=false;return;}
+        if(m==='custom'&&!payloadPy){pyMsg.textContent='请填写 Python 环境目录或解释器绝对路径。';pyMsg.dataset.tone='error';pyMsg.hidden=false;return;}
         savePy.disabled=true;pyMsg.hidden=true;
         try{
-          await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
+          const saved=await api('project-python',{},{workspace_id:project.workspace_id,expected:projectDigest,python:payloadPy});
+          if(saved?.python)pyInput.value=saved.python;
           await refreshProjects();
           if(workspaceId===project.workspace_id&&context){
-            const fresh=await api('context',{},{});
+            const fresh=await api('context');
             if(workspaceId===project.workspace_id){context=fresh;updates.context?.(fresh);}
           }
-          pyMsg.textContent=payloadPy?'已保存，新发起的开发回合及 Notebook 内核将使用此业务 Python 环境。':'已清除，开发回合与 Notebook 内核将不再使用业务 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
+          pyMsg.textContent=payloadPy?'已保存（'+(saved?.python||payloadPy)+'），新发起的开发回合及 Notebook 内核将使用此业务 Python 环境。':'已清除，开发回合与 Notebook 内核将不再使用业务 Python 环境。';pyMsg.dataset.tone='ok';pyMsg.hidden=false;
         }catch(err){
           pyMsg.textContent=err?.message||'保存失败';pyMsg.dataset.tone='error';pyMsg.hidden=false;
         }finally{savePy.disabled=false;}
