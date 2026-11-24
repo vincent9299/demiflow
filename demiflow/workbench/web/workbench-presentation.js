@@ -14,6 +14,17 @@
   const PROJECT = /^[wl][0-9a-f]{32}$/;
   const ROLES = new Set(['cpu', 'gpu', 'remote_api', 'io']);
   const EXCHANGE_MODES = new Set(['memory_incremental', 'durable_incremental', 'finite_sealed']);
+  const FINITE_COMPLETE_KINDS = new Set([
+    'SortOp', 'RepartitionOp', 'RandomShuffleOp', 'RandomizeBlockOrderOp',
+    'OperatorLLMMapOp', 'AgentMapOp', 'EmbeddingMapOp', 'reduce', 'fit',
+  ]);
+  const isPreviewBarrier = (toNode, toPort) => Boolean(
+    FINITE_COMPLETE_KINDS.has(toNode.op_kind)
+    || (toNode.op_kind === 'join' && toPort === 'right')
+    || (toNode.op_kind === 'StreamPrependOp' && toPort === 'prefix')
+    || toNode.traits?.barrier === true
+    || toNode.traits?.coordination === 'barrier'
+  );
   const RECOVERY_MODES = new Set(['checkpoint', 'final_commit', 'delivery_only', 'attempt_only']);
   const ROLE_LABEL = {cpu: 'CPU', gpu: 'GPU', remote_api: '远程 API', io: 'I/O'};
   const KIND_LABEL = {
@@ -762,6 +773,8 @@
         cards.push(card); cardByKey.set(card.key, card);
       }
     }
+    const exchangeByEdge = new Map();
+    for (const ex of projection.exchanges || []) if (ex.edgeId) exchangeByEdge.set(ex.edgeId, ex.mode);
     const edges = [];
     for (const edge of projection.edges) {
       const from = hasOccurrenceIds(identity.format) ? v3Key(identity, edge.from.occurrenceId)
@@ -769,7 +782,11 @@
       const to = hasOccurrenceIds(identity.format) ? v3Key(identity, edge.to.occurrenceId)
         : legacyGroupKey(binding.basis_digest, identity.actionId, edge.to.logicalNodeId);
       if (!cardByKey.has(from) || !cardByKey.has(to)) continue;
-      edges.push({edgeId: edge.edgeId, from, to, kind: edge.kind || 'data', step: edge.step, fromPort: edge.from.port, toPort: edge.to.port});
+      edges.push({
+        edgeId: edge.edgeId, from, to, kind: edge.kind || 'data', step: edge.step,
+        fromPort: edge.from.port, toPort: edge.to.port,
+        exchangeMode: exchangeByEdge.get(edge.edgeId) || null,
+      });
       if (edges.length >= MAX_EDGES) break;
     }
     let selected = null;
@@ -836,7 +853,8 @@
       outgoing.get(from.occurrence_id).push(to.occurrence_id);
       return {edgeId: edge.edge_id, from: keys.get(from.occurrence_id), to: keys.get(to.occurrence_id),
         kind: 'data', ...valueEdgeFacts(edge, dag.schema_version === V4_SCHEMA ? 'v4' : 'v3'),
-        fromPort: edge.from.port, toPort: edge.to.port};
+        fromPort: edge.from.port, toPort: edge.to.port,
+        exchangeMode: isPreviewBarrier(to, edge.to.port) ? 'finite_sealed' : 'memory_incremental'};
     });
     const queue = [...incoming].filter(([, count]) => count === 0).map(([id]) => id);
     for (let i = 0; i < queue.length; i++) for (const id of outgoing.get(queue[i])) {

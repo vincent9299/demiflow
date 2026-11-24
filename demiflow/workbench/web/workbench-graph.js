@@ -14,6 +14,11 @@
   const kindLabel = {source_call: '源码调用', read_table: '数据输入', write_table: '输出', map: '自定义算子', join: '关联', filter: '筛选', query: '查询', reduce: '聚合'};
   const states = {pending: '已登记 · 未开始', running: '运行中', succeeded: '执行完成', failed: '执行失败', incomplete: '观测不完整', reused: '复用物化结果', cancelled: '已取消'};
   const EDGE_LABEL = {data: '数据流', value: '值依赖', action: '动作先后', reference: '源码引用 · 类型未核验'};
+  const EXCHANGE_TIP = {
+    finite_sealed: '等上游全部完成后开始（汇聚屏障）',
+    durable_incremental: '持久化流式：分段落盘后增量传递',
+    memory_incremental: '流式传递：上游边产出、下游边消费',
+  };
   const TONE_GLYPH = {neutral: '· ', success: '✓ ', failed: '✕ ', running: '▸ '};
 
   function status(node, snapshot) {
@@ -61,6 +66,7 @@
       for(const edge of edges){
         const caption=edgeCaption(edge,cards.get(edge.to));
         if(caption)gapX=Math.max(gapX,Math.min(160,Array.from(caption).reduce((w,ch)=>w+(/[\u1100-\uFFFF]/.test(ch)?12:7),0))+24);
+        if(edge.exchangeMode==='finite_sealed')gapX=Math.max(gapX,48);
       }
     }
     const index = new Map(nodes.map((node, i) => [node.key, i]));
@@ -130,8 +136,21 @@
     const notices = document.createElement('div'); notices.className = 'wb-graph-notices'; notices.setAttribute('role', 'status');
     const scroll = document.createElement('div'); scroll.className = 'wb-graph-scroll';
     const empty = document.createElement('div'); empty.className = 'wb-graph-empty';
+    const edgeTooltip = document.createElement('div'); edgeTooltip.className = 'wb-edge-tooltip'; edgeTooltip.hidden = true;
     const canvas = svg('svg', {class: 'wb-graph-canvas', role: 'group', 'aria-label': '数据算子图'});
     scroll.append(canvas, empty);
+    function showEdgeTooltip(anchor, text) {
+      const box = anchor.getBoundingClientRect();
+      edgeTooltip.textContent = text;
+      edgeTooltip.hidden = false;
+      const tipBox = edgeTooltip.getBoundingClientRect();
+      const left = Math.max(8, Math.min(box.left + box.width / 2 - tipBox.width / 2, innerWidth - tipBox.width - 8));
+      const top = Math.max(8, box.top - tipBox.height - 8);
+      edgeTooltip.style.left = left + 'px';
+      edgeTooltip.style.top = top + 'px';
+    }
+    function hideEdgeTooltip() { edgeTooltip.hidden = true; }
+    scroll.addEventListener('scroll', hideEdgeTooltip, {passive: true});
     function toolButton(label, fn) {
       const button = document.createElement('button');
       button.type = 'button'; button.textContent = label; button.setAttribute('aria-label', label);
@@ -148,7 +167,7 @@
     if(controls)toolbar.append(controls);
     const scopeInfo=document.createElement('details');scopeInfo.className='wb-plan-scope';
     const scopeLabel=document.createElement('summary');scopeLabel.textContent='计划范围';scopeInfo.append(scopeLabel);scopeInfo.hidden=true;
-    toolbar.append(scopeInfo);wrapper.append(toolbar, notices, scroll);
+    toolbar.append(scopeInfo);wrapper.append(toolbar, notices, scroll, edgeTooltip);
     host.replaceChildren(wrapper);
 
     let layout = null, fingerprint = null, zoomLevel = 1, viewMode = 'readable', direction='horizontal', directionChosen=false, currentModel=null;
@@ -234,30 +253,46 @@
           const fraction = (idx + 1) / (list.length + 1);
           const input=inputSlots.get(edge),caption=edgeCaption(edge,cards.get(edge.to));
           const shownCaption=fitWidth(caption,160,12);
-          let d, labelX, labelY;
+          let d, labelX, labelY, midX, midY;
           if (edge.from === edge.to) {
             const x = a.x + a.width, y = a.y + a.height * fraction;
             d = `M${x} ${y} C${x + 46} ${y - 30},${x + 46} ${y + 30},${x} ${Math.min(a.y + a.height - 8, y + 18)}`;
-            labelX = x + 40; labelY = y;
+            labelX = x + 40; labelY = y; midX = x + 34; midY = y;
           } else if(direction==='vertical'&&b.y>a.y){
             const x1=a.x+a.width*fraction,y1=a.y+a.height,x2=b.x+b.width*input.fraction,y2=b.y,my=(y1+y2)/2;
             d=`M${x1} ${y1} C${x1} ${my},${x2} ${my},${x2} ${y2}`;
             // Put input labels beside their actual destination, not midway over
             // unrelated operators crossed by a long branch. Stagger adjacent labels.
             labelX=x2;labelY=y2-14-(input.index%2)*18;
+            midX=(x1+x2)/2;midY=my;
           } else if (b.x > a.x) {
             const x1 = a.x + a.width, y1 = a.y + a.height * fraction, x2 = b.x, y2 = b.y + b.height * input.fraction, mx = (x1 + x2) / 2;
             d = `M${x1} ${y1} C${mx} ${y1},${mx} ${y2},${x2} ${y2}`;
             labelX=x2-12-Array.from(shownCaption).reduce((w,ch)=>w+charWidth(ch,12),0)/2;labelY=y2-5;
+            midX = mx; midY = (y1 + y2) / 2;
           } else {
             const x1 = a.x + a.width / 2, y1 = a.y + a.height, x2 = b.x + b.width / 2, y2 = b.y + b.height, dip = Math.max(y1, y2) + 34 + idx * 12;
             d = `M${x1} ${y1} C${x1} ${dip},${x2} ${dip},${x2} ${y2}`;
             labelX = (x1 + x2) / 2; labelY = dip - 4;
+            midX = (x1 + x2) / 2; midY = dip;
           }
+          const modeTip = EXCHANGE_TIP[edge.exchangeMode] || '';
           const path = svg('path', {d, class: 'wb-edge wb-edge-' + edge.kind, 'marker-end': 'url(#' + markerId + ')'});
-          path.append(svg('title', {}, (EDGE_LABEL[edge.kind] || edge.kind) + (caption?' · '+caption:'')));
+          path.append(svg('title', {}, [EDGE_LABEL[edge.kind] || edge.kind, caption, modeTip].filter(Boolean).join(' · ')));
           canvas.append(path);
           if(caption)canvas.append(svg('text', {x: labelX, y: labelY, class: 'wb-edge-port'}, shownCaption));
+          if(edge.exchangeMode==='finite_sealed'){
+            const badge=svg('g',{class:'wb-edge-barrier',transform:`translate(${midX} ${midY})`,tabindex:0,role:'img','aria-label':EXCHANGE_TIP.finite_sealed});
+            badge.append(
+              svg('circle',{r:9}),
+              svg('path',{d:'M-3.2 -4.2h6.4 M-3.2 4.2h6.4 M-2.6 -4.2v1.4l2.6 2.8 2.6-2.8v-1.4 M-2.6 4.2v-1.4l2.6-2.8 2.6 2.8v1.4'}),
+              svg('title',{},EXCHANGE_TIP.finite_sealed));
+            badge.addEventListener('mouseenter',()=>showEdgeTooltip(badge,EXCHANGE_TIP.finite_sealed));
+            badge.addEventListener('mouseleave',hideEdgeTooltip);
+            badge.addEventListener('focus',()=>showEdgeTooltip(badge,EXCHANGE_TIP.finite_sealed));
+            badge.addEventListener('blur',hideEdgeTooltip);
+            canvas.append(badge);
+          }
         });
       }
     }
@@ -323,6 +358,7 @@
       else if (bottom > scroll.scrollTop + scroll.clientHeight) scroll.scrollTop = bottom - scroll.clientHeight + 16;
     }
     function rebuild(model) {
+      hideEdgeTooltip();
       canvas.replaceChildren(); elements.clear();
       if(!directionChosen)direction=model.nodes.length>12?'vertical':'horizontal';
       layout = layoutGraph(model, {width: scroll.clientWidth || host.clientWidth || 0,direction});
