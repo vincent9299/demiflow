@@ -24,7 +24,7 @@ def read_queue(config, *, pool='default', settlement='sink', max_inflight=8,
     Open-empty is not EOS. Historical completed rows are read explicitly with
     read_queue_records; workers never scan/replay the pool's completed history.
     """
-    from ..execution.queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     source=QueueDatasource(config,pool=pool,settlement=settlement,max_inflight=max_inflight,
         idle_timeout_s=idle_timeout_s,lease_s=lease_s,max_tasks=max_tasks,stop=stop)
     return DataAPI(_current_executor.get()).read_datasource(source)

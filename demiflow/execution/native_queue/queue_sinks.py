@@ -1,10 +1,10 @@
 """Exact SQL participants of the native commit coordinator."""
 import json
 
-from ..data.datasink import Datasink
-from ..data.runtime_contract import check_size
-from .queue_contract import queue_config
-from .queue import QueueChannel
+from demiflow.data.datasink import Datasink
+from demiflow.data.runtime_contract import check_size
+from demiflow.execution.queue_contract import queue_config
+from demiflow.execution.native_queue.queue import QueueChannel
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 
 
@@ -70,7 +70,7 @@ class QueueResultSink(Datasink):
         receipt=self.inspect_in_transaction(db,prepared,context)
         if receipt is not None:return receipt
         d=self.action.context.journal.delivery
-        from .raw_budget import budget_delta
+        from demiflow.execution.native_queue.raw_budget import budget_delta
         limits=self.action.context.limits
         for name in ('output_admission_bytes','output_bytes','row_bytes'):
             budget_delta(db,name,prepared['row_bytes'],limits['max_output_bytes'])
@@ -82,7 +82,7 @@ class QueueResultSink(Datasink):
 
     def verify_acquisition(self,prepared):
         self._validate(prepared)
-        from .raw_objects import inspect_acquisition
+        from demiflow.execution.native_queue.raw_objects import inspect_acquisition
         fact=inspect_acquisition(self.action.context,prepared['acquisition_ref']['commit_id'])
         if fact['prepared']['sinks']['raw']['result']!=prepared['row'][self.result]:
             raise UnresolvedCommit('Final row changed its raw acquisition facts')
@@ -129,7 +129,7 @@ class QueuePublishSink(Datasink):
         for m in values:
             if type(m) is not dict or set(m)!={'task_id','pool','payload'} or m['pool']!=self.producer.pool:
                 raise RecoveryContractError('Producer message differs from its pool contract')
-            from .queue_contract import task_message
+            from demiflow.execution.queue_contract import task_message
             task_message(m['task_id'],m['payload'],pool=m['pool'])
             document(m['payload'],self.config.limits.max_payload_bytes)
         for n in ('source_position','output_ordinal'):
@@ -185,7 +185,7 @@ class QueuePublishSink(Datasink):
                 continue
             if row[2]+inserted>=self.config.limits.max_tasks:
                 raise RecoveryContractError('Queue task count budget exhausted')
-            from .raw_budget import budget_delta
+            from demiflow.execution.native_queue.raw_budget import budget_delta
             budget_delta(db,'control_bytes',len(payload.encode('utf8'))+512,self.action.context.limits['max_control_bytes'])
             ordinal=self.action.context.journal.channel.database.publication(db,p.generation,'tasks')
             db.execute("INSERT INTO queue_tasks (generation,task_id,fingerprint,payload,occurrence,ordinal,producer_commit,status) VALUES (?,?,?,?,?,?,?,'pending')",(p.generation,m['task_id'],fingerprint,payload,occurrence,ordinal,context.commit_id))

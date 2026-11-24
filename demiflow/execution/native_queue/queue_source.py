@@ -3,10 +3,10 @@ import asyncio
 import threading
 import time
 
-from ..data.datasource import Datasource
+from demiflow.data.datasource import Datasource
 from demiflow.services.blocking_io import BlockingIOPool
-from .queue import QueueChannel
-from .queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
+from demiflow.execution.native_queue.queue import QueueChannel
+from demiflow.execution.queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, identifier
 from demiflow.execution.worker.row_scope import RowScope, ScopedRow
 
@@ -14,7 +14,7 @@ from demiflow.execution.worker.row_scope import RowScope, ScopedRow
 class QueueDatasource(Datasource):
     def __init__(self,config,*,pool='default',settlement='sink',max_inflight=8,
                  idle_timeout_s=300,lease_s=60,max_tasks=10000,stop=None):
-        from ..collect.raw_contract import integer
+        from demiflow.collect.raw_contract import integer
         import math
         self.config=queue_config(config)
         self.pool=identifier(pool)
@@ -68,9 +68,9 @@ class QueueDatasource(Datasource):
         await self.io.run(self.channel._attach)
         snapshot=await self.io.run(self.channel.snapshot,self.pool,kind='tasks')
         self.generation=snapshot.generation
-        from .queue_commit import bind_queue_budget
+        from demiflow.execution.native_queue.queue_commit import bind_queue_budget
         self.available_commits=await self.io.run(bind_queue_budget,self.parent,self.channel)
-        from .raw_objects import RawNamespace
+        from demiflow.execution.native_queue.raw_objects import RawNamespace
         self.namespace=RawNamespace(self.fetch_actor.store,identity([snapshot.queue_uuid,snapshot.generation]))
         domain=await self.io.run(self.namespace.open)
         run=self.parent.context
@@ -99,7 +99,7 @@ class QueueDatasource(Datasource):
             worker=db.execute('SELECT domain,limits,claimed,settled,exhausted FROM queue_workers WHERE worker_id=?',(self.worker_id,)).fetchone()
         import json
         if worker is None or json.loads(worker[0])!=domain:
-            from .queue_contract import ArtifactDomainUnavailable
+            from demiflow.execution.queue_contract import ArtifactDomainUnavailable
             raise ArtifactDomainUnavailable('Native worker window artifact domain is unavailable')
         self.window_limit=json.loads(worker[1])['queue_max_tasks']
         self.counts.update(claimed=worker[2],settled=worker[3],exhausted=worker[4])
@@ -128,7 +128,7 @@ class QueueDatasource(Datasource):
             else:
                 if db.execute('SELECT count(*) FROM runtime_queue_refs WHERE source_id=?',(self.reference_key,)).fetchone()[0]>=self.max_inflight:
                     raise RecoveryContractError('Unconfirmed completion reference bound exceeded')
-                from .raw_budget import budget_delta
+                from demiflow.execution.native_queue.raw_budget import budget_delta
                 budget_delta(db,'control_bytes',256,run.limits['max_control_bytes'])
                 db.execute('INSERT INTO runtime_queue_refs VALUES (?,?,?)',(self.reference_key,delivery.task_id,delivery.fingerprint))
         self.unconfirmed.add(delivery.task_id)
@@ -145,7 +145,7 @@ class QueueDatasource(Datasource):
         # At most max_inflight exact lookups from this run. A fresh worker has
         # no references and performs zero completed-record scans or hashes.
         from demiflow.execution.sources.queue_history import inspect_result
-        from .queue_commit import QueueCommitStore
+        from demiflow.execution.native_queue.queue_commit import QueueCommitStore
         run=self.parent.context
         with run.journal._connection() as db:
             refs=db.execute('SELECT task_id,fingerprint FROM runtime_queue_refs WHERE source_id=?',(self.reference_key,)).fetchall()
@@ -178,7 +178,7 @@ class QueueDatasource(Datasource):
                 await asyncio.sleep(min(15,self.lease_s/4))
                 with self.lock:values=list(self.active.values())
                 for delivery in values:
-                    from .queue_contract import StaleQueueOwner
+                    from demiflow.execution.queue_contract import StaleQueueOwner
                     try:await self.lease_io.run(self.channel.renew,delivery,lease_s=self.lease_s)
                     except StaleQueueOwner:
                         # Confirmation may have won after this heartbeat took
@@ -229,7 +229,7 @@ class QueueDatasource(Datasource):
                     idle_since=time.monotonic()
                 elif time.monotonic()-idle_since>=self.idle_timeout_s:
                     if self.blocked_artifact_domain:
-                        from .queue_contract import ArtifactDomainUnavailable
+                        from demiflow.execution.queue_contract import ArtifactDomainUnavailable
                         raise ArtifactDomainUnavailable('Unfinished artifacts are outside this worker reading domain')
                     raise QueueIdleTimeout('Queue is not drained before its idle deadline')
                 self.closed.wait(.05)
@@ -253,7 +253,7 @@ class QueueDatasource(Datasource):
             row=db.execute('SELECT final_scope FROM queue_tasks WHERE generation=? AND task_id=?',(delivery.generation,delivery.task_id)).fetchone()
             fact=None if not row or not row[0] else db.execute('SELECT prepared FROM runtime_commits WHERE action_id=?',(row[0],)).fetchone()
         if fact is None or fact[0] is None:return False
-        from .queue_execution import finalize_task
+        from demiflow.execution.native_queue.queue_execution import finalize_task
         finalize_task(self,delivery,None)
         self.counts['recovered']+=1
         return True

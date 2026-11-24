@@ -255,7 +255,7 @@ from demiflow.data.sources import (  # noqa: E402
     DatasourceSource, FileSource, ItemsSource, IterableSource, LanceSource,
     MaterializedSource, RangeSource, SqlSource,
 )
-from demiflow.execution.queue_source import QueueDatasource  # noqa: E402
+from demiflow.execution.native_queue.queue_source import QueueDatasource  # noqa: E402
 from demiflow.lance.model import LanceScanSpec, LanceVectorSearchSpec  # noqa: E402
 
 assert Path(ds.__file__).resolve().is_relative_to(WORKTREE)

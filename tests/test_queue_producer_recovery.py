@@ -3,7 +3,7 @@ import json
 
 import pytest
 from demiflow import data
-from demiflow.execution.queue import ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue import ProducerSourceSpec, task_message
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 from test_queue_v2_protocol import channel, search_producer
@@ -11,7 +11,7 @@ from test_native_search_runtime import engines, server
 
 
 def test_lance_recovery_seeks_after_confirmed_input_unit(channel, tmp_path, monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     import demiflow.lance.read as reader
     path=str(tmp_path/'fixed.lance')
     data.from_items([{'messages':[task_message('x'+str(i),{'value':i},pool='p')]} for i in range(3)]).write_lance(path,mode='create')

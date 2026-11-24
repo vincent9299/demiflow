@@ -8,7 +8,7 @@ from test_raw_fetch import origin_server
 
 
 def test_prepared_domain_is_reported_without_scanning_tasks_or_claiming_elsewhere(channel,tmp_path,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     with origin_server() as (url,calls):
         producer=seed(channel,tmp_path,url);fired=[]
         def fault(name,commit_id):

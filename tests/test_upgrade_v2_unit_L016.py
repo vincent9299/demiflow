@@ -139,7 +139,7 @@ def ray_chain_facts(ray_local, tmp_path_factory):
     import builtins
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.execution.hosts.endpoints import DataflowRayConnector, RayHostEndpoint
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     events, reservations, imports = [], [], []
     original_apply = ResourceManager.apply
     original_terminal = ResourceManager.close

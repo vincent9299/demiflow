@@ -201,7 +201,7 @@ def _commit_child(root, crash=False):
     scope = (RunContext.resume(RunRef(str(root / 'run'), old['run_id'])) if old
              else RunContext.start(root / 'run'))
     if crash:
-        from demiflow.execution import commit
+        from demiflow.execution.checkpoint import commit
 
         def fault(name, commit_id):
             if name == 'after_sink_commit_before_receipt':

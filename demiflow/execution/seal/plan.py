@@ -165,7 +165,7 @@ def _program_value(declaration: ProgramDeclaration):
         return declaration.callable_spec
     if declaration.source_spec is not None:
         from ...data.sources import DatasourceSource
-        from ..queue_source import QueueDatasource
+        from demiflow.execution.native_queue.queue_source import QueueDatasource
         source = declaration.source_spec
         if isinstance(source, DatasourceSource) and type(source.datasource) is QueueDatasource:
             from demiflow.execution.native_queue.dataflow_acquisition_call import QueueSourceDeclaration

@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.gc import collect_published_orphans

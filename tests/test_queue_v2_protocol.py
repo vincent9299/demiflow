@@ -9,10 +9,10 @@ import uuid
 
 import pytest
 
-from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.queue import QueueChannel,QueueConfig,ProducerSourceSpec,task_message
-from demiflow.execution.queue_commit import producer_action,task_action
-from demiflow.execution.queue_sinks import QueuePublishSink,QueueResultSink
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_commit import producer_action, task_action
+from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink
 from demiflow.execution.contracts.recovery_contract import SourcePosition, RecoveryContractError, identity
 from demiflow.execution.queue_contract import StaleQueueOwner
 from demiflow.execution.pipeline.run_context import RunContext
@@ -134,7 +134,7 @@ def test_public_queue_fetch_result_terminal(channel,tmp_path):
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore
     from test_raw_fetch import origin_server,BODY
-    from demiflow.execution.queue import QueueResultSink
+    from demiflow.execution.native_queue.queue import QueueResultSink
     with origin_server() as (url,calls):
         p=channel.open('p',producer_id='producer',source=source())
         with native_parent(tmp_path) as parent:
@@ -209,7 +209,7 @@ def test_terminal_refuses_lost_source_confirmation(channel,tmp_path,monkeypatch)
     from demiflow import data
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore
-    from demiflow.execution.queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     from demiflow.execution.queue_contract import QueueIncomplete
     from test_raw_fetch import origin_server
     with origin_server() as (url,calls):
@@ -252,7 +252,7 @@ def search_producer(channel,p,tmp_path,engine_specs,name):
 
 
 def test_public_search_fixed_before_partial_publication_resume(channel,tmp_path,engines,server,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     p=channel.open('p',producer_id='search-producer',source=ProducerSourceSpec(
         kind='keywords',source_id='fixed-keywords',uri='memory:keywords',version=1))
     fired=[]
@@ -339,7 +339,7 @@ def consume_one(channel,tmp_path,*,explicit=False):
 @pytest.mark.parametrize('seam',['after_checkpoint_committed','after_acked'])
 @pytest.mark.parametrize('explicit',[False,True])
 def test_same_run_recovers_own_unconfirmed_final_without_get(channel,tmp_path,monkeypatch,seam,explicit):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     from test_raw_fetch import origin_server
     with origin_server() as (url,calls):
         p=channel.open('p',producer_id='p',source=source())
@@ -373,7 +373,7 @@ def test_new_worker_does_not_inspect_completed_history(channel,tmp_path,monkeypa
     from demiflow import data
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore
-    from demiflow.execution.raw_objects import RawInspection
+    from demiflow.execution.native_queue.raw_objects import RawInspection
     from test_raw_fetch import origin_server
     with origin_server() as (url,calls):
         publish_and_consume(channel,tmp_path,url)

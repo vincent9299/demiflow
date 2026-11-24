@@ -68,7 +68,7 @@ elif mode == 'execute':
         # these defaults are recorded in the native recovery identity.
         RECOVERY_LIMITS.update(checkpoint_rows=128, checkpoint_interval_ms=60000)
     from demiflow.execution.pipeline.run_context import current_run
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     from demiflow.execution.outputs.object_sink import ObjectSink
     def pause(commit_id=None, run=None):
         run = run or current_run()

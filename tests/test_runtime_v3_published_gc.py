@@ -70,7 +70,7 @@ def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_an
         image = put(store,state_codec.dumps({'ports':{'input':{'borrowed':[{'position':0,'input':{
             'seal_ref':seal,'manifest_ref':manifest}}]}},'batch':[record]},max_bytes=65536),
             'application/x-demiflow-kernel-image-v3')
-        from demiflow.execution.commit import CommitCoordinator
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
         from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.execution.outputs.sinks import _DataflowArtifactSink
         sink=_DataflowArtifactSink(sink_id='test',store=store,action=port._action,

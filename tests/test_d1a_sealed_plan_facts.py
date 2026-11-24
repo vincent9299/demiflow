@@ -92,8 +92,8 @@ def test_v3_local_caller_seals_and_persists(tmp_path):
 def test_v3_queue_caller_seals_and_persists(tmp_path):
     import demiflow.data as data
     from demiflow.collect import FetchPolicy, HttpSource
-    from demiflow.execution.queue import QueueChannel, QueueConfig
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.objects import LocalObjectStore
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server

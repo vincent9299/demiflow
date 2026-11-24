@@ -376,7 +376,7 @@ def _source_identity(source):
         return {'literal_materialization': literal_source_digest(source.handle.blocks),
                 'rows': source.handle.row_count}
     if isinstance(source, DatasourceSource):
-        from demiflow.execution.queue_source import QueueDatasource
+        from demiflow.execution.native_queue.queue_source import QueueDatasource
         from demiflow.execution.sources.queue_history import QueueHistoryDatasource
         if type(source.datasource) in {QueueDatasource,QueueHistoryDatasource}:
             return source.datasource.declaration()

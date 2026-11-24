@@ -397,7 +397,7 @@ def test_g4_queue_closure_end_to_end_seals_helper(tmp_path, monkeypatch):
     from test_mvp2_queue_unified import _config, _make_builder, _seed_tasks
     from runtime_v3_owned_crash import process_records
     from test_raw_fetch import origin_server
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7bg4")
 

@@ -20,7 +20,7 @@ import pytest
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import CallableSpec, FilterOp, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import commit as commit_module
+from demiflow.execution.checkpoint import commit as commit_module
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError

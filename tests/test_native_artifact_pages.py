@@ -68,7 +68,7 @@ def test_partial_reference_binding_is_unprotected_and_cleanup_reclaims_it(tmp_pa
 
 def test_lazy_materialized_history_verifies_earlier_object_bytes(tmp_path):
     from types import SimpleNamespace
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     from demiflow.execution.executors.local import _CheckpointBlocks
     from demiflow.execution.outputs.object_sink import ObjectRowsSink
     from demiflow.execution.contracts.recovery_contract import SourcePosition

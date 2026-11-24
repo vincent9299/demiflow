@@ -732,7 +732,7 @@ def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None, 
             if name in owner_limits:
                 limits[name] = min(limits[name], owner_limits[name])
     if source is not None:
-        from demiflow.execution.queue_execution import queue_source
+        from demiflow.execution.native_queue.queue_execution import queue_source
         queued=queue_source(source)
         if queued is not None:
             ceiling=min(queued.config.limits.max_payload_bytes,queued.config.limits.max_result_bytes)

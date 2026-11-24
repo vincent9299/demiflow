@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from .contracts.dataflow import QueueBinding
 from .contracts.dataflow_errors import DataflowError
-from .raw_fetch import RawFetch
+from demiflow.execution.native_queue.raw_fetch import RawFetch
 from demiflow.execution.contracts.recovery_contract import identity
 
 

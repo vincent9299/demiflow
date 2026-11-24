@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from demiflow.data.api import DataAPI
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.executors.ray import RayDatasetExecutor
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal

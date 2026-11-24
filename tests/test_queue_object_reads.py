@@ -7,8 +7,8 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore,ObjectRef,read_local_object
-from demiflow.execution.raw_objects import RawNamespace
-from demiflow.execution.queue_sinks import QueueResultSink
+from demiflow.execution.native_queue.raw_objects import RawNamespace
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel
@@ -46,7 +46,7 @@ def _facts(channel):
 
 
 def test_shared_remount_ordinary_actor_and_readonly_history_consume_original_receipt(channel,tmp_path,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     with origin_server() as (url,calls):
         p=seed(channel,tmp_path,url);fired=[]
         def fault(name,commit_id):

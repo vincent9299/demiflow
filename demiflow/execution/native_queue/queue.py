@@ -8,9 +8,7 @@ import json
 import math
 import uuid
 
-from .queue_contract import (QueueConfig, QueueLimits, ProducerSourceSpec, ProducerRef,
-    QueueSnapshot, HistoryReadLimits, QueueIncomplete, QueueIdleTimeout,
-    StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit, queue_config, task_message)
+from demiflow.execution.queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, ProducerRef, QueueSnapshot, HistoryReadLimits, QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit, queue_config, task_message
 from demiflow.execution.native_queue.queue_sql import QueueDatabase
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
 
@@ -38,7 +36,7 @@ class QueueChannel:
             self.database.attach()
 
     def _control(self, db, generation, amount):
-        from .raw_budget import budget_delta
+        from demiflow.execution.native_queue.raw_budget import budget_delta
         self.database.lock_budgets(db)
         ceiling = self.config.limits.max_control_bytes
         budget_delta(db, 'database-control-bytes', amount, ceiling)
@@ -196,7 +194,7 @@ class QueueChannel:
             if not fresh:inflight-=1
             if inflight>=limits.get('queue_max_inflight',8):return None
             from types import SimpleNamespace
-            from .queue_commit import QueueBudgetTransaction
+            from demiflow.execution.native_queue.queue_commit import QueueBudgetTransaction
             reservation=identity([worker[0],row[0],'commit-capacity'])
             previous=db.execute("SELECT amount FROM runtime_reservations WHERE name='queue_commit_capacity' AND reservation_id=?",(reservation,)).fetchone()
             budget=QueueBudgetTransaction(db,SimpleNamespace(channel=self,generation=worker[0],delivery=SimpleNamespace(worker_id=worker_id),
@@ -292,6 +290,6 @@ class QueueChannel:
 
 def __getattr__(name):
     if name=='QueueResultSink':
-        from .queue_sinks import QueueResultSink
+        from demiflow.execution.native_queue.queue_sinks import QueueResultSink
         return QueueResultSink
     raise AttributeError(name)

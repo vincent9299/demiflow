@@ -123,7 +123,7 @@ def fix_input(occurrence, columns, *, graph, physical, action, image, services, 
     root = action.context.directory / 'materializations' / 'fixed-datasets'
     root.mkdir(parents=True, exist_ok=True)
     destination = root / occurrence
-    from ..commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.execution.outputs.lance_sink import LanceSink

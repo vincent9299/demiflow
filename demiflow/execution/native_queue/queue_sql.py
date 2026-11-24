@@ -101,7 +101,7 @@ class QueueDatabase:
             pass
             path = Path(c.path)
             if initialize:
-                from demiflow.execution.raw_objects import _directory
+                from demiflow.execution.native_queue.raw_objects import _directory
                 import os
                 os.close(_directory(path.parent,create=True))
                 require_local_storage(path.parent)
@@ -178,7 +178,7 @@ class QueueDatabase:
                     raise RecoveryContractError('Existing v1 or unrelated queue store cannot be migrated in place')
             for statement in SCHEMA:
                 db.execute(statement)
-            from demiflow.execution.raw_budget import schema
+            from demiflow.execution.native_queue.raw_budget import schema
             schema(db)
             db.execute('INSERT INTO runtime_budget_guard VALUES (1) ON CONFLICT(id) DO NOTHING')
             db.execute('INSERT INTO queue_identity VALUES (1,?,?) ON CONFLICT(id) DO NOTHING',

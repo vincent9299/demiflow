@@ -105,7 +105,7 @@ def test_known_remote_failures_are_rows(tmp_path,path,reason,attempts):
 
 @pytest.mark.parametrize('size',[0,1,20000])
 def test_expected_size_is_write_ceiling_without_content_length(tmp_path,size,monkeypatch):
-    from demiflow.execution.raw_objects import RawWriter
+    from demiflow.execution.native_queue.raw_objects import RawWriter
     sizes=[]
     original=RawWriter.write
     def observe(self,chunk):
@@ -277,8 +277,8 @@ def test_secret_header_origin_ownership_survives_redirects(tmp_path,monkeypatch)
 
 @pytest.mark.parametrize('window',['after_acked','settlement_response_lost'])
 def test_native_recovery_closes_raw_settlement_once(tmp_path,window,monkeypatch):
-    from demiflow.execution import commit
-    from demiflow.execution.raw_budget import RawBudget
+    from demiflow.execution.checkpoint import commit
+    from demiflow.execution.native_queue.raw_budget import RawBudget
     original_fault=commit.fault_point
     original_settle=RawBudget.settle_disk
     active=[None];injected=[False]

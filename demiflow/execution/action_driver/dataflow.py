@@ -664,7 +664,7 @@ class DataflowExecution:
             if existing is not None:
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from ..queue_execution import queue_source
+        from demiflow.execution.native_queue.queue_execution import queue_source
         requires_acquisition = queue_source(self._request.source) is not None or any(
             node.kernel.configuration.get('native_operation') == 'acquire' for node in graph.nodes)
         if requires_acquisition:

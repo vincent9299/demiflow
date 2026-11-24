@@ -32,7 +32,7 @@ if __name__ == "__main__":
         assert mode in ("complete", "interrupt")
         root.mkdir(exist_ok=False)
         if mode == "interrupt":
-            from demiflow.execution import commit
+            from demiflow.execution.checkpoint import commit
 
             def fault(name, commit_id):
                 if name == "after_acked":

@@ -103,7 +103,7 @@ def test_trait_replacement_is_keyed_by_the_reported_names():
 
 def test_datasource_kind_is_exact_type_not_subclass():
     from demiflow.execution.sources.queue_history import QueueHistoryDatasource
-    from demiflow.execution.queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     def instance(cls):
         return object.__new__(cls)       # the check reads the type only; no queue is opened
     assert native.datasource_kind(instance(QueueDatasource)) == 'queue'
@@ -116,7 +116,7 @@ def test_datasource_kind_is_exact_type_not_subclass():
 
 def test_key_only_and_native_publication_accept_subclasses_as_before():
     from demiflow.execution.sources.lance_key_source import LanceKeySource
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     def instance(cls):
         return object.__new__(cls)
     assert native.is_key_only(instance(LanceKeySource)) and native.is_key_only(instance(_subclass(LanceKeySource)))

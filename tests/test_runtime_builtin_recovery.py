@@ -88,7 +88,7 @@ def collect_graph(root, family):
 
 
 def run_collect(root, family, window=None):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
 
     root = Path(root)
     directory = root / "run"
@@ -297,7 +297,7 @@ def batch_graph():
 
 
 def run_batch(root, window=None):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
 
     root = Path(root)
     directory = root / "run"

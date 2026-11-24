@@ -190,7 +190,7 @@ def equal_width_cast_residency(directory, *, rejected):
     """
     import pyarrow as pa
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.lance.model import LanceWriteSpec

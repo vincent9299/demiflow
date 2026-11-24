@@ -62,7 +62,7 @@ def test_native_pending_input_precedes_mutating_predicate(tmp_path, fixture_http
     import os
     import threading
     import pytest
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     from demiflow.operator_llm.runtime import PromptActor
     reached = threading.Event()
     original = PromptActor.__call__

@@ -669,7 +669,7 @@ def _integration_cases(source):
             'queue',lambda r,e=explicit:_queue(r,e),True)
     pos('legacy-queue-archive','read_legacy_queue_records','queue',_legacy)
     neg('legacy-wrong-hash','read_legacy_queue_records','queue',lambda r:_legacy(r,True),'SHA256')
-    from demiflow.execution.queue import QueueConfig
+    from demiflow.execution.native_queue.queue import QueueConfig
     def config(root): return QueueConfig(backend='sqlite',queue_id='owned',path=str(root/'queue.sqlite'))
     neg('enqueue-invalid-depth','Dataset.enqueue','queue',lambda r:_ds().enqueue(config(r),producer=None,queue_depth=0),'queue_depth|producer')
     neg('queue-zero-tasks','read_queue','queue',lambda r:data.read_queue(config(r),pool='p',max_tasks=0),'max_tasks')
@@ -763,8 +763,8 @@ def _search(root):
 def _queue(root,explicit):
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.queue import QueueChannel,QueueConfig,ProducerSourceSpec,task_message
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore,ObjectRef
     from test_raw_fetch import origin_server,BODY

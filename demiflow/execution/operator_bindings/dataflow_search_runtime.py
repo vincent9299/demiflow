@@ -4,8 +4,8 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
 from demiflow.services.blocking_io import BlockingIOPool
-from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.raw_budget import budget_delta, record_admission
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.native_queue.raw_budget import budget_delta, record_admission
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, UnresolvedCommit, identity
 from demiflow.execution.worker.row_scope import RowScope, current_row_scope, set_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, action_scope
@@ -43,7 +43,7 @@ class SearchEffects:
 
     def _action(self, occurrence):
         if self._producer_binding is not None:
-            from demiflow.execution.queue_commit import producer_action
+            from demiflow.execution.native_queue.queue_commit import producer_action
             producer, index = self._producer_binding
             key = identity(['search', index, occurrence])
             return producer_action(self._parent, producer.channel, producer.producer,

@@ -9,7 +9,7 @@ import sys
 import pytest
 
 from demiflow.execution.outputs.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, UnresolvedCommit
 from demiflow.execution.pipeline.run_context import RunContext, current_run
 from demiflow.execution.journal.run_journal import RunJournal
@@ -37,7 +37,7 @@ def protocol_worker(root, window=None):
     scope = (RunContext.resume(RunRef(str(directory), identity["run_id"]))
              if identity else RunContext.start(directory))
     if window is not None:
-        import demiflow.execution.commit as protocol
+        import demiflow.execution.checkpoint.commit as protocol
         def interrupt(name, commit_id):
             if name == window:
                 os._exit(37)
@@ -147,7 +147,7 @@ def test_resume_requires_original_reference_and_frozen_limits(tmp_path):
 
 
 def test_state_is_durable_before_any_sink_publication(tmp_path, monkeypatch):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     reference = None
     with pytest.raises(RuntimeError, match="prepared"):
         with RunContext.start(tmp_path / "run") as run:
@@ -196,7 +196,7 @@ def test_oversized_state_does_not_publish_or_advance(tmp_path):
 
 
 def test_orphan_cleanup_preserves_prepared_and_foreign_files(tmp_path, monkeypatch):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     def stop(name, commit_id):
         if name == 'after_prepared':
             raise RuntimeError('prepared')
@@ -284,7 +284,7 @@ def test_owner_transfer_cannot_race_between_check_and_publication(tmp_path):
 
 
 def test_cancel_after_prepare_prevents_publication(tmp_path, monkeypatch):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     def stop(name, commit_id):
         if name == 'after_prepared':
             RunContext.cancel(current_run().ref)

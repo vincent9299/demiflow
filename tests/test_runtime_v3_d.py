@@ -555,7 +555,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: 
 from demiflow.execution.checkpoint import coordinator as ckpt  # noqa: E402
 from demiflow.execution.outputs import sinks  # noqa: E402
 from demiflow.execution.seal import plan as seal  # noqa: E402
-from demiflow.execution import commit as commit_module  # noqa: E402
+from demiflow.execution.checkpoint import commit as commit_module  # noqa: E402
 from demiflow.execution.contracts.recovery_contract import RunRef, SourcePosition, document, identifier, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext  # noqa: E402
 from demiflow.execution.journal.run_journal import RunJournal  # noqa: E402

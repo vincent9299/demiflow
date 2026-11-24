@@ -1,7 +1,7 @@
 """Read only the original acknowledged v3 cut and its bounded operator images."""
 import contextlib
 
-from demiflow.execution import commit as protocol
+from demiflow.execution.checkpoint import commit as protocol
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE

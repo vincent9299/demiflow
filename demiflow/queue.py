@@ -1,8 +1,6 @@
 """Public native SQLite/PostgreSQL task channels and bounded history declarations."""
-from .execution.queue import (QueueChannel,QueueConfig,QueueLimits,ProducerSourceSpec,ProducerRef,
-    QueueSnapshot,HistoryReadLimits,QueueIncomplete,QueueIdleTimeout,StaleQueueOwner,
-    ArtifactDomainUnavailable,HistoryReadLimit,task_message)
-from .execution.queue_sinks import QueueResultSink
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, QueueLimits, ProducerSourceSpec, ProducerRef, QueueSnapshot, HistoryReadLimits, QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from .execution.queue_contract import ProducerWindowLimit
 
 

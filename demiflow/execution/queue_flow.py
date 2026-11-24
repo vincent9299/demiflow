@@ -42,7 +42,7 @@ def declare_value(target, kind):
 
 
 def normalize_source(arguments):
-    from .queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     return QueueDatasource(**{key: decode(value) for key, value in arguments.items()}).declaration()
 
 
@@ -61,7 +61,7 @@ def normalize_enqueue(arguments):
 
 
 def normalize_ack(arguments):
-    from .queue_ack import QueueAcknowledge
+    from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
     return QueueAcknowledge(**{key: decode(value) for key, value in arguments.items()}).recovery_identity()
 
 

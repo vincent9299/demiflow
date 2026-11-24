@@ -243,7 +243,7 @@ class LocalObjectStore:
         root=self.directory, max_bytes=...). Ordinary ObjectRef.read/verify keep
         their existing location/alias semantics and are not no-follow readers.
         """
-        from .execution.raw_objects import resolve_raw_reference
+        from demiflow.execution.native_queue.raw_objects import resolve_raw_reference
         return resolve_raw_reference(self, reference, domain=domain)
 
     def put(self, value, *, sha256=None, temporary=None, max_bytes=None):

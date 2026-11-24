@@ -43,7 +43,7 @@ def source_facts(source):
     from demiflow.data.sources import DatasourceSource, KeyedSource, LanceSource, MaterializedSource, UnionSource
     from demiflow.lance.model import LanceScanSpec
 
-    from demiflow.execution.queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     if type(source) is DatasourceSource and type(source.datasource) is QueueHistoryDatasource:
         if source.native_options is not None:raise RuntimeContractError('History has no alternate execution backend')
@@ -269,9 +269,9 @@ def operation_facts(operation):
         from demiflow.operator_llm.native_actor import is_native_prompt_actor
         target = operation.callable.target
         target = target.__self__ if inspect.ismethod(target) else target
-        from demiflow.execution.raw_fetch import RawFetch, raw_fetch_facts
+        from demiflow.execution.native_queue.raw_fetch import RawFetch, raw_fetch_facts
         from demiflow.execution.native_queue.queue_producer import QueueProducer, producer_facts
-        from demiflow.execution.queue_ack import QueueAcknowledge, ack_facts
+        from demiflow.execution.native_queue.queue_ack import QueueAcknowledge, ack_facts
         if type(target) is QueueAcknowledge:
             domain=ack_facts(target)
         elif type(target) is QueueProducer:

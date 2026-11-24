@@ -296,7 +296,7 @@ def _bare(cls, **attrs):
     lambda: _bare(__import__("demiflow.collect.documents", fromlist=["DecodeDocument"]).DecodeDocument),
     lambda: _bare(__import__("demiflow.collect.image_resize", fromlist=["EncodeImage"]).EncodeImage),
     lambda: _bare(__import__("demiflow.collect.operators", fromlist=["SearchWeb"]).SearchWeb),
-    lambda: _bare(__import__("demiflow.execution.raw_fetch", fromlist=["RawFetch"]).RawFetch),
+    lambda: _bare(__import__('demiflow.execution.native_queue.raw_fetch', fromlist=["RawFetch"]).RawFetch),
     lambda: _bare(__import__('demiflow.execution.native_queue.queue_producer', fromlist=["QueueProducer"]).QueueProducer),
     lambda: _bare(__import__("demiflow.operator_llm.runtime", fromlist=["PromptActor"]).PromptActor),
     lambda: _bare(__import__("demiflow.embeddings.runtime", fromlist=["EmbeddingActor"]).EmbeddingActor),

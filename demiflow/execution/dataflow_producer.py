@@ -153,7 +153,7 @@ class NativeProducerService(NativeAcquisitionService):
 
     def _publish_row(self, command):
         result = self._call_native(command, self._fetch)
-        from .queue_commit import QueueCommitStore
+        from demiflow.execution.native_queue.queue_commit import QueueCommitStore
         with self._fetch.channel.database.connection() as db:
             proofs = [QueueCommitStore._fact(db, cid) for cid in self._fetch.last_call_commits]
         return self._confirmed(command, result, proofs)

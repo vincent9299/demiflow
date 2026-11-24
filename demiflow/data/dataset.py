@@ -754,7 +754,7 @@ class Dataset:
         stay in the declared LocalObjectStore. Parsing and business acceptance
         belong to subsequent ordinary functions/actors.
         """
-        from ..execution.raw_fetch import RawFetch
+        from demiflow.execution.native_queue.raw_fetch import RawFetch
         actor = RawFetch(request=request, output=output, store=store, policy=policy,
                          concurrency=concurrency, queue_depth=queue_depth, label=label)
         from ..planning.dataflow_declaration import validate_native_operation
@@ -874,7 +874,7 @@ class Dataset:
         Requires read_queue(settlement='explicit') and run_stream. It uses the
         same QueueResultSink and atomic source completion as automatic mode.
         """
-        from ..execution.queue_ack import QueueAcknowledge
+        from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
         actor=QueueAcknowledge(config,result=result,queue_depth=queue_depth,keep_row=keep_row)
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("ack_queue",

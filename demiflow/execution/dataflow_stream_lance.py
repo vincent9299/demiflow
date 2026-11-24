@@ -17,7 +17,7 @@ from .contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.recovery_contract import identity, document, SourcePosition, UnresolvedCommit
 from demiflow.execution.native_queue.stream_lance import StreamLanceWriter, _canonical
 from demiflow.execution.outputs.lance_sink import LanceSink
-from .commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.pipeline.run_context import RunAction
 
 from demiflow.execution.outputs.lance_sink import _BatchSink

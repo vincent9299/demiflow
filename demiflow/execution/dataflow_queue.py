@@ -28,17 +28,12 @@ from .contracts.dataflow import (
     WorkerLease,
 )
 from .contracts.dataflow_errors import DataflowError, DataflowRecoveryError
-from .queue_ack import QueueAcknowledge
+from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
 from .queue_contract import QueueIncomplete
-from .queue_execution import (
-    configure_explicit,
-    finalize_task,
-    queue_source,
-    validate_topology,
-)
-from .queue_sinks import QueueResultSink
-from .queue_source import QueueDatasource
-from .raw_fetch import RawFetch
+from demiflow.execution.native_queue.queue_execution import configure_explicit, finalize_task, queue_source, validate_topology
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.native_queue.queue_source import QueueDatasource
+from demiflow.execution.native_queue.raw_fetch import RawFetch
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, action_scope
@@ -664,7 +659,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         result = receipt[(fetch or self._fetch).output]
         commit_id = result['acquisition_ref']['commit_id']
         if self._source is not None:
-            from .queue_commit import QueueCommitStore
+            from demiflow.execution.native_queue.queue_commit import QueueCommitStore
             with self._source.channel.database.connection() as db:
                 fact = QueueCommitStore._fact(db, commit_id)
         else:
@@ -674,7 +669,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         return fact
 
     def _last_final_fact(self, delivery):
-        from .queue_commit import QueueCommitStore
+        from demiflow.execution.native_queue.queue_commit import QueueCommitStore
         with self._source.channel.database.connection() as db:
             row = db.execute('SELECT final_scope FROM queue_tasks WHERE generation=? AND task_id=?',
                              (delivery.generation, delivery.task_id)).fetchone()

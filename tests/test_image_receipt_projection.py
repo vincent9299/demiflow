@@ -7,7 +7,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow.execution.outputs.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.outputs.object_sink import ObjectRowsSink
 from demiflow.execution.contracts.recovery_contract import SourcePosition, UnresolvedCommit

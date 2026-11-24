@@ -3,11 +3,11 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 
 import pytest
-from demiflow.execution.queue_commit import task_action
+from demiflow.execution.native_queue.queue_commit import task_action
 from demiflow.execution.queue_contract import StaleQueueOwner, QueueIncomplete
 from demiflow.execution.native_queue.queue_sql import QueueDatabase
 from test_queue_v2_protocol import channel, domain, native_parent, publish, source, worker
-from demiflow.execution.queue import task_message
+from demiflow.execution.native_queue.queue import task_message
 
 
 @pytest.mark.parametrize('operation',['scope','claim'])

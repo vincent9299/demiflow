@@ -45,7 +45,7 @@ def declare_value(target,kind):
 
 
 def normalize_fetch(arguments):
-    from ..execution.raw_fetch import RawFetch
+    from demiflow.execution.native_queue.raw_fetch import RawFetch
     actor=RawFetch(**_decode(arguments))
     return dict(request=actor.request,output=actor.output,store=actor.store.recovery_identity(),
         policy=actor.policy.declaration(),concurrency=actor.concurrency,queue_depth=actor.queue_depth,label=actor.label)
@@ -77,7 +77,7 @@ def receipt_type():
 
 def analyze_fetch(a,*,inputs,callables,resources):
     from ..objects import LocalObjectStore
-    from ..execution.raw_fetch import RawFetch,raw_fetch_facts
+    from demiflow.execution.native_queue.raw_fetch import RawFetch, raw_fetch_facts
     schema=inputs[0];require_fields(schema,[a['request']])
     request=schema[a['request']]['type']
     if request['kind']!='record' or request.get('nullable'):

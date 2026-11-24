@@ -4,7 +4,7 @@ import json
 import pytest
 
 from demiflow import data
-from demiflow.execution.queue import ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue import ProducerSourceSpec, task_message
 from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel
 
@@ -16,7 +16,7 @@ def _expand(row):
 
 @pytest.mark.parametrize('seam', ['native_unit', 'dataset_cut'])
 def test_same_run_producer_recovers_zero_and_many_outputs(channel, tmp_path, monkeypatch, seam):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     producer = channel.open('p', producer_id='recovery', source=ProducerSourceSpec(
         kind='records', source_id='fixed-records', uri='memory:records', version=1))
     directory = tmp_path / 'producer'

@@ -1,7 +1,7 @@
 """One prepare/publish/progress/ACK protocol inside the existing run driver."""
 from dataclasses import asdict
 
-from ..data.datasink import WriteContext, Datasink
+from demiflow.data.datasink import WriteContext, Datasink
 from demiflow.execution.contracts.recovery_contract import CommitContext, SourcePosition, RecoveryContractError, MAX_SINKS, MAX_STATES, identifier, validate_receipt, identity
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 
@@ -99,7 +99,7 @@ class CommitCoordinator:
         context = self._context(fact['commit_id'])
         if set(sinks) != set(fact['intent']['sinks']) or set(sinks) != set(fact['receipts']):
             raise RecoveryContractError('Completion sink set differs')
-        from .raw_objects import inspect_acquisition
+        from demiflow.execution.native_queue.raw_objects import inspect_acquisition
         for commit_id in fact['prepared'].get('raw_acquisitions', ()):
             inspect_acquisition(self.run, commit_id)
         for reference in fact['prepared']['state'].values():
@@ -118,19 +118,19 @@ class CommitCoordinator:
         if bool(acknowledge is not None) != fact["intent"]["requires_ack"]:
             raise RecoveryContractError("Recovery source ACK contract differs")
         prepared = fact["prepared"]
-        from .raw_objects import inspect_acquisition
+        from demiflow.execution.native_queue.raw_objects import inspect_acquisition
         for commit_id in prepared.get('raw_acquisitions', ()):
             inspect_acquisition(self.run, commit_id)
         for reference in prepared["state"].values():
             self.artifacts.read(reference)
         # Even confirmed receipts are inspected, so corruption cannot turn into
         # a silently skipped source prefix.
-        from .raw_objects import RawObjectSink
-        from .queue_sinks import QueueResultSink, QueuePublishSink
+        from demiflow.execution.native_queue.raw_objects import RawObjectSink
+        from demiflow.execution.native_queue.queue_sinks import QueueResultSink, QueuePublishSink
         for sink_id, sink in sinks.items():
             self.run.check_stop()
             if type(sink) is RawObjectSink:
-                from .raw_objects import ConcurrentRawPublication
+                from demiflow.execution.native_queue.raw_objects import ConcurrentRawPublication
                 for publication_try in range(3):
                     try:
                         # Hashing may take minutes; never hold the control DB lock.
@@ -204,7 +204,7 @@ class CommitCoordinator:
         self.journal.confirm_commit(self.run.fence, context.commit_id,
             expected="data_committed", status="checkpoint_committed")
         fault_point("after_checkpoint_committed", context.commit_id)
-        from .queue_commit import QueueCommitStore
+        from demiflow.execution.native_queue.queue_commit import QueueCommitStore
         if type(self.journal) is QueueCommitStore and self.journal.phase == 'final':
             self.journal.finalize_source_commit(self.run.fence, context.commit_id)
             fault_point('after_ack_before_record', context.commit_id)

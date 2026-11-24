@@ -11,8 +11,8 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.queue import ProducerSourceSpec,task_message
-from demiflow.execution.queue_sinks import QueueResultSink
+from demiflow.execution.native_queue.queue import ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.recovery_contract import RunRef
 from test_queue_v2_protocol import channel

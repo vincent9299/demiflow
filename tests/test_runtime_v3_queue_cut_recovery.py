@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from demiflow.execution.queue import QueueChannel, QueueConfig, task_message
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, task_message
 from demiflow.execution.queue_contract import StaleQueueOwner, QueueIncomplete
 from test_queue_v2_protocol import native_parent, publish, source, worker
 
@@ -84,7 +84,7 @@ def test_native_restore_preserves_generation_deadline(tmp_path):
 def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, monkeypatch, worker_mode, change_type):
     from demiflow import data
     from demiflow.execution.dataflow_queue import NativeAcquisitionService
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.execution.pipeline.run_context import RunContext
     from test_mvp2_queue_unified import _config, _seed_tasks, _make_builder, _records_by_task
     from test_raw_fetch import origin_server

@@ -31,7 +31,7 @@ from demiflow.execution.contracts.checkpoint import (
 import threading
 import weakref
 
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, CutRequest, PhysicalDataflow, RecoveryImage, SourceCursor
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.recovery_contract import MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document, identifier, identity

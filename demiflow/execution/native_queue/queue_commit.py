@@ -7,8 +7,8 @@ from contextlib import contextmanager
 import json
 from types import SimpleNamespace
 
-from .queue import QueueChannel
-from .queue_contract import StaleQueueOwner
+from demiflow.execution.native_queue.queue import QueueChannel
+from demiflow.execution.queue_contract import StaleQueueOwner
 from demiflow.execution.contracts.recovery_contract import COMMIT_STATES, RecoveryContractError, document, identity
 from demiflow.execution.pipeline.run_context import RunAction
 
@@ -48,7 +48,7 @@ class QueueBudgetTransaction:
         return self.db.execute('SELECT consumed,ceiling FROM runtime_budgets WHERE name=?',(window,)).fetchone()
 
     def native_budget_delta(self,name,delta,ceiling,*,owner=None,pool_delta=None):
-        from .raw_budget import budget_delta
+        from demiflow.execution.native_queue.raw_budget import budget_delta
         pool,window=self._names(name,owner)
         if name=='control_bytes':
             budget_delta(self.db,'database-control-bytes',delta,self.store.channel.config.limits.max_control_bytes)
@@ -101,7 +101,7 @@ class QueueCommitStore:
             'task-'+identity([self.generation,delivery.task_id]) if delivery else 'producer-'+self.generation,declaration)
 
     def _control(self,db,amount):
-        from .raw_budget import budget_delta
+        from demiflow.execution.native_queue.raw_budget import budget_delta
         budget_delta(db,'control_bytes',amount,self.local_run.limits['max_control_bytes'])
 
     def _artifact_delta(self,db,domain,delta):

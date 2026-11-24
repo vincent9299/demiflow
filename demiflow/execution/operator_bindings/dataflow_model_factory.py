@@ -122,8 +122,8 @@ def native_model_declaration(operation):
         from demiflow.execution.dataflow_producer import ProducerCall
         producer_facts(actor)
         return CallableSpec.create(ProducerCall)
-    from demiflow.execution.raw_fetch import RawFetch, raw_fetch_facts
-    from demiflow.execution.queue_ack import QueueAcknowledge, ack_facts
+    from demiflow.execution.native_queue.raw_fetch import RawFetch, raw_fetch_facts
+    from demiflow.execution.native_queue.queue_ack import QueueAcknowledge, ack_facts
     if type(actor) in (RawFetch, QueueAcknowledge):
         from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
         (raw_fetch_facts if type(actor) is RawFetch else ack_facts)(actor)

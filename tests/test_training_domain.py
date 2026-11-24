@@ -129,7 +129,7 @@ def test_original_receipt_cross_action_and_parent(tmp_path):
         selected = first.selected_model(result, 1, identity('predictor'))
         assert 'resume_files' not in selected['snapshot']
         first.hold_active()
-        from demiflow.execution.commit import CommitCoordinator
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
         from demiflow.execution.outputs.lance_sink import LanceSink
         from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.lance.model import LanceWriteSpec
@@ -163,7 +163,7 @@ def test_original_receipt_cross_action_and_parent(tmp_path):
 
 
 def test_missing_receipt_not_a_cache_hit(tmp_path, monkeypatch):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     request,binding = setup_request(tmp_path)
     provider = Provider()
     failed = []
@@ -755,7 +755,7 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
         result = finish(fit)
         row = fit.index.read(request.instance_id)
         import pyarrow as pa
-        from demiflow.execution.commit import CommitCoordinator
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
         from demiflow.execution.outputs.lance_sink import LanceSink
         from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.execution.training.runtime import confirm_table_consumption

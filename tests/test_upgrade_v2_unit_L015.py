@@ -41,7 +41,7 @@ def actual_chain(tmp_path_factory):
     root = tmp_path_factory.mktemp('chain-contract')
     assignments, executions, commits = [], [], []
     original_assignment = DataflowExecution._assignment
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     original_commit = CommitCoordinator.commit
     def assign(execution, *args, **kwargs):
         value = original_assignment(execution, *args, **kwargs)

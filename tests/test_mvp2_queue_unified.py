@@ -10,8 +10,8 @@ from runtime_v3_owned_crash import assert_released, kill_owned_worker, process_r
 
 import demiflow.data as data
 from demiflow.collect import FetchPolicy, HttpSource
-from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
-from demiflow.execution.queue_sinks import QueueResultSink
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.objects import LocalObjectStore
@@ -114,7 +114,7 @@ def test_public_queue_runs_in_managed_worker(tmp_path):
 
 
 def test_both_commit_scopes_settle_in_driver_single_journal(tmp_path, monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     records = []
     original = commits.CommitCoordinator.__init__
 

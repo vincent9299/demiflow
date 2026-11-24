@@ -227,10 +227,10 @@ def test_create_reconciliation_uses_marker_and_preserves_fixed_version(root, mon
     (runs.directory(root,value['run_id'])/'unit-1.lock').touch()
     run.transition({'prepared'}, 'running')
     from demiflow.execution import RunContext, SourcePosition
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.seal.program_identity import plan_identity
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     def fail(name, commit_id):
         if name == 'after_sink_commit_before_receipt':
             raise RuntimeError('lost receipt')

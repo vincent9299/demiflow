@@ -46,9 +46,9 @@ import pytest
 
 import demiflow.data as data
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution import commit as commit_module
+from demiflow.execution.checkpoint import commit as commit_module
 from demiflow.execution.outputs.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction

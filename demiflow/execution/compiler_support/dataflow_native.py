@@ -117,7 +117,7 @@ def native_variant(operation, declaration) -> NativeVariant | None:
 
 def datasource_kind(datasource) -> str:
     """The source kind of a datasource: a queue, a queue history, or an ordinary datasource."""
-    from demiflow.execution.queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     if type(datasource) is QueueDatasource:
         return 'queue'
@@ -144,7 +144,7 @@ def publishes_natively(sink) -> bool:
     Queue tasks were settled by their original authority already; that terminal
     only publishes the result manifest, without Arrow.
     """
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     return not isinstance(sink, QueueResultSink)
 
 

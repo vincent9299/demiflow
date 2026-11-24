@@ -46,7 +46,7 @@ def test_plain_stream_seal_without_native_cut_does_not_authorize_recovery(tmp_pa
 
 @pytest.mark.parametrize('corrupt_marker',[False,True])
 def test_prepared_not_published_is_recoverable_only_with_matching_original_receipts(tmp_path,monkeypatch,corrupt_marker):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     inputs,calls=tmp_path/'inputs',tmp_path/'commits'
     def observed(row):
         with inputs.open('a') as output: output.write('row\n')
@@ -146,7 +146,7 @@ def test_real_worker_budget_failure_keeps_class_name_and_message(tmp_path):
 
 @pytest.mark.parametrize('phase',['commit','recover'])
 def test_native_coordinator_budget_rejection_is_not_mislabeled_unknown(tmp_path,monkeypatch,phase):
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     def reject(*args,**kwargs):
         raise ExecutionBudgetExceeded('disk_bytes',message='original native storage admission rejected')
     if phase=='commit':

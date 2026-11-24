@@ -1,5 +1,5 @@
 """Explicit graph-tail adapter to the same native final task commit."""
-from .queue_contract import queue_config
+from demiflow.execution.queue_contract import queue_config
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 from demiflow.execution.worker.row_scope import current_row_scope
 
@@ -24,7 +24,7 @@ class QueueAcknowledge:
             raise RecoveryContractError('Explicit ACK requires a validated graph-tail source')
 
     async def __call__(self,row):
-        from .queue_execution import finalize_task
+        from demiflow.execution.native_queue.queue_execution import finalize_task
         scope=current_row_scope()
         if scope is None or scope.delivery is None or self.source is None:
             raise RecoveryContractError('Explicit ACK lost its source-owned delivery')
@@ -34,6 +34,6 @@ class QueueAcknowledge:
 
 
 def ack_facts(actor):
-    from .queue_flow import resource
+    from demiflow.execution.queue_flow import resource
     return dict(native=actor.recovery_identity(), effects=['queue'],
                 resources=[resource(actor.config, 'complete')], reserved_bytes=65536)

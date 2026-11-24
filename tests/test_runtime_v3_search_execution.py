@@ -41,7 +41,7 @@ def test_standalone_search_uses_native_journal_and_reports_metrics(tmp_path, eng
 @pytest.mark.parametrize('outcome', ['fixed', 'unknown'])
 def test_search_resume_before_first_dataset_cut_never_repeats_http(tmp_path, engines, server, monkeypatch, outcome):
     from demiflow.collect.search_contract import NativeSearchResultSink
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     fired = []
     original = NativeSearchResultSink.prepare
     def interrupt(self, *args, **kwargs):

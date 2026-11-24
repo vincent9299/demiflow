@@ -63,7 +63,7 @@ class SeedScores:
 
 
 def _install_driver_crash(run, location):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.action_driver.dataflow import DataflowExecution

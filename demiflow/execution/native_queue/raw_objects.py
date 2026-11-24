@@ -13,7 +13,7 @@ from pathlib import Path
 import stat
 import uuid
 
-from ..data.datasink import Datasink
+from demiflow.data.datasink import Datasink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
 
 
@@ -117,7 +117,7 @@ def _read_domain_marker(base):
 
 def resolve_raw_reference(store, reference, *, domain):
     """Explicit read-only native namespace binding; no journal or registration."""
-    from ..objects import ObjectRef,_local_path
+    from demiflow.objects import ObjectRef, _local_path
     if type(reference) is dict:
         if (len(reference)!=2 or set(reference)!={'uri','sha256'} or
                 type(reference['uri']) is not str or len(reference['uri'])>4096 or
@@ -367,7 +367,7 @@ class RawObjectSink(Datasink):
         if type(prepared) is not dict or set(prepared) != {'format','object','result','domain'} or prepared['format'] != 1:
             raise RecoveryContractError('Invalid raw prepared descriptor')
         fact = prepared['object']
-        from ..collect.raw_contract import validate_result
+        from demiflow.collect.raw_contract import validate_result
         try:
             validate_result(prepared['result'],fact,prepared['domain'])
         except (TypeError,ValueError,KeyError) as exc:
@@ -395,7 +395,7 @@ class RawObjectSink(Datasink):
                 inspected.close()
 
     def _receipt(self, prepared, context):
-        from ..collect.raw_contract import validate_result
+        from demiflow.collect.raw_contract import validate_result
         validate_result(prepared['result'],prepared['object'],prepared['domain'],context=context)
         return dict(commit_id=context.commit_id, sink_id=self.sink_id, status='committed', data=prepared)
 
@@ -459,7 +459,7 @@ class RawObjectSink(Datasink):
 def inspect_acquisition(run, commit_id):
     """Read exactly one referenced native acquisition, without mutation."""
     from types import SimpleNamespace
-    from .commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     fact = run.journal.execution_commit(identifier(commit_id))
     if fact is None or set(fact['intent']['sinks']) != {'raw'} or fact['prepared'] is None:
         raise UnresolvedCommit('Referenced raw acquisition is unavailable')
@@ -469,7 +469,7 @@ def inspect_acquisition(run, commit_id):
     domain = prepared['domain']
     namespace = None
     if domain is not None:
-        from .queue_contract import ArtifactDomainUnavailable
+        from demiflow.execution.queue_contract import ArtifactDomainUnavailable
         host=_host_identity()
         if domain['read_domain']=='host' and domain['host_identity']!=host:
             raise ArtifactDomainUnavailable('Raw artifact belongs to another host domain')

@@ -2,12 +2,11 @@
 import dis
 import inspect
 
-from ..data.datasink import WriteResult
-from ..data.plan import (AsyncMapOp,MapOp,BoundMapOp,SelectColumnsOp,
-                         DropColumnsOp,RenameColumnsOp)
-from ..data.sources import DatasourceSource
-from .queue_source import QueueDatasource
-from .queue_sinks import QueueResultSink
+from demiflow.data.datasink import WriteResult
+from demiflow.data.plan import AsyncMapOp, MapOp, BoundMapOp, SelectColumnsOp, DropColumnsOp, RenameColumnsOp
+from demiflow.data.sources import DatasourceSource
+from demiflow.execution.native_queue.queue_source import QueueDatasource
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.worker.row_scope import current_row_scope
 
@@ -62,7 +61,7 @@ def stateless_map_identity(spec):
 
 
 def validate_topology(source,plan,sink,*,mode='sink',action=None):
-    from .raw_fetch import RawFetch
+    from demiflow.execution.native_queue.raw_fetch import RawFetch
     from demiflow.execution.seal.program_identity import describe
     if type(sink) is not QueueResultSink or source.settlement!=mode:
         raise RecoveryContractError('Automatic queue settlement requires exactly QueueResultSink and matching settlement mode')
@@ -123,16 +122,16 @@ def validate_topology(source,plan,sink,*,mode='sink',action=None):
             raise RecoveryContractError('Task settlement supports pure one-to-one maps and exactly one raw fetch')
     if len(fetch)!=1 or fetch[0][1].output!=sink.result:
         raise RecoveryContractError('Task result sink requires exactly one matching fetch receipt')
-    from .queue_contract import resolve_consumer_contract
+    from demiflow.execution.queue_contract import resolve_consumer_contract
     declaration=dict(protocol='demiflow.queue.consumer.v3',
                      operations=operations,result=sink.result,settlement=source.settlement)
     return fetch[0],resolve_consumer_contract(source,declaration,action=action)
 
 
 def finalize_task(source,delivery,row):
-    from .queue_commit import task_action
-    from .commit import CommitCoordinator
-    from .queue_contract import QueueIncomplete
+    from demiflow.execution.native_queue.queue_commit import task_action
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
+    from demiflow.execution.queue_contract import QueueIncomplete
     action=task_action(source.parent,source.channel,source.pool,delivery,'final','terminal',source.contract,stop_check=source._check)
     sink=source.sink.bind(action)
     coordinator=CommitCoordinator(action)
@@ -155,8 +154,8 @@ def finalize_task(source,delivery,row):
 
 
 def configure_explicit(source,plan,action):
-    from .queue_ack import QueueAcknowledge
-    from ..data.plan import LogicalPlan
+    from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
+    from demiflow.data.plan import LogicalPlan
     if not plan.operations or action.declaration['kind']!='run_stream':
         raise RecoveryContractError('Explicit ACK is supported only at graph tail with run_stream')
     operation=plan.operations[-1]

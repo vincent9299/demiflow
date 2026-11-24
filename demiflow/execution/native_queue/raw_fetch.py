@@ -5,12 +5,12 @@ import os
 import shutil
 import time
 
-from ..objects import LocalObjectStore
-from ..collect.raw_contract import fetch_policy, integer, request as validate_request
+from demiflow.objects import LocalObjectStore
+from demiflow.collect.raw_contract import fetch_policy, integer, request as validate_request
 from demiflow.services.blocking_io import BlockingIOPool
-from .commit import CommitCoordinator
-from .raw_budget import RawBudget
-from .raw_objects import RawNamespace, RawObjectSink, _directory
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.native_queue.raw_budget import RawBudget
+from demiflow.execution.native_queue.raw_objects import RawNamespace, RawObjectSink, _directory
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, document, identifier, identity
 from demiflow.execution.worker.row_scope import current_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, current_action
@@ -64,7 +64,7 @@ class RawFetch:
             await self.io.run(self.namespace.open)
         else:
             self.namespace = self.queue_source.namespace
-        from ..collect.raw_transport import Transfer
+        from demiflow.collect.raw_transport import Transfer
         self.transfer = Transfer(self.policy,self.concurrency,self.io)
         self.transfer.open()
 
@@ -82,7 +82,7 @@ class RawFetch:
 
     def _scope(self, occurrence, declaration, delivery=None):
         if self.queue_source is not None:
-            from .queue_commit import task_action
+            from demiflow.execution.native_queue.queue_commit import task_action
             source=self.queue_source
             if delivery is None or source.active.get(delivery.task_id) is not delivery:
                 raise RecoveryContractError('Raw task lost its source-owned delivery')
@@ -92,7 +92,7 @@ class RawFetch:
         return RunAction(self.run,scope_id,declaration)
 
     async def __call__(self,row):
-        from ..collect.raw_transport import Outcome
+        from demiflow.collect.raw_transport import Outcome
         if type(row) is not dict or self.output in row:
             raise ValueError('Fetch requires a record with an unused output field')
         req = validate_request(row[self.request])

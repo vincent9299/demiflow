@@ -235,7 +235,7 @@ def resolve_consumer_contract(source, declaration, *, action=None):
     document(declaration, 65536)
     if action is None:
         return declaration  # Passive topology inspection has no queue/run authority.
-    from .queue import QueueChannel
+    from demiflow.execution.native_queue.queue import QueueChannel
     channel = QueueChannel(source.config)
     channel._attach()
     with channel.database.connection() as db:

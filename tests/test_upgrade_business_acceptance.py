@@ -53,12 +53,12 @@ import demiflow.data as data
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.outputs.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
-from demiflow.execution.queue_commit import producer_action
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_commit import producer_action
 from demiflow.execution.queue_contract import HistoryReadLimit, HistoryReadLimits
-from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink
+from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.journal.run_journal import RunJournal

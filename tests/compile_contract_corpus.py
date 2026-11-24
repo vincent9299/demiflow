@@ -280,7 +280,7 @@ def _aggregates():
 
 
 def _queue_sink(c):
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     return QueueResultSink(c.queue(), pool='default', result='result')
 
 

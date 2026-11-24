@@ -104,7 +104,7 @@ def test_active_run_is_reused_and_remains_open(tmp_path):
 
 @pytest.mark.parametrize('changed', [False, True])
 def test_unfinished_registration_uses_original_recovery_and_code_pin(tmp_path, monkeypatch, changed):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     def stop(name, commit_id):

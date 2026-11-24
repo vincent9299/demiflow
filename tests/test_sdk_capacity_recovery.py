@@ -32,7 +32,7 @@ def write_graph(root, mode, crash=None):
     context = (RunContext.resume(RunRef(str(directory), previous['run_id']))
                if previous else RunContext.start(directory))
     if crash:
-        from demiflow.execution import commit
+        from demiflow.execution.checkpoint import commit
         def fault(point, commit_id):
             if point == crash:
                 os._exit(37)

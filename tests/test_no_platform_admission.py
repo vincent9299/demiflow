@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution.queue import QueueChannel, QueueConfig
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig
 from demiflow.execution.queue_contract import resolve_consumer_contract, resolve_producer_contract
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, document
 from demiflow.execution.pipeline.run_context import RunContext
@@ -78,7 +78,7 @@ def test_old_hash_only_original_run_and_business_refusal(queue):
 
 
 def test_old_full_consumer_cross_run_uses_original_scope(queue,tmp_path):
-    from demiflow.execution.queue_commit import task_action
+    from demiflow.execution.native_queue.queue_commit import task_action
     channel,p=queue;src=SimpleNamespace(config=channel.config,pool='p');body=consumer()
     old={**body,'protocol':'demiflow.queue.consumer.v2','platform':'original'}
     with native_parent(tmp_path/'fixture') as action:
@@ -114,7 +114,7 @@ def test_old_producer_reconstructs_hash_and_preserves_business(queue):
 
 @pytest.mark.parametrize('payload',[b'not-text','x'*65537])
 def test_old_scope_read_is_bounded_and_text_only(queue,tmp_path,payload):
-    from demiflow.execution.queue_commit import task_action
+    from demiflow.execution.native_queue.queue_commit import task_action
     channel,p=queue;src=SimpleNamespace(config=channel.config,pool='p');body=consumer()
     old={**body,'protocol':'demiflow.queue.consumer.v2','platform':'original'}
     with native_parent(tmp_path/'fixture') as action:

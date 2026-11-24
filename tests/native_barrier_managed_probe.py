@@ -104,7 +104,7 @@ def observed_fsync(fd):
         fsyncs['python_artifact_fsync'] += 1
     return original_fsync(fd)
 os.fsync = observed_fsync
-import demiflow.execution.commit as protocol
+import demiflow.execution.checkpoint.commit as protocol
 from demiflow.execution.contracts.recovery_contract import RunRef
 WRITER_METRICS = []
 ATTEMPTS = []

@@ -143,7 +143,7 @@ def test_arrow_public_write_uses_admitted_physical_reader(tmp_path, monkeypatch)
 
 @pytest.mark.parametrize('window', ['after_prepared', 'after_acked'])
 def test_embedding_resume_keeps_batches_and_does_not_repeat_paid_calls(embedding_server, tmp_path, monkeypatch, window):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     from demiflow.execution.journal.run_journal import RunJournal
     root = tmp_path / 'run'
     def build():
@@ -188,7 +188,7 @@ def test_embedding_known_http_failure_is_replayed_without_request(embedding_serv
 
 
 def test_auto_json_state_restores_with_committed_prepend_frontier(tmp_path, monkeypatch):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     from demiflow.execution.journal.run_journal import RunJournal
     def build():
         return data.from_items([{'id': i} for i in range(1, 9)]).prepend(

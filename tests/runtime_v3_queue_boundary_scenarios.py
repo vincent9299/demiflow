@@ -7,19 +7,19 @@ import time
 
 
 def _channel(root, name):
-    from demiflow.execution.queue import QueueChannel, QueueConfig
+    from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig
     root.mkdir(parents=True)
     return QueueChannel(QueueConfig(backend='sqlite', queue_id=name, path=str(root/'queue.sqlite')))
 
 
 def _open(channel):
-    from demiflow.execution.queue import ProducerSourceSpec
+    from demiflow.execution.native_queue.queue import ProducerSourceSpec
     return channel.open('p', producer_id='boundary', source=ProducerSourceSpec(
         kind='manifest', source_id='boundary', uri='memory:boundary', version=1))
 
 
 def _publish(channel, producer, root, base):
-    from demiflow.execution.queue import task_message
+    from demiflow.execution.native_queue.queue import task_message
     from test_queue_v2_protocol import publish
     from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_queue_business_scenarios import _body
@@ -49,7 +49,7 @@ def run_boundaries(root, base, calls):
     from demiflow.environment import OperatorEnvironment
     from demiflow.operator_llm.parser import parse_prompt_pack
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_queue_business_scenarios import _messages, PACK

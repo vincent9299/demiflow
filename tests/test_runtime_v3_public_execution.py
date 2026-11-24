@@ -202,7 +202,7 @@ def test_partial_cut_restores_input_kernel_and_terminal_prefix(tmp_path, monkeyp
 
 def test_public_lance_write_recovery_after_prepared(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     class Interrupted(Exception):
         pass
     def fault(name, commit_id):

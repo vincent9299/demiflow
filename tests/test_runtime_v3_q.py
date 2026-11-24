@@ -148,21 +148,21 @@ _install_contract_fakes()
 from demiflow import data  # noqa: E402
 from demiflow.collect import FetchPolicy, HttpSource  # noqa: E402
 from demiflow.objects import LocalObjectStore  # noqa: E402
-from demiflow.execution.commit import CommitCoordinator  # noqa: E402
+from demiflow.execution.checkpoint.commit import CommitCoordinator  # noqa: E402
 from demiflow.execution.dataflow_queue import NativeAcquisitionService, queue_service_request  # noqa: E402
 from demiflow.execution.contracts.dataflow import (  # noqa: E402
     ArtifactRef, Bounds, DriverServices, QueueBinding, QueueCommand, QueueReply,
     RuntimeServices, WorkerLease,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: E402
-from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message  # noqa: E402
-from demiflow.execution.queue_ack import QueueAcknowledge  # noqa: E402
-from demiflow.execution.queue_commit import producer_action  # noqa: E402
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message  # noqa: E402
+from demiflow.execution.native_queue.queue_ack import QueueAcknowledge  # noqa: E402
+from demiflow.execution.native_queue.queue_commit import producer_action  # noqa: E402
 from demiflow.execution.queue_contract import QueueIncomplete  # noqa: E402
-from demiflow.execution.queue_execution import validate_topology  # noqa: E402
-from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink  # noqa: E402
-from demiflow.execution.queue_source import QueueDatasource  # noqa: E402
-from demiflow.execution.raw_fetch import RawFetch  # noqa: E402
+from demiflow.execution.native_queue.queue_execution import validate_topology  # noqa: E402
+from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink  # noqa: E402
+from demiflow.execution.native_queue.queue_source import QueueDatasource  # noqa: E402
+from demiflow.execution.native_queue.raw_fetch import RawFetch  # noqa: E402
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity  # noqa: E402
 from demiflow.execution.pipeline.run_context import RunAction, RunContext  # noqa: E402
 from demiflow.data.plan import AsyncMapOp  # noqa: E402
@@ -179,9 +179,9 @@ def _assert_tree() -> None:
     import demiflow
     tree = _tree_root()
     assert Path(demiflow.__file__).resolve().is_relative_to(tree)
-    for name in ('demiflow.execution.dataflow_queue', 'demiflow.execution.queue_source',
-                 'demiflow.execution.raw_fetch', 'demiflow.execution.queue_execution',
-                 'demiflow.execution.queue_sinks'):
+    for name in ('demiflow.execution.dataflow_queue', 'demiflow.execution.native_queue.queue_source',
+                 'demiflow.execution.native_queue.raw_fetch', 'demiflow.execution.native_queue.queue_execution',
+                 'demiflow.execution.native_queue.queue_sinks'):
         mod = sys.modules.get(name)
         if mod is not None and getattr(mod, '__file__', None):
             assert Path(mod.__file__).resolve().is_relative_to(tree), name

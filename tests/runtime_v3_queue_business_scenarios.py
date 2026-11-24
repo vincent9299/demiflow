@@ -133,7 +133,7 @@ def external_transport():
 
 
 def _messages(row):
-    from demiflow.execution.queue import task_message
+    from demiflow.execution.native_queue.queue import task_message
     for result in row['searched']:
         assert result['status'] == 'ok'
         for candidate in result['candidates']:
@@ -198,7 +198,7 @@ def _producer(channel, producer, root, base):
 def _consumer(channel, root, *, explicit=False):
     from demiflow import data
     from demiflow.collect import FetchPolicy, HttpSource
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.objects import LocalObjectStore
     # A restart must wait out an unfinished native lease; it may not revoke a
     # live epoch merely because this Dataset cut was confirmed.
@@ -221,7 +221,7 @@ def _one_business(root, base, calls, model_calls, *, explicit=False, recover=Fal
     from demiflow.agent import AgentConfig
     from demiflow.environment import OperatorEnvironment
     from demiflow.operator_llm.parser import parse_prompt_pack
-    from demiflow.execution.queue import QueueConfig, QueueChannel, ProducerSourceSpec
+    from demiflow.execution.native_queue.queue import QueueConfig, QueueChannel, ProducerSourceSpec
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     root.mkdir(parents=True)
@@ -303,7 +303,7 @@ def _one_business(root, base, calls, model_calls, *, explicit=False, recover=Fal
 
 def _unknown_search(root, base, calls):
     import pytest
-    from demiflow.execution.queue import QueueConfig, QueueChannel, ProducerSourceSpec
+    from demiflow.execution.native_queue.queue import QueueConfig, QueueChannel, ProducerSourceSpec
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.collect.search_contract import NativeSearchResultSink
     from demiflow.execution.contracts.recovery_contract import UnresolvedCommit

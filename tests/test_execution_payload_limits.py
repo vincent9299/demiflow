@@ -14,7 +14,7 @@ from demiflow.planning.dataflow_policy import run_row_limit
 from demiflow.lance.arrow_batches import arrow_batches
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.outputs.lance_sink import LanceSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.contracts.recovery_contract import SourcePosition
 from demiflow.lance.model import LanceWriteSpec
 from demiflow.operator_llm.parser import parse_prompt_pack
@@ -108,7 +108,7 @@ def wide_graph(directory):
 
 @pytest.mark.parametrize('window', ['prepared_failure', 'cancel_after_prepared', 'native_return_loss'])
 def test_wide_model_output_recovers_with_identical_budget_without_repeating_effects(tmp_path, server, monkeypatch, window):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     original = LanceSink.commit
     def fault(name, commit_id):
         fact = current_run().journal.execution_commit(commit_id)

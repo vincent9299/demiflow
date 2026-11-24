@@ -38,8 +38,8 @@ def test_ray_prompt_and_relational_chain(tmp_path, native_server, monkeypatch):
 def test_ray_native_producer_fetch_settlement_and_history(tmp_path, monkeypatch):
     ray = pytest.importorskip('ray')
     import ray.data
-    from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.collect import FetchPolicy, HttpSource
     from demiflow.objects import LocalObjectStore
     from test_raw_fetch import origin_server

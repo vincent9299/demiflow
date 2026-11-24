@@ -707,7 +707,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
         native = FileSink(services.action, request.arguments)
     elif request.kind == 'write_datasink':
         native = request.sink
-        from demiflow.execution.queue_sinks import QueueResultSink
+        from demiflow.execution.native_queue.queue_sinks import QueueResultSink
         if isinstance(native, QueueResultSink):
             # Each task is already atomically settled by the original queue
             # authority before the terminal can publish it. This cut only owns

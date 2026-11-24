@@ -7,11 +7,11 @@ from pathlib import Path
 from demiflow.data import plan as ops
 from demiflow.data.sources import FileSource, ItemsSource, MaterializedSource, LanceSource
 from demiflow.services.blocking_io import BlockingIOPool
-from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.queue import QueueChannel
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.native_queue.queue import QueueChannel
 from demiflow.execution.queue_contract import ProducerRef, ProducerWindowLimit, queue_config
-from demiflow.execution.queue_commit import producer_action
-from demiflow.execution.queue_sinks import QueuePublishSink
+from demiflow.execution.native_queue.queue_commit import producer_action
+from demiflow.execution.native_queue.queue_sinks import QueuePublishSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, document, identity, identifier
 from demiflow.execution.seal.program_identity import describe, source_identity
 from demiflow.execution.worker.row_scope import RowScope, ScopedRow, current_row_scope
@@ -169,7 +169,7 @@ class QueueProducer:
         await self.io.run(self.channel._attach)
         if self.channel.database.queue_uuid != self.producer.queue_uuid:
             raise RecoveryContractError('Producer belongs to another physical queue')
-        from demiflow.execution.queue_commit import bind_queue_budget
+        from demiflow.execution.native_queue.queue_commit import bind_queue_budget
         await self.io.run(bind_queue_budget,self.parent,self.channel)
         await self.io.run(self._resume)
 

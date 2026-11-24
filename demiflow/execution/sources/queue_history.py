@@ -6,9 +6,9 @@ import time
 from types import SimpleNamespace
 
 from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata
-from demiflow.execution.queue import QueueChannel
+from demiflow.execution.native_queue.queue import QueueChannel
 from demiflow.execution.queue_contract import queue_config, QueueSnapshot, HistoryReadLimits, HistoryReadLimit
-from demiflow.execution.queue_commit import QueueCommitStore
+from demiflow.execution.native_queue.queue_commit import QueueCommitStore
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
 
 
@@ -75,13 +75,13 @@ def inspect_result(channel,snapshot,task_id,*,verify='artifacts',check_stop=lamb
         limits={'max_output_bytes':channel.config.limits.max_object_bytes,'max_row_bytes':channel.config.limits.max_result_bytes})
     # QueueResultSink's read-only inspection checks SQL row equality and the
     # exact RawObjectSink receipts; it cannot claim, prepare, repair or finalize.
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     action=SimpleNamespace(context=context,action_id=fact['action_id'])
     store.delivery=SimpleNamespace(generation=snapshot.generation,task_id=task_id)
     sink=QueueResultSink(channel.config,pool=snapshot.pool,result=prepared['result_field']).bind(action)
     sink._validate(prepared)
     if verify=='artifacts':
-        from demiflow.execution.commit import CommitCoordinator
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
         if observation:
             from demiflow.data.datasink import WriteContext
             receipt=sink.inspect(prepared,WriteContext(run_id=context.ref.run_id,action_id=fact['action_id'],

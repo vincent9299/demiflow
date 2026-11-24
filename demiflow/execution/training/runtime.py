@@ -5,7 +5,7 @@ from dataclasses import replace
 import json
 import time
 
-from ..commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from ..contracts.training import FitBinding, FitRequest, FitResult, FitSubmissionRejected, InputCopyReceipt, JobLookup, JobRef, ProjectObject, TrainingSnapshotRef
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunAction

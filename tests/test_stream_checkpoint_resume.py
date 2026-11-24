@@ -87,7 +87,7 @@ def test_save_when_passes_unsaved_rows_and_append_bound(tmp_path):
 
 
 def test_global_checkpoint_recovers_commit_before_manifest_publication(tmp_path, monkeypatch):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     uri = tmp_path / 'out.lance'
     calls = []
     def execute():

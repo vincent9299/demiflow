@@ -126,7 +126,7 @@ def _run_child(config):
         return _run_model_child(config)
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), demiflow.__file__
-    from demiflow.execution import commit as protocol
+    from demiflow.execution.checkpoint import commit as protocol
     from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.action_driver.dataflow import DataflowExecution
@@ -305,7 +305,7 @@ def _probe_worker(row):
     import os
     import sqlite3
     from demiflow.execution.journal.run_journal import RunJournal
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     checked = {}
     for name, operation in (
         ('sqlite_forbidden', lambda: sqlite3.connect(os.environ['DF_V3_RECOVERY_DB'])),

@@ -10,7 +10,7 @@ import sqlite3
 import pytest
 
 from demiflow.execution.outputs.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 

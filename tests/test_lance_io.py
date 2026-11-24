@@ -263,7 +263,7 @@ def test_checkpoint_recovers_pending_publish(tmp_path, monkeypatch):
     # Interrupt the original protocol after native publication, before its
     # runtime receipt/ACK. Never fabricate an old pending sidecar.
     import lance
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     calls = tmp_path/'calls'
     def factory():
         with calls.open('a') as stream: stream.write('source\n')
