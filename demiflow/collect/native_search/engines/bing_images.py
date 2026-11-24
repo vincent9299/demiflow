@@ -13,6 +13,7 @@ categories = ['images', 'web']
 paging = True
 enable_http3 = True
 safesearch = True
+language_support = True
 time_range_support = True
 base_url = 'https://www.bing.com'
 page_size = 35

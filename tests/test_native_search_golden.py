@@ -1,10 +1,10 @@
 """Native search against recorded behaviour of the previous (vendored SearXNG) runtime.
 
 The fixtures hold inputs and the outputs the previous runtime produced (main
-9bad3137): result merging, and offline request building of every built-in source
+9bad3137): result merging, offline request building of every built-in source
 across languages (including other letter cases such as ``zh-tw``), paging, safe
 search and time ranges (helper lookups such as cookie or token pages are stubbed
-identically on both sides).
+identically on both sides), and the source capabilities receipts record.
 """
 import datetime
 import json
@@ -107,3 +107,30 @@ def test_language_tags_babel_cannot_parse_never_reach_sources():
     with pytest.raises(ValueError):
         SearchConfig(engines=('google',), language='az-TR')
     assert validate_language('zh-tw') == 'zh-tw'
+
+
+CAPABILITY_PROGRAM = r'''
+import json, sys
+from demiflow.collect.native_search import worker as w
+from demiflow.collect.native_search.config import SearchConfig
+golden = json.load(open(sys.argv[1]))['capabilities']
+config = SearchConfig(engines=tuple(golden), language='en')
+settings = {'sources': config.source_configs(), 'outgoing': {}, 'timeout_s': 10, 'max_bytes': 1 << 20,
+            'max_results': 100, 'max_redirects': 3, 'offline_audit': True}
+loaded, errors = w.bootstrap(settings)
+w.send({'errors': errors, 'capabilities': {name: {key: getattr(loaded[name], key, '<absent>') for key in fields}
+                                           for name, fields in golden.items() if name in loaded}})
+'''
+
+
+def test_source_capabilities_match_recorded_reference():
+    # Receipts store these capabilities and derive ignored_parameters from safesearch/language_support.
+    path = FIXTURES / 'capabilities_golden.json'
+    golden = json.loads(path.read_text())['capabilities']
+    assert len(golden) == 21
+    result = subprocess.run([sys.executable, '-c', CAPABILITY_PROGRAM, str(path)], cwd=ROOT, capture_output=True,
+                            text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
+    actual = json.loads(result.stdout)
+    assert actual['errors'] == {}
+    assert actual['capabilities'] == golden

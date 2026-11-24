@@ -19,6 +19,7 @@ brave_spellcheck = False
 paging = False
 max_page = 10
 safesearch = True
+language_support = True
 time_range_support = False
 SAFE_SEARCH = {2: 'strict', 1: 'moderate', 0: 'off'}
 

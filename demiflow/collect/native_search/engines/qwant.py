@@ -19,6 +19,7 @@ paging = True
 max_page = 5
 qwant_categ = 'images'
 safesearch = True
+language_support = True
 test_group_value = random.randint(1, 3)
 base_url = 'https://www.qwant.com'
 api_url = 'https://api.qwant.com/v3/search/'

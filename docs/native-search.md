@@ -29,7 +29,7 @@
 - **处理器族**：只保留 online 与 offline 两类。online_dictionary、online_currency、online_url_search 返回 `unsupported_processor`。
 - **非 HTTP 来源**：只保留只读 SQLite。MySQL、MariaDB、PostgreSQL、MongoDB、Valkey、command 来源及 `search-mysql`、`search-mariadb`、`search-postgresql`、`search-mongodb` extras 一并移除；`[search]` 只含 httpx、babel、lxml、curl_cffi。
 - **自定义适配器契约**：
-  - HTTP 与辅助函数改从 `demiflow.collect.native_search.adapter` 导入，取代 `searx.network`、`searx.utils`、`searx.exceptions`；
+  - HTTP 与辅助函数改从 `demiflow.collect.native_search.adapter` 导入，取代 `searx.network`、`searx.utils`、`searx.exceptions`。只提供“自定义来源”一节列出的辅助；`searx.utils` 的其余函数、`EngineCache`、engine traits 和 `result_types` 类不再提供；
   - 请求参数 `locale` 取代 `searxng_locale`；
   - 失败用 `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError` 表示。
 - **`services.searxng.SearxNGService`**：不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`，声明 wikisearch 会报错；wikisearch 只作为原生来源提供。服务指纹不再包含 wikisearch 适配器字节，同一 profile 的设置文件名和 `secret_key` 随之改变；运行中的旧服务按服务流程换版重启。
@@ -84,7 +84,8 @@
   - 请求构造：13 组共 66,266 个离线用例，包括 1134 个语言标签在 9 个依赖语言的来源上的全部取值、这些标签的 1946 种大小写写法在 21 个来源上的取值，以及分页、安全搜索、时间范围组合。另有 2 个 babel 无法解析的标签（`az-TR`、`no-NO`）结果不同，它们在进入来源前就被 `validate_language` 拒绝。
   - 结果合并：13,000 个随机用例；
   - 响应解析：21 个来源的合成响应。
-- 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例，期望值来自旧实现。
+- 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
+- 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
 - 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用
@@ -277,9 +278,18 @@ max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_
 `params` 的内容：
 
 - `query`、`pageno`、`safesearch`、`time_range`、`locale`（请求语言）、`language`、`category`、`engine_data`；
-- 适配器要设置的 `url`，以及可选的 `method`、`headers`、`data`、`json`、`cookies`、`allow_redirects`、`max_redirects`、`raise_for_httperror`、`impersonate`。
+- 适配器要设置的 `url`，以及可选的 `method`、`headers`、`data`、`json`、`content`（非 GET 请求的原始请求体）、`cookies`、`auth`、`verify`、`allow_redirects`、`max_redirects`、`raise_for_httperror`、`impersonate`。
 
 `url` 为空表示拒绝本次请求。`response(resp)` 返回结果字典列表。`resp` 提供 `status_code`、`headers`、`text`、`content`、`json()`、`url`、`cookies` 和 `search_params`。
+
+`demiflow.collect.native_search.adapter` 提供适配器可用的全部辅助：
+
+- HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。
+- 异常：`SourceError`、`SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`。
+- 文本：`html_to_text`、`extract_text`、`ecma_unescape`、`size_text`、`user_agent`。
+- 结果：`main_result`、`image_result`、`legacy_record`。
+
+XPath 直接用 lxml。令牌一类的缓存放在模块内，并自行设置条数和大小上限。
 
 ```python
 # my_sources/catalog.py

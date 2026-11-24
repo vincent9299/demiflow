@@ -14,7 +14,9 @@ about = {'website': 'https://www.wikipedia.org/', 'wikidata_id': 'Q52',
          'use_official_api': True, 'require_api_key': False, 'results': 'JSON'}
 categories = ['general']
 paging = False
-language_support = True
+# Receipts have always reported no language support for this source although the edition follows the
+# request language; kept so its capabilities and ignored_parameters stay comparable with earlier runs.
+language_support = False
 requires_language = True
 page_limit = 8
 excerpt_chars = 300

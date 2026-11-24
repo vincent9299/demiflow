@@ -12,6 +12,7 @@ about = {'website': 'https://www.bing.com', 'wikidata_id': 'Q182496',
          'require_api_key': False, 'results': 'HTML'}
 categories = ['general', 'web']
 safesearch = True
+language_support = True
 enable_http3 = True
 base_url = 'https://www.bing.com'
 SAFE_SEARCH = {0: 'off', 1: 'moderate', 2: 'strict'}
