@@ -5,6 +5,7 @@ page scripts. Country, interface language and safe search travel as cookies.
 """
 from urllib.parse import urlencode
 
+from demiflow.collect.native_search.adapter import legacy_record
 from demiflow.collect.native_search.brave_data import extract_data
 from demiflow.collect.native_search.locales import brave_cookies
 
@@ -39,6 +40,6 @@ def request(query, params):
 
 def response(resp):
     page = extract_data(resp.text)['data'][1]['data']['body']['response']
-    return [{'template': 'images.html', 'url': item['url'], 'title': item['title'], 'source': item['source'],
-             'img_src': item['properties']['url'], 'thumbnail_src': item['thumbnail']['src']}
+    return [legacy_record(template='images.html', url=item['url'], title=item['title'], source=item['source'],
+                          img_src=item['properties']['url'], thumbnail_src=item['thumbnail']['src'])
             for item in page['results']]

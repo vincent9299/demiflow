@@ -7,7 +7,8 @@ anti-bot ``datadome`` cookie Qwant sets is kept for this source in this worker.
 import random
 from urllib.parse import urlencode
 
-from demiflow.collect.native_search.adapter import SourceAccessDenied, SourceCaptcha, SourceError, SourceRateLimited
+from demiflow.collect.native_search.adapter import (SourceAccessDenied, SourceCaptcha, SourceError, SourceRateLimited,
+                                                   legacy_record)
 from demiflow.collect.native_search.errors import check_status
 from demiflow.collect.native_search.locales import qwant_locale
 
@@ -61,7 +62,7 @@ def response(resp):
     check_status(resp)
     found = []
     for item in data.get('result', {}).get('items', []) or []:
-        found.append({'title': item.get('title', ''), 'url': item.get('url', ''), 'template': 'images.html',
-                      'thumbnail_src': item['thumbnail'] or '', 'img_src': item['media'] or '',
-                      'resolution': f"{item['width']} x {item['height']}", 'img_format': item.get('thumb_type')})
+        found.append(legacy_record(title=item.get('title', ''), url=item.get('url', ''), template='images.html',
+                                   thumbnail_src=item['thumbnail'] or '', img_src=item['media'] or '',
+                                   resolution=f"{item['width']} x {item['height']}", img_format=item.get('thumb_type')))
     return found

@@ -1,7 +1,7 @@
 """Wikimedia Commons image search (MediaWiki query API, 10 files per page)."""
 from urllib.parse import urlencode
 
-from demiflow.collect.native_search.adapter import html_to_text, size_text
+from demiflow.collect.native_search.adapter import html_to_text, legacy_record, size_text
 
 about = {'website': 'https://commons.wikimedia.org/', 'wikidata_id': 'Q565',
          'official_api_documentation': 'https://commons.wikimedia.org/w/api.php', 'use_official_api': True,
@@ -36,10 +36,10 @@ def response(resp):
         info = page['imageinfo'][0]
         meta = info.get('extmetadata') or {}
         artist = (meta.get('Artist') or {}).get('value') or ''
-        found.append({'template': 'images.html', 'title': page['title'].replace('File:', '').rsplit('.', 1)[0],
+        found.append(legacy_record(**{'template': 'images.html', 'title': page['title'].replace('File:', '').rsplit('.', 1)[0],
                       'url': info['descriptionurl'], 'content': html_to_text(page['snippet']), 'img_src': info['url'],
                       'thumbnail_src': info['thumburl'], 'resolution': f"{info['width']} x {info['height']}",
                       'img_format': info['mime'], 'filesize': size_text(info['size']) if info.get('size') else info.get('size'),
                       'license': (meta.get('LicenseShortName') or {}).get('value'),
-                      'author': html_to_text(artist) if artist else None})
+                      'author': html_to_text(artist) if artist else None}))
     return found

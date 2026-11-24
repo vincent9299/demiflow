@@ -6,6 +6,7 @@ explicit request language is required.
 """
 from urllib.parse import quote
 
+from demiflow.collect.native_search.adapter import SourceError
 from demiflow.collect.native_search.locales import wikipedia_host
 
 about = {'website': 'https://www.wikipedia.org/', 'wikidata_id': 'Q52',
@@ -22,7 +23,9 @@ browser_user_agent = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 
 
 def request(query, params):
-    host = wikipedia_host(params['locale'])
+    host = wikipedia_host(params['locale'], default=None)
+    if host is None:
+        raise SourceError('Wikipedia does not declare the requested language')
     params['url'] = f'https://{host}/w/rest.php/v1/search/page?q={quote(query)}&limit={page_limit}'
     params['headers'] = {'User-Agent': browser_user_agent, 'Accept': 'application/json'}
 

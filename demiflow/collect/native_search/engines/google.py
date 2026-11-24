@@ -10,7 +10,7 @@ from urllib.parse import unquote, urlencode, urlsplit
 
 from lxml import html
 
-from demiflow.collect.native_search.adapter import SourceCaptcha, extract_text, main_result
+from demiflow.collect.native_search.adapter import SourceCaptcha, extract_text, legacy_record, main_result
 from demiflow.collect.native_search.locales import google_parameters
 
 about = {'website': 'https://www.google.com', 'wikidata_id': 'Q9366', 'use_official_api': False,
@@ -84,5 +84,5 @@ def response(resp):
         found.append(main_result(unwrap(links[0]), title=extract_text(titles[0]) or '',
                                  content=extract_text(item.xpath(SNIPPET)) or '',
                                  thumbnail=thumbnails[0] if thumbnails else ''))
-    found.extend({'suggestion': extract_text(node)} for node in dom.xpath(SUGGESTION))
+    found.extend(legacy_record(suggestion=extract_text(node)) for node in dom.xpath(SUGGESTION))
     return found

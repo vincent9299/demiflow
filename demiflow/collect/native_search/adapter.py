@@ -16,8 +16,8 @@ from .errors import SourceAccessDenied, SourceCaptcha, SourceError, SourceRateLi
 from .worker_network import Request, get, head, multi_requests, post, request
 
 __all__ = ['Request', 'SourceAccessDenied', 'SourceCaptcha', 'SourceError', 'SourceRateLimited',
-           'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text', 'image_result', 'main_result',
-           'multi_requests', 'size_text',
+           'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text', 'image_result', 'legacy_record',
+           'main_result', 'multi_requests', 'size_text',
            'post', 'request', 'user_agent']
 
 _UNICODE_ESCAPE = re.compile(r'%u([0-9a-fA-F]{4})')
@@ -113,9 +113,34 @@ def main_result(url, **fields):
     return _typed('MainResult', MAIN_RESULT_FIELDS, url, fields)
 
 
+IMAGE_FORMATS = {'png': 'PNG', 'svg+xml': 'SVG', 'jpeg': 'JPG', 'bmp': 'BMP', 'x-icon': 'ICO', 'tiff': 'TIF'}
+
+
 def image_result(url, img_src, **fields):
-    """A typed image result (``images.html``) with the image fields present."""
+    """A typed image result (``images.html``); ``img_format`` defaults to the type guessed from ``img_src``."""
+    if not fields.get('img_format'):
+        import mimetypes
+        guessed = mimetypes.guess_type(img_src)[0]
+        if guessed:
+            subtype = guessed.split('/')[-1]
+            fields['img_format'] = IMAGE_FORMATS.get(subtype, subtype.upper())
     return _typed('Image', IMAGE_RESULT_FIELDS, url, {'img_src': img_src, **fields})
+
+
+def legacy_record(**fields):
+    """A plain result record with the standard fields filled the way merged records are."""
+    record = dict(fields)
+    for name, default in (('url', None), ('template', 'default.html'), ('engine', ''), ('parsed_url', None),
+                          ('title', ''), ('content', ''), ('img_src', ''), ('thumbnail', ''), ('priority', ''),
+                          ('engines', set()), ('positions', ''), ('score', 0), ('category', ''),
+                          ('publishedDate', None), ('iframe_src', None)):
+        record.setdefault(name, default)
+    if 'infobox' in record:
+        record.setdefault('urls', [])
+        record.setdefault('attributes', [])
+    if 'answer' in record:
+        record['template'] = 'answer/legacy.html'
+    return record
 
 
 def size_text(size, precision=2):

@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 from lxml import html
 
-from demiflow.collect.native_search.adapter import SourceAccessDenied, SourceError, get
+from demiflow.collect.native_search.adapter import SourceAccessDenied, SourceError, get, legacy_record
 
 about = {'website': 'https://www.pexels.com', 'wikidata_id': 'Q101240504', 'use_official_api': False,
          'require_api_key': False, 'results': 'JSON'}
@@ -61,8 +61,8 @@ def response(resp):
     found = []
     for item in resp.json().get('data', []):
         photo = item['attributes']
-        found.append({'template': 'images.html', 'url': f"{base_url}/photo/{photo['slug']}-{photo['id']}/",
+        found.append(legacy_record(**{'template': 'images.html', 'url': f"{base_url}/photo/{photo['slug']}-{photo['id']}/",
                       'title': photo['title'], 'content': photo['description'],
                       'thumbnail_src': photo['image']['small'], 'img_src': photo['image']['download_link'],
-                      'resolution': f"{photo['width']}x{photo['height']}", 'author': f"{photo['user']['username']}"})
+                      'resolution': f"{photo['width']}x{photo['height']}", 'author': f"{photo['user']['username']}"}))
     return found

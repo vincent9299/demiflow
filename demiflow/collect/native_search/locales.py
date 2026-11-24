@@ -1,10 +1,29 @@
 """Language tags of search requests mapped to source-specific codes."""
 import babel
 
-# Wikipedia editions whose subdomain is not the ISO language code.
-WIKIPEDIA_SUBDOMAINS = {'nb': 'no', 'gsw': 'als', 'yue': 'zh-yue', 'nan': 'zh-min-nan', 'lzh': 'zh-classical',
-                        'sgs': 'bat-smg', 'vro': 'fiu-vro', 'rup': 'roa-rup', 'nrf': 'nrm', 'cbk': 'cbk-zam',
-                        'ak': 'ak', 'nds-NL': 'nds-nl', 'be-tarask': 'be-tarask'}
+# Wikipedia editions by language (and script). Derived from the hosts the
+# previous runtime chose for every babel locale; ``wikipedia_host`` reproduces
+# all of them. Exceptions are keyed by the tag as written (None: no edition).
+WIKIPEDIA_CODES = {
+    'af': 'af', 'am': 'am', 'an': 'an', 'ar': 'ar', 'as': 'as', 'az': 'az', 'ba': 'ba', 'be': 'be', 'bg': 'bg',
+    'bn': 'bn', 'bo': 'zh', 'bs': 'bs', 'ca': 'ca', 'ckb': 'ckb', 'cs': 'cs', 'cy': 'cy', 'da': 'da', 'de':
+    'de', 'el': 'el', 'en': 'en', 'es': 'es', 'et': 'et', 'fa': 'fa', 'fi': 'fi', 'fil': 'tl', 'fo': 'fo', 'fr':
+    'fr', 'fy': 'fy', 'gl': 'gl', 'gsw': 'als', 'gu': 'gu', 'he': 'he', 'hi': 'hi', 'hr': 'hr', 'hsb': 'hsb',
+    'hu': 'hu', 'hy': 'hy', 'id': 'id', 'ii': 'zh', 'is': 'is', 'it': 'it', 'ja': 'ja', 'jv': 'jv', 'ka': 'ka',
+    'kaa': 'kaa', 'kk-Arab': 'zh', 'km': 'km', 'kn': 'kn', 'ko': 'ko', 'ku': 'ku', 'lb': 'lb', 'lij': 'lij',
+    'lt': 'lt', 'lv': 'lv', 'mai': 'mai', 'mk': 'mk', 'ml': 'ml', 'mn': 'mn', 'mn-Mong': 'zh', 'mr': 'mr', 'ms':
+    'zh', 'nb': 'no', 'ne': 'ne', 'or': 'or', 'os': 'os', 'pa': 'pa', 'pl': 'pl', 'ps': 'ps', 'pt': 'pt', 'qu':
+    'qu', 'ro': 'ro', 'ru': 'ru', 'sa': 'sa', 'sah': 'sah', 'sd': 'sd', 'si': 'si', 'sk': 'sk', 'sl': 'sl',
+    'so': 'so', 'sq': 'sq', 'sr': 'sr', 'ta': 'ta', 'te': 'te', 'th': 'th', 'tr': 'tr', 'ug': 'zh', 'uk': 'uk',
+    'ur': 'ur', 'uz': 'uz', 'vi': 'vi', 'vo': 'vo', 'wa': 'wa', 'yi': 'yi', 'yue-Hans': 'zh', 'yue-Hant': 'zh',
+    'za': 'zh', 'zgh': 'zgh', 'zh': 'zh', 'zh-Hans': 'zh', 'zh-Hant': 'zh', 'zh-Latn': 'zh'
+}
+WIKIPEDIA_EXCEPTIONS = {
+    'bo': None, 'bo-IN': None, 'en-SG': 'zh.wikipedia.org', 'ii': None, 'kk-Arab': None, 'ko-CN':
+    'zh.wikipedia.org', 'mn-Mong': None, 'mn-Mong-MN': None, 'ms': None, 'ms-BN': None, 'ms-ID': None, 'ms-MY':
+    None, 'ta-SG': 'zh.wikipedia.org', 'ug': None, 'yue-HK': None, 'yue-Hans': None, 'yue-Hant': None,
+    'yue-Hant-HK': None, 'yue-Hant-MO': None, 'yue-MO': None, 'za': None, 'zh-Latn': None
+}
 
 
 def parse(tag):
@@ -17,16 +36,18 @@ def parse(tag):
         return None
 
 
-def wikipedia_host(tag, default='en'):
-    """Host of the Wikipedia edition for a request language, e.g. ``zh-CN`` -> ``zh.wikipedia.org``."""
-    if tag and tag.lower() in ('be-tarask', 'nds-nl'):
-        return tag.lower() + '.wikipedia.org'
+def wikipedia_host(tag, default='en.wikipedia.org'):
+    """Host of the Wikipedia edition for a request language; ``default`` when none is declared."""
+    if not tag or tag == 'all':
+        return default
+    if tag in WIKIPEDIA_EXCEPTIONS:
+        return WIKIPEDIA_EXCEPTIONS[tag] or default
     locale = parse(tag)
     if locale is None:
-        code = default
-    else:
-        code = WIKIPEDIA_SUBDOMAINS.get(locale.language, locale.language)
-    return code + '.wikipedia.org'
+        return default
+    key = locale.language + ('-' + locale.script if locale.script else '')
+    code = WIKIPEDIA_CODES.get(key) or (WIKIPEDIA_CODES.get(locale.language) if not locale.script else None)
+    return code + '.wikipedia.org' if code else default
 
 
 # Google interface languages and search regions. Derived from the request
