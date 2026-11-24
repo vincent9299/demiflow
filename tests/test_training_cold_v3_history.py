@@ -121,7 +121,7 @@ with scope as run:
 
 
 @pytest.mark.parametrize(('cut', 'family'), [('nonfinal', 'dataset'), ('final', 'dataset'), ('nonfinal', 'routed')])
-def test_published_v3_engine_cold_resume_reads_original_cut(old_sdk, tmp_path, cut, family):
+def test_published_v3_engine_cut_reads_and_original_version_resumes(old_sdk, tmp_path, cut, family):
     if family == 'routed':
         (tmp_path / 'historical_business.py').write_text(
             'def score(row, *, offset):\n    return {**row, "score": row["id"] + offset}\n')
@@ -141,7 +141,9 @@ def test_published_v3_engine_cold_resume_reads_original_cut(old_sdk, tmp_path, c
     assert journal.execution_commit(interrupted['commit'])['status'] == 'checkpoint_committed'
     loaded = load_sealed_plan(directory, action, version='v3')
     assert loaded['graph'].dag_id == before['dag_id'] and loaded['physical'].plan_id == before['plan_id']
-    resumed = invoke(REPO, 'resume')
+    # The current reader still reads original facts. Cross-version program
+    # identity substitution is retired; the original runtime owns its resume.
+    resumed = invoke(old_sdk, 'resume')
     assert resumed.returncode == 0, resumed.stderr
     rows = json.loads((tmp_path / 'result.json').read_bytes())
     if family == 'routed':
