@@ -424,14 +424,23 @@ class LocalResourceProvider:
                 allocation_id, exc_info=True)
 
     def ensure_absent(self, exact_identity, terminate_deadline_ms):
+        try:
+            return self._retire(exact_identity, terminate_deadline_ms)
+        except (OSError, ResourceError):
+            # The unit's own files could not settle it: its lock is gone, or another
+            # run's observation released the record between two ledger calls. A
+            # ledger release that names this very unit then stands as its exit.
+            accepted = self._accept_observed_exit(exact_identity["scope_id"], exact_identity["allocation_id"])
+            if accepted is None:
+                raise
+            return accepted
+
+    def _retire(self, exact_identity, terminate_deadline_ms):
         scope_id = exact_identity["scope_id"]
         allocation_id = exact_identity["allocation_id"]
         identifier(scope_id)
         identifier(allocation_id)
         process = self._spawned.get(allocation_id)
-        accepted = self._accept_observed_exit(scope_id, allocation_id)
-        if accepted is not None:
-            return accepted
         found = self.unit.inspect(scope_id, allocation_id, process=process)
         if found["phase"] == "REQUESTED":
             # A capacity-pending request may never have reserved anything.
@@ -452,15 +461,7 @@ class LocalResourceProvider:
         if evidence["confirmed"]:
             prior = self.pool.reservation_view(allocation_id)
             if prior is None or prior['state'] != 'RELEASED':
-                try:
-                    self.pool.release(allocation_id, evidence)
-                except ResourceError:
-                    # Another run's observation released the unit between the two
-                    # ledger calls. Its release stands if it names this very unit.
-                    accepted = self._accept_observed_exit(scope_id, allocation_id)
-                    if accepted is None:
-                        raise
-                    return accepted
+                self.pool.release(allocation_id, evidence)
             self._release_devices(allocation_id, evidence["evidence_ref"])
             self._spawned.pop(allocation_id, None)
             self._close_confirmed_control(allocation_id)
