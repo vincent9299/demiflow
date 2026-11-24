@@ -493,3 +493,299 @@ def test_flow_check_allows_config_expr_and_ancestor_prefixed_imports(tmp_path):
     entry_report = report['entries'][0]
     assert entry_report['status'] != 'invalid', report
     assert not [d for d in report.get('diagnostics', []) if d.get('code') == 'FL-07'], report
+
+
+def test_tree_usage_tolerates_missing_and_transient_files(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations import sandbox_native
+
+    root = tmp_path / 'work'
+    root.mkdir()
+    (root / 'keep.txt').write_text('hello')
+    vanishing = root / 'vanish.tmp'
+    vanishing.write_text('bye')
+
+    real_scandir = sandbox_native.os.scandir
+
+    class _VanishScandir:
+        def __init__(self, ctx):
+            self._ctx = ctx
+        def __enter__(self):
+            entries = list(self._ctx.__enter__())
+            if vanishing.exists():
+                vanishing.unlink()
+            return iter(entries)
+        def __exit__(self, *args):
+            return self._ctx.__exit__(*args)
+
+    monkeypatch.setattr(sandbox_native.os, 'scandir', lambda fd: _VanishScandir(real_scandir(fd)))
+    used, count = sandbox_native.tree_usage([str(root), str(tmp_path / 'already_deleted')])
+    assert used == 5
+    assert count >= 1
+
+
+def test_flow_check_supports_static_dict_str_methods_and_comprehensions(tmp_path):
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+
+    proj = tmp_path / 'comp_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow import data\n'
+        'def run(source=None, items=None):\n'
+        '    ver = source.get("version")\n'
+        '    names = {item["name"].strip() for item in items if item.get("enabled")}\n'
+        '    if type(ver) is not int or ver <= 0 or not names:\n'
+        '        raise ValueError("bad config")\n'
+        '    if any(n.startswith("x") for n in names):\n'
+        '        return data.range(len(names)).count()\n'
+        '    return data.range(1).count()\n'
+    )
+    (proj / 'configs' / 'demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {'
+        '"source": {"version": 2}, '
+        '"items": [{"name": " x1 ", "enabled": true}, {"name": "y2", "enabled": false}]}}\n'
+    )
+    report = check_project(proj, entry='flows/demo.py:run', params='configs/demo.json')
+    assert report['status'] == 'passed', report
+
+
+def test_source_opaque_constant_no_recursive_alias_and_static_ifexp(tmp_path):
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+    from demiflow.forge.source import SourceTree, Symbol
+
+    proj = tmp_path / 'opaque_proj'
+    initialize_project(proj)
+    for d in ('flows', 'operators', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'operators' / 'base.py').write_text(
+        'from pathlib import Path\n'
+        'PROJECT = Path(__file__).resolve().parents[1]\n'
+        'OPAQUE = object()\n'
+        'def helper(x):\n'
+        '    return x\n'
+    )
+    (proj / 'operators' / 'reexport.py').write_text(
+        'from . import base\n'
+        'helper = base.helper\n'
+    )
+    tree = SourceTree(proj)
+    resolved_proj = tree.resolve(Symbol('operators.base.PROJECT'))
+    assert resolved_proj == proj.resolve()
+    resolved_const = tree.resolve(Symbol('operators.base.OPAQUE'))
+    assert isinstance(resolved_const, Symbol) and resolved_const.opaque is True
+    resolved_fn = tree.resolve(Symbol('operators.reexport.helper'))
+    assert resolved_fn.module == 'operators.base'
+
+    (proj / 'flows' / 'ifexp.py').write_text(
+        'from demiflow import data\n'
+        'def run(mode="small"):\n'
+        '    n = 3 if mode == "small" else 10\n'
+        '    return data.range(n).count()\n'
+    )
+    (proj / 'configs' / 'ifexp.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"mode": "small"}}\n'
+    )
+    report = check_project(proj, entry='flows/ifexp.py:run', params='configs/ifexp.json')
+    assert report['status'] == 'passed', report
+    assert report['entries'][0]['status'] == 'checked', report
+
+
+def test_flow_check_project_confined_static_config_read_and_security_boundary(tmp_path):
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+
+    proj = tmp_path / 'cfg_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs', 'prompts', 'data'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'deployment.json').write_text('{"demo": {"count": 4}}\n')
+    (proj / 'prompts' / 'p.yaml').write_text('version: 1\n')
+    (proj / 'data' / 'secret.json').write_text('{"count": 9}\n')
+    outside = tmp_path / 'outside.json'
+    outside.write_text('{"count": 9}\n')
+
+    (proj / 'flows' / 'good.py').write_text(
+        'from copy import deepcopy\n'
+        'import hashlib, json, yaml\n'
+        'from pathlib import Path\n'
+        'from demiflow import data\n'
+        'ROOT = Path(__file__).resolve().parents[1]\n'
+        'def run():\n'
+        '    cfg = deepcopy(json.loads((ROOT / "deployment.json").read_bytes()))\n'
+        '    base, extra = cfg["demo"], {"bias": 1}\n'
+        '    merged = {**base, **extra}\n'
+        '    p = (ROOT / "prompts" / "p.yaml").resolve()\n'
+        '    if not p.is_relative_to(ROOT / "prompts") or not p.is_file():\n'
+        '        raise ValueError("missing prompt")\n'
+        '    raw = p.read_bytes()\n'
+        '    _ = hashlib.sha256(raw).hexdigest()\n'
+        '    meta = yaml.safe_load(raw)\n'
+        '    return data.range(merged["count"] + merged["bias"] + meta["version"]).count()\n'
+    )
+    (proj / 'configs' / 'good.json').write_text('{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}\n')
+    good = check_project(proj, entry='flows/good.py:run', params='configs/good.json')
+    assert good['status'] == 'passed', good
+    assert good['entries'][0]['status'] == 'checked', good
+    assert 'deployment.json' in good['basis']['sources']
+    assert 'prompts/p.yaml' in good['basis']['sources']
+
+    # Security boundary 1: reading from protected data/ dir must NOT pass
+    (proj / 'flows' / 'bad_data.py').write_text(
+        'import json\n'
+        'from pathlib import Path\n'
+        'from demiflow import data\n'
+        'ROOT = Path(__file__).resolve().parents[1]\n'
+        'def run():\n'
+        '    cfg = json.loads((ROOT / "data" / "secret.json").read_bytes())\n'
+        '    return data.range(cfg["count"]).count()\n'
+    )
+    (proj / 'configs' / 'bad_data.json').write_text('{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}\n')
+    bad_data = check_project(proj, entry='flows/bad_data.py:run', params='configs/bad_data.json')
+    assert bad_data['status'] != 'passed', bad_data
+
+    # Security boundary 2: reading outside project root must NOT pass
+    (proj / 'flows' / 'bad_out.py').write_text(
+        'import json\n'
+        'from pathlib import Path\n'
+        'from demiflow import data\n'
+        'def run(target=""):\n'
+        '    cfg = json.loads(Path(target).read_bytes())\n'
+        '    return data.range(cfg["count"]).count()\n'
+    )
+    (proj / 'configs' / 'bad_out.json').write_text(
+        f'{{"format": "demiflow_forge_flow_parameters_v2", "arguments": {{"target": "{outside.as_posix()}"}}}}\n'
+    )
+    bad_out = check_project(proj, entry='flows/bad_out.py:run', params='configs/bad_out.json')
+    assert bad_out['status'] != 'passed', bad_out
+
+
+def test_deepseek_stdio_exdev_rename_is_atomic(tmp_path):
+    import subprocess
+    from pathlib import Path
+    shim = Path(__file__).resolve().parents[1] / 'demiflow/workbench/conversations/deepseek_stdio.cjs'
+    src = tmp_path / 'src.txt'
+    dst = tmp_path / 'dst.txt'
+    src.write_text('new-content')
+    dst.write_text('old-content')
+    script = (
+        f"const fs = require('fs');\n"
+        f"const origSync = fs.renameSync;\n"
+        f"let first = true;\n"
+        f"fs.renameSync = function(a, b) {{ if (first) {{ first = false; const e = new Error('EXDEV'); e.code = 'EXDEV'; throw e; }} return origSync.call(this, a, b); }};\n"
+        f"require({str(shim)!r});\n"
+        f"fs.renameSync({str(src)!r}, {str(dst)!r});\n"
+    )
+    res = subprocess.run(['node', '-e', script], capture_output=True, text=True)
+    assert res.returncode == 0, res.stderr
+    assert dst.read_text() == 'new-content'
+    assert not src.exists()
+
+
+def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
+    import lance
+    import pyarrow as pa
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+    from demiflow.workbench.conversations.context import _run_project_layout
+
+    ext = tmp_path / 'external_inputs'
+    ext.mkdir()
+    tbl = ext / 'items.lance'
+    lance.write_dataset(pa.table({'x': [1, 2, 3]}), str(tbl))
+
+    proj = tmp_path / 'tbl_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    bound = _run_project_layout(proj, {'action': 'bind_table', 'alias': 'items_in', 'path': str(tbl), 'version': 1})
+    assert bound['status'] == 'bound'
+    assert bound['param_ref'] == {'kind': 'table', 'alias': 'items_in'}
+    assert (proj / 'tables' / 'items_in.json').is_file()
+
+    (proj / 'flows' / 'read_demo.py').write_text(
+        'import hashlib\n'
+        'from demiflow import data\n'
+        'def run(source=None):\n'
+        '    limit = 2 ** 3\n'
+        '    tag = hashlib.sha256("ok".encode()).hexdigest()\n'
+        '    if limit != 8 or len(tag) != 64:\n'
+        '        raise ValueError("bad")\n'
+        '    return data.read_lance(uri=source["uri"], version=source["version"]).count()\n'
+    )
+    (proj / 'configs' / 'read_demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"source": {"kind": "table", "alias": "items_in"}}}\n'
+    )
+    report = check_project(proj, entry='flows/read_demo.py:run', params='configs/read_demo.json')
+    assert report['status'] == 'passed', report
+    assert report['entries'][0]['status'] == 'checked', report
+
+
+def test_deepseek_tool_call_clips_oversized_write_payload():
+    from demiflow.workbench.conversations.deepseek import DeepSeek
+    from demiflow.workbench.conversations.common import wire
+
+    adapter = DeepSeek.__new__(DeepSeek)
+    adapter.thread = 'sess-1'
+    adapter.items = {}
+    adapter.message_kind = None
+    big_content = 'x' * 50000
+    events = adapter.event({
+        'method': 'session/update',
+        'params': {
+            'sessionId': 'sess-1',
+            'update': {
+                'sessionUpdate': 'tool_call',
+                'toolCallId': 'call_1',
+                'title': 'write',
+                'status': 'in_progress',
+                'rawInput': {'file_path': 'configs/big.json', 'content': big_content},
+            },
+        },
+    })
+    assert events[1][0] == 'item.updated'
+    wire(events[1][1], 65536)
+    assert len(events[1][1]['rawInput']['content']) < 5000
+
+
+def test_resolve_local_uri_tolerates_unreadable_parent_and_loop_continue_break(tmp_path, monkeypatch):
+    from pathlib import Path
+    from demiflow.lance import storage
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+
+    target = tmp_path / 'sub' / 't.lance'
+    target.mkdir(parents=True)
+    orig_is_file = Path.is_file
+    def guarded_is_file(self):
+        if self.name == 'lance_locations.json':
+            raise PermissionError('EACCES under Landlock')
+        return orig_is_file(self)
+    monkeypatch.setattr(Path, 'is_file', guarded_is_file)
+    assert storage.resolve_local_uri(target) == target.resolve()
+    monkeypatch.undo()
+
+    proj = tmp_path / 'loop_proj'
+    initialize_project(proj)
+    for d in ('flows', 'configs'):
+        (proj / d).mkdir(exist_ok=True)
+    (proj / 'flows' / 'loop_demo.py').write_text(
+        'from demiflow import data\n'
+        'def run(items=None):\n'
+        '    picked = 0\n'
+        '    for v in items:\n'
+        '        if v < 0:\n'
+        '            continue\n'
+        '        if v == 99:\n'
+        '            break\n'
+        '        picked = picked + v\n'
+        '    return data.range(picked).count()\n'
+    )
+    (proj / 'configs' / 'loop_demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"items": [-1, 2, 3, 99, 100]}}\n'
+    )
+    report = check_project(proj, entry='flows/loop_demo.py:run', params='configs/loop_demo.json')
+    assert report['status'] == 'passed', report
+    assert report['entries'][0]['status'] == 'checked', report

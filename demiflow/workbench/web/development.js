@@ -379,7 +379,7 @@ SOFTWARE.
     window.addEventListener('resize',sizeViewport);sizeViewport();state.releaseViewport=()=>window.removeEventListener('resize',sizeViewport);
     const chat=globalThis.ForgeDevelopmentChat.create({flow,onRaw:output,
       onOpenFile:(path,mode)=>state.files?.openFile(path,mode),
-      onContinue:()=>{if(state.disposed||input.disabled||state.sending)return;input.value='继续';resizeInput();form.requestSubmit();},
+      onContinue:()=>{if(state.disposed||input.disabled||state.sending)return;input.value='继续';resizeInput();availability();form.requestSubmit();},
       onChange:()=>{if(state.disposed||!state.chat)return;rail.update();hero.hidden=!!state.chat.items.size;layout.classList.toggle('development-empty',!state.chat.items.size);},
       onTrim:()=>{earlier.hidden=false;}});
     state.chat=chat;state.items=chat.items;
@@ -616,7 +616,7 @@ SOFTWARE.
         const request=++state.navigationEpoch;
         earlier.disabled=true;
         try{
-          const older=await api('dev-replay',{session_id:sid,before_sequence:state.windowStart+1,max_turns:8,limit:200});
+          const older=await api('dev-replay',{session_id:sid,before_sequence:state.windowStart+1,max_turns:8,limit:100});
           if(state.disposed||state.navigationEpoch!==request)return;
           const prevHeight=timeline.scrollHeight,prevTop=timeline.scrollTop;
           const existing=state.renderedEvents||[];

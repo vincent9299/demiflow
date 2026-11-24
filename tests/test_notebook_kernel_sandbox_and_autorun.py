@@ -66,6 +66,60 @@ def test_notebook_assistant_sandbox_excludes_project_python(tmp_path):
     assert nb_spec.write_paths == ()
 
 
+def test_developer_sandbox_includes_declared_readonly_external_locations_only(tmp_path):
+    from demiflow.workbench.conversations.worker import sandbox_spec
+
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    ext_ro = tmp_path / 'external_ro_datasets'
+    ext_ro.mkdir()
+    ext_rw = tmp_path / 'external_rw_datasets'
+    ext_rw.mkdir()
+    state = tmp_path / 'state'
+    state.mkdir(mode=0o700)
+    priv_home = state / 's1' / 'provider'
+    priv_home.mkdir(parents=True, mode=0o700)
+    fake_exec = tmp_path / 'fake-cli'
+    fake_exec.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    fake_exec.chmod(0o755)
+
+    (proj / 'workspace.json').write_text(json.dumps({
+        'name': 'demo',
+        'locations': {
+            'ext_ro': {'root': str(ext_ro), 'writable': False},
+            'ext_rw': {'root': str(ext_rw), 'writable': True},
+            'bad_ancestor': {'root': str(tmp_path), 'writable': False},
+            'bad_state': {'root': str(state), 'writable': False},
+        },
+    }), encoding='utf-8')
+
+    deployment = type('Dep', (), {
+        'mode': 'restricted',
+        'direct_network': False,
+        'state': state,
+        'value': {},
+        'providers': {'deepseek': {'executable': str(fake_exec)}},
+        'limits': type('Lim', (), {
+            'sessions': 8, 'turns': 8, 'turn_seconds': 60,
+            'rss_bytes': 2 * 1024**3, 'processes': 32,
+            'provider_bytes': 64 * 1024**2, 'private_total_bytes': 128 * 1024**2,
+        })(),
+    })()
+    project = {'root': str(proj), 'kind': 'pipeline', 'writes': ['flows'], 'protected': []}
+    session = {'id': 's1', 'provider': 'deepseek'}
+    config = {'executable': str(fake_exec)}
+
+    dev_spec = sandbox_spec(deployment, project, session, {'operation': 'message', 'created': 10**12}, {'sources': []}, config, priv_home)
+    nb_spec = sandbox_spec(deployment, project, session, {'operation': 'notebook_cell_cli', 'created': 10**12}, {'sources': []}, config, priv_home)
+
+    assert str(ext_ro.resolve()) in dev_spec.read_paths
+    assert str(ext_ro.resolve()) not in dev_spec.write_paths
+    assert str(ext_rw.resolve()) not in dev_spec.read_paths
+    assert str(tmp_path.resolve()) not in dev_spec.read_paths
+    assert str(state.resolve()) not in dev_spec.read_paths
+    assert str(ext_ro.resolve()) not in nb_spec.read_paths
+
+
 def test_registry_notebook_sandbox_validation_and_persistence(tmp_path):
     from demiflow.forge.schema import ForgeError
     from demiflow.workbench.projects import registry

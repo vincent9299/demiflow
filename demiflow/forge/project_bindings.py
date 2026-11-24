@@ -10,6 +10,93 @@ from .project_io import identifier, relative_path, read_control
 from .schema import ForgeError
 
 
+def bind_table(root, alias, raw_path, *, location_id=None, version=None):
+    """Safely register a read-only input location (if needed) and pin tables/<alias>.json."""
+    from .io import ensure_directory, no_symlinks
+    from .platform_worker import describe_fixed_table
+    from .project_io import control_lock, write_control
+    from demiflow.lance.refs import DatasetRef
+
+    root = Path(root).absolute()
+    if not isinstance(alias, str) or not alias or not isinstance(raw_path, str) or not raw_path:
+        raise ForgeError('bind_table requires alias and path to a .lance directory', code='invalid_request')
+    identifier(alias)
+    if version is not None and (type(version) is not int or version < 1):
+        raise ForgeError('bind_table version must be a positive integer', code='invalid_request')
+    target = Path(raw_path)
+    target = (target if target.is_absolute() else (root / target)).absolute()
+    no_symlinks(target)
+    forbidden_roots = (Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'))
+    if (any(p.startswith('.') for p in target.parts[1:])
+            or any(target == fb or fb in target.parents for fb in forbidden_roots)
+            or not target.is_dir() or target.suffix != '.lance'):
+        raise ForgeError('bind_table requires an existing non-hidden .lance directory', code='invalid_request')
+    description = describe_fixed_table(target, version)
+    parent_dir = target.parent
+    with control_lock(root):
+        _, value = load_project(root)
+        expected_ws = content_digest(value)
+        locations = value.setdefault('locations', {})
+        chosen_loc = None
+        rel_uri = None
+        for existing_id, loc in locations.items():
+            try:
+                loc_root = location_root(root, loc)
+                if loc_root in target.parents:
+                    chosen_loc = existing_id
+                    rel_uri = target.relative_to(loc_root).as_posix()
+                    break
+            except Exception:
+                continue
+        if chosen_loc is None:
+            if location_id is not None:
+                if not isinstance(location_id, str) or not location_id:
+                    raise ForgeError('Invalid location_id', code='invalid_request')
+                identifier(location_id)
+                if location_id in locations:
+                    raise ForgeError(f'location_id already exists with a different root: {location_id}', code='conflict')
+                chosen_loc = location_id
+            else:
+                chosen_loc = 'input_' + hashlib.sha256(str(parent_dir).encode()).hexdigest()[:10]
+            if len(locations) >= 16:
+                raise ForgeError('Location budget exhausted (max 16)', code='resource_limit')
+            locations[chosen_loc] = {'root': str(parent_dir), 'writable': False}
+            write_control(root / 'workspace.json', value, expected=expected_ws)
+            rel_uri = target.name
+        ensure_directory(root / 'tables')
+        ref = DatasetRef(
+            alias,
+            rel_uri,
+            description['version'],
+            alias,
+            '1',
+            description['schema_hash'],
+            description['row_count'],
+            store_id=chosen_loc,
+        )
+        control = {
+            'format': 'demiflow_forge_table_v1',
+            'alias': alias,
+            'location_id': chosen_loc,
+            'ref': ref.to_dict(),
+        }
+        table_path = root / 'tables' / f'{alias}.json'
+        if table_path.exists():
+            old_ctrl = read_control(table_path, 16384)
+            write_control(table_path, control, expected=content_digest(old_ctrl))
+        else:
+            write_control(table_path, control, create=True)
+    return dict(
+        status='bound',
+        alias=alias,
+        location_id=chosen_loc,
+        relative_uri=rel_uri,
+        version=description['version'],
+        row_count=description['row_count'],
+        param_ref={'kind': 'table', 'alias': alias},
+    )
+
+
 def table_binding(root, value, alias):
     from demiflow.lance.refs import DatasetRef
 

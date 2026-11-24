@@ -66,7 +66,7 @@ def automatic_project(root):
         # Bytecode / test caches inside source dirs must not block granting write
         # access to their parent directory (which otherwise explodes writes into
         # dozens of single-file entries and blocks creating new files).
-        if path.name in {'__pycache__', '.pytest_cache', '.mypy_cache', '_runtime_run'}:
+        if path.name in {'__pycache__', '.pytest_cache', '.mypy_cache'}:
             continue
         if (path.name.startswith('.') or path.name in {'AGENTS.md','PIPELINE_SPEC.md','workspace.json','data','datasets','runs','results','outputs','notebooks','logs','node_modules','.venv'}
                 or path.suffix in {'.ipynb','.lance','.parquet','.arrow','.db','.sqlite','.sqlite3'}):

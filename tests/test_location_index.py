@@ -136,3 +136,27 @@ def test_lookup_closes_every_connection_including_missing_keys(tmp_path,index_co
     assert mapping.get('a')=='b'
     for i in range(20):assert mapping.get('absent'+str(i)) is None
     assert opened and all(connection.closed for connection in opened)
+
+
+def test_unwritable_cache_falls_back_to_readonly_lookup(tmp_path,index_config,monkeypatch):
+    import errno
+    path=write(tmp_path,dict(version=1,files={'a':'b','c':'d'}))
+    def deny(*a,**kw):
+        raise PermissionError(errno.EACCES,'Permission denied',str(index_config/'index.lock'))
+    monkeypatch.setattr(locations,'_lock',deny)
+    mapping=locations.IndexedLocations(str(path),locations.identity(path.stat()))
+    assert mapping.get('a')=='b'
+    assert mapping.get('missing') is None
+    assert not index_config.exists()
+
+
+def test_erofs_cache_falls_back_to_readonly_lookup(tmp_path,index_config,monkeypatch):
+    import errno
+    path=write(tmp_path,dict(version=1,tables={'a.lance':'b.lance'}))
+    def readonly_fs(*a,**kw):
+        raise OSError(errno.EROFS,'Read-only file system',str(index_config/'index.lock'))
+    monkeypatch.setattr(locations,'_lock',readonly_fs)
+    mapping=locations.IndexedLocations(str(path),locations.identity(path.stat()),field='tables')
+    assert mapping.get('a.lance')=='b.lance'
+    assert mapping.get('missing.lance') is None
+    assert not index_config.exists()

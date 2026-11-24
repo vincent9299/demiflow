@@ -200,8 +200,16 @@ def main():
             return 125
         if check_disk:
             last_disk = time.monotonic()
-            private_size, private_files = tree_usage([spec['private_home']])
-            source_size, source_files = tree_usage(spec['source_roots'])
+            try:
+                private_size, private_files = tree_usage([spec['private_home']])
+                source_size, source_files = tree_usage(spec['source_roots'])
+            except (FileNotFoundError, NotADirectoryError):
+                time.sleep(.05)
+                continue
+            except Exception as exc:
+                sys.stderr.write(f'[sandbox] terminated (125): disk scan failed ({type(exc).__name__}: {exc})\n')
+                sys.stderr.flush()
+                return 125
             total_bytes = private_size + max(0, source_size - spec['source_baseline_bytes']) + anonymous
             total_files = private_files + max(0, source_files - spec['source_baseline_files'])
             if total_bytes > spec['private_bytes'] or total_files > 8192:
@@ -221,6 +229,11 @@ if __name__ == '__main__':
     try:
         result = main()
     except BaseException as exc:
+        try:
+            sys.stderr.write(f'[sandbox] terminated (126): {type(exc).__name__}: {exc}\n')
+            sys.stderr.flush()
+        except OSError:
+            pass
         try:
             os.write(int(sys.argv[2]), ('error:' + type(exc).__name__ + ': ' + str(exc))[:2048].encode())
         except OSError:

@@ -31,8 +31,13 @@ def _guard():
 
 def _local_file(path, *, maximum=None):
     for parent in (path, *path.parents):
-        if parent.is_symlink():
-            raise ValueError('Symlink in native table location')
+        try:
+            if parent.is_symlink():
+                raise ValueError('Symlink in native table location')
+        except PermissionError:
+            if parent == path:
+                raise
+            break
     info = path.stat()
     if not stat.S_ISREG(info.st_mode) or maximum is not None and info.st_size > maximum:
         raise ValueError('Native table file type or metadata budget exceeded')
@@ -45,8 +50,13 @@ def _local_layout(uri):
         raise ValueError('Preview requires an absolute local table path')
     for path in (root, root / '_versions', root / 'data', root / '_deletions', root / '_indices'):
         for parent in (path, *path.parents):
-            if parent.is_symlink():
-                raise ValueError('Symlink in native table location')
+            try:
+                if parent.is_symlink():
+                    raise ValueError('Symlink in native table location')
+            except PermissionError:
+                if parent == path:
+                    raise
+                break
         if path.exists() and not path.is_dir():
             raise ValueError('Native table location must be a directory')
     if resolve_local_uri(root) != root:

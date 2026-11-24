@@ -107,6 +107,46 @@ def _build_rework_prompt(pipeline_checks, review_report):
     return (header + '\n'.join(issues))[:8000]
 
 
+def _declared_readonly_locations(root: Path, denied: list[Path], private_home: Path) -> list[Path]:
+    """Return physical read-only local data roots explicitly declared in workspace.json.
+
+    Never grants write access and skips any path overlapping denied/system scopes.
+    """
+    ws_file = root / 'workspace.json'
+    if not ws_file.is_file():
+        return []
+    try:
+        doc = json.loads(ws_file.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    locations = doc.get('locations') if isinstance(doc, dict) else None
+    if not isinstance(locations, dict):
+        return []
+    root_phys = root.resolve(strict=False)
+    forbidden = [Path(p).resolve(strict=False) for p in (*denied, private_home, Path('/dev'), Path('/proc'), Path('/sys'), Path('/run'))]
+    extra: list[Path] = []
+    for loc in locations.values():
+        if not isinstance(loc, dict):
+            continue
+        if loc.get('kind') not in (None, 'local'):
+            continue
+        is_readonly = (loc.get('writable') is False) or (loc.get('read_only') is True and loc.get('writable') is not True)
+        if not is_readonly:
+            continue
+        raw_root = loc.get('root')
+        if not isinstance(raw_root, str) or not raw_root:
+            continue
+        candidate = Path(raw_root).resolve(strict=False)
+        if not candidate.is_dir():
+            continue
+        if candidate == root_phys or candidate.is_relative_to(root_phys):
+            continue
+        if any(candidate == bad or candidate.is_relative_to(bad) or bad.is_relative_to(candidate) for bad in forbidden):
+            continue
+        extra.append(candidate)
+    return extra
+
+
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None,
                  extra_read_paths=(), extra_runtime_paths=()):
     """Assemble only controller-declared scope; no provider-supplied path grants."""
@@ -157,6 +197,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             cred = Path(provider['native_credentials'])
             if active_cred is None or cred.resolve() != active_cred:
                 denied.append(cred)
+    if not notebook_op:
+        read.extend(_declared_readonly_locations(root, denied, Path(private_home)))
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
     rt = tuple(sorted({*runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),

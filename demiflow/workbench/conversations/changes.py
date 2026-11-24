@@ -11,8 +11,8 @@ from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import safe_path
 
 TEXT_SUFFIXES = {'.py', '.md', '.json', '.yaml', '.yml', '.toml', '.js', '.css', '.html', '.txt'}
-IGNORED_DIRS = {'__pycache__', '.pytest_cache', '.mypy_cache', '_runtime_run', 'logs', 'data', 'runs', 'datasets', 'outputs', 'results'}
-IGNORED_SUFFIXES = {'.pyc', '.pyo', '.lance', '.manifest', '.parquet', '.arrow', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.db', '.sqlite', '.sqlite3'}
+IGNORED_DIRS = {'__pycache__', '.pytest_cache', '.mypy_cache', 'logs', 'data', 'runs', 'datasets', 'outputs', 'results'}
+IGNORED_SUFFIXES = {'.pyc', '.pyo', '.lance', '.manifest', '.parquet', '.arrow', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.db', '.sqlite', '.sqlite3', '.lock'}
 
 
 def _ignored(rel):

@@ -19,8 +19,10 @@ from ..data.flow_contract import (
     field,
     literal_type,
 )
+from .io import no_symlinks
 from .operator_check import OperatorChecker
 from .platform import bounded_json, content_digest, native_handlers
+from .platform_environment import read_bounded
 from .schema import ForgeError
 from .source import (
     Definition,
@@ -30,6 +32,14 @@ from .source import (
     defaults,
     parameters,
 )
+
+
+class _LoopContinue(Exception):
+    pass
+
+
+class _LoopBreak(Exception):
+    pass
 
 
 @dataclass
@@ -316,6 +326,17 @@ class FlowChecker:
                     node.targets if isinstance(node, ast.Assign) else [node.target]
                 )
                 for target in targets:
+                    if isinstance(target, (ast.Tuple, ast.List)) and target.elts and all(isinstance(e, ast.Name) for e in target.elts):
+                        if not isinstance(value, (tuple, list)) or len(value) != len(target.elts):
+                            self.fail("FL-07", "Unpack target count mismatch", node, module)
+                        val_origin = self._parameter_origin(node.value)
+                        mod_ns = self.tree.load(module)
+                        for idx, elem in enumerate(target.elts):
+                            if elem.id in mod_ns:
+                                self.fail("FL-02", "Flow variable shadows an imported/defined symbol", node, module)
+                            env[elem.id] = value[idx]
+                            self.parameter_scopes[-1][elem.id] = self._origin_index(val_origin, idx)
+                        continue
                     if not isinstance(target, ast.Name):
                         self.fail("FL-07", "Flow mutation is not wiring", node, module)
                     if target.id in self.tree.load(module):
@@ -366,6 +387,7 @@ class FlowChecker:
                         incomplete=True,
                     )
                 iterable_origin = self._parameter_origin(node.iter)
+                broke = False
                 for index, value in enumerate(values):
                     env[node.target.id] = value
                     origin = iterable_origin
@@ -373,13 +395,23 @@ class FlowChecker:
                     self.stack.append(f"loop:{node.lineno}:{index}")
                     try:
                         returned, result = self._body(node.body, env, module)
+                    except _LoopContinue:
+                        returned, result = False, None
+                    except _LoopBreak:
+                        broke = True
+                        break
                     finally:
                         self.stack.pop()
                     if returned:
                         return True, result
-                returned, result = self._body(node.orelse, env, module)
-                if returned:
-                    return True, result
+                if not broke:
+                    returned, result = self._body(node.orelse, env, module)
+                    if returned:
+                        return True, result
+            elif isinstance(node, ast.Continue):
+                raise _LoopContinue()
+            elif isinstance(node, ast.Break):
+                raise _LoopBreak()
             elif isinstance(node, ast.Pass):
                 pass
             else:
@@ -410,6 +442,7 @@ class FlowChecker:
                 "ValueError", "TypeError", "RuntimeError", "Exception",
                 "type", "isinstance", "len", "str", "int", "float", "bool",
                 "min", "max", "list", "tuple", "dict", "set", "sorted",
+                "any", "all", "sum", "range", "enumerate", "zip",
             }:
                 return Symbol("builtins." + node.id)
             self.fail("FL-01", f"Unbound name: {node.id}", node, module)
@@ -434,6 +467,32 @@ class FlowChecker:
                         return API(member, parent)
             if isinstance(parent, DatasetPort) and node.attr in self.methods:
                 return API(self.methods[node.attr], parent)
+            if type(parent) is dict and node.attr in {'get', 'keys', 'values', 'items'}:
+                return ('__bound_pure_method__', getattr(parent, node.attr))
+            if type(parent) is str and node.attr in {'strip', 'lstrip', 'rstrip', 'startswith', 'endswith', 'lower', 'upper', 'replace', 'split', 'join', 'encode'}:
+                return ('__bound_pure_method__', getattr(parent, node.attr))
+            if type(parent) is bytes and node.attr == 'decode':
+                return ('__bound_pure_method__', parent.decode)
+            if isinstance(parent, Path):
+                if node.attr in {'name', 'stem', 'suffix'}:
+                    return getattr(parent, node.attr)
+                if node.attr == 'parent':
+                    candidate = parent.parent
+                    if candidate == self.tree.root or self.tree.root in candidate.parents:
+                        return candidate
+                    self.fail("FL-07", "Static wiring path may not escape project root", node, module, incomplete=True)
+                if node.attr in {'as_posix', 'is_relative_to'}:
+                    return ('__bound_pure_method__', getattr(parent, node.attr))
+                if node.attr == 'resolve':
+                    return ('__bound_pure_method__', lambda: self._resolve_project_path(parent, node, module))
+                if node.attr == 'is_file':
+                    return ('__bound_pure_method__', lambda: self._project_static_is_file(parent, node, module))
+                if node.attr == 'read_bytes':
+                    return ('__bound_pure_method__', lambda: self._read_project_static_file(parent, node, module))
+                if node.attr == 'read_text':
+                    return ('__bound_pure_method__', lambda encoding='utf-8': self._read_project_static_file(parent, node, module).decode(encoding))
+            if hasattr(parent, 'hexdigest') and type(parent).__name__ == 'HASH' and node.attr == 'hexdigest':
+                return ('__bound_pure_method__', parent.hexdigest)
             self.fail(
                 "FL-02",
                 "Attribute does not resolve to a public platform API",
@@ -451,7 +510,7 @@ class FlowChecker:
                     module,
                 )
             return parent[key]
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod)):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
             left, right = visit(node.left), visit(node.right)
             if isinstance(left, RuntimeValue) or isinstance(right, RuntimeValue):
                 if not isinstance(node.op, (ast.Add, ast.Sub)):
@@ -463,6 +522,8 @@ class FlowChecker:
                                      'arguments': self._json_value([left, right])}, types[0])
             if isinstance(node.op, ast.Div) and isinstance(left, Path) and isinstance(right, (str, Path)):
                 return left / right
+            if (isinstance(left, Symbol) and left.opaque) or (isinstance(right, Symbol) and right.opaque):
+                self.fail('FL-07', 'Opaque module constant used in wiring expression', node, module, incomplete=True)
             if isinstance(node.op, (ast.Add, ast.Sub)):
                 if type(left) is not type(right) or type(left) not in (int, float, str) or type(left) is str and isinstance(node.op, ast.Sub):
                     self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
@@ -472,10 +533,15 @@ class FlowChecker:
                     self.fail('FL-07', 'Unsupported configured arithmetic', node, module)
                 if isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) and right == 0:
                     self.fail('FL-07', 'Division by zero in configured arithmetic', node, module)
-                result = (left * right if isinstance(node.op, ast.Mult) else
-                          left / right if isinstance(node.op, ast.Div) else
-                          left // right if isinstance(node.op, ast.FloorDiv) else
-                          left % right)
+                if isinstance(node.op, ast.Pow):
+                    if abs(left) > 10**6 or abs(right) > 64:
+                        self.fail('FL-07', 'Exponentiation exceeds static bounds', node, module)
+                    result = left ** right
+                else:
+                    result = (left * right if isinstance(node.op, ast.Mult) else
+                              left / right if isinstance(node.op, ast.Div) else
+                              left // right if isinstance(node.op, ast.FloorDiv) else
+                              left % right)
             bounded_json(result, 1024 * 1024)
             return result
         if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
@@ -499,24 +565,37 @@ class FlowChecker:
             items = [visit(n) for n in node.elts]
             return items if isinstance(node, ast.List) else tuple(items)
         if isinstance(node, ast.Dict):
-            if any(k is None for k in node.keys):
-                self.fail(
-                    "FL-03",
-                    "Dynamic mapping expansion is unsupported",
-                    node,
-                    module,
-                    incomplete=True,
-                )
-            keys = [visit(k) for k in node.keys]
-            if any(type(k) is not str for k in keys) or len(set(keys)) != len(keys):
-                self.fail("FL-03", "Mapping keys must be unique strings", node, module)
-            return dict(zip(keys, [visit(v) for v in node.values]))
+            merged = {}
+            explicit_keys = set()
+            for k_node, v_node in zip(node.keys, node.values):
+                if k_node is None:
+                    mapping = visit(v_node)
+                    if type(mapping) is not dict or any(type(mk) is not str for mk in mapping):
+                        self.fail(
+                            "FL-03",
+                            "Dynamic mapping expansion requires a static string-keyed dict",
+                            node,
+                            module,
+                            incomplete=True,
+                        )
+                    merged.update(mapping)
+                else:
+                    k = visit(k_node)
+                    if type(k) is not str or k in explicit_keys:
+                        self.fail("FL-03", "Mapping keys must be unique strings", node, module)
+                    explicit_keys.add(k)
+                    merged[k] = visit(v_node)
+                if len(merged) > 1024:
+                    self.fail("FL-10", "Mapping exceeds budget", node, module, incomplete=True)
+            return merged
         if isinstance(node, ast.UnaryOp) and isinstance(
             node.op, (ast.Not, ast.USub, ast.UAdd)
         ):
             value = visit(node.operand)
             if isinstance(value, RuntimeValue) and isinstance(node.op, ast.Not) and value.type == scalar('bool'):
                 return RuntimeValue({'value_expression': 'not', 'arguments': [value.expression]}, scalar('bool'))
+            if isinstance(node.op, ast.Not) and type(value) in (bool, int, float, str, list, tuple, dict, set, type(None)):
+                return not value
             if type(value) not in (bool, int, float):
                 self.fail("FL-07", "Runtime value used in topology", node, module)
             return (
@@ -599,7 +678,32 @@ class FlowChecker:
                 self.fail("FL-03", "Repeated keyword argument", node, module)
             args = [visit(a) for a in node.args]
             kwargs = {k.arg: visit(k.value) for k in node.keywords}
+            if (isinstance(target, tuple) and len(target) == 2 and target[0] == '__bound_pure_method__'
+                    and not any(isinstance(a, (RuntimeValue, DatasetPort, Action)) for a in (*args, *kwargs.values()))):
+                try:
+                    val = target[1](*args, **kwargs)
+                    return list(val) if isinstance(val, (type({}.keys()), type({}.values()), type({}.items()))) else val
+                except (TypeError, ValueError, KeyError) as exc:
+                    self.fail("FL-07", str(exc), node, module)
             if isinstance(target, Symbol):
+                def _bounded_range(*rargs):
+                    r = range(*rargs)
+                    if len(r) > 4096:
+                        raise ValueError("Static range exceeds 4096 elements")
+                    return list(r)
+                def _yaml_safe_load(raw):
+                    import yaml
+                    return yaml.safe_load(raw)
+
+                def _yaml_safe_dump(obj, **kw):
+                    import yaml
+                    return yaml.safe_dump(obj, **kw)
+
+                def _hashlib_sha256(raw=b''):
+                    if not isinstance(raw, (bytes, bytearray)):
+                        raise TypeError('sha256 requires bytes')
+                    return hashlib.sha256(raw)
+
                 pure_builtins = {
                     'builtins.type': type,
                     'builtins.isinstance': isinstance,
@@ -615,8 +719,20 @@ class FlowChecker:
                     'builtins.dict': dict,
                     'builtins.set': set,
                     'builtins.sorted': sorted,
+                    'builtins.any': any,
+                    'builtins.all': all,
+                    'builtins.sum': sum,
+                    'builtins.range': _bounded_range,
+                    'builtins.enumerate': lambda it, start=0: list(enumerate(it, start)),
+                    'builtins.zip': lambda *its: list(zip(*its)),
                     'pathlib.Path': Path,
                     'pathlib.PurePosixPath': Path,
+                    'json.loads': json.loads,
+                    'json.dumps': json.dumps,
+                    'copy.deepcopy': copy.deepcopy,
+                    'hashlib.sha256': _hashlib_sha256,
+                    'yaml.safe_load': _yaml_safe_load,
+                    'yaml.safe_dump': _yaml_safe_dump,
                 }
                 fn = pure_builtins.get(target.name)
                 if fn is not None and not any(isinstance(a, (RuntimeValue, DatasetPort, Action)) for a in (*args, *kwargs.values())):
@@ -658,6 +774,13 @@ class FlowChecker:
                 module,
                 incomplete=True,
             )
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            return self._static_comprehension(node, env, module)
+        if isinstance(node, ast.IfExp):
+            cond = visit(node.test)
+            if isinstance(cond, (RuntimeValue, DatasetPort, Action)):
+                self.fail("FL-07", "Runtime value used in topology", node.test, module)
+            return visit(node.body) if bool(cond) else visit(node.orelse)
         self.fail(
             "FL-07",
             f"Unsupported wiring expression: {type(node).__name__}",
@@ -665,6 +788,114 @@ class FlowChecker:
             module,
             incomplete=True,
         )
+
+    def _static_comprehension(self, node, env, module):
+        def _bind_target(target, value, scope):
+            if isinstance(target, ast.Name):
+                scope[target.id] = value
+                return
+            if isinstance(target, (ast.Tuple, ast.List)):
+                if not isinstance(value, (tuple, list)) or len(value) != len(target.elts):
+                    self.fail("FL-07", "Comprehension target unpack mismatch", target, module)
+                for elt, item in zip(target.elts, value):
+                    _bind_target(elt, item, scope)
+                return
+            self.fail("FL-07", "Unsupported comprehension target", target, module, incomplete=True)
+
+        results = {} if isinstance(node, ast.DictComp) else []
+        steps = 0
+
+        def _walk(gen_index, scope):
+            nonlocal steps
+            if gen_index == len(node.generators):
+                if isinstance(node, ast.DictComp):
+                    k = self._expr(node.key, scope, module)
+                    v = self._expr(node.value, scope, module)
+                    if isinstance(k, (RuntimeValue, DatasetPort, Action)) or isinstance(v, (RuntimeValue, DatasetPort, Action)):
+                        self.fail("FL-07", "Runtime value used in static comprehension", node, module)
+                    results[k] = v
+                else:
+                    val = self._expr(node.elt, scope, module)
+                    if isinstance(val, (RuntimeValue, DatasetPort, Action)):
+                        self.fail("FL-07", "Runtime value used in static comprehension", node, module)
+                    results.append(val)
+                return
+            gen = node.generators[gen_index]
+            if gen.is_async:
+                self.fail("FL-07", "Async comprehension unsupported in wiring", gen, module, incomplete=True)
+            iterable = self._expr(gen.iter, scope, module)
+            if isinstance(iterable, (RuntimeValue, DatasetPort, Action)) or not isinstance(iterable, (list, tuple, set, dict, str)):
+                self.fail("FL-07", "Comprehension requires a static configured iterable", gen.iter, module)
+            for item in iterable:
+                steps += 1
+                if steps > 4096:
+                    self.fail("FL-10", "Static comprehension exceeded 4096 iterations", node, module, incomplete=True)
+                inner = dict(scope)
+                _bind_target(gen.target, item, inner)
+                keep = True
+                for cond in gen.ifs:
+                    flag = self._expr(cond, inner, module)
+                    if isinstance(flag, (RuntimeValue, DatasetPort, Action)):
+                        self.fail("FL-07", "Runtime value used in comprehension filter", cond, module)
+                    if not bool(flag):
+                        keep = False
+                        break
+                if keep:
+                    _walk(gen_index + 1, inner)
+
+        _walk(0, dict(env))
+        if isinstance(node, ast.DictComp):
+            return results
+        if isinstance(node, ast.SetComp):
+            return set(results)
+        return results
+
+    _STATIC_PROTECTED_ROOTS = frozenset({'data', 'datasets', 'runs', 'results', 'outputs', 'logs', 'notebooks'})
+
+    def _resolve_project_path(self, path, node, module):
+        candidate = path if path.is_absolute() else (self.tree.root / path)
+        try:
+            resolved = no_symlinks(candidate.absolute())
+            resolved = resolved.resolve()
+        except (ForgeError, OSError):
+            self.fail("FL-07", "Static wiring path must stay within project without symlinks", node, module, incomplete=True)
+        root = self.tree.root.resolve()
+        if resolved != root and root not in resolved.parents:
+            self.fail("FL-07", "Static wiring path may not escape project root", node, module, incomplete=True)
+        return resolved
+
+    def _project_static_relative(self, path, node, module):
+        resolved = self._resolve_project_path(path, node, module)
+        root = self.tree.root.resolve()
+        if resolved == root:
+            self.fail("FL-07", "Static wiring file must be a file inside the project", node, module, incomplete=True)
+        rel = resolved.relative_to(root)
+        if any(p.startswith('.') for p in rel.parts) or rel.parts[0] in self._STATIC_PROTECTED_ROOTS:
+            self.fail("FL-07", "Static wiring may only access project-owned static config/prompt files", node, module, incomplete=True)
+        rel_str = rel.as_posix()
+        self.tree.require_visible(rel_str)
+        return resolved, rel_str
+
+    def _project_static_is_file(self, path, node, module):
+        resolved, _ = self._project_static_relative(path, node, module)
+        return resolved.is_file()
+
+    def _read_project_static_file(self, path, node, module):
+        resolved, rel_str = self._project_static_relative(path, node, module)
+        if not resolved.is_file():
+            self.fail("FL-07", f"Static project file not found: {rel_str}", node, module)
+        if rel_str not in self.tree.files and len(self.tree.files) >= self.tree.limits["files"]:
+            self.fail("FL-10", "Source file budget exceeded", node, module, incomplete=True)
+        try:
+            raw = read_bounded(resolved, self.tree.limits["file_bytes"])
+        except (OSError, ValueError, ForgeError) as exc:
+            self.fail("FL-07", str(exc), node, module, incomplete=True)
+        if rel_str not in self.tree.files:
+            self.tree.bytes += len(raw)
+            if self.tree.bytes > self.tree.limits["total_bytes"]:
+                self.fail("FL-10", "Source byte budget exceeded", node, module, incomplete=True)
+            self.tree.files[rel_str] = hashlib.sha256(raw).hexdigest()
+        return raw
 
     def _native(self, api, args, kwargs, node, module):
         record = api.record

@@ -105,17 +105,22 @@ _STANDARD_PROJECT_DIRS = frozenset({
 PROJECT_LAYOUT_TOOL = dict(
     name='manage_project_layout',
     description=(
-        'Safely manage controlled project structure and workspace.json registrations on the host: '
+        'Safely manage controlled project structure, table bindings and workspace.json registrations on the host: '
         'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/data/logs/tests/docs); '
         'register_flow checks and registers a flow entry in workspace.json (defaulting to configs/<flow>.json); '
-        'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json).'
+        'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
+        'bind_table registers a read-only input location in workspace.json (if needed) and pins a Lance table control under tables/<alias>.json for {"kind":"table","alias":"..."} parameters.'
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
-        'action': dict(type='string', enum=['ensure_dirs', 'register_flow', 'bind_params']),
+        'action': dict(type='string', enum=['ensure_dirs', 'register_flow', 'bind_params', 'bind_table']),
         'dirs': dict(type='array', items=dict(type='string')),
         'entry': dict(type='string'),
         'params': dict(type='string'),
         'old_params': dict(type='string'),
+        'alias': dict(type='string'),
+        'path': dict(type='string'),
+        'location_id': dict(type='string'),
+        'version': dict(type='integer'),
     }),
 )
 
@@ -180,6 +185,15 @@ def _run_project_layout(project_root, arguments):
             value['entries'][entry] = bound
             write_control(root / 'workspace.json', value, expected=expected)
         return dict(status='updated', entry=entry, params=bound)
+    if action == 'bind_table':
+        from demiflow.forge.project_bindings import bind_table
+        return bind_table(
+            root,
+            arguments.get('alias'),
+            arguments.get('path'),
+            location_id=arguments.get('location_id'),
+            version=arguments.get('version'),
+        )
     reject('Unsupported manage_project_layout action', 'invalid_request')
 
 
