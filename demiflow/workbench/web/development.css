@@ -127,6 +127,11 @@ dialog pre{max-width:75vw;max-height:65vh;overflow:auto;white-space:pre-wrap;ove
 .dev-tree-search-input{flex:1;min-width:0;border:0;background:transparent;color:#18181b;font:inherit;font-size:12px;line-height:20px;outline:none;padding:1px 2px}
 .dev-tree-search-clear{border:0;background:transparent;color:#71717a;font-size:14px;line-height:1;padding:2px 4px;cursor:pointer;border-radius:4px;flex:none}
 .dev-tree-search-clear:hover{background:#f1f1f4;color:#09090b}
+.dev-tree-create-wrap{display:flex;flex-direction:column;gap:2px;flex:none}
+.dev-tree-create-submit{border:0;background:#18181b;color:#fff;font:inherit;font-size:11.5px;font-weight:500;padding:2px 7px;border-radius:5px;cursor:pointer;line-height:18px;flex:none}
+.dev-tree-create-submit:hover{background:#27272a}
+.dev-tree-create-submit:disabled{opacity:.45;cursor:default}
+.dev-tree-create-error{margin:0 6px 6px;font-size:11.5px;color:#b91c1c;line-height:1.4}
 .dev-search-results{display:flex;flex-direction:column;gap:2px;padding:2px 2px 6px}
 .dev-search-empty{padding:8px 10px;font-size:12px;color:#71717a}
 .dev-changed-empty{padding:6px 9px;font-size:11.5px;color:#71717a}
