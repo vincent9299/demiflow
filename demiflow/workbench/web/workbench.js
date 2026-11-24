@@ -1452,7 +1452,7 @@
       overview.append(pathChip);
       const snapshotRun=run,snapshotOutput=activeOutput;
       if(activeOutput.result){
-        const openBtn=$('button','在数据页打开','wb-link-action is-open');openBtn.type='button';
+        const openBtn=$('button','在数据页打开','wb-link-action is-open');openBtn.type='button';openBtn.setAttribute('aria-label','在数据页打开');
         openBtn.onclick=()=>openResult(snapshotRun,snapshotOutput);
         overview.append(openBtn);
       }
