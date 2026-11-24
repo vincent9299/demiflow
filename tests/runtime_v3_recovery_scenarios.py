@@ -471,7 +471,7 @@ if os.environ.get('DEMIFLOW_WORKER_LAUNCH') or 'default_worker.py' in sys.argv[0
     try:
         import sqlite3
         from demiflow.execution.journal.run_journal import RunJournal
-        from demiflow.execution.commit import CommitCoordinator
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
         from demiflow.execution.worker.runtime import WorkerJournalClient
         def reject(kind):
             def denied(*args, **kwargs):
