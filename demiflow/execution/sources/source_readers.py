@@ -340,7 +340,9 @@ class ItemsReader(_BaseReader):
         retained = self.retained_bytes - (self.buffered_bytes if source_growth else 0)
         if any(value is self._pending_record for value in args):
             retained -= self.pending_inline_bytes
-        return function(*args, services=self._services, retained=retained, **kwargs)
+        return function(*args,
+            resident_bytes=stage_resident_bytes(getattr(self._services, 'assignment', None)),
+            retained=retained, **kwargs)
 
     def _teardown(self) -> None:
         self._pending_record = None
