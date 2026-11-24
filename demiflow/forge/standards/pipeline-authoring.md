@@ -8,11 +8,11 @@
 
 ### DF-02
 
-项目标准角色目录为 `flows/`、`operators/`、`prompts/`、`configs/`、`data_tools/`、`notebooks/`。每条 Flow 在 `flows/` 定义一个明确入口；共享代码算子放在 `operators/`；版本化的 Prompt 或 Agent 定义放在 `prompts/`；Flow 运行参数与业务配置文件统一放在 `configs/`（不再新建 `parameters/`，存量项目已登记的 `parameters/` 保持兼容）；数据探索与分析 Notebook 放在 `notebooks/`。业务数据表与运行产物统一放在 `data/`（直接平铺如 `data/<name>.lance`，不再按 `run_id` 建 `runs/` 子目录，存量 `runs/` 兼容）；可读运行日志放在 `logs/`；平台内部锁、数据库与缓存由 `.forge/` 管理。源码目录中的文件和项目声明中已登记的入口分别计数。准备交付的入口显式绑定实际使用的参数。
+项目标准角色目录为 `flows/`、`operators/`、`prompts/`、`configs/`、`data_tools/`、`notebooks/`。每条 Flow 在 `flows/` 定义一个明确入口并在 `workspace.json` 登记；共享代码算子放在 `operators/`；版本化的 Prompt 或 Agent 定义放在 `prompts/`；Flow 运行参数与业务/部署配置统一放在 `configs/`（不再新建 `parameters/`，已迁移入口不应在 `parameters/` 残留未登记旧文件）；数据探索与分析 Notebook 放在 `notebooks/`（保留原有输出）。业务数据表与默认运行产物统一放在 `data/`（直接平铺如 `data/<name>.lance`，不再把活跃入口默认输出写向历史 `runs/`，历史 `runs/` 仅作只读数据保留）；可读运行日志放在 `logs/`；平台内部锁、数据库与缓存由 `.forge/` 管理。项目根目录保持整洁，不散落业务配置（`*.json`/`*.yaml`）、Notebook（`*.ipynb`）或运行脚本（`*.py`）；`flows/`、`operators/`、`configs/`、`prompts/` 仅保留活跃入口、已声明复用模块或有效引用文件，废弃代码与历史实验配置应及时清理或归位。源码目录中的文件和项目声明中已登记的入口分别计数。准备交付的入口显式绑定实际使用的参数。
 
 在模块顶层用 `__demiflow_operators__ = ["normalize"]` 声明可复用的算子函数或可调用的 Actor。尚未接入 Flow 的算子也可声明。用 docstring 说明用途、输入和返回值。
 
-Notebook 使用的可复用代码放在 `data_tools/`。在模块顶层用 `__demiflow_data_tools__` 将本地函数或类名映射到用途。例如 `{"summarize": "analysis", "preview": "view", "review": "annotation", "sample_card": "annotation_component"}`。分析和查看函数返回值、图表或控件。标注入口组合组件，接受用户判断后，按稳定样本标识和数据版本保存结果。目录发现只读取静态声明。通用函数也可标为 `tool`。项目自写与引入的第三方模块同在工作台「工具」出现；平台发布的通用模块从 `demiflow.data_tools` 导入。
+Notebook 使用的可复用代码放在 `data_tools/`（连同配套查看模板资源）。在模块顶层用 `__demiflow_data_tools__` 将本地函数或类名映射到用途。例如 `{"summarize": "analysis", "preview": "view", "review": "annotation", "sample_card": "annotation_component"}`。分析和查看函数返回值、图表或控件。标注入口组合组件，接受用户判断后，按稳定样本标识和数据版本保存结果。目录发现只读取静态声明。通用函数也可标为 `tool`。项目自写与引入的第三方模块同在工作台「工具」出现；平台发布的通用模块从 `demiflow.data_tools` 导入。
 
 ### DF-03
 

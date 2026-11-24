@@ -105,7 +105,8 @@ def test_developer_sandbox_includes_declared_readonly_external_locations_only(tm
             'provider_bytes': 64 * 1024**2, 'private_total_bytes': 128 * 1024**2,
         })(),
     })()
-    project = {'root': str(proj), 'kind': 'pipeline', 'writes': ['flows'], 'protected': []}
+    project = {'root': str(proj), 'kind': 'pipeline', 'writes': ['flows', 'moved_root_script.py'], 'protected': []}
+    (proj / 'flows').mkdir()
     session = {'id': 's1', 'provider': 'deepseek'}
     config = {'executable': str(fake_exec)}
 
@@ -114,6 +115,8 @@ def test_developer_sandbox_includes_declared_readonly_external_locations_only(tm
 
     assert str(ext_ro.resolve()) in dev_spec.read_paths
     assert str(ext_ro.resolve()) not in dev_spec.write_paths
+    assert str((proj / 'flows').resolve()) in dev_spec.write_paths
+    assert str((proj / 'moved_root_script.py').resolve()) not in dev_spec.write_paths
     assert str(ext_rw.resolve()) not in dev_spec.read_paths
     assert str(tmp_path.resolve()) not in dev_spec.read_paths
     assert str(state.resolve()) not in dev_spec.read_paths

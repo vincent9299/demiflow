@@ -101,18 +101,28 @@ INPUT_TOOL = dict(name='read_input', description='Discover and read bounded inpu
 _STANDARD_PROJECT_DIRS = frozenset({
     'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'data', 'logs', 'tests', 'docs',
 })
+_MOVE_DEST_DIRS = frozenset({
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'tests', 'docs',
+})
+_PROTECTED_TOP_DIRS = frozenset({'.forge', '.git', '.venv', 'runs', 'data', 'logs', 'tables'})
+_PROTECTED_ROOT_FILES = frozenset({'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'README.md'})
+_PROTECTED_DATA_SUFFIXES = frozenset({'.lance', '.parquet', '.arrow', '.db', '.sqlite', '.sqlite3'})
 
 PROJECT_LAYOUT_TOOL = dict(
     name='manage_project_layout',
     description=(
-        'Safely manage controlled project structure, table bindings and workspace.json registrations on the host: '
+        'Safely manage controlled project structure, file organization, table bindings and workspace.json registrations on the host: '
         'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/data/logs/tests/docs); '
         'register_flow checks and registers a flow entry in workspace.json (defaulting to configs/<flow>.json); '
         'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
-        'bind_table registers a read-only input location in workspace.json (if needed) and pins a Lance table control under tables/<alias>.json for {"kind":"table","alias":"..."} parameters.'
+        'bind_table registers a read-only input location in workspace.json (if needed) and pins a Lance table control under tables/<alias>.json for {"kind":"table","alias":"..."} parameters; '
+        'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
+        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries.'
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
-        'action': dict(type='string', enum=['ensure_dirs', 'register_flow', 'bind_params', 'bind_table']),
+        'action': dict(type='string', enum=[
+            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path',
+        ]),
         'dirs': dict(type='array', items=dict(type='string')),
         'entry': dict(type='string'),
         'params': dict(type='string'),
@@ -121,8 +131,63 @@ PROJECT_LAYOUT_TOOL = dict(
         'path': dict(type='string'),
         'location_id': dict(type='string'),
         'version': dict(type='integer'),
+        'src': dict(type='string'),
+        'dst': dict(type='string'),
+        'paths': dict(type='array', items=dict(type='string')),
     }),
 )
+
+
+def _registered_control_paths(root: Path) -> set[str]:
+    from demiflow.forge import project as forge_project
+    try:
+        _, value = forge_project.load_project(root)
+    except Exception:
+        return set()
+    entries = value.get('entries') or {}
+    used = {e.partition(':')[0] for e in entries}
+    for plist in entries.values():
+        used.update(plist)
+    return used
+
+
+def _validate_tree_mutable(root: Path, rel: str, target: Path, *, allow_notebooks: bool, registered: set[str]):
+    parts = Path(rel).parts
+    if not parts or any(p.startswith('.') for p in parts):
+        reject(f'Protected or hidden path cannot be modified: {rel}', 'operation_rejected')
+    top = parts[0]
+    if top in _PROTECTED_TOP_DIRS or (not allow_notebooks and top == 'notebooks'):
+        reject(f'Protected project directory cannot be modified: {rel}', 'operation_rejected')
+    if len(parts) == 1 and top in _PROTECTED_ROOT_FILES:
+        reject(f'Protected root file cannot be modified: {rel}', 'operation_rejected')
+    if rel in registered:
+        reject(f'Registered entry or bound parameter cannot be moved/removed directly: {rel}', 'conflict')
+    if target.is_symlink():
+        reject(f'Symbolic link cannot be moved/removed: {rel}', 'operation_rejected')
+    if target.is_file():
+        suf = target.suffix.lower()
+        if suf in _PROTECTED_DATA_SUFFIXES or (not allow_notebooks and suf == '.ipynb'):
+            reject(f'Protected data or notebook file cannot be deleted: {rel}', 'operation_rejected')
+        return
+    if target.is_dir():
+        count = 0
+        stack = [target]
+        while stack:
+            cur = stack.pop()
+            for child in cur.iterdir():
+                count += 1
+                if count > 4096:
+                    reject(f'Directory tree exceeds modification budget: {rel}', 'resource_limit')
+                if child.is_symlink():
+                    reject(f'Directory contains symbolic link: {rel}', 'operation_rejected')
+                child_rel = child.relative_to(root).as_posix()
+                if child_rel in registered:
+                    reject(f'Directory contains registered entry or parameter: {child_rel}', 'conflict')
+                suf = child.suffix.lower()
+                if suf in _PROTECTED_DATA_SUFFIXES or (not allow_notebooks and suf == '.ipynb'):
+                    reject(f'Directory contains protected data or notebook file: {child_rel}', 'operation_rejected')
+                if child.is_dir():
+                    stack.append(child)
 
 
 def _run_project_layout(project_root, arguments):
@@ -194,6 +259,52 @@ def _run_project_layout(project_root, arguments):
             location_id=arguments.get('location_id'),
             version=arguments.get('version'),
         )
+    if action == 'move_path':
+        import shutil
+        src_raw = arguments.get('src')
+        dst_raw = arguments.get('dst')
+        if not isinstance(src_raw, str) or not src_raw or not isinstance(dst_raw, str) or not dst_raw:
+            reject('move_path requires non-empty relative src and dst paths', 'invalid_request')
+        src_path = safe_path(root, src_raw, missing=False)
+        dst_path = safe_path(root, dst_raw, missing=True)
+        src_rel = src_path.relative_to(root).as_posix()
+        dst_rel = dst_path.relative_to(root).as_posix()
+        dst_parts = Path(dst_rel).parts
+        if len(dst_parts) < 2 or dst_parts[0] not in _MOVE_DEST_DIRS or any(p.startswith('.') for p in dst_parts):
+            reject(f'move_path destination must be inside a standard role directory: {dst_rel}', 'invalid_request')
+        if dst_path.exists() or dst_path.is_symlink():
+            reject(f'move_path destination already exists: {dst_rel}', 'conflict')
+        if src_path == dst_path or src_path in dst_path.parents:
+            reject('move_path source and destination overlap', 'invalid_request')
+        with control_lock(root):
+            registered = _registered_control_paths(root)
+            _validate_tree_mutable(root, src_rel, src_path, allow_notebooks=True, registered=registered)
+            ensure_directory(dst_path.parent)
+            shutil.move(str(src_path), str(dst_path))
+        return dict(status='moved', src=src_rel, dst=dst_rel)
+    if action == 'remove_path':
+        import shutil
+        raw_paths = arguments.get('paths')
+        if not isinstance(raw_paths, list) or not raw_paths or len(raw_paths) > 64:
+            reject('remove_path requires a non-empty list of 1..64 relative paths', 'invalid_request')
+        targets = []
+        for item in raw_paths:
+            if not isinstance(item, str) or not item:
+                reject('remove_path entries must be non-empty relative path strings', 'invalid_request')
+            target = safe_path(root, item, missing=False)
+            targets.append((target.relative_to(root).as_posix(), target))
+        removed = []
+        with control_lock(root):
+            registered = _registered_control_paths(root)
+            for rel, target in targets:
+                _validate_tree_mutable(root, rel, target, allow_notebooks=False, registered=registered)
+            for rel, target in targets:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.exists():
+                    target.unlink()
+                removed.append(rel)
+        return dict(status='removed', removed=removed)
     reject('Unsupported manage_project_layout action', 'invalid_request')
 
 
