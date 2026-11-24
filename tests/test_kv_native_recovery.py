@@ -106,7 +106,9 @@ def test_dataset_process_crash_recovers_original_sqlite_commit(tmp_path, boundar
     assert store.get('a')['value'] == (99 if published else 1)
     assert store.get('b')['value'] == 2
     assert store.get('history')['value'] == {'unchanged': True}
-    assert (tmp_path/'source').read_text().splitlines() == ['row', 'row']
+    # A prepare that was never recorded leaves nothing to adopt: the source is read again.
+    reads = 4 if boundary == 'after_prepare_before_record' else 2
+    assert (tmp_path/'source').read_text().splitlines() == ['row'] * reads
     with RunJournal(tmp_path/'run')._connection() as db:
         assert not db.execute("SELECT path FROM runtime_artifacts WHERE path LIKE 'scratch/kv-%'").fetchall()
 
