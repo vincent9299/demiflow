@@ -103,7 +103,6 @@ def test_management_runs_filters_and_opens_real_result(root,browser,tmp_path):
         navigate(page,'管道')
         page.locator('.wb-flow-record[data-entry="flows/questions.py:select"]').click()
         page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).click()
-        page.get_by_role('button', name='确认运行', exact=True).click()
         expect(page.locator('.wb-run-bar')).to_be_visible(timeout=65000)
         expect(page.locator('.wb-run-bar > .wb-tag')).to_have_text('已完成',timeout=65000)
         run_id=page.evaluate('ForgeView.decodeView(location.hash).run_id')

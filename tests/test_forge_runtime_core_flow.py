@@ -107,7 +107,6 @@ def open_menu_action(page, name):
 
 def submit_run(page):
     page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).click()
-    page.get_by_role('button', name='确认运行', exact=True).click()
 
 
 def choose_flow(page, entry):
