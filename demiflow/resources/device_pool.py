@@ -9,18 +9,19 @@ declared device memory fits no single device is rejected before startup.
 
 This is logical admission/accounting, not physical device isolation: real
 CUDA_VISIBLE_DEVICES/UUID binding evidence is explicitly out of scope.
+
+Released records move to the ledger's history as scans meet them, so admission
+reads live records only and the ledger has no lifetime record limit. Every
+process sharing one device root must therefore run a version that reads history.
 """
 import fcntl
-import json
 import os
-from pathlib import Path
 import time
 
-from .capacity import _save_atomic
+from .capacity import AllocationRecords, MAX_ACTIVE_RECORDS, _save_atomic
 from .contracts import ResourceError, accelerator_budget_key, identifier
 
 MAX_DEVICES = 64
-MAX_ACTIVE_RECORDS = 1024
 _PLACEMENT_KEYS = frozenset({"device_ids"})
 
 
@@ -89,16 +90,13 @@ def _placement_ids(value, name):
     return list(ids)
 
 
-class DevicePool:
+class DevicePool(AllocationRecords):
     """One normalized root, one file lock, bounded atomic per-allocation records."""
 
     def __init__(self, root, *, inventory):
-        self.root = Path(root).resolve()
         self.inventory = validate_inventory(inventory)
         self._devices = {device["device_id"]: device for device in self.inventory}
-        self.root.mkdir(parents=True, exist_ok=True)
-        self._records = self.root / "allocations"
-        self._records.mkdir(exist_ok=True)
+        self._open_records(root)
 
     def _lock(self):
         path = self.root / "devices.lock"
@@ -109,33 +107,6 @@ class DevicePool:
             os.close(fd)
             raise
         return fd
-
-    def _read(self, allocation_id):
-        path = self._records / (allocation_id + ".json")
-        try:
-            with open(path, "rb") as stream:
-                raw = stream.read(8193)
-        except FileNotFoundError:
-            return None
-        if len(raw) > 8192:
-            raise ResourceError("INVALID_SPEC", "device record exceeds byte budget")
-        record = json.loads(raw)
-        if type(record) is not dict or record.get("allocation_id") != allocation_id:
-            raise ResourceError("INVALID_SPEC", "device record identity differs")
-        return record
-
-    def _active(self):
-        records = []
-        with os.scandir(self._records) as entries:
-            for count, entry in enumerate(entries):
-                if count >= MAX_ACTIVE_RECORDS + 1:
-                    raise ResourceError("QUOTA_EXCEEDED", "device record count exceeds budget")
-                if not entry.name.endswith(".json") or entry.name.endswith(".tmp"):
-                    continue
-                record = self._read(entry.name[:-5])
-                if record is not None and record["state"] != "RELEASED":
-                    records.append(record)
-        return records
 
     def _usage(self, records):
         charged_memory = {device_id: 0 for device_id in self._devices}

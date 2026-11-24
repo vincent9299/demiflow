@@ -902,7 +902,8 @@ class DataflowExecution:
         hosts = self._scheduler.place_hosts(pending)
         ready = []
         from demiflow.execution.scheduler.native_limits import admission_timeout_ms
-        deadline = time.monotonic() + admission_timeout_ms(self._policy) / 1000
+        started = time.monotonic()
+        deadline = started + admission_timeout_ms(self._policy) / 1000
         while pending:
             deferred = []
             for stage, work in pending:
@@ -912,14 +913,22 @@ class DataflowExecution:
                 except DataflowError as exc:
                     if exc.retryable:
                         deferred.append((stage, work))
+                        waiting = exc
                         continue
                     raise
                 ready.append((lease, stage, work.operation_id))
             pending = deferred
             if pending:
-                if time.monotonic() >= deadline:
-                    raise DataflowError('CAPACITY_PENDING', 'Worker admission deadline exceeded before business activation', retryable=True)
-                time.sleep(min(.01, max(0, deadline - time.monotonic())))
+                now = time.monotonic()
+                if now >= deadline:
+                    # Say what the scheduler was still waiting for, not only that time ran out.
+                    conditions = [str(item) for item in waiting.context.get('conditions') or ()]
+                    raise DataflowError('CAPACITY_PENDING', ('Worker admission deadline exceeded before business activation'
+                        + (': ' + ', '.join(conditions) if conditions else ''))[:1024], retryable=True,
+                        context={'conditions': conditions}) from waiting
+                # A wait that has lasted a second is no longer a launch in progress:
+                # each round costs journal transactions, so poll it less often.
+                time.sleep(min(.01 if now - started < 1 else .05, max(0, deadline - now)))
         if (can_start_clock and ready and self._restore_image is handoff_image
                 and self._checkpoint.is_latest_image(handoff_image)
                 and not self._active_worker_allocations and not self._by_partition

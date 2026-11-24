@@ -45,7 +45,20 @@ def allocation_envelope(value, *, track_thread=None):
 
 ENVELOPE_ENV = "DEMIFLOW_RESOURCE_ENVELOPE"
 MAX_ACTIVE_RECORDS = 1024
+# Released records met by one scan that leave the active directory under the
+# caller's lock: enough to drain a backlog in a few admissions, bounded I/O.
+MAX_ARCHIVED_PER_SCAN = 64
+# A release made by the ledger's own observation of a physical exit (see the
+# cleanup contract). The reference binds the ledger root and the whole record:
+# identity, spec, and the origin naming the scope, unit and observing domain.
+OBSERVED_EXIT = "df-capacity-observed-exit:v1:"
 _ENVELOPE_KEYS = frozenset({"allocation_id", "spec_hash", "cpu_millis", "memory_bytes", "resource_directory"})
+
+
+def observed_exit_reference(root, record):
+    binding = {"root": str(root), "allocation_id": record["allocation_id"], "spec_hash": record["spec_hash"],
+               "identity": record["identity"], "origin": record.get("origin")}
+    return OBSERVED_EXIT + hashlib.sha256(document(binding)).hexdigest()
 
 
 def _save_atomic(path, value):
@@ -107,47 +120,21 @@ def inherited_envelope():
     return envelope
 
 
-class LocalCapacityPool:
-    """One normalized root, one file lock, bounded atomic per-allocation records."""
+class AllocationRecords:
+    """Per-allocation record files of one ledger root: live ones in `allocations/`,
+    released ones kept byte-for-byte in `released/`. The owning ledger holds its
+    own lock around every call.
 
-    def __init__(self, root, *, capacity, deadline=None):
+    A ledger whose released records may move to history must only be shared by
+    processes that read history too; an older reader would miss a moved record.
+    """
+
+    def _open_records(self, root):
         self.root = Path(root).resolve()
-        if type(capacity) is not dict or not {"cpu_millis", "memory_bytes"} <= set(capacity) or set(capacity) - {
-                "cpu_millis", "memory_bytes", "scratch_bytes"}:
-            raise ResourceError("INVALID_SPEC", "pool capacity needs cpu_millis/memory_bytes")
-        if any(type(v) is not int or v <= 0 for v in capacity.values()):
-            raise ResourceError("INVALID_SPEC", "pool capacity values must be positive ints")
-        self.capacity = dict(capacity)
-        if deadline is not None:
-            import math
-            if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= 0:
-                raise ResourceError('INVALID_SPEC', 'capacity deadline must be a finite monotonic time')
-        self._deadline = deadline
         self.root.mkdir(parents=True, exist_ok=True)
         self._records = self.root / "allocations"
         self._records.mkdir(exist_ok=True)
         self._released = self.root / "released"
-
-    def _lock(self):
-        path = self.root / "capacity.lock"
-        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
-        try:
-            if self._deadline is None:
-                fcntl.flock(fd, fcntl.LOCK_EX)
-            else:
-                while True:
-                    remaining = self._deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise ResourceError('CLEANUP_UNCONFIRMED', 'capacity cleanup lock deadline expired')
-                    try:
-                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
-                        time.sleep(min(.01, remaining))
-        except BaseException:
-            os.close(fd)
-            raise
-        return fd
 
     def _released_path(self, allocation_id):
         # Exact lookup, never a scan of unbounded historical allocations.
@@ -162,16 +149,16 @@ class LocalCapacityPool:
             return None
         with os.fdopen(descriptor, "rb") as stream:
             if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                raise ResourceError("INVALID_SPEC", "capacity record is not a regular file")
+                raise ResourceError("INVALID_SPEC", "allocation record is not a regular file")
             try:
                 raw = stream.read(8193)
             except OSError as exc:
-                raise ResourceError("INVALID_SPEC", "capacity record cannot be read") from exc
+                raise ResourceError("INVALID_SPEC", "allocation record cannot be read") from exc
         if len(raw) > 8192:
-            raise ResourceError("INVALID_SPEC", "capacity record exceeds byte budget")
+            raise ResourceError("INVALID_SPEC", "allocation record exceeds byte budget")
         record = json.loads(raw)
         if type(record) is not dict or record.get("allocation_id") != allocation_id:
-            raise ResourceError("INVALID_SPEC", "capacity record identity differs")
+            raise ResourceError("INVALID_SPEC", "allocation record identity differs")
         return record, raw
 
     def _read(self, allocation_id):
@@ -247,13 +234,56 @@ class LocalCapacityPool:
                     else:
                         records.append(record)
             if not overflow:
+                # A complete scan already knows every live record. Released ones
+                # it met move to history, so later scans read live records only.
+                for allocation_id in released[:MAX_ARCHIVED_PER_SCAN]:
+                    self._archive_released(allocation_id)
                 return records
             if not released:
-                raise ResourceError("QUOTA_EXCEEDED", "capacity record count exceeds active scan budget")
+                raise ResourceError("QUOTA_EXCEEDED", "allocation record count exceeds active scan budget")
             for allocation_id in released:
                 self._archive_released(allocation_id)
-        raise ResourceError("CAPACITY_PENDING", "capacity history compaction made progress; retry bounded scan",
+        raise ResourceError("CAPACITY_PENDING", "allocation history compaction made progress; retry bounded scan",
                             retriable=True, retry_after_ms=1)
+
+
+class LocalCapacityPool(AllocationRecords):
+    """One normalized root, one file lock, bounded atomic per-allocation records."""
+
+    def __init__(self, root, *, capacity, deadline=None):
+        if type(capacity) is not dict or not {"cpu_millis", "memory_bytes"} <= set(capacity) or set(capacity) - {
+                "cpu_millis", "memory_bytes", "scratch_bytes"}:
+            raise ResourceError("INVALID_SPEC", "pool capacity needs cpu_millis/memory_bytes")
+        if any(type(v) is not int or v <= 0 for v in capacity.values()):
+            raise ResourceError("INVALID_SPEC", "pool capacity values must be positive ints")
+        self.capacity = dict(capacity)
+        if deadline is not None:
+            import math
+            if type(deadline) not in (int, float) or not math.isfinite(deadline) or deadline <= 0:
+                raise ResourceError('INVALID_SPEC', 'capacity deadline must be a finite monotonic time')
+        self._deadline = deadline
+        self._open_records(root)
+
+    def _lock(self):
+        path = self.root / "capacity.lock"
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            if self._deadline is None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            else:
+                while True:
+                    remaining = self._deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ResourceError('CLEANUP_UNCONFIRMED', 'capacity cleanup lock deadline expired')
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        time.sleep(min(.01, remaining))
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
 
     def _charged(self, records):
         charged = {
@@ -273,8 +303,14 @@ class LocalCapacityPool:
             "identity": record.get("identity"),
         }
 
-    def reserve(self, allocation_id, spec_hash_value, effective_profile, deadline_ms):
+    def reserve(self, allocation_id, spec_hash_value, effective_profile, deadline_ms, *, origin=None):
+        """`origin` is the reserving provider's bounded description of who created
+        the allocation and where its unit lives; the ledger stores it verbatim."""
         identifier(allocation_id)
+        if origin is not None:
+            if type(origin) is not dict:
+                raise ResourceError("INVALID_SPEC", "allocation origin must be an object")
+            document(origin, 2048)
         if type(spec_hash_value) is not str or len(spec_hash_value) != 64:
             raise ResourceError("INVALID_SPEC", "spec_hash must be sha256 hex")
         if type(effective_profile) is not dict or not {"cpu_millis", "memory_bytes"} <= set(effective_profile):
@@ -318,6 +354,8 @@ class LocalCapacityPool:
             }
             if "scratch_bytes" in effective_profile:
                 record["effective"]["scratch_bytes"] = effective_profile["scratch_bytes"]
+            if origin is not None:
+                record["origin"] = origin
             _save_atomic(self._records / (allocation_id + ".json"), record)
             return self._view(record)
         finally:
@@ -401,6 +439,23 @@ class LocalCapacityPool:
             active = self._active()
             return {"charged": self._charged(active), "capacity": dict(self.capacity),
                     "active": [self._view(r) for r in active]}
+        finally:
+            os.close(fd)
+
+    def live_records(self):
+        """Complete live records, including each one's origin, for the provider
+        that proves physical exits. A copy: the ledger remains the only writer."""
+        fd = self._lock()
+        try:
+            return self._active()
+        finally:
+            os.close(fd)
+
+    def record(self, allocation_id):
+        identifier(allocation_id)
+        fd = self._lock()
+        try:
+            return self._read(allocation_id)
         finally:
             os.close(fd)
 

@@ -1,6 +1,6 @@
 # demiflow 开发约束
 
-**必须遵循 [DemiFlow 发版规范](docs/repository-rules.md)**：隔离开发、integration 合入闸、四线总闸、main 定版、正式目录落位、推送及归档均按该规范执行。它覆盖下文历史工作位置/发版描述；最新真人指令优先。
+**必须遵循 [DemiFlow 发版规范](docs/repository-rules.md)**：隔离开发、integration 合入闸、按影响范围的验收与定期全量四线、main 定版、正式目录落位、推送及归档均按该规范执行。它覆盖下文历史工作位置/发版描述；最新真人指令优先。
 
 Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/dataset-engine-architecture.md)逐项核对受影响的模块职责、调用时序和依赖方向。
 
