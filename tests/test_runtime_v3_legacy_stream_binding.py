@@ -1,4 +1,4 @@
-"""Authenticate the original published native terminal without its old dispatcher."""
+"""Current terminal recovery and side-effect-free rejection of a retired SDK program."""
 import json
 import os
 import subprocess
@@ -62,13 +62,66 @@ with RunContext.start(root/'run', limits={'checkpoint_rows':4, 'checkpoint_inter
 """
 
 
+CURRENT = """
+import json, os, sys
+from pathlib import Path
+import pyarrow as pa
+from demiflow import data
+from demiflow.data.plan import CallableSpec, MapBatchesOp
+from demiflow.execution.checkpoint import commit
+from demiflow.execution.pipeline.checked import action
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.storage.state_artifacts import StateArtifacts
+from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
+from demiflow.execution.outputs.batch_conversion import _cast_sink_batch
+from demiflow.execution.contracts.record_schema import encode
+from demiflow.planning.dataflow_policy import PREFLIGHT_BOUNDS
+
+root, uri, when = sys.argv[1:]
+root = Path(root)
+schema = pa.schema([('id', pa.int32())], metadata={b'sealed': b'original'})
+encoded = encode(schema, bounds=PREFLIGHT_BOUNDS)
+arguments = {'batch_format': 'pyarrow', 'batch_size': 2,
+             'native_execution_limits': {'memory_bytes': 96<<20, 'cpu_millis': 4000,
+                                         'inflight_rows': 2, 'inflight_bytes': 1<<20},
+             'declared_arrow_schema': encoded}
+(root/'args.json').write_text(json.dumps(arguments))
+with RunContext.start(root/'run', limits={'checkpoint_rows':4, 'checkpoint_interval_ms':60000}) as run, data.local_execution(workers=4, worker_mode='thread') as session:
+    (root/'run-id').write_text(run.ref.run_id)
+    def stop(name, ident):
+        if name == 'after_checkpoint_committed':
+            fact = run.journal.execution_commit(ident)
+            cut = StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])
+            if cut['cut']['final'] == (when == 'final'):
+                (root/'original-commit').write_text(ident)
+                os._exit(75)
+    commit.fault_point = stop
+    ds = data.read_lance(uri, version=1).select_columns(['id'])
+    with action('iter_batches', ds._source, ds._plan, arguments={'batch_format':'pyarrow'}) as owner:
+        # The real terminal conversion node belongs to this borrowed action.
+        # No legacy dispatcher, rewritten seal, or fabricated cut is involved.
+        plan = owner.plan.append(MapBatchesOp(CallableSpec.create(_cast_sink_batch,
+            fn_kwargs={'schema_bytes': encoded, 'max_bytes': 1<<20}),
+            batch_size=2, batch_format='pyarrow'))
+        request = make_action_request(session._executor, owner.source, plan,
+                                      kind='iter_batches', arguments=arguments)
+        assert request.action is owner.execution
+        list(run_dataset_action(request))
+"""
+
+
+@pytest.mark.parametrize('writer_version', ['published', 'current'])
 @pytest.mark.parametrize('cut', ['nonfinal', 'final'])
-def test_original_terminal_keeps_its_bounds_schema_and_borrowed_action(tmp_path, monkeypatch, cut):
+def test_terminal_keeps_its_bounds_schema_and_borrowed_action(tmp_path, monkeypatch, cut, writer_version):
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'resources'))
     old, _ = _extract_original(tmp_path, '59f3b5027ff8b386040ca55525ce2cae8b0fc41b')
+    from pathlib import Path
+    current = Path(__file__).resolve().parents[1]
+    writer = old if writer_version == 'published' else current
     uri = source(tmp_path, range(24))
-    result = subprocess.run([sys.executable, '-B', '-c', OLD, str(tmp_path), uri, cut], cwd=old,
-                            env={**os.environ, 'PYTHONPATH': str(old),
+    result = subprocess.run([sys.executable, '-B', '-c', OLD if writer_version == 'published' else CURRENT,
+                             str(tmp_path), uri, cut], cwd=writer,
+                            env={**os.environ, 'PYTHONPATH': str(writer),
                                  'DEMIFLOW_RESOURCE_ROOT': str(tmp_path/'resources')},
                             timeout=90, capture_output=True, text=True)
     assert result.returncode == 75, result.stderr
@@ -108,6 +161,14 @@ def test_original_terminal_keeps_its_bounds_schema_and_borrowed_action(tmp_path,
     with pytest.raises(DataflowError, match='limits or schema differ'):
         read({**original, 'declared_arrow_schema': None})
     assert not launches
+    if writer_version == 'published':
+        # The archived cast function names a retired SDK module. The latest
+        # scope deliberately removes cross-version identity substitution.
+        with pytest.raises(DataflowError, match='Program payload failed to load') as error:
+            read(original)
+        assert error.value.code == 'CORRUPT_ARTIFACT'
+        assert not launches
+        return
     tables = read(original)
     assert all(0 < len(table) <= 2 for table in tables)
     expected_schema = pa.schema([('id', pa.int32())], metadata={b'sealed': b'original'})

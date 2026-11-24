@@ -182,7 +182,7 @@ def test_a_deadline_interrupts_instead_of_waiting(tmp_path):
                 'SELECT count(*) FROM n').fetchone()
 
 
-@pytest.mark.parametrize('module', ['run_reader', 'sealed_plan_facts'])
+@pytest.mark.parametrize('module', ['journal.run_reader', 'journal.sealed_plan_facts'])
 def test_reader_modules_do_not_load_hosts(module):
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, '-I', '-B', '-c',

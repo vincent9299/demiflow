@@ -340,10 +340,11 @@ def test_e017():
 
 
 def test_e018(monkeypatch):
-    seen, original = [], API.infer_recovery
+    from demiflow.planning import dataflow_place
+    seen, original = [], dataflow_place.infer_recovery
     def infer(graph, snapshots, *, policy):
         seen.append(snapshots); return original(graph, snapshots, policy=policy)
-    monkeypatch.setattr(API, 'infer_recovery', infer)
+    monkeypatch.setattr(dataflow_place, 'infer_recovery', infer)
     report = API.explain_dataset(ItemsSource(items=()), LogicalPlan(), provider='local', options={})
     assert isinstance(report, dto.CapabilityReport) and seen == [()]
     with pytest.raises(DataflowError): API.explain_dataset(ItemsSource(items=()), LogicalPlan(), provider='bad', options={})
@@ -416,13 +417,14 @@ def test_group_placement_reserves_publication_and_checks_each_host():
 def test_partial_group_launch_retires_original_workers(tmp_path, monkeypatch, failure):
     from demiflow import data
     from demiflow.resources.manager import ResourceManager
-    resolve = API.resolve_runtime_policy
+    from demiflow.execution.scheduler import native_limits
+    resolve = native_limits.resolve_runtime_policy
 
     def policy(*args, **kwargs):
         policy, bounds = resolve(*args, **kwargs)
         return replace(policy, default_partitions=8, max_replicas=8), bounds
 
-    monkeypatch.setattr(API, 'resolve_runtime_policy', policy)
+    monkeypatch.setattr(native_limits, 'resolve_runtime_policy', policy)
 
     starts, activated = [], []
     original_apply = ResourceManager.apply

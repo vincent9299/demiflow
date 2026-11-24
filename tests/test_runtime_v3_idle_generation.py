@@ -100,7 +100,7 @@ def test_local_and_thread_admit_identical_activity_without_ack_or_lease_churn():
     observed = []
     thread = object.__new__(ThreadHostEndpoint)
     thread._activated = True; thread._allocation_id = 'owned'
-    thread._connector = NS(_host=lambda _: NS(_executor=object(), receive=observed.append))
+    thread._connector = NS(_host=lambda _: NS(assigned=lambda: True, receive=observed.append))
     commands = [{'kind': 'park_policy'}, {'kind': 'ack', 'delivery_id': 'old'},
         {'kind': 'renew_lease'}, {'kind': 'resume'},
         {'kind': 'data', 'delivery_id': 'new'}, {'kind': 'park'}]

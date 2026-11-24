@@ -717,7 +717,6 @@ def test_late_writer_keeps_run_lease_and_handles_until_it_exits(tmp_path):
 
 
 def test_temporary_hot_path_does_not_scan_tenfold_history(tmp_path, monkeypatch):
-    from demiflow.execution.outputs.block_sink import storage_usage
     results = []
     for history in (1000, 10000):
         with RunContext.start(tmp_path/str(history)) as run:
@@ -739,9 +738,9 @@ def test_temporary_hot_path_does_not_scan_tenfold_history(tmp_path, monkeypatch)
                 for i in range(64):
                     path = run.directory/'scratch'/str(i)
                     run.allocate_artifact(path, size=32)
-                    assert storage_usage(run) == 64
+                    assert run.journal.storage_usage() == 64
                     run.release_temporaries([path])
-                    assert storage_usage(run) == 0
+                    assert run.journal.storage_usage() == 0
             with run.journal._connection(write=True) as db:
                 db.set_progress_handler(None, 0)
             with run.journal._connection() as db:
