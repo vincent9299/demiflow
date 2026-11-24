@@ -29,12 +29,21 @@ def validate_python(value):
         return value
     if type(value) is not str or len(value.encode('utf-8')) > 2048 or any(ord(c) < 32 for c in value):
         raise ForgeError('Python 路径格式不正确。', code='invalid_request')
-    p = Path(value)
-    if not p.is_absolute() or str(p) != value or '..' in p.parts:
+    raw = value.strip()
+    if len(raw) > 1:
+        raw = raw.rstrip('/')
+    p = Path(raw)
+    if not p.is_absolute() or str(p) != raw or '..' in p.parts:
         raise ForgeError('Python 路径必须是规范的绝对路径。', code='invalid_request')
+    if p.is_dir():
+        for rel in ('bin/python', 'bin/python3', 'python', 'python3'):
+            candidate = p / rel
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        raise ForgeError('该目录下未找到可执行的 bin/python 或 bin/python3：' + raw, code='invalid_request')
     if not p.is_file() or not os.access(p, os.X_OK):
-        raise ForgeError('指定的 Python 解释器不存在或不可执行：' + value, code='invalid_request')
-    return value
+        raise ForgeError('指定的 Python 解释器不存在或不可执行：' + raw, code='invalid_request')
+    return raw
 
 
 PROTECTED_SANDBOX_ROOTS = {'.git', '.forge', 'flows', 'operators', 'prompts', 'data_tools', 'tests', 'src', 'lib'}
