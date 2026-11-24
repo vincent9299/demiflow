@@ -9,9 +9,9 @@ from pathlib import Path
 import time
 import uuid
 
-from demiflow.execution.request_limits import RequestGate, drain_on_service_stop
-from demiflow.execution.blocking_io import BlockingIOPool
-from demiflow.execution.stream_resources import CallMetrics
+from demiflow.services.request_limits import RequestGate, drain_on_service_stop
+from demiflow.services.blocking_io import BlockingIOPool
+from demiflow.execution.journal.run_telemetry import CallMetrics
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 from demiflow.operator_llm.stream_recovery import native_request_budget
@@ -83,12 +83,6 @@ class EmbeddingActor:
         self._native_recovery = None
         self._journal_binding = None
 
-    def native_stream_recovery(self, action, node_id):
-        from .stream_recovery import NativeEmbeddingRecovery
-        if (self._native_recovery is None or self._native_recovery.action is not action
-                or self._native_recovery.node_id != node_id):
-            self._native_recovery = NativeEmbeddingRecovery(self, action, node_id)
-        return self._native_recovery
 
     @property
     def cancel_drain_timeout_s(self):
@@ -197,7 +191,7 @@ class EmbeddingActor:
                             # vocabulary. Native Embedding historically raises
                             # an execution budget failure; preserve that API
                             # without changing the atomic reservation itself.
-                            from demiflow.execution.recovery_contract import RecoveryContractError
+                            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                             raise RecoveryContractError('Execution budget exhausted: embedding requests') from error
                         if not reserved:
                             record = await io(journal.lookup, request)

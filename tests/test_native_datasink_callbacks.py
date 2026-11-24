@@ -4,8 +4,8 @@ import json
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 from native_datasink_support import CallbackSink
 
 

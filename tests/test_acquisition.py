@@ -8,7 +8,7 @@ from demiflow.collect import FetchPolicy
 from demiflow.collect.documents import read_document
 from demiflow.collect.session import WebSession
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.request_limits import RequestGate
+from demiflow.services.request_limits import RequestGate
 
 
 @pytest.mark.slow

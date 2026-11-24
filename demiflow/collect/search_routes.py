@@ -6,7 +6,7 @@ import re
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 
-from demiflow.execution.request_limits import RequestGate, ServiceStopped
+from demiflow.services.request_limits import RequestGate, ServiceStopped
 from .native_search import SearchConfig
 from .native_search.config import digest, public
 from .search_reuse import ReceiptReuseSearchSession

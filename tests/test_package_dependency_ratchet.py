@@ -40,11 +40,11 @@ PRIVATE_IMPORT_BUDGET = {
 # package-wide private-name allowance. The checkpoint selector is the existing
 # canonical public entry's assembly seam, not a runtime-core dependency.
 P1_ASSEMBLY_IMPORTS = {
-    ('demiflow.execution.local_kernel', 'demiflow.data.execution_contract', '_current_executor'),
-    ('demiflow.execution.local_kernel', 'demiflow.data.execution_contract', '_use_executor'),
-    ('demiflow.execution.stream_checkpoint', 'demiflow.data.execution_contract', '_current_executor'),
+    ('demiflow.execution.pipeline.local_kernel', 'demiflow.data.execution_contract', '_current_executor'),
+    ('demiflow.execution.pipeline.local_kernel', 'demiflow.data.execution_contract', '_use_executor'),
+    ('demiflow.execution.executors.stream_checkpoint', 'demiflow.data.execution_contract', '_current_executor'),
     ('demiflow.pipeline.core', 'demiflow.data.execution_contract', '_use_executor'),
-    ('demiflow.execution.stream_checkpoint', 'demiflow.data.api', '_select_executor'),
+    ('demiflow.execution.executors.stream_checkpoint', 'demiflow.data.api', '_select_executor'),
 }
 
 # Pre-v3 execution modules. runtime-v3 has one orchestration entry
@@ -53,22 +53,18 @@ P1_ASSEMBLY_IMPORTS = {
 # Listing a module here does not say it can be deleted. It says: do not build new
 # code on it without deciding that on purpose. Value: today's importers.
 PRE_V3_MODULES = {
-    'demiflow.execution.stream': {
+    'demiflow.execution.journal.stream': {
         'demiflow.data.dataset',
         'demiflow.data.execution_contract',  # TYPE_CHECKING only: original StreamStats identity
-        'demiflow.execution.dataflow_stream',
-        'demiflow.execution.request_limits',
+        'demiflow.execution.action_driver.stream',
+        'demiflow.services.request_limits',
         'demiflow.execution.worker.graph_execution', 'demiflow.execution.worker.queue_transform'},
-    'demiflow.execution.plan_interpreter': {
-        'demiflow.execution.dataflow_history',
+    'demiflow.execution.seal.plan_interpreter': {
         'demiflow.execution.seal.plan',
-        'demiflow.execution.sealed_plan_facts', 'demiflow.execution.sealed_plans',
-        'demiflow.planning.dataset_dag',
+        'demiflow.execution.journal.sealed_plan_facts', 'demiflow.execution.seal.sealed_plans',
         'demiflow.workbench.runs.facts'},
-    'demiflow.execution.local_tasks': {
-        'demiflow.execution.dataset_native'},
-    'demiflow.execution.local': {'demiflow.execution'},
-    'demiflow.execution.ray': {'demiflow.execution'},
+    'demiflow.execution.hosts.local': {'demiflow.execution'},
+    'demiflow.execution.hosts.ray': {'demiflow.execution'},
 }
 
 # Execution modules the plan compiler imports today. Plan compilation and run
@@ -81,26 +77,17 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.dataflow_kinds',
     'demiflow.execution.contracts.errors',
     'demiflow.execution.contracts.relational_region',  # sealed data and pure grant arithmetic
-    'demiflow.execution.dataflow_compile_inputs',
-    'demiflow.execution.dataflow_managed_devices',
-    'demiflow.execution.dataflow_model_factory',
-    'demiflow.execution.dataflow_models',
-    'demiflow.execution.dataflow_native',
-    'demiflow.execution.dataflow_native_limits',
-    'demiflow.execution.dataflow_publication_budget',
-    'demiflow.execution.dataflow_routed_prompt',
-    'demiflow.execution.dataflow_schema',
-    'demiflow.execution.dataflow_shared',
-    'demiflow.execution.kernels.reducer_memory',
-    'demiflow.execution.kernels.shuffle_order',
-    'demiflow.execution.kernels.task_scope',
-    'demiflow.execution.operator_policy',
-    'demiflow.execution.payload_limits',
-    'demiflow.execution.plan_facts',
-    'demiflow.execution.plan_interpreter',
-    'demiflow.execution.recovery_contract',
-    'demiflow.execution.recovery_identity',
-    'demiflow.execution.runtime_limits',
+    'demiflow.execution.compiler_support.dataflow_compile_inputs',
+    'demiflow.execution.operator_bindings.dataflow_model_factory',
+    'demiflow.execution.compiler_support.dataflow_native',
+    'demiflow.execution.scheduler.dataflow_publication_budget',
+    'demiflow.execution.compiler_support.dataflow_schema',
+    'demiflow.execution.compiler_support.capabilities',  # original pure capability vocabulary
+    'demiflow.execution.contracts.record_schema',
+    'demiflow.execution.compiler_support.operator_policy',
+    'demiflow.execution.seal.plan_facts',
+    'demiflow.execution.contracts.recovery_contract',
+    'demiflow.execution.seal.program_identity',
 }
 
 
@@ -220,7 +207,7 @@ def _lowering_symbol_modules():
     """
     import re
     kinds = (PACKAGE / 'execution/contracts/dataflow_kinds.py').read_text(encoding='utf-8')
-    native = (PACKAGE / 'execution/dataflow_native.py').read_text(encoding='utf-8')
+    native = (PACKAGE / 'execution/compiler_support/dataflow_native.py').read_text(encoding='utf-8')
     compiler_symbols = re.findall(r'^_(?:MODEL_)?COMPILE = "([a-z_.]+):[A-Za-z_]+"$', kinds, re.M)
     block = native[native.index('DECLARATION_LOWERINGS'):]
     declared = re.findall(r"'([a-z_.]+):[A-Za-z_]+'", block[:block.index('})')])

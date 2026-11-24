@@ -1,13 +1,13 @@
 import asyncio
 import json
 import pytest
-from demiflow.execution.adaptive_requests import AdaptiveRequestGate, request_admission_policy
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.adaptive_requests import AdaptiveRequestGate, request_admission_policy
+from demiflow.services.request_limits import ServiceStopped
 
 
 def test_grow_shrink_drain_and_fatal_state(tmp_path,monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=2,max_concurrency=4,increase_step=1,
         window_s=10,min_samples=2,recovery_s=20),state_path=tmp_path/'gate.json')
     gate.begin_action()
@@ -65,7 +65,7 @@ def test_invalid_policy(policy):
 
 def test_old_inflight_failures_do_not_repeat_shrink_or_delay_recovery(tmp_path,monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=32,max_concurrency=40,
         recovery_s=20,coalesce_inflight_failures=True),state_path=tmp_path/'gate.json')
     now[0]=101;gate.result(transient=True,elapsed_s=10)
@@ -85,7 +85,7 @@ def test_old_inflight_failures_do_not_repeat_shrink_or_delay_recovery(tmp_path,m
 
 def test_coalescing_preserves_fatal_and_consecutive_failure_protection(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=32,max_concurrency=40,
         coalesce_inflight_failures=True),failures=3)
     gate.result(transient=True,elapsed_s=10)
@@ -101,7 +101,7 @@ def test_coalescing_preserves_fatal_and_consecutive_failure_protection(monkeypat
 
 def test_default_and_untimed_failures_keep_existing_decrease_behavior(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     default=AdaptiveRequestGate(dict(initial_concurrency=32,max_concurrency=40))
     default.result(transient=True,elapsed_s=10)
     now[0]=101;default.result(transient=True,elapsed_s=10)
@@ -115,7 +115,7 @@ def test_default_and_untimed_failures_keep_existing_decrease_behavior(monkeypatc
 
 def test_latency_decrease_also_covers_old_inflight_failure(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=8,max_concurrency=16,
         min_samples=2,window_s=10,latency_p95_s=5,coalesce_inflight_failures=True))
     gate.result(success=True,elapsed_s=10)
@@ -127,7 +127,7 @@ def test_latency_decrease_also_covers_old_inflight_failure(monkeypatch):
 
 def test_failure_window_ignores_isolated_noise_but_decreases_on_sustained_errors(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=32,max_concurrency=40,
         transient_min_failures=3,transient_failure_ratio=.1,transient_window_s=60,
         coalesce_inflight_failures=True))
@@ -148,7 +148,7 @@ def test_failure_window_ignores_isolated_noise_but_decreases_on_sustained_errors
 
 def test_failure_window_checks_ratio_and_expires_old_events(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=16,transient_min_failures=3,
         transient_failure_ratio=.5,transient_window_s=10),failures=20)
     for _ in range(20):gate.result(success=True,elapsed_s=2)
@@ -163,7 +163,7 @@ def test_failure_window_checks_ratio_and_expires_old_events(monkeypatch):
 
 def test_failure_window_has_fixed_memory_and_does_not_disable_hard_stop(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=16,transient_min_failures=5,
         transient_failure_ratio=.5),failures=3)
     for _ in range(2000):gate.result(success=True,elapsed_s=2)
@@ -192,7 +192,7 @@ def test_invalid_failure_window(policy):
 
 def test_explicit_backpressure_bypasses_noise_window_and_preserves_inflight_coalescing(monkeypatch):
     now=[100.]
-    monkeypatch.setattr('demiflow.execution.adaptive_requests.time.monotonic',lambda:now[0])
+    monkeypatch.setattr('demiflow.services.adaptive_requests.time.monotonic',lambda:now[0])
     gate=AdaptiveRequestGate(dict(initial_concurrency=32,max_concurrency=40,
         transient_min_failures=3,transient_failure_ratio=.5,coalesce_inflight_failures=True))
     for _ in range(100):gate.result(success=True,elapsed_s=2)

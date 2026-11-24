@@ -8,7 +8,7 @@ constitute recoverable identity on their own.
 from collections import deque
 import re
 
-from ..recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from .errors import ProtocolError
 
 DATA_REF_SCHEMA = "demiflow.data_ref.v1"

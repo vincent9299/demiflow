@@ -1,33 +1,12 @@
-"""U4/S4 source-progress (SRC) conformance: the additive cursor_ref wire seam.
-
-S4 aligns the execution-layer cut_contribution position rule (graph_wire.py) with
-the byte-frozen K6 CheckpointManifest rule (contracts/checkpoint.py): a source
-position is exactly one of next_ordinal (fixed re-readable sources) or cursor_ref
-(an identifier naming a cursor artifact for incremental Lance/file/queue progress).
-The frozen K6 multi-source coverage, legacy degenerate-vector read and recovery
-routing are already proven by test_protocol_conformance (ckp_02/03/05); this suite
-proves the NEW wire capability and that the two validators accept/reject identically,
-plus a cursor_ref multi-source vector assembling into a full-coverage manifest.
-The contracts family is never modified (D2).
-"""
+"""Historical source positions retain their closed shape, bounds and coverage."""
 import pytest
 
 from demiflow.execution.contracts.checkpoint import (
     validate_checkpoint_manifest,
 )
-from demiflow.execution.graph_wire import (
-    CUT_CONTRIBUTION_SCHEMA, validate_cut_contribution,
-)
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
-def _contribution(**overrides):
-    value = {"schema_version": CUT_CONTRIBUTION_SCHEMA, "checkpoint_id": "ck-1",
-             "allocation_id": "alloc-1", "channel_cuts": [],
-             "operator_states": [], "inflight": [], "output_descriptor": None,
-             "source_progress": [], "final": False}
-    value.update(overrides)
-    return value
 
 
 def _sp(source_id, partition_id, position):
@@ -50,12 +29,19 @@ def _manifest(**overrides):
     return value
 
 
-# --- the new wire capability: cursor_ref positions are accepted -----------------
+def _source_manifest(**overrides):
+    value = _manifest(**overrides)
+    value['participants'] = dict(value['participants'], sources=[
+        {'source_id': p['source_id'], 'partition_id': p['partition_id']}
+        for p in value['source_progress']])
+    return value
+
+# --- historical source positions: cursor_ref positions are accepted -----------------
 
 def test_wire_source_progress_cursor_ref_accepted():
     entry = _sp("lance-src", "p0", {"cursor_ref": "cursor-" + "a" * 64})
-    assert validate_cut_contribution(
-        _contribution(source_progress=[entry]))["source_progress"] == [entry]
+    assert validate_checkpoint_manifest(
+        _source_manifest(source_progress=[entry]))["source_progress"] == [entry]
 
 
 @pytest.mark.parametrize("bad", [
@@ -63,7 +49,7 @@ def test_wire_source_progress_cursor_ref_accepted():
 ])
 def test_wire_source_progress_cursor_ref_rejects_invalid_identifier(bad):
     with pytest.raises(RecoveryContractError):
-        validate_cut_contribution(_contribution(
+        validate_checkpoint_manifest(_source_manifest(
             source_progress=[_sp("src-1", "p0", {"cursor_ref": bad})]))
 
 
@@ -80,21 +66,21 @@ def test_wire_source_progress_cursor_ref_rejects_invalid_identifier(bad):
 ])
 def test_wire_source_progress_position_exactly_one_kind(position):
     with pytest.raises(RecoveryContractError):
-        validate_cut_contribution(_contribution(
+        validate_checkpoint_manifest(_source_manifest(
             source_progress=[_sp("src-1", "p0", position)]))
 
 
 @pytest.mark.parametrize("ordinal", [0, 1, 2**63 - 1])
 def test_wire_source_progress_next_ordinal_accepts_in_range(ordinal):
     entry = _sp("src-1", "p0", {"next_ordinal": ordinal})
-    assert validate_cut_contribution(
-        _contribution(source_progress=[entry]))["source_progress"] == [entry]
+    assert validate_checkpoint_manifest(
+        _source_manifest(source_progress=[entry]))["source_progress"] == [entry]
 
 
 @pytest.mark.parametrize("ordinal", [-1, 2**63, True, 1.0, "1", None])
 def test_wire_source_progress_next_ordinal_rejects_out_of_range_or_non_int(ordinal):
     with pytest.raises(RecoveryContractError):
-        validate_cut_contribution(_contribution(
+        validate_checkpoint_manifest(_source_manifest(
             source_progress=[_sp("src-1", "p0", {"next_ordinal": ordinal})]))
 
 
@@ -104,14 +90,14 @@ def test_wire_source_progress_multi_source_vector_mixed_kinds():
     progress = [_sp("fixed-src", "p0", {"next_ordinal": 12}),
                 _sp("incr-src", "p0", {"cursor_ref": "c" * 64}),
                 _sp("incr-src", "p1", {"cursor_ref": "d" * 64})]   # same source, new partition
-    assert validate_cut_contribution(
-        _contribution(source_progress=progress))["source_progress"] == progress
+    assert validate_checkpoint_manifest(
+        _source_manifest(source_progress=progress))["source_progress"] == progress
 
 
 def test_wire_source_progress_rejects_duplicate_source_partition():
     entry = _sp("incr-src", "p0", {"cursor_ref": "c" * 64})
     with pytest.raises(RecoveryContractError):
-        validate_cut_contribution(_contribution(source_progress=[entry, entry]))
+        validate_checkpoint_manifest(_source_manifest(source_progress=[entry, entry]))
 
 
 # --- the S4 seam itself: wire and K6 accept/reject every position identically ----
@@ -142,9 +128,11 @@ def test_wire_and_k6_position_rules_align(position):
         except RecoveryContractError:
             return False
 
-    wire_ok = accepts(validate_cut_contribution, _contribution(source_progress=[entry]))
+    expected = (len(position) == 1 and (
+        type(position.get("next_ordinal")) is int and 0 <= position["next_ordinal"] < 2**63
+        or type(position.get("cursor_ref")) is str and 1 <= len(position["cursor_ref"]) <= 128))
     k6_ok = accepts(validate_checkpoint_manifest, _manifest(source_progress=[entry]))
-    assert wire_ok == k6_ok                               # one closed rule, two layers
+    assert k6_ok == expected
 
 
 # --- cursor_ref vector assembles into a full-coverage K6 manifest ---------------

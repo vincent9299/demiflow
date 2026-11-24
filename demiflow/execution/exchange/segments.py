@@ -7,11 +7,16 @@ read_domain, and converts back for the driver commit terminal. It builds no new
 physical transport; artifact registration/release stays with BlockSink under the
 granted fence (worker) and the CommitCoordinator (driver).
 """
-from ..artifact_manifest import entries
+
+from dataclasses import asdict
+from demiflow.execution.storage.segments import RecordBlocks
+from demiflow.execution.contracts.dataflow import ArtifactRef
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.storage.artifact_manifest import entries
 from ..contracts.exchange import (
     build_data_ref, check_read_domain, validate_data_ref,
 )
-from ..recovery_contract import RecoveryContractError, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 
 
 def read_domain(run_directory, host_id):
@@ -59,3 +64,27 @@ def refs_descriptor(refs, *, rows, reader_domain):
             raise RecoveryContractError("First-batch result carrier must be file blocks")
         blocks.append(dict(path=ref["location"], bytes=ref["bytes"], sha256=ref["sha256"]))
     return dict(blocks=blocks, rows=rows)
+
+
+def finite_buffer(buffers, spec, *, store, bounds, assignment, check_stop, partition,
+                  frame_call, coalesce_allowed):
+    if spec.channel_id not in buffers:
+        if (len(buffers) + 2) * 2 >= bounds.max_open_files:
+            raise DataflowError('BUDGET_EXCEEDED', 'finite spool exceeds open file budget')
+        buffers[spec.channel_id] = RecordBlocks(store, bounds, partition,
+            assignment=assignment, check_stop=check_stop, partitioned=False,
+            frame_call=frame_call, coalesce_allowed=coalesce_allowed)
+    return buffers[spec.channel_id]
+
+
+def seal_finite_blocks(stream):
+    keys = stream.prepare_blocks()
+    out = []
+    with stream.hold_metadata(keys), stream.hold_metadata(out):
+        for key in keys:
+            tag, ref, rows, size = stream.seal_block(key)
+            # Preserve the original bounded descriptor and its identity bytes.
+            out.append({'partition_id': stream.partition_id, 'rows': rows,
+                        'bytes': size, 'data_ref': asdict(ref)})
+    part = out[0]
+    return ArtifactRef(**part['data_ref']), part['rows']

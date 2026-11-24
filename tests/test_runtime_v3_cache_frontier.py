@@ -20,9 +20,17 @@ class Counter:
         return self.count
 
 
+def bind_cache_state(actor, owner):
+    from demiflow.execution.kernels.task_scope import snapshot_resident_function, restore_resident_function
+    from demiflow.execution.kernels.operator_state import snapshot_auto_state, restore_auto_state
+    actor.bind_checkpoint_cache(owner,
+        snapshot_function=snapshot_resident_function, restore_function=restore_resident_function,
+        snapshot_instance=snapshot_auto_state, restore_instance=restore_auto_state)
+
+
 def cache(root, owner='a', counter=None, **kwargs):
     actor = CachedSyncMap(counter or Counter(), root, 'v1', inputs=['value'], output='count', **kwargs)
-    actor.bind_checkpoint_cache(hashlib.sha256(owner.encode()).hexdigest())
+    bind_cache_state(actor, hashlib.sha256(owner.encode()).hexdigest())
     return actor
 
 
@@ -81,7 +89,7 @@ def test_old_stateful_image_rejected_and_old_stateless_result_readable(tmp_path)
         asyncio.run(cache(tmp_path).restore_state(image))
     assert failure.value.code == 'INCOMPATIBLE_HISTORY'
     plain = CachedSyncMap(lambda value: value + 10, tmp_path / 'plain', 'v1', inputs=['value'], output='count')
-    plain.bind_checkpoint_cache('b' * 64)
+    bind_cache_state(plain, 'b' * 64)
     plain_image = asyncio.run(plain.snapshot_state())
     assert 'cache_frontier' not in plain_image
     assert plain({'value': 0})['count'] == 10
@@ -154,7 +162,7 @@ def test_cache_creator_metadata_obeys_original_byte_capacity(tmp_path):
 def test_native_kv_sink_keeps_creator_metadata_and_refuses_replacement(tmp_path):
     import sqlite3
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     store = SQLiteKV(tmp_path / 'index.sqlite', 'n', max_value_bytes=128, max_bytes=128)
     store.put_many([('a', 1)], _origin='x' * 126)
     with RunContext.start(tmp_path / 'run'), data.local_execution():
@@ -190,7 +198,7 @@ def test_other_owner_cannot_erase_post_cut_creator_state_evidence(tmp_path):
 
 def test_actual_task_lifetimes_do_not_replay_other_tasks_cache_hits(tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     # Each two-input task owns a fresh counter. The second task hits a result
     # made by task 0, which must not count as an invocation on the fresh owner.
     with RunContext.start(tmp_path / 'run'), data.local_execution(batch_rows=2):
@@ -207,9 +215,9 @@ import demiflow
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 root=Path(sys.argv[1]); mode=sys.argv[2]; form=sys.argv[3]
 assert Path(demiflow.__file__).resolve().is_relative_to(Path.cwd())
 class Counter:
@@ -369,7 +377,7 @@ def test_function_predicate_state_uses_the_same_acknowledged_cache_frontier(tmp_
 
 def test_unadapted_and_shared_function_data_remain_usable_but_cannot_restore(tmp_path):
     from demiflow.data.plan import CallableSpec
-    from demiflow.execution.dataflow_model_factory import CacheFactory
+    from demiflow.execution.operator_bindings.dataflow_model_factory import CacheFactory
     namespace = {'counter': [0]}
     exec('def count(value):\n counter[0]+=1\n return counter[0]', namespace)
     actor = cache(tmp_path / 'global', counter=namespace['count'])

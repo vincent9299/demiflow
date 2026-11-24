@@ -4,7 +4,7 @@ from collections import Counter
 
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 
 
@@ -43,10 +43,10 @@ def _flow(rows=5, branches=16):
 
 @pytest.mark.parametrize('resume',[False, True])
 def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, monkeypatch, resume):
-    from demiflow.execution.source_readers import ItemsReader
+    from demiflow.execution.sources.source_readers import ItemsReader
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.sealed_plans import load_sealed_plan
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
+    from demiflow.execution.journal.run_journal import RunJournal
     reads, cuts, source_frontiers = [], [], []
     next_record, commit = ItemsReader.next_record, DataflowCheckpointCoordinator.commit
     def observe(reader):
@@ -107,21 +107,22 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
 
 def _disable_optional_fusion(monkeypatch):
     from dataclasses import replace
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    resolve = action_limits.resolve_runtime_policy
     def explicit_policy(*args, **kwargs):
         policy, bounds = resolve(*args, **kwargs)
         return replace(policy, fusion=False), bounds
     # Exercise the supported unfused physical policy through the original
     # compiler, resource authority, real workers, channels and commit journal.
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', explicit_policy)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', explicit_policy)
 
 
 def test_unfused_source_parks_at_64_real_deliveries_before_reading_fifth_row(tmp_path, monkeypatch):
-    from demiflow.execution.source_readers import ItemsReader
+    from demiflow.execution.sources.source_readers import ItemsReader
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     _disable_optional_fusion(monkeypatch)
     reads, images = [], []
     next_record = ItemsReader.next_record
@@ -159,7 +160,7 @@ def test_unfused_source_parks_at_64_real_deliveries_before_reading_fifth_row(tmp
 
 def test_single_source_invocation_wider_than_all_slots_still_rejects(tmp_path, monkeypatch):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     _disable_optional_fusion(monkeypatch)
     with pytest.raises(DataflowError, match='one operator invocation exceeds the parked durable credit window'):
         with RunContext.start(tmp_path/'run', limits={'memory_bytes':256*1024**2,

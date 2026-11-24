@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow import _kv_sink
-from demiflow.execution.run_context import RunContext, current_run
+from demiflow.execution.pipeline.run_context import RunContext, current_run
 from demiflow.kv import SQLiteKV
 
 

@@ -169,7 +169,7 @@ def test_query_circuit_keeps_attempt_failures_for_capacity_without_stopping_reco
 
 def test_query_circuit_counts_bounded_fallback_once_and_replays_while_stopped(tmp_path,monkeypatch):
     from collections import Counter
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     calls=Counter()
     async def call(self,context,message):
         if message['op']=='merge':return {'results':[r for g in message['groups'] for r in g['results']]}
@@ -285,7 +285,7 @@ def test_exit_fault_can_be_isolated_without_global_shrink_but_pool_still_stops()
 
 
 def test_pool_window_persists_receipts_before_stopping(tmp_path,monkeypatch):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     async def call(self,context,message):
         if message['op']=='merge':return {'results':[r for g in message['groups'] for r in g['results']]}
         failed=message['query'].startswith('bad')

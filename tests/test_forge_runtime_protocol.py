@@ -12,7 +12,7 @@ from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.runs import domain as run_domain
 from demiflow.workbench.runs import admission as run_admission
 from demiflow.forge.schema import ForgeError
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.resources.process_observation import signal_owned
 from test_forge_runs import base, root, prepared
 from test_forge_public_api import service, request

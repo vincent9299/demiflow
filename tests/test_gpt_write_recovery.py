@@ -19,9 +19,10 @@ import pytest
 
 from demiflow import data
 from demiflow.errors import LanceWriteConflict
-from demiflow.execution.recovery_contract import RecoveryContractError, RunRef, identity
-from demiflow.execution.run_context import RunContext, create_target_absent_binding
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, identity
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.outputs.lance_sink import create_target_absent_binding
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.lance.model import LanceWriteSpec
 
 REFUSAL = 'This delivery-only entry needs its P3 native sink adapter before replay'
@@ -42,7 +43,7 @@ def _intent(run, action_id, spec):
 
 def _pause_native(tmp_path, monkeypatch, *, mode='create', fn=keep_row):
     """Fault after sealing, before any commit; capture real native identity."""
-    from demiflow.execution import dataflow_sinks
+    from demiflow.execution.outputs import sinks as dataflow_sinks
     spec = LanceWriteSpec(str(tmp_path / 'out.lance'), mode=mode,
                          on=('value',) if mode == 'merge' else ())
     captured = {}
@@ -200,7 +201,7 @@ def _commit_child(root, crash=False):
     scope = (RunContext.resume(RunRef(str(root / 'run'), old['run_id'])) if old
              else RunContext.start(root / 'run'))
     if crash:
-        from demiflow.execution import commit
+        from demiflow.execution.checkpoint import commit
 
         def fault(name, commit_id):
             if name == 'after_sink_commit_before_receipt':
@@ -223,7 +224,7 @@ def test_r_c_existing_native_commit_recovers_without_republication(tmp_path):
     before = journal.execution_commits('action-1')
     assert len(before) == 1 and before[0]['status'] == 'prepared'
     # The workbench no longer re-exports the engine reader under a private name (P4).
-    from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt
+    from demiflow.execution.journal.publication_facts import inspect_write_receipt as _native_execution_receipt
     projected = _native_execution_receipt(journal, 'action-1')
     assert projected['committed_version'] == 1
     assert journal.execution_commits('action-1') == before

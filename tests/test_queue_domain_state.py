@@ -1,14 +1,14 @@
 """Bounded native affinity counts; unavailable to this worker is not global liveness."""
 import json
 import pytest
-from demiflow.execution.queue_contract import ArtifactDomainUnavailable
+from demiflow.execution.contracts.queue_contract import ArtifactDomainUnavailable
 from test_queue_v2_protocol import channel
 from test_queue_v2_boundaries import seed,worker
 from test_raw_fetch import origin_server
 
 
 def test_prepared_domain_is_reported_without_scanning_tasks_or_claiming_elsewhere(channel,tmp_path,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     with origin_server() as (url,calls):
         producer=seed(channel,tmp_path,url);fired=[]
         def fault(name,commit_id):

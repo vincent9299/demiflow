@@ -4,7 +4,7 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy, HttpSource
 from demiflow.objects import LocalObjectStore, ObjectRef
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_raw_fetch import BODY, origin_server
 
 
@@ -56,7 +56,7 @@ def test_fetch_graph_read_does_not_mutate_declarations(tmp_path):
                          ids=['before_first_cut', 'after_empty_residency_cut'])
 def test_fetch_recovers_original_native_receipt_across_dataset_cut(tmp_path, monkeypatch, nested):
     import json
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
 
     fired = []
 

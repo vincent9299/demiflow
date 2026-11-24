@@ -5,7 +5,7 @@ import pytest
 
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from _worker_event_fixtures import events
 from _join_spool_fixtures import install_join_spool_probe
@@ -98,7 +98,7 @@ def test_indivisible_payload_over_eight_mib_survives_join_and_sink(tmp_path, mon
 @pytest.mark.parametrize('partitions', [1, 2])
 def test_wide_join_hydrates_after_key_only_join_under_small_pool(tmp_path, monkeypatch, partitions):
     """Each input exceeds a 256 MiB pool; verify every payload without collecting it."""
-    from demiflow.execution.local_kernel import LocalKernelOptions
+    from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
     proof_path = install_join_spool_probe(tmp_path, monkeypatch)
     native = dict(memory_bytes=256 * 2**20, max_rss_bytes=2 * 2**30,
                   threads=2, partitions=partitions, timeout_s=120)

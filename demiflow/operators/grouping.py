@@ -1,0 +1,73 @@
+"""Bounded keyed microbatches for the streaming executor; no global sort."""
+import math
+import sys
+
+
+def row_size(row, limit):
+    """Conservative Python-object estimate before retaining another row.
+
+    Counts container allocations and nested scalar objects, not process RSS or
+    transport encoding. Shared objects across different rows count repeatedly.
+    """
+    pending, seen, size = [row], set(), 0
+    while pending:
+        value = pending.pop()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        size += sys.getsizeof(value)
+        if size > limit or len(seen) > 100000:
+            raise ValueError('Streaming group row exceeds chunk_bytes or object-count bound')
+        if isinstance(value, dict):
+            pending.extend(value.keys()); pending.extend(value.values())
+        elif isinstance(value, (list, tuple)):
+            pending.extend(value)
+        elif not isinstance(value, (str, bytes, int, float, bool, type(None))):
+            raise TypeError('Streaming grouping accepts nested mappings/sequences and scalar payloads')
+    return size
+
+
+def group_key(row, on):
+    values = [row[k] for k in on]
+    if any(not isinstance(v, (str, int, float, bool, type(None))) or
+           isinstance(v, float) and not math.isfinite(v) for v in values):
+        raise ValueError('Streaming grouping keys must be finite scalar values')
+    return tuple((type(v), v) for v in values)
+
+
+def pack_group(rows, *, on, output):
+    return [{**{k: rows[0][k] for k in on}, output: rows}]
+
+
+def group_batches_facts(operation):
+    return {'contract': 'demiflow.stream_group_batches',
+                    'arguments': {name: getattr(operation, name) for name in
+                                  ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
+
+
+def group_evictions(key, size, *, groups, sizes, chunk_bytes, buffer_bytes, buffered_bytes, max_groups):
+    """Choose evictions against the same live group state after each yielded flush."""
+    if key in groups and sizes[key] + size > chunk_bytes:
+        yield key
+    while groups and buffered_bytes() + size > buffer_bytes:
+        yield next(iter(groups))
+    if key not in groups and len(groups) >= max_groups:
+        yield next(iter(groups))
+
+
+def append_group(row, key, size, *, groups, sizes, bases, on, max_batch):
+    if key not in groups:
+        groups[key] = []
+        sizes[key] = 0
+        bases[key] = {field: row[field] for field in on}
+    groups[key].append(row)
+    sizes[key] += size
+    return size, len(groups[key]) >= max_batch
+
+
+def pop_group(key, *, groups, sizes, bases, output):
+    batch = groups.pop(key, [])
+    base = bases.pop(key, {})
+    released = sizes.pop(key, 0)
+    # An online microbatch cannot assert a final complete group.
+    return ({**base, output: batch} if batch else None), released

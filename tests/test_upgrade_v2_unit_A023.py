@@ -9,7 +9,7 @@ from demiflow.errors import UnsupportedExecutionOptionError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from _runtime_v3_executor_scope import observed_source
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _action_spy(monkeypatch):

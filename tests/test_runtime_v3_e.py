@@ -16,13 +16,13 @@ from demiflow import data
 from demiflow.data.plan import CallableSpec, LogicalPlan
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.action_driver import dataflow as E
-from demiflow.execution import dataflow_api as API
+from demiflow.execution.executors import dataflow_api as API
 from demiflow.execution.scheduler import placement as S
 from demiflow.execution.contracts import dataflow as dto
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_services import make_driver_services
-from demiflow.execution.recovery_contract import identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.action_driver.services import make_driver_services
+from demiflow.execution.contracts.recovery_contract import identity
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from demiflow.resources.contracts import ResourceProfile
 

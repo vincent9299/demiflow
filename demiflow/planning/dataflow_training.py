@@ -177,7 +177,7 @@ def physical_values(graph, stages):
 def validate_training_inputs(graph, physical, *, bounds):
     """Use sealed metadata only. The owner verifies actual materializations before fit."""
     from ..data.training_schema import validate_columns
-    from ..execution.dataflow_schema import node_schemas
+    from demiflow.execution.compiler_support.dataflow_schema import node_schemas
     snapshots = {s.source_id: s for s in physical.sources} if physical is not None else {}
     by_id = {node.occurrence_id: node for node in graph.nodes}
     schemas = node_schemas(graph, physical, bounds=bounds)

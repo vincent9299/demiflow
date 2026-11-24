@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from test_forge_runs import base, root
 
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.forge import operation_budget as budget
 from demiflow.forge import platform_worker
 from demiflow.workbench.runs import domain as run_domain

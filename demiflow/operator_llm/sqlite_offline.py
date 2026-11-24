@@ -3,11 +3,15 @@
 Binary inputs are content addressed ordinary files; SQLite stores their digest
 and location. Reading a request reconstructs the exact original model context.
 """
+
+from dataclasses import asdict, dataclass
+from demiflow.execution.contracts.artifact import digest
+from demiflow.execution.storage.artifacts import immutable, read
 import base64
 import hashlib
 import json
 from pathlib import Path
-from ..execution.artifacts import resolve_local_artifact
+from demiflow.execution.storage.artifacts import resolve_local_artifact
 
 from .call_ref import PromptRecordRef
 from .journal import canonical, request_key
@@ -158,3 +162,29 @@ class SQLiteOfflinePromptClient:
     async def aclose(self):
         from .client import _journal_io
         await _journal_io(self.journal.close)
+
+
+@dataclass(frozen=True)
+class JsonArtifactRef:
+    artifact_path: str
+    sha256: str
+
+    def to_dict(self):
+        return asdict(self)
+
+    def read(self, root=None):
+        path = Path(self.artifact_path)
+        if not path.is_absolute():
+            path = Path(root or '.') / path
+        value = read(path)
+        if digest(value) != self.sha256:
+            raise ValueError('Immutable JSON artifact digest mismatch')
+        return restore(value)
+
+def save_json_artifact(directory, value):
+    directory = Path(directory)
+    value = externalize(value, directory / 'inputs')
+    sha = digest(value)
+    path = directory / (sha + '.json')
+    immutable(path, value)
+    return JsonArtifactRef(str(path), sha)

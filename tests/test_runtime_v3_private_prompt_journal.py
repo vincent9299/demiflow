@@ -9,8 +9,8 @@ import sqlite3
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.journal import UncertainPromptCall
 from test_runtime_v3_native_execution import PACK, native_server
@@ -200,7 +200,7 @@ def test_private_prompt_process_workers_never_open_cache(tmp_path, native_server
 
 
 def test_private_prompt_cannot_change_sealed_route_over_rpc(tmp_path, native_server, monkeypatch):
-    from demiflow.execution import dataflow_prompt_journal as module
+    from demiflow.execution.journal import dataflow_prompt_journal as module
     original = module.private_prompt_request
     def attack(service, command, request):
         return original(service, replace(command, options={**dict(command.options), 'prompt_route': 'undeclared'}), request)
@@ -254,9 +254,9 @@ def _private_graph(path):
 def _private_event(run, store, seed='a', *, scope='first', operation='reserve', value_ref=None, options=None):
     from demiflow.execution.contracts.dataflow import NativeJournalCommand
     from demiflow.execution.contracts.dataflow_codec import _thaw_json
-    from demiflow.execution.dataflow_authority import _ref_to_json, _ref_from_json
-    from demiflow.execution.dataflow_prompt_journal import _rpc_id
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.dataflow_codec import encode_artifact_reference as _ref_to_json, decode_artifact_reference as _ref_from_json
+    from demiflow.execution.contracts.dataflow_codec import private_prompt_rpc_id as _rpc_id
+    from demiflow.execution.contracts.recovery_contract import identity
     from test_runtime_v3_native_rpc_replay import event
     original = event(run, store, seed)
     payload = _thaw_json(original.payload)
@@ -270,8 +270,8 @@ def _private_event(run, store, seed='a', *, scope='first', operation='reserve', 
 
 def test_duplicate_private_prompt_rpc_is_not_a_new_logical_invocation(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
-    from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
@@ -295,9 +295,9 @@ def test_duplicate_private_prompt_rpc_is_not_a_new_logical_invocation(tmp_path):
 
 
 def test_private_prompt_stop_keeps_receipt_and_response_but_refuses_new_reserve(tmp_path):
-    from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
-    from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
+    from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
+    from demiflow.services.request_limits import COOPERATIVE_STOP_REASON, ServiceStopped
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
@@ -318,8 +318,8 @@ def test_private_prompt_stop_keeps_receipt_and_response_but_refuses_new_reserve(
 
 
 def test_private_prompt_rpc_cannot_invent_http_retry_policy(tmp_path):
-    from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, lease):
@@ -334,8 +334,8 @@ def test_private_prompt_rpc_cannot_invent_http_retry_policy(tmp_path):
 
 
 def test_old_classic_requeue_cannot_remove_active_private_driver_intent(tmp_path):
-    from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'
@@ -355,8 +355,8 @@ def test_old_classic_requeue_cannot_remove_active_private_driver_intent(tmp_path
 
 
 def test_explicit_original_requeue_requires_fresh_admission_for_a_new_row(tmp_path):
-    from demiflow.execution.dataflow_prompt_journal import bind_private_prompt_contracts
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
     from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
     from test_runtime_v3_native_rpc_replay import interrupted_run, service
     path = tmp_path/'private.sqlite'

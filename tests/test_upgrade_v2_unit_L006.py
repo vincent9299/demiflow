@@ -8,8 +8,8 @@ import shutil
 
 import pytest
 
-from demiflow.execution.plan_interpreter import PlanContractError
-from demiflow.execution.sealed_plans import SEALED_PLAN_FACTS_SCHEMA, load_sealed_plan
+from demiflow.execution.contracts.errors import PlanContractError
+from demiflow.execution.seal.sealed_plans import SEALED_PLAN_FACTS_SCHEMA, load_sealed_plan
 from test_execution_layout import chain_fixture
 import _v2_native_fixtures as fx
 

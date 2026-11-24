@@ -29,7 +29,7 @@ def test_three_stage_plan_rejects_changed_program_membership(tmp_path, damage):
         elif damage == 'insert':
             altered = (*members, members[0])
         else:
-            from demiflow.execution.recovery_contract import identity
+            from demiflow.execution.contracts.recovery_contract import identity
             altered = (members[0], replace(members[1], digest=identity('other-occurrence')), *members[2:])
         with pytest.raises(DataflowError):
             verify(replace(original, programs=altered))

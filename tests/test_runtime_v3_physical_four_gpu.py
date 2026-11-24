@@ -12,7 +12,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_physical_gpu import (
     _calls, _cpu_after, _cpu_before, _cuda_calculate, _limits, _smi,
 )
@@ -42,7 +42,7 @@ def four_gpus(tmp_path, monkeypatch):
     (tmp_path/'hardware-before.json').write_text(json.dumps(devices, indent=2))
     (tmp_path/'calls').mkdir(); (tmp_path/'ready').mkdir()
     yield devices
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     snapshot = device_pool('local').snapshot()
     assert not snapshot['active'] and not snapshot['charged']
     allocations = [json.loads(p.read_text()) for p in
@@ -97,7 +97,7 @@ def _four_branch_pipeline(tmp_path, devices, mode):
 
 @pytest.mark.parametrize('mode', ['normal', 'failure', 'cancel'])
 def test_four_physical_gpu_workers_overlap_and_release(tmp_path, four_gpus, mode):
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     devices = four_gpus
     failures = []
     observed = []

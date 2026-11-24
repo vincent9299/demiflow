@@ -10,12 +10,16 @@ def install_join_spool_probe(tmp_path, monkeypatch):
     script = '''import os
 if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
     from demiflow.execution.kernels import join_spool
+    from demiflow.operators import join_spool as spool_algorithm
+    from contextvars import ContextVar
+    bound_services = ContextVar("test_join_services")
     from _worker_event_fixtures import emit
-    original_class, original_join = join_spool._Spool, join_spool.join_pairs
+    original_class, original_join = spool_algorithm.JoinSpool, join_spool.join_pairs
     reports = []
     class ObservedSpool(original_class):
-        def __init__(self, file, services, *, bounded=False, retained_key=None):
-            super().__init__(file, services, bounded=bounded, retained_key=retained_key)
+        def __init__(self, file, **options):
+            super().__init__(file, **options)
+            services = bound_services.get()
             self.proof = dict(input_rows=0, hydrated_rows=0, max_document_bytes=0,
                 max_payload_bytes=0, max_index_bytes=0, max_index_entries=0,
                 index_limit=self.index_limit, row_window=self.row_window,
@@ -25,8 +29,8 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
                 native_limits=dict((getattr(services, 'constants', {}) or {}).get('native_limits') or {}))
             assert len(reports) < 32
             reports.append(self.proof)
-        def append(self, record, fields):
-            result = super().append(record, fields)
+        def append(self, record, fields, **filters):
+            result = super().append(record, fields, **filters)
             self.proof['input_rows'] += 1
             self.proof['max_payload_bytes'] = max(self.proof['max_payload_bytes'], record.encoded_bytes)
             return result
@@ -54,13 +58,15 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
             return result
     def observed_join(*args, **kwargs):
         first = len(reports)
+        token = bound_services.set(kwargs['services'])
         try:
             yield from original_join(*args, **kwargs)
         finally:
             for proof in reports[first:]:
                 emit(LOG, 'join', **proof)
             del reports[first:]
-    join_spool._Spool = ObservedSpool
+            bound_services.reset(token)
+    spool_algorithm.JoinSpool = ObservedSpool
     join_spool.join_pairs = observed_join
 '''.replace('LOG', repr(str(path)))
     (directory / 'sitecustomize.py').write_text(script)

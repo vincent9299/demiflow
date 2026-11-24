@@ -4,7 +4,7 @@ import pytest
 
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.local_kernel import LocalKernelOptions
+from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
 from demiflow.operator_llm.errors import PromptBudgetExceededError
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK, server
@@ -57,7 +57,7 @@ def test_final_prompt_usage_does_not_depend_on_progress_delivery(server, monkeyp
 @pytest.mark.parametrize('metadata_failed', [False, True])
 def test_final_prompt_usage_survives_client_close_failure(server, monkeypatch, method, request_failed, metadata_failed):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.journal import run_telemetry as dataflow_api
     from demiflow.operator_llm.client import AsyncOperatorLLMClient
 
     progress_threads = suppress_periodic_progress(monkeypatch)
@@ -114,7 +114,7 @@ def test_final_prompt_usage_survives_client_close_failure(server, monkeypatch, m
 @pytest.mark.parametrize('handling_unrelated_error', [False, True])
 @pytest.mark.parametrize('action', ['materialize', 'run_stream'])
 def test_final_metadata_failure_is_not_suppressed_after_success(server, monkeypatch, handling_unrelated_error, action):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.journal import run_telemetry as dataflow_api
     record = dataflow_api.record_execution_metadata
     def fail_metadata(request, execution):
         record(request, execution)

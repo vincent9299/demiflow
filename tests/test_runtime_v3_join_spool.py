@@ -9,7 +9,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_recovery import _open, _store
 from test_runtime_v3_artifact_accounting import consumed
 from test_runtime_v3_real_seams import PreparationOnly
@@ -62,7 +62,7 @@ with _open(Path(sys.argv[1])) as run:
 
 
 def test_worker_stream_is_lazy_and_refunds_only_with_original_lease_proof(tmp_path):
-    from demiflow.execution.dataflow_scratch import ScratchStream
+    from demiflow.execution.storage.scratch import ScratchStream
     from demiflow.execution.storage.staging import recover_staging
     with pytest.raises(PreparationOnly), RunContext.start(tmp_path / 'run') as run:
         store, port, bounds = _store(run, ceiling=200000)
@@ -86,7 +86,8 @@ def test_worker_stream_is_lazy_and_refunds_only_with_original_lease_proof(tmp_pa
 
 def test_repartition_moves_only_references_and_preserves_wide_rows(monkeypatch):
     from test_runtime_v3_k import rec, services, Bounds
-    from demiflow.execution.kernels.join_spool import join_pairs, _Spool
+    from demiflow.execution.kernels.join_spool import join_pairs
+    from demiflow.operators.join_spool import JoinSpool as _Spool
     svc = services(bounds=Bounds(max_resident_bytes=65536, max_row_bytes=4096,
         max_spill_bytes=16 * 1024**2))
     partition = _Spool.partition
@@ -135,11 +136,12 @@ def test_real_wide_join_under_small_memory_grant(tmp_path):
 def test_public_join_streams_left_only_after_the_entire_right_fits(tmp_path, monkeypatch):
     from collections import Counter
     from demiflow.execution.kernels import join_spool
+    from demiflow.operators import join_spool as spool_algorithm
 
     appends = Counter()
     index_results = []
-    actual_append = join_spool._Spool.append
-    actual_index = join_spool.right_index
+    actual_append = spool_algorithm.JoinSpool.append
+    actual_index = spool_algorithm.right_index
     def indexed(*args, **kwargs):
         result = actual_index(*args, **kwargs)
         index_results.append(result[0] is not None)
@@ -147,8 +149,8 @@ def test_public_join_streams_left_only_after_the_entire_right_fits(tmp_path, mon
     def counted_append(spool, record, fields, **kwargs):
         appends[tuple(fields)] += 1
         return actual_append(spool, record, fields, **kwargs)
-    monkeypatch.setattr(join_spool._Spool, 'append', counted_append)
-    monkeypatch.setattr(join_spool, 'right_index', indexed)
+    monkeypatch.setattr(spool_algorithm.JoinSpool, 'append', counted_append)
+    monkeypatch.setattr(spool_algorithm, 'right_index', indexed)
 
     # At this grant all the small build keys fit, but the large right side
     # must keep its complete prefix when it switches to partitioned matching.
@@ -174,8 +176,8 @@ def test_public_lance_join_vector_probes_only_true_inner_and_semi_batches(tmp_pa
     import lance
     import pyarrow as pa
     import pyarrow.compute as pc
-    from demiflow.execution.arrow_payload import ArrowBatchCache
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.storage.arrow_payload import ArrowBatchCache
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
     uri = str(tmp_path / 'source.lance')
     keys = [None, *range(1, 128)]
@@ -225,10 +227,11 @@ def test_public_hot_duplicate_group_reads_cached_or_disk_backed_right_bodies(tmp
                                                                            width, expected_reads):
     from collections import Counter
     from demiflow.execution.kernels import join_spool
+    from demiflow.operators import join_spool as spool_algorithm
 
     rights = set()
     body_reads = Counter()
-    append, read = join_spool._Spool.append, join_spool._Spool._document
+    append, read = spool_algorithm.JoinSpool.append, spool_algorithm.JoinSpool._document
     def append_input(spool, record, fields, **kwargs):
         entry = append(spool, record, fields, **kwargs)
         if fields == ('rk',) and entry is not None:
@@ -238,8 +241,8 @@ def test_public_hot_duplicate_group_reads_cached_or_disk_backed_right_bodies(tmp
         if offset in rights:
             body_reads[offset] += 1
         return read(spool, offset, header)
-    monkeypatch.setattr(join_spool._Spool, 'append', append_input)
-    monkeypatch.setattr(join_spool._Spool, '_document', read_body)
+    monkeypatch.setattr(spool_algorithm.JoinSpool, 'append', append_input)
+    monkeypatch.setattr(spool_algorithm.JoinSpool, '_document', read_body)
     with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 128 << 20,
              'max_batch_bytes': 2 << 20, 'max_row_bytes': 256 << 10}), data.local_execution(
              workers=1, worker_mode='thread', partitions=1):

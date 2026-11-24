@@ -5,7 +5,7 @@ lines later with INCOMPATIBLE_HISTORY. Building the scope binding must not fail 
 """
 from types import SimpleNamespace
 
-from demiflow.execution.dataflow_services import resource_scope_binding
+from demiflow.execution.hosts.configuration import resource_scope_binding
 
 
 def resources(**provider):

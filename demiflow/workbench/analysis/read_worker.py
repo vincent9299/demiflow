@@ -23,8 +23,8 @@ def read_config(value):
 
 def run_read(config):
     read_config(config)
-    from demiflow.execution.datafusion import DataFusionOptions
-    from demiflow.execution.datafusion import DataFusionSession
+    from demiflow.execution.hosts.datafusion import DataFusionOptions
+    from demiflow.execution.hosts.datafusion import DataFusionSession
     from demiflow.workbench.analysis.query import NATIVE_OPTIONS
     from demiflow.workbench.analysis.query import NATIVE_CAPACITY
     import lance

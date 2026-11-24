@@ -5,7 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.errors import InvalidLanceRequest
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 LIMITS = dict(memory_bytes=128*1024**2, max_rss_bytes=2*1024**3,

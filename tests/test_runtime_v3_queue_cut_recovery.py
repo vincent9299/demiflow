@@ -3,8 +3,8 @@ from dataclasses import replace
 
 import pytest
 
-from demiflow.execution.queue import QueueChannel, QueueConfig, task_message
-from demiflow.execution.queue_contract import StaleQueueOwner, QueueIncomplete
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, task_message
+from demiflow.execution.contracts.queue_contract import StaleQueueOwner, QueueIncomplete
 from test_queue_v2_protocol import native_parent, publish, source, worker
 
 
@@ -83,9 +83,9 @@ def test_native_restore_preserves_generation_deadline(tmp_path):
 @pytest.mark.parametrize('change_type', [False, True])
 def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, monkeypatch, worker_mode, change_type):
     from demiflow import data
-    from demiflow.execution.dataflow_queue import NativeAcquisitionService
-    from demiflow.execution.queue_sinks import QueueResultSink
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.native_queue.dataflow_queue import NativeAcquisitionService
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+    from demiflow.execution.pipeline.run_context import RunContext
     from test_mvp2_queue_unified import _config, _seed_tasks, _make_builder, _records_by_task
     from test_raw_fetch import origin_server
     from runtime_v3_owned_crash import assert_released
@@ -114,7 +114,7 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
             with RunContext.resume(ref) as run:
                 with data.local_execution(workers=1, worker_mode=worker_mode, partitions=1):
                     build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
-                from demiflow.execution.state_artifacts import StateArtifacts
+                from demiflow.execution.storage.state_artifacts import StateArtifacts
                 with run.journal._connection() as db:
                     actions = [r[0] for r in db.execute('SELECT action_id FROM runtime_actions')]
                 states = [StateArtifacts(run).read(f['prepared']['state']['dataflow-cut-v3'])
@@ -155,9 +155,9 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
     else:
         from types import SimpleNamespace
         from demiflow.resources.thread import ThreadResourceProvider
-        from demiflow.execution.dataflow_capacity import local_capacity
+        from demiflow.execution.hosts.capacity import local_capacity
         from demiflow.resources.capacity import LocalCapacityPool
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         domain, capacity = local_capacity()
         pool = LocalCapacityPool(domain/'capacity', capacity=capacity)
         provider = ThreadResourceProvider(pool, root.with_name(root.name+'-driver-resources')/'thread-units',

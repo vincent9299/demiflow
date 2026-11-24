@@ -34,8 +34,8 @@ from demiflow import data  # noqa: E402
 from demiflow.data.dataset import Dataset, MaterializedDataset  # noqa: E402
 from demiflow.data.plan import LogicalPlan  # noqa: E402
 from demiflow.data.sources import MaterializedSource, LanceSource  # noqa: E402
-from demiflow.execution.local_kernel import KeyedSource, UnionSource  # noqa: E402
-from demiflow.execution.recovery_contract import RecoveryContractError  # noqa: E402
+from demiflow.execution.pipeline.local_kernel import KeyedSource, UnionSource  # noqa: E402
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError  # noqa: E402
 from demiflow.errors import LanceWriteError  # noqa: E402
 from demiflow.lance.model import LanceWriteReceipt  # noqa: E402
 from demiflow._compat.error_transport import make_error  # noqa: E402
@@ -47,9 +47,7 @@ from demiflow.environment import OperatorEnvironment  # noqa: E402
 from demiflow.objects import LocalObjectStore  # noqa: E402
 from demiflow.collect.document_library import DocumentLibrary  # noqa: E402
 from demiflow.collect.reading import PromptContext  # noqa: E402
-from demiflow.execution.queue_contract import (  # noqa: E402
-    QueueConfig, ProducerRef, ProducerSourceSpec,
-)
+from demiflow.execution.contracts.queue_contract import QueueConfig, ProducerRef, ProducerSourceSpec
 
 PACK = '''
 schema_version: demiflow_prompt_pack_v2
@@ -82,7 +80,7 @@ def _reset_record(monkeypatch):
     # This gate proves public delegation only. Scope recording call boundaries
     # to each test, keeping real DTOs and modules installed for other gates.
     import _runtime_v3_u_fakes as recording
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     real_make = dataflow_api.make_action_request
     def request(*args, **kwargs):
         recorded = recording.make_action_request(*args, **kwargs)
@@ -635,7 +633,7 @@ def test_u036(monkeypatch):
     assert _ds([{"x": 1}, {"x": 2}]).take_all(limit=2) == [{"x": 1}, {"x": 2}]
     assert RECORD.request_kinds() == ["take_all"]
     assert RECORD.last_request().arguments == {"limit": 2}
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     overflow = ValueError("Dataset contains more than the take_all limit of 2 rows")
     def reject(request):
         assert request.kind == "take_all"

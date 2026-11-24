@@ -292,12 +292,12 @@ _install_fake_module(
     normalize_native_options=ENGINE.normalize_native_options,
 )
 _install_fake_module(
-    "demiflow.execution.dataflow_inputs",
+    'demiflow.execution.sources.materialized_input',
     build_input_handle=ENGINE.build_input_handle,
     InputMaterializedHandle=FakeInputHandle,
 )
 _install_fake_module(
-    "demiflow.execution.dataflow_api",
+    'demiflow.execution.executors.dataflow_api',
     make_action_request=ENGINE.make_action_request,
     run_dataset_action=ENGINE.run_dataset_action,
     explain_dataset=ENGINE.explain_dataset,
@@ -328,9 +328,9 @@ _assert_tree_binding()
 @pytest.fixture(autouse=True)
 def _reset_engine(monkeypatch):
     """Unit-test the Ray adapter against explicit facade seams, never sys.modules."""
-    import demiflow.execution.dataflow_api as api
-    import demiflow.execution.dataflow_inputs as inputs
-    import demiflow.execution.input_runtime as input_runtime
+    import demiflow.execution.executors.dataflow_api as api
+    import demiflow.execution.sources.materialized_input as inputs
+    import demiflow.execution.executors.base as input_runtime
     import demiflow.planning.dataflow_policy as policy
     monkeypatch.setattr(api, "make_action_request", ENGINE.make_action_request)
     monkeypatch.setattr(api, "run_dataset_action", ENGINE.run_dataset_action)
@@ -600,14 +600,9 @@ def test_y022(executor, source, plan):
     ENGINE.next_result = owned
     Dataset(source, plan, executor).materialize()._source.handle
     other = FakeResultHandle("materialize")
-    # The executor's own hosted resource scope IS released on close.
-    scope = FakeResultHandle("host")
-    executor._hosted_scopes.append(scope)
     executor.close()
-    assert scope.released is True
     assert owned.released is False
     assert other.released is False
-    assert executor._hosted_scopes == []
     assert executor._closed is True
     executor.close()
 

@@ -8,7 +8,7 @@ max_row ceiling is never exceeded.
 """
 import pytest
 
-from demiflow.execution.payload_limits import stream_limits
+from demiflow.execution.compiler_support.payload_limits import stream_limits
 
 MB = 1024 ** 2
 

@@ -13,7 +13,7 @@ import time
 
 from .native_search import NativeSearchSession, SearchConfig
 from .native_search.config import digest
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 
 
 TRANSIENT_STOPS = frozenset({

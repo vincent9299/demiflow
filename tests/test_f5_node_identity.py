@@ -14,6 +14,8 @@ rejects duplicate occurrence_id / self-loop / cycle / dangling edge, but never
 blanket-rejects a repeated logical_node_id. K1-K6 contracts are byte-frozen;
 the wire-stability category proves the recomputed identities flow through them.
 """
+
+from demiflow.execution.compiler_support import operator_policy
 import copy
 import json
 import os
@@ -26,9 +28,9 @@ from demiflow.data import plan as ops
 from demiflow.data.plan import CallableSpec, LogicalPlan
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.contracts import exchange, operator
-from demiflow.execution.plan_facts import operation_facts
-from demiflow.execution.recovery_contract import identifier, identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.seal.plan_facts import operation_facts
+from demiflow.execution.contracts.recovery_contract import identifier, identity
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dag import (
     compile_declared_dag, compile_logical_dag, compile_physical_execution_plan,
     dag_id_for, validate_logical_dag,
@@ -189,7 +191,7 @@ def test_chain_sealing_input_distinguishes_repeated_async_map():
 @pytest.mark.parametrize("mode", ["process", "thread"])
 def test_unified_chain_repeated_map_async_runs_end_to_end(tmp_path, mode):
     from _worker_event_fixtures import emit, events
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.resources.process_observation import require_pidfds
     try:
         require_pidfds()
@@ -261,7 +263,7 @@ def test_recomputed_identities_pass_frozen_operator_and_exchange_wire():
         identifier(node["logical_node_id"])         # format-valid sha256 identifier
         identifier(node["occurrence_id"])
         # K2 OperatorSpec accepts the positional identity (shape unchanged).
-        spec = operator.compile_operator_spec(
+        spec = operator_policy.compile_operator_spec(
             CallableSpec.create(_passthrough), logical_node_id=node["logical_node_id"],
             occurrence_id=node["occurrence_id"], artifact_manifest_ref=ref,
             module_key="p_" + "b" * 24)

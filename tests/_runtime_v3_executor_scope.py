@@ -1,7 +1,7 @@
 """Use the real Dataset owner boundary when exercising a thin adapter directly."""
 import inspect
 
-from demiflow.execution.checked import action
+from demiflow.execution.pipeline.checked import action
 
 
 def call(executor, method, source, plan, *args, **kwargs):

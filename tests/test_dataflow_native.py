@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.data.plan import CallableSpec
-from demiflow.execution import dataflow_native as native
-from demiflow.execution.dataflow_native import NativeVariant
+from demiflow.execution.compiler_support import dataflow_native as native
+from demiflow.execution.compiler_support.dataflow_native import NativeVariant
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,8 +37,7 @@ def _declare(target, *args):
 
 
 def test_model_factories_are_recognised_by_identity_only():
-    from demiflow.execution.dataflow_model_factory import (
-        CacheFactory, EmbeddingFactory, PromptFactory, RoutedPromptFactory)
+    from demiflow.execution.operator_bindings.dataflow_model_factory import CacheFactory, EmbeddingFactory, PromptFactory, RoutedPromptFactory
     assert native.model_variant(None) is None
     assert native.model_variant(_declare(RoutedPromptFactory)) == 'routed_prompt'
     assert native.model_variant(_declare(PromptFactory)) == 'prompt'
@@ -62,10 +61,10 @@ def test_native_prompt_admission_uses_only_the_actual_actor_class():
 
 
 def test_service_declarations_and_the_configuration_they_add():
-    from demiflow.execution.dataflow_acquisition_call import AcquisitionCall
-    from demiflow.execution.dataflow_producer import ProducerCall
-    from demiflow.execution.dataflow_search import NativeSearchCall
-    from demiflow.execution.dataflow_stream_lance import StreamLanceFactory
+    from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
+    from demiflow.execution.native_queue.dataflow_acquisition_call import ProducerCall
+    from demiflow.execution.operator_bindings.dataflow_search import NativeSearchCall
+    from demiflow.execution.native_queue.dataflow_stream_lance import StreamLanceFactory
     assert native.native_variant(None, None) is None
     assert native.native_variant(None, _declare(AcquisitionCall, 'finalize', True)) == NativeVariant(
         'acquisition', {'native_operation': 'finalize'})
@@ -84,8 +83,8 @@ def test_service_declarations_and_the_configuration_they_add():
 
 def test_acquire_takes_its_key_from_the_declared_actor(tmp_path):
     from demiflow import data
-    from demiflow.execution.dataflow_fetch import fetch_declaration_key
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.native_queue.dataflow_fetch import fetch_declaration_key
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.objects import LocalObjectStore
     operation = data.from_items([{'request': 'r'}]).fetch(store=LocalObjectStore(str(tmp_path / 'objs')))._plan.operations[-1]
     variant = native.native_variant(operation, native_model_declaration(operation))
@@ -103,8 +102,8 @@ def test_trait_replacement_is_keyed_by_the_reported_names():
 
 
 def test_datasource_kind_is_exact_type_not_subclass():
-    from demiflow.execution.queue_history import QueueHistoryDatasource
-    from demiflow.execution.queue_source import QueueDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     def instance(cls):
         return object.__new__(cls)       # the check reads the type only; no queue is opened
     assert native.datasource_kind(instance(QueueDatasource)) == 'queue'
@@ -116,8 +115,8 @@ def test_datasource_kind_is_exact_type_not_subclass():
 
 
 def test_key_only_and_native_publication_accept_subclasses_as_before():
-    from demiflow.execution.lance_key_source import LanceKeySource
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.sources.lance_key_source import LanceKeySource
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     def instance(cls):
         return object.__new__(cls)
     assert native.is_key_only(instance(LanceKeySource)) and native.is_key_only(instance(_subclass(LanceKeySource)))
@@ -132,7 +131,7 @@ def test_narrowing_builds_the_key_only_source(tmp_path):
     import lance
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.lance_key_source import LanceKeySource
+    from demiflow.execution.sources.lance_key_source import LanceKeySource
     uri = str(tmp_path / 't.lance')
     lance.write_dataset(pa.table({'k': ['a'], 'x': [1]}), uri)
     source = data.read_lance(uri)._source
@@ -160,14 +159,14 @@ def test_cache_state_is_asked_of_the_owner_of_the_bound_callable():
 def test_importing_the_module_initialises_no_native_service():
     script = (
         "import sys\n"
-        "import demiflow.execution.dataflow_native as native\n"
+        "import demiflow.execution.compiler_support.dataflow_native as native\n"
         "native.model_variant(None); native.native_variant(None, None)\n"
         "from demiflow.operator_llm.native_actor import is_native_prompt_actor\n"
         "assert not is_native_prompt_actor(lambda row: row)\n"
-        "heavy = [name for name in ('demiflow.execution.dataflow_acquisition_call', 'demiflow.execution.dataflow_producer',\n"
-        "    'demiflow.execution.dataflow_search', 'demiflow.execution.dataflow_stream_lance', 'demiflow.execution.dataflow_fetch',\n"
-        "    'demiflow.execution.queue_source', 'demiflow.execution.queue_history', 'demiflow.execution.queue_sinks',\n"
-        "    'demiflow.execution.lance_key_source', 'demiflow.operator_llm.runtime', 'demiflow.lance.search', 'lance', 'pyarrow')\n"
+        "heavy = [name for name in ('demiflow.execution.native_queue.dataflow_acquisition_call', 'demiflow.execution.native_queue.dataflow_queue',\n"
+        "    'demiflow.execution.operator_bindings.dataflow_search', 'demiflow.execution.native_queue.dataflow_stream_lance', 'demiflow.execution.native_queue.dataflow_fetch',\n"
+        "    'demiflow.execution.native_queue.stream_lance', 'demiflow.execution.native_queue.queue_source', 'demiflow.execution.sources.queue_history', 'demiflow.execution.native_queue.queue_sinks',\n"
+        "    'demiflow.execution.sources.lance_key_source', 'demiflow.operator_llm.runtime', 'demiflow.lance.search', 'lance', 'pyarrow')\n"
         "    if name in sys.modules]\n"
         "assert not heavy, heavy\n")
     done = subprocess.run([sys.executable, '-P', '-B', '-c', script], cwd=ROOT, capture_output=True, text=True, timeout=60,
@@ -190,7 +189,7 @@ def test_every_registered_lowering_symbol_resolves_to_a_function_with_the_agreed
     from demiflow.planning import dataflow_compile
     from demiflow.planning.dataflow_compile import _GENERIC_LOWERING, _lowering, compile_kernel_spec
     compiler_symbols = {record.operator[0] for record in kind_records().values() if record.operator is not None}
-    assert compiler_symbols == {_GENERIC_LOWERING, 'demiflow.execution.dataflow_models:build_model_factory'}
+    assert compiler_symbols == {_GENERIC_LOWERING, 'demiflow.planning.dataflow_models:build_model_factory'}
     assert _lowering(_GENERIC_LOWERING) is compile_kernel_spec is dataflow_compile.compile_kernel_spec
     for symbol in compiler_symbols:                      # lower(operation, *, program_ref, bounds)
         parameters = inspect.signature(_lowering(symbol)).parameters
@@ -208,8 +207,8 @@ def test_every_registered_lowering_symbol_resolves_to_a_function_with_the_agreed
 def test_only_engine_symbols_are_resolved():
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.planning.dataflow_compile import _lowering
-    for symbol in ('os:system', 'json.decoder:JSONDecoder', 'demiflow.execution.dataflow_models', 'build_model_factory',
-                   'demiflow.execution.dataflow_models:not_a_function', 'demiflow.execution.dataflow_models:__doc__'):
+    for symbol in ('os:system', 'json.decoder:JSONDecoder', 'demiflow.execution.operator_bindings.dataflow_models', 'build_model_factory',
+                   'demiflow.execution.operator_bindings.dataflow_models:not_a_function', 'demiflow.execution.operator_bindings.dataflow_models:__doc__'):
         with pytest.raises(DataflowError) as refused:
             _lowering(symbol)
         assert refused.value.code == 'INVALID_CONTRACT', symbol

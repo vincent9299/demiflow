@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from demiflow.execution.artifacts import resolve_local_artifact
+from demiflow.execution.storage.artifacts import resolve_local_artifact
 from demiflow.operator_llm.sqlite_offline import externalize, restore
 
 

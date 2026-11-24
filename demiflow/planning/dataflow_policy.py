@@ -10,11 +10,88 @@ from __future__ import annotations
 import math
 import re
 from typing import Mapping
+from demiflow.resources.contracts import ResourceProfile
 
 from demiflow.execution.contracts.dataflow import Bounds, RuntimePolicy
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.runtime_limits import execution_limits
-from demiflow.resources.contracts import ResourceProfile
+from demiflow.execution.contracts.dataflow import BATCH_TARGET_BYTES, MAX_NATIVE_ROW_BYTES
+
+def native_row_limit(pool, rss, ceiling=MAX_NATIVE_ROW_BYTES):
+    """Reuse native Dataset's pool/16 and RSS/64 resident-copy allowance."""
+    estimate = max(BATCH_TARGET_BYTES, min(MAX_NATIVE_ROW_BYTES, pool // 16, rss // 64))
+    return max(1, min(ceiling, estimate, pool, max(1, rss // 2)))
+
+def run_row_limit(limits):
+    # The driver and one native worker share the run RSS allowance, as in Forge.
+    native_rss = max(1, limits['max_rss_bytes'] // 2)
+    pool = min(limits['memory_bytes'], max(1, native_rss // 2))
+    return native_row_limit(pool, native_rss)
+
+def resolve_payload_bounds(limits, overrides=None, *, inherited_explicit=(), ceiling=None, local_memory=False):
+    """Default estimates never replace an explicitly declared finite ceiling."""
+    explicit = set(overrides or ()) | set(inherited_explicit)
+    derived = run_row_limit(limits)
+    # A separately tightened local executor has historically shared this pool
+    # between driver/worker payload and codec. Changing a worker-count ceiling
+    # does not change which rows the action is allowed to accept.
+    if local_memory and ceiling is not None and limits['memory_bytes'] < ceiling['memory_bytes']:
+        derived = min(derived, max(1, limits['memory_bytes'] // 4))
+    row = limits['max_row_bytes'] if 'max_row_bytes' in explicit else derived
+    row = min(row, MAX_NATIVE_ROW_BYTES, limits['memory_bytes'], max(1, limits['max_rss_bytes'] // 4))
+    batch = limits['max_batch_bytes'] if 'max_batch_bytes' in explicit else max(derived, row)
+    batch = min(batch, limits['memory_bytes'])
+    if ceiling is not None:
+        row, batch = min(row, ceiling['max_row_bytes']), min(batch, ceiling['max_batch_bytes'])
+    return dict(max_row_bytes=min(row, batch), max_batch_bytes=batch)
+
+# Finite execution defaults; Forge may admit/tighten the same native budgets.
+
+DEFAULT_LIMITS = dict(timeout_s=600, admission_timeout_s=30, cancel_grace_s=10,
+    memory_bytes=256 * 1024**2, max_rss_bytes=4 * 1024**3,
+    max_scratch_bytes=4 * 1024**3, max_output_bytes=2 * 1024**3, max_evidence_bytes=64 * 1024**2,
+    max_input_rows=100000, max_output_rows=200000, batch_rows=256, log_bytes=16 * 1024**2)
+
+
+DEFAULT_LIMITS.update(max_row_bytes=run_row_limit(DEFAULT_LIMITS),
+                      max_batch_bytes=run_row_limit(DEFAULT_LIMITS))
+
+RECOVERY_LIMITS = dict(max_state_bytes=16 * 1024**2, max_control_bytes=64 * 1024**2,
+                       max_commits=16384, max_requests=100000, max_artifacts=65536,
+                       checkpoint_rows=512, checkpoint_interval_ms=1000, checkpoint_timeout_s=60,
+                       checkpoint_unconfirmed_rows=4096, checkpoint_unconfirmed_bytes=64 * 1024**2)
+
+
+def declared_limit_keys(values, explicit):
+    """A full admitted envelope may carry a smaller set of caller declarations."""
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    if values is not None and type(values) is not dict:
+        raise RecoveryContractError('Unknown execution budget')
+    keys = frozenset(values or ())
+    if explicit is None:
+        return keys
+    declared = frozenset(explicit)
+    if not declared <= keys:
+        raise RecoveryContractError("Explicit execution budgets must have admitted values")
+    return declared
+
+
+def execution_limits(values=None):
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    result = {**DEFAULT_LIMITS, **RECOVERY_LIMITS}
+    if values is not None:
+        if type(values) is not dict or values.keys() - result.keys():
+            raise RecoveryContractError("Unknown execution budget")
+        result.update(values)
+    if any(type(v) is not int or not 0 < v < 2**63 for v in result.values()):
+        raise RecoveryContractError("Execution budgets must be finite positive integers")
+
+    result.update(resolve_payload_bounds(result, values))
+    if result["max_row_bytes"] > result["max_batch_bytes"]:
+        raise RecoveryContractError("A row must fit the admitted batch budget")
+    if result["max_commits"] > 16384 or result["max_artifacts"] > 65536:
+        raise RecoveryContractError("Execution metadata cardinality exceeds protocol limits")
+    return result
+
 
 RUNTIME_POLICY_VERSION = "demiflow.runtime_policy.v3"
 
@@ -105,7 +182,7 @@ def resolve_runtime_policy(
         raise _reject(f"invalid run limits: {exc}") from exc
 
     if "memory_bytes" in options:
-        from ..execution.payload_limits import resolve_payload_bounds
+
         ceiling = dict(native)
         native["memory_bytes"] = _tighten(options["memory_bytes"], native["memory_bytes"], "memory_bytes")
         explicit = set(explicit_limits)
@@ -301,3 +378,108 @@ def normalize_native_options(
     if replicas:
         result["replicas"] = replicas
     return result
+
+
+_NATIVE_RESOURCE_FIELDS = {'memory_bytes', 'max_rss_bytes', 'max_scratch_bytes', 'max_row_bytes', 'batch_rows',
+           'threads', 'partitions', 'timeout_s', 'admission_timeout_s', 'cgroup_headroom_bytes'}
+
+def parse_native_resources(value):
+    """Snapshot a small closed budget; never expose engine configuration."""
+    if value is None:
+        return None
+    if isinstance(value, tuple):
+        # LocalKernelOptions may be copied by dataclasses.replace.
+        if len(value) > len(_NATIVE_RESOURCE_FIELDS):
+            raise ValueError('Too many native_resources fields')
+        value = dict(value)
+    if not isinstance(value, dict) or len(value) > len(_NATIVE_RESOURCE_FIELDS) or set(value) - _NATIVE_RESOURCE_FIELDS:
+        raise ValueError('native_resources requires a dict of supported resource limits')
+    for name, number in value.items():
+        if name.endswith('_s'):
+            valid = type(number) in (int, float) and math.isfinite(number) and number > 0
+        else:
+            valid = type(number) is int and number > 0
+        if not valid:
+            raise ValueError('native_resources ' + name + ' must be finite and positive')
+    return tuple(sorted(value.items()))
+
+
+PREFLIGHT_BOUNDS = Bounds(
+    max_nodes=4096, max_edges=16384, max_partitions=4096, max_depth=64,
+    max_control_bytes=65536, max_row_bytes=16 * 1024 * 1024,
+    max_batch_bytes=64 * 1024 * 1024, max_resident_bytes=1024 * 1024 * 1024,
+    max_spill_bytes=1024 * 1024 * 1024, max_state_bytes=256 * 1024 * 1024,
+    max_pending_events=1024, max_open_files=256, max_output_rows=1000000,
+    timeout_ms=60000)
+
+
+def explain_policy(provider, options, *, action_kinds):
+    """Validate explain declarations without source I/O or runtime admission."""
+    if provider not in ("local", "ray_core"):
+        raise DataflowError("INVALID_CONTRACT", "unknown provider: " + str(provider))
+    metadata_fields = {'action_kind', 'terminal_category', 'terminal_native_options',
+                       'source_parallelism_cap', 'terminal_parallelism_cap'}
+    if not isinstance(options, Mapping):
+        raise DataflowError('INVALID_CONTRACT', 'explain options must be a mapping')
+    # Executor plan() carries declaration metadata alongside runtime policy.
+    # Only these closed metadata fields are separated; unknown policy keys still
+    # pass to the canonical validator and fail rather than being swallowed.
+    runtime_options = {key: value for key, value in options.items() if key not in metadata_fields}
+    policy, bounds = resolve_runtime_policy(runtime_options, {}, provider=provider)
+    action_kind = options.get('action_kind', 'collect_summary')
+    if type(action_kind) is not str or action_kind not in action_kinds:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'unknown explain action kind')
+    category = options.get('terminal_category', 'action')
+    if type(category) is not str or category not in ('action', 'sink'):
+        raise DataflowError('INVALID_CONTRACT', 'unknown explain terminal category')
+    for name in ('source_parallelism_cap', 'terminal_parallelism_cap'):
+        value = options.get(name)
+        if value is not None and (type(value) is not int or not 1 <= value <= bounds.max_partitions):
+            raise DataflowError('INVALID_CONTRACT', name + ' must be within the partition budget')
+    if options.get('terminal_native_options') is not None:
+        normalize_native_options(options['terminal_native_options'], operation_kind=action_kind)
+    return policy, bounds
+
+
+def stream_residency(facts, limits):
+    """Conservative platform payload admission, not a promise about process RSS.
+
+    Each worker reserves input/batch and a completed result while downstream is
+    blocked. Queues have separate reservations; dequeuing never erases ownership.
+    Candidate internal temporaries remain protected by the enclosing process.
+    """
+    row_bytes = limits['max_row_bytes']
+    batch_bytes = limits['max_batch_bytes']
+    # Materialization cache plus bounded control state, and reader/serialization
+    # buffers. Native libraries and candidate temporaries still need the process
+    # guard; this reservation describes platform-owned Python payload.
+    fixed = max(80 * 1024**2, 32 * 1024**2 + 3 * limits.get("max_state_bytes", 16 * 1024**2)) + 3 * batch_bytes
+    facts = list(facts)
+    if any(f.get("native", {}).get("contract") == "demiflow.prompt.http" for f in facts):
+        # Recovery index, output encoding and atomic batch publication buffers.
+        fixed += min(512 * 1024**2, limits["memory_bytes"] // 8) + 8 * 1024**2 + 2 * row_bytes
+    total = fixed
+    stages = []
+    for fact in facts:
+        args = fact['arguments']
+        concurrency = args.get('concurrency') or 1
+        depth = args.get('queue_depth') or concurrency
+        batch_rows = args.get('max_batch') or 1
+        if any(type(value) is not int or value < 1 for value in (concurrency, depth, batch_rows)):
+            raise ValueError('Stream concurrency, queue depth and batch rows must be positive integers')
+        if concurrency > 64 or depth > 256 or batch_rows > limits['batch_rows']:
+            raise ValueError('Stream worker/queue/batch admission limit exceeded')
+        # A batch may be small enough by row count yet exceed its byte budget;
+        # workers check that budget before appending each incoming row.
+        inputs = min(batch_rows * row_bytes, batch_bytes) if fact['kind'] == 'batch_map' else row_bytes
+        # Retain the original expansion while a post-filter list/serialized
+        # child is awaiting downstream capacity.
+        output = 2 * batch_bytes if fact['kind'] in {'async_map', 'batch_map', 'flat_map'} else row_bytes
+        reserved = (depth * (row_bytes + 1024) + concurrency * (inputs + output + 4096)
+                    + fact.get('reserved_bytes', 0))
+        stages.append({'kind': fact['kind'], 'reserved_bytes': reserved})
+        total += reserved
+    if total > limits['memory_bytes']:
+        raise ValueError(f'Stream payload reservation {total} exceeds memory budget {limits["memory_bytes"]}')
+    return {'reserved_bytes': total, 'fixed_bytes': fixed, 'stages': stages,
+            'assurance': 'platform_payload_admission; third_party_temporaries_require_process_guard'}

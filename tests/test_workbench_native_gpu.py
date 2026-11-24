@@ -8,8 +8,8 @@ import pytest
 
 from demiflow import data
 from demiflow.data.native_options import parse_native_options, resource_only_options
-from demiflow.execution.capabilities import check_call
-from demiflow.execution.plan_facts import operation_facts
+from demiflow.planning.traits import check_call
+from demiflow.execution.seal.plan_facts import operation_facts
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.runs import manager as runs, native_resources
 from test_forge_runs import base, root, custom, execute
@@ -42,7 +42,7 @@ def test_resource_declaration_binds_actual_options_without_changing_old_facts():
     assert check_call(actual)['supported']
     for bad in (None, {'gpu':.5}, {'unregistered':1}):
         assert not check_call({**actual,'resource_declaration':bad})['supported']
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.data.runtime_contract import RuntimeContractError
     context=CheckedExecution.__new__(CheckedExecution)
     node={'id':'changed-resource','capability_fact':{**actual,'resource_declaration':{'gpu':2}}}
@@ -131,7 +131,7 @@ def test_real_managed_cuda_plan_bridge_and_browser(root, tmp_path, monkeypatch, 
     from demiflow.forge.platform import content_digest
     from demiflow.workbench.projects import workspace as ws
     from demiflow.workbench.graph import model
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     from runtime_v3_product_scenarios import read_native_execution
     from test_forge_public_api import service
     from test_forge_workbench_browser import page_for

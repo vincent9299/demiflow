@@ -10,6 +10,10 @@ modules that cannot import execution.
 """
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+
+from collections.abc import Mapping
+
 import math
 import re
 from collections.abc import Mapping as _RuntimeMapping
@@ -40,8 +44,8 @@ if TYPE_CHECKING:
     from demiflow.data.plan import CallableSpec, LogicalPlan
     from demiflow.data.sources import SourcePlan
     from demiflow.execution.executors.base import DatasetExecutor
-    from demiflow.execution.recovery_contract import SourcePosition
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.resources.contracts import WorkerLaunchSpec
     from demiflow.resources.manager import ResourceManager
 
@@ -2070,3 +2074,145 @@ class DriverAuthority(Protocol):
     def poll_replies(self, *, max_replies: int) -> tuple[CompletedControl, ...]: ...
     def close(self, *, deadline_ms: int) -> None: ...
     def bind_queue(self, service: object) -> None: ...
+
+
+EXECUTION_LIMITS = 'native_execution_limits'
+DELIVERY_LIMIT = 'native_delivery_limit'
+
+def execution_ceilings(value):
+    """Small declaration borrowed from an old placement, never a new grant."""
+    names = {'cpu_millis', 'memory_bytes', 'scratch_bytes', 'inflight_rows',
+             'inflight_bytes', 'output_bytes'}
+    if value is None:
+        return {}
+    if not isinstance(value, _RuntimeMapping) or set(value) - names:
+        raise DataflowError('INVALID_CONTRACT', 'invalid native execution ceilings')
+    result = {key: amount for key, amount in value.items() if amount is not None}
+    if any(type(amount) is not int or not 0 < amount < 2**63 for amount in result.values()):
+        raise DataflowError('INVALID_CONTRACT', 'native execution ceilings must be bounded positive integers')
+    if result.get('cpu_millis', 1000) < 1000:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'native execution requires one whole CPU worker')
+    return result
+
+def sealed_execution_ceilings(graph):
+    values = [execution_ceilings(node.kernel.configuration.get('arguments', {}).get(EXECUTION_LIMITS))
+              for node in graph.nodes if node.kind == 'terminal']
+    return {key: min(value[key] for value in values if key in value)
+            for key in set().union(*(value.keys() for value in values))}
+
+def validate_native_limits(value):
+    _native_limits(value)
+
+
+def clone_record(record, **changes):
+    """Revalidate a copy; external replacement values keep normal DTO checks.
+
+    Only the original, bounded source-position document is thawed. Its tuples
+    are frozen JSON arrays, unlike business payload tuples whose type matters.
+    Do not broaden Record's public constructor to accept arbitrary objects.
+    """
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
+    if type(record) is not Record:
+        raise DataflowError('INVALID_CONTRACT', 'clone_record requires a validated Record')
+    if 'source_position' not in changes:
+        changes['source_position'] = _thaw_json(record.source_position)
+    return replace(record, **changes)
+
+
+def stage_resident_bytes(assignment):
+    """Project the immutable assignment's resident grant; no runtime capability."""
+    stages = getattr(assignment, 'stages', ())
+    return (sum(max(stage.resident_bytes, stage.profile.requests['memory_bytes'])
+                for stage in stages) if stages else None)
+
+
+def shared_binding(configuration, occurrence):
+    value = configuration.get('shared_actor')
+    if value is None:
+        return None
+    if (not isinstance(value, Mapping) or set(value) != {'owner', 'members', 'state_owner'}
+            or not isinstance(value['members'], (tuple, list)) or len(value['members']) < 2
+            or any(type(o) is not str for o in value['members'])
+            or len(set(value['members'])) != len(value['members'])
+            or occurrence not in value['members'] or value['owner'] != value['members'][0]
+            or value['state_owner'] != value['members'][-1]):
+        raise DataflowError('INVALID_CONTRACT', 'Invalid shared actor occurrence binding')
+    return {'owner': value['owner'], 'members': list(value['members']), 'state_owner': value['state_owner']}
+
+
+def inherits_bound_port(value, port):
+    """Require a real base, bypassing virtual registration and metaclass hooks."""
+    bases = type.__dict__['__mro__'].__get__(type(value))
+    return any(base is port for base in bases)
+
+
+class PromptJournalPort(ABC):
+    """Bound model journal operations; driver still verifies occurrence and lease.
+
+    read_only, limit, max_record_bytes and timeout_s are the original sealed
+    finite constraints. Consumers require real inheritance; ABC virtual
+    registration does not confer bound-journal eligibility.
+    """
+    read_only: bool
+    limit: int
+    max_record_bytes: int
+    timeout_s: float
+
+    @abstractmethod
+    def lookup(self, request): raise NotImplementedError
+    @abstractmethod
+    def lookup_with_references(self, request): raise NotImplementedError
+    @abstractmethod
+    def reserve(self, request): raise NotImplementedError
+    @abstractmethod
+    def reserve_http_retry(self, request, **kwargs): raise NotImplementedError
+    @abstractmethod
+    def response(self, request, record): raise NotImplementedError
+    @abstractmethod
+    def failed(self, request, error, elapsed): raise NotImplementedError
+    @abstractmethod
+    def references(self, request): raise NotImplementedError
+    @abstractmethod
+    def media_references(self, record, *, register=False): raise NotImplementedError
+    @abstractmethod
+    def offline_lookup(self, record): raise NotImplementedError
+    @abstractmethod
+    def close(self): raise NotImplementedError
+
+class PrivatePromptJournalPort(PromptJournalPort):
+    """Original private-cache declaration and route, not native paid recovery.
+
+    Reserve/retry preserve the private journal's row scope. Native-only
+    operations remain rejected by the actual bound implementation and driver.
+    """
+    @property
+    @abstractmethod
+    def declaration(self): raise NotImplementedError
+    @property
+    @abstractmethod
+    def route(self): raise NotImplementedError
+
+class BoundImageWriter(ABC):
+    """Write already-received image bytes under the bound output's authority.
+
+    Return the original ObjectRef dictionary. Remote writers stage and request;
+    local writers validate/publish under their existing run owner. Neither
+    grants run/database access to the image algorithm.
+    """
+    @abstractmethod
+    def store_image(self, raw, options): raise NotImplementedError
+
+
+BATCH_TARGET_BYTES = 8 * 1024**2
+MAX_NATIVE_ROW_BYTES = 128 * 1024**2
+PAYLOAD_FIELDS = ('memory_bytes', 'max_rss_bytes', 'max_row_bytes', 'max_batch_bytes', 'batch_rows')
+
+
+NATIVE_STREAM_LANCE_SCHEMA = 'demiflow.stream_lance.v3'
+
+
+REF_CARRIER = 'stored_typed_row.v1'
+
+MIN_TERMINAL_WORKSPACE = 8192
+
+MIN_TERMINAL_INDEX = 3072  # First block and its first forest root.

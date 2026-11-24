@@ -22,7 +22,7 @@ from ..lance.flow_contract import normalize_lookup as _normalize_lookup, lookup_
 from ..lance.flow_contract import normalize_save as _normalize_save, analyze_save as _analyze_save
 from ..collect import flow_contract as _collect_contract
 from ..collect import fetch_flow as _fetch_flow
-from ..execution import queue_flow as _queue_flow
+from demiflow.execution.executors import queue_flow as _queue_flow
 from ..operator_llm import packing as _prompt_packing
 from .datasink import Datasink
 from .plan import (
@@ -200,7 +200,7 @@ class Dataset:
             import math
             from functools import partial
             from .plan import StreamGroupBatchesOp
-            from ..execution.stream_grouping import pack_group
+            from demiflow.operators.grouping import pack_group
             keys = (on,) if isinstance(on, str) else tuple(on)
             if (not keys or len(keys) > 32 or len(set(keys)) != len(keys)
                     or any(not isinstance(k, str) or not k for k in keys)
@@ -301,13 +301,13 @@ class Dataset:
     @_flow_api("checkpoint", datasets=("self",), execution="action")
     def checkpoint(self, path, *, version):
         """Retired facade; execution-owned recovery uses the platform RunRef."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint')
 
     @_flow_api("checkpoint_async", datasets=("self",), execution="action")
     async def checkpoint_async(self, path, *, version):
         """Retired facade; reject before dispatching a worker thread."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint_async')
         import asyncio
         return await asyncio.to_thread(self.checkpoint, path, version=version)
@@ -319,7 +319,7 @@ class Dataset:
         max_rows_per_batch: int = 8192,
     ) -> "Dataset":
         """Retired facade; execution-owned recovery uses the platform RunRef."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint_lance')
         from ..lance.checkpoint import checkpoint_lance
         return checkpoint_lance(
@@ -335,7 +335,7 @@ class Dataset:
         max_rows_per_batch: int = 8192,
     ) -> "Dataset":
         """Retired facade; reject before dispatching a worker thread."""
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('checkpoint_lance_async')
         import asyncio
         return await asyncio.to_thread(
@@ -507,7 +507,7 @@ class Dataset:
         I/O deadlines inside the callable; cancellation drains running calls
         before actor cleanup. The default 'inline' preserves existing behavior.
         """
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('async_map', dict(checkpoint=checkpoint,
             checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s))
         import inspect
@@ -582,7 +582,7 @@ class Dataset:
         记入 stats.dead_batches（幂等重跑即重试）。动机与契约详见
         plan.BatchMapOp；惰性路径遇到本算子将显式拒绝（同 AsyncMapOp）。
         """
-        from ..execution.capabilities import require_action
+        from demiflow.execution.compiler_support.capabilities import require_action
         require_action('batch_map', dict(checkpoint=checkpoint,
             checkpoint_operator=checkpoint_operator, checkpoint_lease_s=checkpoint_lease_s))
         from .flow_contract import normalize_stream_parameters
@@ -754,7 +754,7 @@ class Dataset:
         stay in the declared LocalObjectStore. Parsing and business acceptance
         belong to subsequent ordinary functions/actors.
         """
-        from ..execution.raw_fetch import RawFetch
+        from demiflow.execution.native_queue.raw_fetch import RawFetch
         actor = RawFetch(request=request, output=output, store=store, policy=policy,
                          concurrency=concurrency, queue_depth=queue_depth, label=label)
         from ..planning.dataflow_declaration import validate_native_operation
@@ -858,7 +858,7 @@ class Dataset:
         Open a ProducerRef first. Native progress records empty expansions and
         actual source EOS; QueueChannel.seal then closes the producer explicitly.
         """
-        from ..execution.queue_producer import QueueProducer
+        from demiflow.execution.native_queue.queue_producer import QueueProducer
         actor=QueueProducer(config,producer=producer,messages=messages,queue_depth=queue_depth)
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("enqueue",
@@ -874,7 +874,7 @@ class Dataset:
         Requires read_queue(settlement='explicit') and run_stream. It uses the
         same QueueResultSink and atomic source completion as automatic mode.
         """
-        from ..execution.queue_ack import QueueAcknowledge
+        from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
         actor=QueueAcknowledge(config,result=result,queue_depth=queue_depth,keep_row=keep_row)
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("ack_queue",
@@ -896,7 +896,7 @@ class Dataset:
         SQLite main pages are capped (rollback journal may use the same size).
         The action owns one writer and a bounded set of delivered key digests.
         """
-        from ..execution.stream_admission import StreamAdmission
+        from demiflow.operators.admission import StreamAdmission
         actor = StreamAdmission(path=path, key=key, unique_on=unique_on, quotas=quotas,
             output=output, when=when, max_entries=max_entries, max_key_bytes=max_key_bytes,
             max_disk_bytes=max_disk_bytes)
@@ -934,8 +934,8 @@ class Dataset:
         operation = declared._plan.operations[-1]
         typed = DeduplicateOp(**{**vars(operation), 'label': 'deduplicate_'+output},
                               on=fields, key=key, output=output)
-        from ..execution.plan_facts import _deduplicate_arguments
-        from ..execution.recovery_contract import identity
+        from demiflow.execution.seal.plan_facts import _deduplicate_arguments
+        from demiflow.execution.contracts.recovery_contract import identity
         actor = operation.callable.target.__self__
         actor._deduplicate_declaration = identity(_deduplicate_arguments(actor))
         from ..planning.dataflow_declaration import validate_native_operation
@@ -955,7 +955,7 @@ class Dataset:
         result cache. Oversized or ambiguous matches fail explicitly. Limits
         cover returned Arrow/Python payloads, not Lance's internal allocation.
         """
-        from ..execution.stream_lookup import LanceLookup
+        from demiflow.operators.lookup import LanceLookup
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("lookup",
             configuration={"on": list(on) if isinstance(on, (list, tuple)) else on,
@@ -1010,7 +1010,7 @@ class Dataset:
         identical saved content; changed content fails instead of overwriting.
         when selects which rows to persist; other rows pass through unchanged.
         """
-        from ..execution.stream_lance import StreamLanceSink
+        from demiflow.execution.native_queue.stream_lance import StreamLanceSink
         from .plan import SaveLanceOp
         import math
         if not isinstance(stage,str) or not stage: raise ValueError('save_lance stage is required')
@@ -1055,14 +1055,14 @@ class Dataset:
         写放最前（await 段在中断路径可能被取消截断，契约见 stream.py）。
         """
         if checkpoint is not None:
-            from ..execution.recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Explicit checkpoint mode is retired; use RunContext recovery')
         if queue_factory is not None:
             from ..errors import UnsupportedExecutionOptionError
             raise UnsupportedExecutionOptionError('worker exchange queues are owned by the unified engine')
         if source_batch_size is not None and (type(source_batch_size) is not int or not 1 <= source_batch_size <= 256):
             raise ValueError('source_batch_size must be 1..256')
-        from ..execution.capabilities import validate_stream_plan
+        from demiflow.planning.dataflow_compile import validate_stream_plan
         validate_stream_plan(self._plan, source=self._source)
         from ..planning.dataflow_declaration import validate_native_operation
         validate_native_operation("run_stream", configuration={"action": "run_stream"}, bindings={})
@@ -1325,7 +1325,7 @@ class Dataset:
         """
         from ..embeddings.runtime import EmbeddingActor
         from ..embeddings import embedding_execution_config
-        from ..inference import _resolve_request_gate
+        from demiflow.inference import resolve_request_gate as _resolve_request_gate
         from ..planning.dataflow_declaration import validate_native_operation
         from .plan import EmbeddingMapOp
         execution = embedding_execution_config(batch_size=batch_size, concurrency=concurrency,
@@ -1469,7 +1469,7 @@ class Dataset:
         """
         if 'journal_dir' in (options or {}):
             raise ValueError('map_prompt_async recovery is execution-owned; remove journal options')
-        from ..execution.dataflow_prompt_journal import private_prompt_declaration
+        from demiflow.operator_llm.flow_contract import private_prompt_declaration
         private_prompt_declaration(options)
         from ..operator_llm.parser import resolve_prompt
         if isinstance(config, (str, Path)):
@@ -1537,7 +1537,7 @@ class Dataset:
                            declared._stages+tuple(actors.values()))
         if route is not None or isolate_route_failures:
             raise ValueError('route/isolate_route_failures require routes')
-        from ..inference import _resolve_request_gate, request_admission_config
+        from demiflow.inference import resolve_request_gate as _resolve_request_gate, request_admission_config
         declared_request_policy = request_admission_config(request_policy, concurrency=concurrency)
         request_gate = _resolve_request_gate(policy=request_policy, gate=request_gate, concurrency=concurrency)
         if isinstance(token_budget, Mapping):
@@ -1571,7 +1571,7 @@ class Dataset:
         actor = PromptActor(operation, operation.config,
             InProcessOperatorLLMCoordinator(operation.max_requests), operation.options, service=service)
         if service is not None:
-            from ..execution.dataflow_managed_http import managed_http_digest
+            from demiflow.services.http import managed_http_digest
             actor._sealed_service_declaration = managed_http_digest(service)
         if not any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
             from ..operator_llm.http_options import validate_http_options
@@ -2081,7 +2081,7 @@ class Dataset:
         self, datasink: Datasink, *, backend_options=None,
     ) -> None:
         """Execute the lazy plan through a formal Datasink."""
-        from ..execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         if not callable(getattr(datasink, 'recovery_identity', None)):
             raise RecoveryContractError('A durable Datasink needs its immutable recovery_identity')
         native = parse_native_options(backend_options, family='sink')

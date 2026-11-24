@@ -68,8 +68,8 @@ import pytest
 from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.run_context import RunContext, RunAction
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.pipeline.run_context import RunContext, RunAction
 from demiflow.resources.capacity import LocalCapacityPool
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -511,7 +511,7 @@ def test_carrier_binds_same_sealed_plan(tmp_path, monkeypatch):
     from test_mvp2_queue_unified import _config, _settle
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server
-    from demiflow.execution.queue import QueueChannel
+    from demiflow.execution.native_queue.queue import QueueChannel
     from demiflow.execution.action_driver import dataflow as driver
     from demiflow.execution.seal.plan import load_dataflow
 
@@ -546,7 +546,7 @@ def test_carrier_binds_same_sealed_plan(tmp_path, monkeypatch):
 
 @requires_real_source
 def test_chain_failure_releases_capacity(tmp_path, monkeypatch):
-    from demiflow.execution import commit as commit_module
+    from demiflow.execution.checkpoint import commit as commit_module
     slice_rows = _real_slice(8)
     obj = _empty_store(tmp_path)
     monkeypatch.setenv("STAGE2_OBJECT_ROOT", str(obj))
@@ -591,7 +591,8 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
 # --- Gate 4: worker zero CommitCoordinator (AST) + driver single journal (spy) ---
 
 def test_worker_constructs_zero_commit_coordinator():
-    from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner, dataflow_host
+    from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner
+    from demiflow.execution.hosts import dataflow_worker_host as dataflow_host
     for module in (dataflow_execution, dataflow_graph_runner, dataflow_host):
         tree = ast.parse(Path(module.__file__).read_text())
         referenced, imported_modules = set(), set()
@@ -611,7 +612,7 @@ def test_worker_constructs_zero_commit_coordinator():
 
 @requires_real_source
 def test_chain_settlement_in_driver_single_journal(tmp_path, monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     slice_rows = _real_slice(8)
     obj = _empty_store(tmp_path)
     monkeypatch.setenv("STAGE2_OBJECT_ROOT", str(obj))
@@ -821,7 +822,7 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
     from test_raw_fetch import origin_server
     from demiflow.execution.seal import plan as sealing
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.queue import QueueChannel
+    from demiflow.execution.native_queue.queue import QueueChannel
     cfg = _config(tmp_path, 'f8b')
     root = tmp_path / "run"
     original_stage = sealing._stage_one_program

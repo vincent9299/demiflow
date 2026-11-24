@@ -1,9 +1,10 @@
 """Public native SQLite/PostgreSQL task channels and bounded history declarations."""
-from .execution.queue import (QueueChannel,QueueConfig,QueueLimits,ProducerSourceSpec,ProducerRef,
-    QueueSnapshot,HistoryReadLimits,QueueIncomplete,QueueIdleTimeout,StaleQueueOwner,
-    ArtifactDomainUnavailable,HistoryReadLimit,task_message)
-from .execution.queue_sinks import QueueResultSink
-from .execution.queue_contract import ProducerWindowLimit
+from demiflow.execution.native_queue.queue import QueueChannel
+from demiflow.execution.contracts.queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, ProducerRef, QueueSnapshot, HistoryReadLimits, QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.contracts.queue_contract import ProducerWindowLimit
+# Public discovery installs the existing value handlers at the API assembly boundary.
+from demiflow.execution.executors import queue_flow as _queue_flow
 
 
 def queue_status(config,*,pool='default'):

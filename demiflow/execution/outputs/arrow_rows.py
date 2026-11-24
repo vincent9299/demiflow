@@ -3,7 +3,7 @@ import json
 
 from ..contracts.dataflow import Record
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 _POSITION_FIELDS = ('fragment_id', 'row_offset', 'row_id')
 
@@ -23,8 +23,8 @@ def pack_result(batch, positions, *, source_id, split_id, version, occurrence, s
 
 def validate_row_sizes(batch, maximum):
     """Prove existing typed-row limits in bulk. Ambiguous rows use the original exact codec."""
-    from ..arrow_payload import _value_upper
-    from ..exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _value_upper
+    from demiflow.execution.contracts.record_codec import _encode_payload
     names = sum(8 + len(json.dumps(name, ensure_ascii=False).encode()) for name in batch.schema.names)
     def check(start, count):
         part = batch.slice(start, count)
@@ -51,8 +51,8 @@ class PublishedArrowRows:
     """One authenticated result batch; Record consumers can reconstruct original provenance."""
     def __init__(self, ref, *, rows, first, schema_ref, schemas):
         import pyarrow as pa
-        from ..arrow_payload import _uncompressed_ipc
-        from ..dataflow_segments import ARROW_STREAM_MEDIA
+        from demiflow.execution.contracts.record_codec import _uncompressed_ipc
+        from demiflow.execution.storage.segments import ARROW_STREAM_MEDIA
         bounds = schemas.bounds
         if (ref.media_type != ARROW_STREAM_MEDIA or type(rows) is not int or not 0 < rows <= bounds.max_output_rows
                 or not 0 < ref.size_bytes <= bounds.max_batch_bytes
@@ -93,7 +93,7 @@ class PublishedArrowRows:
         self.bytes = result.get_total_buffer_size() + ref.size_bytes
 
     def record(self):
-        from ..exchange.dataflow_bridge import _encode_payload
+        from demiflow.execution.contracts.record_codec import _encode_payload
         i, lineage = self.index, self.lineage
         value = self.batch.slice(i, 1).to_pylist()[0]
         position = self.positions.slice(i, 1).to_pylist()[0]

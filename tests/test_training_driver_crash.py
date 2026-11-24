@@ -11,10 +11,10 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow import data
-from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.training.deployment import TrainingDeployment
+from demiflow.execution.contracts.recovery_contract import RunRef
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.pipeline.training_deployment import TrainingDeployment
 from test_training_dataset_action import recipe
 from test_training_domain import setup_request
 from training_action_programs import waiting_trainer
@@ -22,7 +22,7 @@ from training_action_programs import waiting_trainer
 
 def execute(root, resume, stopped_at):
     if stopped_at == 'ready' and not resume:
-        from demiflow.execution.training.managed_host import ManagedFitHost
+        from demiflow.execution.hosts.training_host import ManagedFitHost
         activate = ManagedFitHost._activate
         def wait_before_activation(self, key, location):
             if (location / 'ready.json').exists():

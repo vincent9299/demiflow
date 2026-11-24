@@ -9,7 +9,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,7 +95,7 @@ def value_executor(request):
     with _RayDataBlocker() as blocker:
         if name == 'local':
             from demiflow.execution.executors.local import LocalDatasetExecutor
-            from demiflow.execution.local_kernel import LocalKernelOptions
+            from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
             executor = LocalDatasetExecutor(workers=2, local_kernel=LocalKernelOptions(
                 workers=2, worker_mode='thread', partitions=1, batch_rows=2))
             try:
@@ -137,7 +137,7 @@ def _typed_flow(calls, count=3):
 
 
 def test_original_list_scalar_dict_outputs_and_map_inputs(provider, tmp_path):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     cases = [('list', _fold_list, [], [[3, 5], [7]]),
              ('scalar', _fold_scalar, 0, [35, 7]),
              ('dict', _fold_dict, {'values': []},
@@ -205,7 +205,7 @@ def test_mixed_values_do_not_invent_table_columns(provider, tmp_path, reverse):
 
 
 def test_relational_region_keeps_nonmapping_reducer_result(provider, tmp_path):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     with RunContext.start(tmp_path / 'run', limits=LIMITS) as run:
         left = data.from_items([{'k': 1, 'v': 3}, {'k': 1, 'v': 5}])
         joined = left.join(data.from_items([{'k': 1, 'r': 2}]), on='k').join(
@@ -243,7 +243,7 @@ def test_final_original_ack_replays_values_without_workers_or_reducer(provider, 
 
 def test_materialized_reducer_values_resume_original_nonfinal_ack(provider, tmp_path, monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     calls = tmp_path / 'calls'
     expected = [[(i, b'\x00\xff', -0.0)] for i in range(12)]
     with RunContext.start(tmp_path / 'build', limits=LIMITS):
@@ -305,17 +305,17 @@ def test_reducer_value_limits_reject_without_committed_output(tmp_path, bound):
         ('reducer state', 'Reducer retained objects') if bound == 'state' else
         ('record string exceeds byte budget', 'encoded record exceeds the row byte budget')))
     assert (tmp_path / 'calls').read_text() == 'called\n'
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     assert RunJournal(tmp_path / 'run').execution_commits('action-1') == []
 
 
 @pytest.mark.parametrize('value', [[(b'\xff', -0.0), [1, None]], 35, False, 0, [], {}, (), b'', ''])
 def test_record_codec_clone_and_state_preserve_top_level_values(value):
     from demiflow.execution.contracts.dataflow import Record, thaw_record_value
-    from demiflow.execution.dataflow_records import clone_record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
-    from demiflow.execution import dataflow_record_frames as frames
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts.dataflow import clone_record
+    from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
+    from demiflow.execution.contracts import record_codec as frames
+    from demiflow.execution.contracts import state_codec
     from test_runtime_v3_c import bounds
     raw = _encode_payload(value, max_bytes=4096)
     record = Record(hashlib.sha256(raw).hexdigest(), {'offset': [1, 2]}, None, value, len(raw), 4)
@@ -332,7 +332,7 @@ def test_record_codec_clone_and_state_preserve_top_level_values(value):
 
 def test_top_level_mapping_keys_and_closed_data_gate_remain_strict():
     from demiflow.execution.contracts.dataflow import Record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _decode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload, _decode_payload
     with pytest.raises(DataflowError):
         Record('0' * 64, {}, None, {1: 'invalid key'}, 1, 0)
     class Code:

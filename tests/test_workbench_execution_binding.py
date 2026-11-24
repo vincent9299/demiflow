@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 from runtime_v3_history_scenarios import write_legacy_seal
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.graph import model
 from demiflow.workbench.runs import facts

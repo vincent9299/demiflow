@@ -752,6 +752,8 @@ class Store:
         tool_last = {}
         tool_has_delta = set()
         last_turn_state = {}
+        change_last = {}
+        change_files = {}
         span_counter = 0
         for seq, _, ev in raw_rows:
             tid = ev.get('turn_id')
@@ -777,6 +779,12 @@ class Store:
                     tool_has_delta.add((tid, epoch, data.get('item_id')))
                 elif kind == 'turn.state':
                     last_turn_state[tid] = seq
+                elif kind == 'change.observed':
+                    change_last[tid] = seq
+                    bucket = change_files.setdefault(tid, {})
+                    for f in data.get('files') or ():
+                        if isinstance(f, dict) and isinstance(f.get('path'), str):
+                            bucket[f['path']] = f
 
         compacted = []
         span_id.clear()
@@ -815,10 +823,28 @@ class Store:
                     continue
             elif kind == 'turn.state' and seq != last_turn_state.get(tid):
                 continue
+            elif kind == 'change.observed':
+                if seq != change_last.get(tid):
+                    continue
+                merged_files = list((change_files.get(tid) or {}).values())
+                if len(merged_files) > 1:
+                    compact_files = []
+                    strip_diffs = len(merged_files) > 16
+                    for f in merged_files[:64]:
+                        if strip_diffs and 'diff' in f:
+                            cf = {k: v for k, v in f.items() if k != 'diff'}
+                            cf.setdefault('diff_unavailable', 'compacted_in_replay')
+                            compact_files.append(cf)
+                        else:
+                            compact_files.append(f)
+                    ev = dict(ev, data=dict(data, files=compact_files))
+                    size = len(json.dumps(ev, ensure_ascii=False).encode('utf-8'))
             compacted.append((seq, size, ev))
 
         # Fit within limit and 256 KiB. If over budget, first drop non-latest completed
-        # turns' process/tool rows while preserving each turn's user prompt & final answer.
+        # turns' process/tool rows while preserving each turn's user prompt & final answer;
+        # if still over budget, also prune the newest completed turn's process/tool rows
+        # so its user prompt and final answer are never crowded out.
         newest_tid = selected[0]['id']
         budget_bytes = 256 * 1024
         if len(compacted) > limit or sum(s for _, s, _ in compacted) > budget_bytes:
@@ -828,20 +854,26 @@ class Store:
                 data = ev.get('data') or {}
                 if ev.get('type') in ('message.completed', 'message.delta') and data.get('channel') not in ('process', 'summary'):
                     final_answer_seq[tid] = seq
-            pruned = []
-            for entry in compacted:
-                seq, _, ev = entry
-                tid = ev.get('turn_id')
-                kind = ev.get('type')
-                data = ev.get('data') or {}
-                if tid != newest_tid and tid not in active_turns:
-                    if kind in ('item.updated', 'item.started', 'output.delta'):
-                        continue
-                    if kind in ('message.delta', 'message.completed') and (
-                            data.get('channel') in ('process', 'summary') or seq != final_answer_seq.get(tid)):
-                        continue
-                pruned.append(entry)
-            compacted = pruned
+
+            def _prune_turns(entries, include_newest):
+                out = []
+                for entry in entries:
+                    seq, _, ev = entry
+                    tid = ev.get('turn_id')
+                    kind = ev.get('type')
+                    data = ev.get('data') or {}
+                    if tid not in active_turns and (include_newest or tid != newest_tid):
+                        if kind in ('item.updated', 'item.started', 'output.delta'):
+                            continue
+                        if kind in ('message.delta', 'message.completed') and (
+                                data.get('channel') in ('process', 'summary') or seq != final_answer_seq.get(tid)):
+                            continue
+                    out.append(entry)
+                return out
+
+            compacted = _prune_turns(compacted, include_newest=False)
+            if len(compacted) > limit or sum(s for _, s, _ in compacted) > budget_bytes:
+                compacted = _prune_turns(compacted, include_newest=True)
 
         kept, used, omitted = [], 0, False
         for seq, size, ev in reversed(compacted):
@@ -851,6 +883,32 @@ class Store:
             kept.append(ev); used += size
         kept.reverse()
         first_seq = kept[0]['sequence'] if kept else last_seq
+        # Always preserve the user prompt bubble (`message.user`) for every turn shown in
+        # the replay window (both initial tail and upward pagination pages) even when a
+        # long turn exceeds the 4096-event scan or `limit` cap, while keeping `first_seq`
+        # anchored to the contiguous tail so upward pagination never skips intermediate events.
+        if kept:
+            seen_user_turns = {ev.get('turn_id') for ev in kept if ev.get('type') == 'message.user'}
+            missing_tids = []
+            for ev in kept:
+                tid = ev.get('turn_id')
+                if tid and tid not in seen_user_turns and tid not in missing_tids:
+                    missing_tids.append(tid)
+            if missing_tids:
+                anchored = []
+                with self.connect() as db:
+                    for tid in missing_tids[:max_turns]:
+                        row = db.execute(
+                            """SELECT size, body FROM events
+                               WHERE session=? AND turn=? AND json_extract(body,'$.type')='message.user'
+                               ORDER BY sequence LIMIT 1""",
+                            (sid, tid),
+                        ).fetchone()
+                        if row is not None and used + row['size'] <= budget_bytes + 65536:
+                            anchored.append(json.loads(row['body']))
+                            used += row['size']
+                if anchored:
+                    kept = sorted(anchored + kept, key=lambda item: item['sequence'])
         has_earlier = bool(older_turns or truncated_scan or omitted or archive_seq > 0)
         return dict(events=kept, first_sequence=first_seq, next_sequence=last_seq,
                     last_sequence=last_seq, has_earlier=has_earlier)

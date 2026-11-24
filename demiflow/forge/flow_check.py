@@ -934,7 +934,7 @@ class FlowChecker:
             if not isinstance(fitted, DeclaredValue) or fitted.type != scalar("fit"):
                 self.fail("FL-04", "select requires the declared fit result", node, module)
             return DeclaredValue({**fitted.value, "steps": list(training_steps(values["steps"]))}, scalar("model_selection"))
-        from ..execution.capabilities import check_action
+        from demiflow.execution.compiler_support.capabilities import check_action
         capability = check_action(kind, values)
         if not capability['supported']:
             self.fail('FL-07', capability['reason'], node, module,cause='unsupported')
@@ -1559,7 +1559,7 @@ class FlowChecker:
                for namespace in self.tree.modules.values() for value in namespace.values()):
             analysis['required_distributions'] = sorted(set(analysis.get('required_distributions', ())) | {'torch'})
         stream = stream or analysis['driver']=='stream'
-        from ..execution.capabilities import check_composition, check_call
+        from demiflow.planning.traits import check_composition, check_call
 
         capability_fact = {
             "kind": analysis.get('kind', "async_map" if kind == "map" and sem["execution"] == "stream" else kind),
@@ -1684,7 +1684,7 @@ class FlowChecker:
 
     def _segment_capability(self, identity, driver):
         """At most one evaluation per node and driver, including shared paths."""
-        from ..execution.capabilities import check_call, check_composition
+        from demiflow.planning.traits import check_call, check_composition
         pending = []
         while (identity, driver) not in self.capability_cache:
             previous = self.node_index[identity]

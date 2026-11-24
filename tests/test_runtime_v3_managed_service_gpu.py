@@ -9,9 +9,9 @@ import psutil
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.dataflow_managed_devices import _physical_devices
-from demiflow.execution.dataflow_devices import device_pool
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.hosts.managed_devices import physical_devices as _physical_devices
+from demiflow.execution.hosts.devices import device_pool
 from runtime_v3_managed_http_scenarios import managed_fixture, events
 from test_runtime_v3_managed_embedding_service import dataset
 
@@ -152,7 +152,7 @@ def test_gpu_service_rejects_ambiguous_or_undeployed_devices_before_launch(tmp_p
 
 def test_gpu_service_profile_does_not_expand_run_or_admit_ray_indices():
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_managed_devices import service_profile
+    from demiflow.planning.dataflow_place import service_profile
     from demiflow.resources.contracts import ResourceProfile
     kernel = SimpleNamespace(configuration={'managed_http_devices': {'indices': [0]}},
         profile=ResourceProfile(requests={'cpu_millis': 100, 'memory_bytes': 32*1024**2,

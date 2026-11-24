@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 ROWS = [{'a': i % 3, 'b': i, 'v': float(i)} for i in range(30)]
@@ -41,7 +41,7 @@ def test_seed_repeats_union_flatmap_multiplicity_despite_input_order(tmp_path):
 
 def _record(row, index, action='a', *, max_bytes=4096):
     from demiflow.execution.contracts.dataflow import Record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     return Record(hashlib.sha256(f'{action}:{index}'.encode()).hexdigest(),
         {'source': action, 'ordinal': index}, None, row,
         len(_encode_payload(row, max_bytes=max_bytes)), index)
@@ -111,7 +111,7 @@ def test_low_window_real_store_spills_twice_and_closes_every_reader(tmp_path, mo
 def test_duplicate_record_identity_order_survives_reordered_delivery(tmp_path):
     import random
     from demiflow.execution.kernels.shuffle_order import seeded_shuffle
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from test_runtime_v3_artifact_accounting import store_fixture
     records = [_record({'v': i % 3}, i) for i in range(90)]
     # Distinct provenance also disambiguates a forwarded record-id collision.
@@ -225,7 +225,7 @@ def test_measured_merge_drops_old_wide_frames_at_single_reader_tail(tmp_path, mo
             for count in run_lengths:
                 records = (_record({'v': i, 'payload': 'x' * 16384}, i, max_bytes=32768)
                     for i in range(start, start + count))
-                built = ordering._build_sort_runs(records, spec=_spec(), services=services,
+                built = ordering.build_sort_runs(records, spec=_spec(), services=services,
                     window=window, key_for_record=_TypedKeys(services, window))
                 refs.extend(built)
                 assert len(built) == 1
@@ -250,13 +250,13 @@ def test_measured_merge_drops_old_wide_frames_at_single_reader_tail(tmp_path, mo
 
 def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypatch):
     from demiflow.execution.kernels import shuffle_order
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
     from test_runtime_v3_artifact_accounting import store_fixture, consumed
     with store_fixture(tmp_path, ceiling=256 << 10) as (run, store, port):
         services = _services(store, port)
         services = replace(services, bounds=replace(services.bounds, max_spill_bytes=256 << 10))
         builds, written, released = [], [], []
-        original_build, original_put, original_release = shuffle_order._build_sort_runs, store.put, store.release
+        original_build, original_put, original_release = shuffle_order.build_sort_runs, store.put, store.release
         def build(*args, **kwargs):
             builds.append(True)
             return original_build(*args, **kwargs)
@@ -267,7 +267,7 @@ def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypat
         def release(ref, **kwargs):
             released.append(ref)
             return original_release(ref, **kwargs)
-        monkeypatch.setattr(shuffle_order, '_build_sort_runs', build)
+        monkeypatch.setattr(shuffle_order, 'build_sort_runs', build)
         monkeypatch.setattr(store, 'put', put)
         monkeypatch.setattr(store, 'release', release)
         records = (_record({'v': i, 'payload': b'x' * 256}, i) for i in range(100))
@@ -286,8 +286,8 @@ def test_borrowed_metadata_is_admitted_while_first_sort_runs_exist(tmp_path, mon
     from dataclasses import asdict
     from demiflow.execution.contracts.dataflow import ProducerCompletion
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_finite_input import borrowed_records
-    from demiflow.execution.dataflow_segments import FINITE_RECORDS_MEDIA, SEGMENTS_MEDIA, SCHEMA
+    from demiflow.execution.worker.finite_input import borrowed_records
+    from demiflow.execution.storage.segments import FINITE_RECORDS_MEDIA, SEGMENTS_MEDIA, SCHEMA
     from demiflow.execution.exchange.dataflow_channels import seal_scope
     from demiflow.execution.kernels.operator import OperatorKernel
     from test_runtime_v3_artifact_accounting import store_fixture
@@ -386,7 +386,7 @@ def test_real_store_failure_and_close_release_only_owned_shuffle_runs(tmp_path, 
         monkeypatch.setattr(store, 'release', release)
         monkeypatch.setattr(store, 'read', read)
         if boundary == 'second_build':
-            original = shuffle_order._build_sort_runs
+            original = shuffle_order.build_sort_runs
             builds = [0]
             def build(records, **kwargs):
                 builds[0] += 1
@@ -398,7 +398,7 @@ def test_real_store_failure_and_close_release_only_owned_shuffle_runs(tmp_path, 
                             yield record
                     return original(interrupt(), **kwargs)
                 return original(records, **kwargs)
-            monkeypatch.setattr(shuffle_order, '_build_sort_runs', build)
+            monkeypatch.setattr(shuffle_order, 'build_sort_runs', build)
         emitted = shuffle_order.seeded_shuffle((_record(row, i) for i, row in enumerate(source)),
             spec=_spec(), services=services)
         if boundary == 'output_close':
@@ -418,7 +418,7 @@ def test_typed_codec_values_and_mapping_order_contract(tmp_path):
     from decimal import Decimal
     import numpy as np
     from demiflow.execution.kernels.shuffle_order import seeded_shuffle
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from test_runtime_v3_artifact_accounting import store_fixture
     rows = [{'v': value} for value in (None, True, 1, 1.0, -0.0, float('nan'), float('inf'),
             b'\x00data', (1, 'x'), [1, 'x'], {1, 2}, frozenset({1, 2}), Decimal('1.20'),
@@ -437,7 +437,7 @@ def test_typed_codec_values_and_mapping_order_contract(tmp_path):
 
 
 def test_legacy_formula_and_old_sealed_configuration_remain_unchanged(tmp_path, monkeypatch):
-    from demiflow.execution.kernels.ordering import shuffle_key
+    from demiflow.operators.ordering import shuffle_key
     from demiflow.execution.action_driver import dataflow as execution_module
     from demiflow.planning import dataflow_compile
     from test_runtime_v3_real_seams import prepared

@@ -1,4 +1,5 @@
 """Original frames remain ordered and bounded through coalesced transport."""
+from demiflow.execution.contracts import record_codec
 from collections import deque
 import json
 import socket
@@ -8,12 +9,10 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from demiflow.execution.dataflow_hosts import _EndpointBase, LocalHostEndpoint
-from demiflow.execution.recovery_contract import document, RecoveryContractError
-from demiflow.execution.worker.bootstrap import (
-    ControlFrameReader, send_messages, _MAX_CONTROL_BYTES,
-)
-from demiflow.execution.worker.dataflow_host import HostedDataflowWorker
+from demiflow.execution.hosts.endpoints import _EndpointBase, LocalHostEndpoint
+from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
+from demiflow.execution.hosts.worker_bootstrap import ControlFrameReader, send_messages, _MAX_CONTROL_BYTES
+from demiflow.execution.hosts.dataflow_worker_host import HostedDataflowWorker
 from test_runtime_v3_ray_terminal_seams import private_ray_provider
 
 
@@ -112,7 +111,7 @@ def test_reader_rejects_early_eof_without_losing_partial_frame(raw):
 
 
 def test_partial_deadline_and_oversized_header_fail_before_body_allocation(monkeypatch):
-    import demiflow.execution.worker.bootstrap as bootstrap
+    import demiflow.execution.hosts.worker_bootstrap as bootstrap
     sender, receiver = socket.socketpair()
     clock = [100.0]
     monkeypatch.setattr(bootstrap.time, 'monotonic', lambda: clock[0])
@@ -217,7 +216,7 @@ def test_ray_method_preserves_per_command_receive_and_does_not_hide_partial_fail
 def test_lifecycle_response_and_events_share_one_reader_and_keep_fencing():
     from test_runtime_v3_c import make, bounds
     from demiflow.execution.contracts.dataflow_codec import encode_wire
-    from demiflow.execution.worker.bootstrap import recv_message
+    from demiflow.execution.hosts.worker_bootstrap import recv_message
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     event = make('WorkerEvent', kind='progress')
     budget = bounds()
@@ -262,8 +261,8 @@ def test_lifecycle_response_and_events_share_one_reader_and_keep_fencing():
 def test_real_ray_terminal_acks_use_bounded_batch_rpcs(tmp_path, monkeypatch, private_ray_provider):
     import sys
     from demiflow import data
-    from demiflow.execution.dataflow_hosts import RayHostEndpoint
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.hosts.endpoints import RayHostEndpoint
+    from demiflow.execution.pipeline.run_context import RunContext
     original = _EndpointBase.flush_business
     terminal = []
     def flush(endpoint):
@@ -298,10 +297,10 @@ def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path
     from demiflow.data.api import DataAPI
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.local import LocalDatasetExecutor
-    from demiflow.execution.local_kernel import LocalKernelOptions
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
+    from demiflow.execution.pipeline.run_context import RunContext
     import demiflow.execution.exchange.dataflow_bridge as bridge
-    original_start, original_decode = DataflowExecution.start, bridge._decode_record_document
+    original_start, original_decode = DataflowExecution.start, record_codec._decode_record_document
     executions, decoded = [], []
     def start(execution):
         assert execution._policy.provider == 'local' and execution._policy.worker_mode != 'thread'
@@ -315,7 +314,7 @@ def test_actual_process_terminal_partial_read_and_error_release_workers(tmp_path
     monkeypatch.setattr(DataflowExecution, 'start', start)
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
     if fault == 'read_error':
-        monkeypatch.setattr(bridge, '_decode_record_document', decode)
+        monkeypatch.setattr(record_codec, '_decode_record_document', decode)
     def execute():
         # The module's real Ray fixture may still hold its public executor.
         # Bind this test's Local API explicitly; do not replace that fixture.

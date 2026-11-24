@@ -6,12 +6,17 @@ internal fields and verification algorithms are not redefined here. Distinct
 from the E1 sink-output ``artifact_manifest`` (paged-artifacts-v1), which stays
 owned by the commit path.
 """
+
+from demiflow.execution.contracts.errors import require_plan_contract as _require
+
+import json
+import hashlib
 import re
 from pathlib import Path
 
-from ..recovery_contract import document, identifier, identity
-from .envelope import protocol_version
-from .errors import ProtocolError
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.envelope import protocol_version
+from demiflow.execution.contracts.errors import ProtocolError
 
 MANIFEST_SCHEMA = "demiflow.run_artifact_manifest.v1"
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -201,7 +206,7 @@ def amend_manifest(value, changes):
 
 def manifest_digest(value):
     """Storage digest in the existing immutable-artifact encoding convention."""
-    from ..artifacts import digest
+
     return digest(value)
 
 
@@ -216,11 +221,19 @@ def verify_manifest(value, ref):
     return True
 
 
-def save_manifest(directory, value):
-    """Persist via the existing immutable content-addressed JSON mechanism."""
-    from ..file_ref import save_json_artifact
-    validate_manifest(value)
-    ref = save_json_artifact(Path(directory), value)
-    path = Path(ref.artifact_path)
-    return {"manifest_id": value["manifest_id"], "path": str(path),
-            "bytes": path.stat().st_size, "sha256": ref.sha256}
+def encoded(value):return json.dumps(value,ensure_ascii=False,sort_keys=True,indent=2).encode()+b'\n'
+
+def digest(value):return hashlib.sha256(value if isinstance(value,bytes) else encoded(value)).hexdigest()
+
+
+def validate_plan_artifact_ref(ref, prefix):
+    _require(type(ref) is dict and set(ref) == {"path", "sha256", "bytes"},
+             "invalid_contract", prefix + " ref key set is unsupported")
+    path = ref["path"]
+    _require(type(path) is str and path and not Path(path).is_absolute()
+             and ".." not in Path(path).parts,
+             "invalid_contract", prefix + " path must be run-relative")
+    _require(type(ref["sha256"]) is str and _SHA256.fullmatch(ref["sha256"]) is not None,
+             "invalid_contract", prefix + " sha256 must be 64 lowercase hex")
+    _require(type(ref["bytes"]) is int and ref["bytes"] >= 0,
+             "invalid_contract", prefix + " bytes must be nonnegative")

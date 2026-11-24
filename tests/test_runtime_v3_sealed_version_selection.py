@@ -7,8 +7,8 @@ import sys
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.plan_interpreter import PlanContractError
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.contracts.errors import PlanContractError
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 # Final published main before legacy writer retirement. Both original bindings are

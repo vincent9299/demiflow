@@ -3,7 +3,7 @@ import sqlite3
 
 import pytest
 
-from demiflow.execution.run_journal import RunJournal, OBSERVATION_COUNT
+from demiflow.execution.journal.run_journal import RunJournal, OBSERVATION_COUNT
 
 
 def update(node='node', sequence=1, state='running', **details):

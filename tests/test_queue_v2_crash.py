@@ -11,10 +11,10 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.queue import ProducerSourceSpec,task_message
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.native_queue.queue import ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RunRef
 from test_queue_v2_protocol import channel
 from test_raw_fetch import origin_server,BODY
 
@@ -26,12 +26,12 @@ from pathlib import Path
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.queue import QueueConfig,QueueChannel
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.queue import QueueConfig,QueueChannel
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.secrets import Secret
-from demiflow.execution.raw_objects import RawWriter
-import demiflow.execution.commit as commits
+from demiflow.execution.native_queue.raw_objects import RawWriter
+import demiflow.execution.checkpoint.commit as commits
 settings=json.loads(Path(sys.argv[1]).read_text())
 raw=settings['config']
 if raw['dsn'] is not None:raw['dsn']=Secret(raw['dsn']['secret_env'])

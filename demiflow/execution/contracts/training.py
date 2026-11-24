@@ -1,6 +1,8 @@
 """Value and callable contracts at the sealed fit/predict boundary."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path, PurePosixPath
@@ -8,7 +10,7 @@ from types import MappingProxyType
 from typing import Protocol
 import re
 
-from ..recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 
 def _text(value, label):
@@ -371,3 +373,14 @@ class FitContext(Protocol):
     def report_progress(self, metrics: Mapping) -> None: ...
     def report_snapshot(self, snapshot: TrainingSnapshotRef) -> None: ...
     def run_group(self, entry: str, args: Sequence[str], deadline: float) -> None: ...
+
+
+def validate_result(result, request):
+    if (type(result) is not FitResult or result.instance_id != request.instance_id
+            or result.fit_key != request.fit_key
+            or any(s.model_format != request.semantics['model_format'] for s in result.snapshots)):
+        raise RecoveryContractError("Training provider returned an incompatible instance, recipe or model")
+    result.select(request.semantics['save_steps'])
+    budget = request.semantics['budget'].get('optimizer_updates')
+    if budget is not None and result.final_step != budget:
+        raise RecoveryContractError("Training ended at a different optimizer update than requested")

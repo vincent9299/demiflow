@@ -12,8 +12,8 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document, _decode_record_document
-from demiflow.execution.kernels.dataflow import _materialize_row
+from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document, _decode_record_document
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from test_runtime_v3_artifact_accounting import store_fixture,consumed
 from test_runtime_v3_published_gc import put
 from test_runtime_v3_real_seams import prepared,reader_services
@@ -145,7 +145,7 @@ def test_real_external_sort_fan_in_accounts_for_read_leases_and_output(tmp_path)
             assert consumed(services.action.context)==before and store.open_file_slots==1
             store._bounds=replace(old,max_open_files=10)
             ordered=list(merge_sort_runs(runs,spec=spec,services=replace(runtime,bounds=store._bounds)))
-            assert [_materialize_row(record,runtime) for record in ordered]==list(reversed(rows))
+            assert [_materialize_row(record, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for record in ordered]==list(reversed(rows))
             assert store.open_file_slots==1 and descriptors(store)==1
         finally:store._bounds=old
 
@@ -172,8 +172,8 @@ def test_join_admits_stream_and_external_payload_before_consuming_input(tmp_path
             assert not touched and store.open_file_slots==1
             store=bounded_view(store,port,8);runtime.store=store;runtime.bounds=store._bounds
             pairs=list(join_pairs(source(),iter([right]),left_keys=('k',),right_keys=('k',),how='inner',services=runtime))
-            assert len(pairs)==1 and _materialize_row(pairs[0][0],runtime)==row
-            assert _materialize_row(pairs[0][1],runtime)=={'k':1,'r':2}
+            assert len(pairs)==1 and _materialize_row(pairs[0][0], store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))==row
+            assert _materialize_row(pairs[0][1], store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))=={'k':1,'r':2}
             assert store.open_file_slots==1 and descriptors(store)==1
         finally:store.close()
 

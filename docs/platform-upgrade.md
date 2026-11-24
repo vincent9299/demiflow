@@ -66,7 +66,7 @@ python -m demiflow.operator_llm.recover history --path /data/calls.sqlite
 业务 append 指纹仍由业务定义，并由显式提交表保存固定版本。`DatasetCommit` 是围绕标准 Dataset writer 的控制协议：
 
 ```python
-from demiflow.execution.dataset_commit import DatasetCommit
+from demiflow.execution.checkpoint.dataset_commit import DatasetCommit
 with DatasetCommit(run_control / 'append_intents', batch_fingerprint, target_uri) as commit:
     if commit.output is None:
         receipt = rows.write_lance(target_uri, mode='append', schema=SCHEMA, return_receipt=True)

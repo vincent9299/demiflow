@@ -7,10 +7,10 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore,ObjectRef,read_local_object
-from demiflow.execution.raw_objects import RawNamespace
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.raw_objects import RawNamespace
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel
 from test_queue_v2_boundaries import seed
 from test_raw_fetch import origin_server,BODY
@@ -46,7 +46,7 @@ def _facts(channel):
 
 
 def test_shared_remount_ordinary_actor_and_readonly_history_consume_original_receipt(channel,tmp_path,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     with origin_server() as (url,calls):
         p=seed(channel,tmp_path,url);fired=[]
         def fault(name,commit_id):
@@ -127,7 +127,7 @@ def test_oversize_declarations_rejected_before_parsing_or_serialization(tmp_path
         monkeypatch.setattr('demiflow.objects._local_path',forbidden)
         reference={'uri':'file:///'+'x'*8192,'sha256':ref.sha256}
     else:
-        monkeypatch.setattr('demiflow.execution.raw_objects.document',forbidden)
+        monkeypatch.setattr('demiflow.execution.native_queue.raw_objects.document',forbidden)
         domain={**domain,field:'/'+'x'*8192};reference=ref
         if field=='store_id':store.store_id=domain[field]
         elif field=='declared_domain':store.domain_id=domain[field]

@@ -3,6 +3,8 @@
 These helpers bound logical batch bytes, not process RSS. A borrowed slice may
 retain a larger parent buffer; readers and writers need separate protection.
 """
+
+from demiflow.execution.contracts.dataflow import BATCH_TARGET_BYTES
 from collections.abc import Iterable, Iterator
 import pyarrow as pa
 
@@ -98,3 +100,27 @@ def fixed_row_tables(batches, schema, *, batch_rows, batch_bytes=ARROW_BATCH_BYT
                 yield output
     if count:
         yield pa.Table.from_batches(pieces, schema=schema)
+
+
+def batch_target(limits):
+    return min(BATCH_TARGET_BYTES, limits['max_batch_bytes'], limits['max_row_bytes'])
+
+def arrow_batches(batches, limits):
+    """Split borrowed Arrow batches under one logical row/batch contract.
+
+    Borrowed slice offsets are legal. Their retained parent buffers count against
+    the memory allowance, rather than being mistaken for logical batch bytes.
+    No payload copy is performed by this admission helper.
+    """
+    import pyarrow as pa
+
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    for value in batches:
+        if not isinstance(value, (pa.RecordBatch, pa.Table)):
+            raise RecoveryContractError('Lance staging requires native Arrow batches')
+        if value.get_total_buffer_size() > limits['memory_bytes']:
+            raise RecoveryContractError('Arrow retained buffers exceed memory budget')
+        incoming = value.to_batches() if isinstance(value, pa.Table) else (value,)
+        yield from bounded_record_batches(incoming, value.schema,
+            batch_rows=limits['batch_rows'], batch_bytes=batch_target(limits),
+            max_row_bytes=limits['max_row_bytes'])

@@ -9,9 +9,9 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow import BlockPartition, Record
 from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, _identity_project
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.exchange.dataflow_bridge import _encode_record_document, _decode_record_document, _encode_payload
-from demiflow.execution.dataflow_segments import SegmentForest, segment_refs, block_chunks, RECORDS_MEDIA
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.record_codec import _encode_record_document, _decode_record_document, _encode_payload
+from demiflow.execution.storage.segments import SegmentForest, segment_refs, block_chunks, RECORDS_MEDIA
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_c import bounds
 from test_runtime_v3_k import FakeStore
 
@@ -102,7 +102,7 @@ def test_repartition_count_is_admitted_before_worker_launch(tmp_path, monkeypatc
 
 
 def _block_records(saved):
-    from demiflow.execution.dataflow_handles import _ChunkStream
+    from demiflow.execution.storage.streams import _ChunkStream
     handle = saved._source.handle
     for block in handle._blocks:
         stream = _ChunkStream(block_chunks(handle._store, block, handle._store._bounds))

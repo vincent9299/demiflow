@@ -4,6 +4,11 @@ Commands, GPU selection and offload/memory flags are caller declarations. A node
 owns its process group; the CLI supervisor can instead keep it across runs.
 """
 from __future__ import annotations
+
+import inspect
+import json
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.recovery_contract import document
 import asyncio
 from contextlib import ExitStack, suppress, asynccontextmanager
 import fcntl
@@ -297,3 +302,62 @@ class _HTTPOwner:
                     pump,self._log_pump=self._log_pump,None
                     await asyncio.to_thread(pump.close)
                 self._stack.close()
+
+
+_SCHEMA = 'demiflow.managed_http_declaration.v1'
+
+_MAX_BYTES = 65536
+
+_PATHS = frozenset({'root', 'log_path', 'resource_directory'})
+
+_FIELDS = frozenset({'command', 'base_url', 'root', 'gpus', 'env', 'ready_path',
+    'expected_model', 'log_path', 'startup_timeout_s', 'shutdown_timeout_s',
+    'readiness_timeout_s', 'poll_interval_s', 'resource_wait_timeout_s',
+    'startup_log_interval_s', 'model_match', 'required_paths', 'log',
+    'resource_directory', 'request_concurrency', 'log_max_bytes'})
+
+def _invalid(reason):
+    return DataflowError('INVALID_CONTRACT', reason)
+
+def freeze_managed_http(service):
+
+    if type(service) is not ManagedHTTPService:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Embedding service requires a passive native ManagedHTTPService')
+    if (inspect.getattr_static(ManagedHTTPService, '__init__'),
+            inspect.getattr_static(ManagedHTTPService, 'bind')) != _NATIVE_MANAGED_HTTP_METHODS:
+        raise _invalid('Managed HTTP service methods differ from the native declaration')
+    values = vars(service)
+    if set(values) != _FIELDS:
+        raise _invalid('Managed HTTP service contains modified methods or unknown live state')
+    if values['log'] is not None:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed embedding service log callbacks require a code-bound declaration')
+    parameters = {}
+    for name, value in values.items():
+        if name in _PATHS:
+            if type(value) is not type(Path()):
+                raise _invalid('Managed HTTP paths must be passive native paths')
+            value = str(value)
+        elif name == 'required_paths':
+            if type(value) is not tuple or len(value) > 256 or any(type(p) is not type(Path()) for p in value):
+                raise _invalid('Managed HTTP required paths must be bounded native paths')
+            value = [str(p) for p in value]
+        parameters[name] = value
+    # Validate structural/byte limits before allocating the normalized copy.
+    encoded = document({'schema': _SCHEMA, 'parameters': parameters}, _MAX_BYTES)
+    return json.loads(encoded)
+
+def restore_managed_http(value):
+
+    if (type(value) is not dict or set(value) != {'schema', 'parameters'}
+            or value['schema'] != _SCHEMA or type(value['parameters']) is not dict
+            or set(value['parameters']) != _FIELDS):
+        raise _invalid('Invalid sealed managed HTTP declaration')
+    document(value, _MAX_BYTES)
+    service = ManagedHTTPService(**value['parameters'])
+    if freeze_managed_http(service) != value:
+        raise _invalid('Managed HTTP declaration was not canonically sealed')
+    return service
+
+def managed_http_digest(service):
+    import hashlib
+    return hashlib.sha256(document(freeze_managed_http(service), _MAX_BYTES)).hexdigest()

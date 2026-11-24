@@ -2,17 +2,17 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 async def fail_control(row):
     import asyncio
     from demiflow.data.runtime_contract import RuntimeContractError
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
+    from demiflow.services.request_limits import ServiceStopped
     from demiflow.operator_llm.journal import UncertainPromptCall
     await asyncio.sleep(0)
     if row['kind'] == 'validation':

@@ -6,8 +6,8 @@ import pytest
 
 from demiflow import data
 from _worker_event_fixtures import emit, events
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from test_stream_checkpoint_contract import native_scopes, interrupt_after_success
 
@@ -87,7 +87,7 @@ def test_save_when_passes_unsaved_rows_and_append_bound(tmp_path):
 
 
 def test_global_checkpoint_recovers_commit_before_manifest_publication(tmp_path, monkeypatch):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     uri = tmp_path / 'out.lance'
     calls = []
     def execute():
@@ -120,7 +120,7 @@ def test_global_checkpoint_recovers_commit_before_manifest_publication(tmp_path,
 
 
 def test_global_checkpoint_never_publishes_downstream_without_upstream(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_stream_lance import NativeStreamLanceService
+    from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
     vectors = []
     original = NativeStreamLanceService.request
     def observe(self, command, record):

@@ -4,8 +4,8 @@ import pytest
 from demiflow import data
 from demiflow.collect import SearchConfig
 from demiflow.collect.session import WebSession
-from demiflow.execution.recovery_contract import UnresolvedCommit
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
+from demiflow.execution.pipeline.run_context import RunContext
 from test_native_search_runtime import engines, server
 
 
@@ -41,7 +41,7 @@ def test_standalone_search_uses_native_journal_and_reports_metrics(tmp_path, eng
 @pytest.mark.parametrize('outcome', ['fixed', 'unknown'])
 def test_search_resume_before_first_dataset_cut_never_repeats_http(tmp_path, engines, server, monkeypatch, outcome):
     from demiflow.collect.search_contract import NativeSearchResultSink
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     fired = []
     original = NativeSearchResultSink.prepare
     def interrupt(self, *args, **kwargs):
@@ -119,9 +119,9 @@ def test_standalone_search_run_stream_retains_native_metrics(tmp_path, engines, 
 @pytest.mark.asyncio
 async def test_stream_actor_late_binding_reuses_original_row_fact(tmp_path, engines, server):
     from demiflow.collect.operators import SearchWeb
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.row_scope import RowScope, set_row_scope
-    from demiflow.execution.stream_resources import StreamResources
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.worker.row_scope import RowScope, set_row_scope
+    from demiflow.execution.worker.stream_resources import StreamResources
 
     session = _session(tmp_path, engines)
     actor = SearchWeb('queries', 'found', session, None, 5, 2)

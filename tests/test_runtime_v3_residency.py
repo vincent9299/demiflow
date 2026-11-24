@@ -1,9 +1,9 @@
 """Real Dataset finite phases: managed exits, native cuts and exact recovery."""
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 LIMITS = {'memory_bytes': 80 * 1024, 'max_batch_bytes': 16 * 1024,
           'max_row_bytes': 8 * 1024, 'max_state_bytes': 128 * 1024,
@@ -46,8 +46,8 @@ def test_dataset_three_phases_release_only_after_real_exit(tmp_path, monkeypatch
         assert states[-1]['dataflow.sources.v3'] == states[0]['dataflow.sources.v3']
         from copy import deepcopy
         from dataclasses import replace
-        from demiflow.execution.checkpoint.coordinator import _cut_from_json, _contribution_from_json
-        from demiflow.execution.dataflow_residency import validate_recovered_residency
+        from demiflow.execution.contracts.checkpoint import cut_from_json as _cut_from_json, contribution_from_json as _contribution_from_json
+        from demiflow.execution.checkpoint.residency import validate_recovered_residency
         from demiflow.execution.contracts.dataflow_errors import DataflowError
         last = states[-1]
         cut = _cut_from_json(last['cut'])

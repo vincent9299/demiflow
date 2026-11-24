@@ -48,7 +48,7 @@ class InProcessOperatorLLMCoordinator:
         self._execution_binding = None
 
     def bind_execution(self, context, node_id):
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         binding = (context, 'requests-' + identity(node_id))
         if self._execution_binding is not None and self._execution_binding != binding:
             raise RuntimeError('A request coordinator cannot be shared across execution nodes')
@@ -277,7 +277,6 @@ class OperatorLLMRuntime:
         raise RuntimeError("unreachable Operator LLM schema retry state")
 
 
-
 def validate_prompt_binding(operation, config):
     prompt = resolve_prompt(config, operation.prompt_name)
     required_inputs = set(prompt.arguments)
@@ -376,9 +375,9 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
                     # Take the recovery journal first and pass it to the factory
                     # so the constructor's http_error_retry guard sees a verified
                     # writable journal; bind_client then installs the scopes.
-                    from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+                    from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
                     journal = getattr(recovery, 'journal', None)
-                    if isinstance(journal, RemotePromptJournal):
+                    if inherits_bound_port(journal, PromptJournalPort):
                         native_journal = journal
                 # Standalone transports retain their original factory call
                 # shape; only an actual native journal requires this binding.
@@ -502,30 +501,6 @@ class AsyncOperatorLLMRuntime(OperatorLLMRuntime):
 class PromptActor(BoundOperatorLLMMap):
     """Native map_async actor; uses exactly the map_prompt row contract."""
 
-    def native_stream_recovery(self, action, node_id):
-        options = self._runtime.options or {}
-        if self.environment is not None or any(k in options for k in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
-            return None
-        from .stream_recovery import NativePromptRecovery
-        self._runtime.native_recovery = NativePromptRecovery(self, action, node_id)
-        return self._runtime.native_recovery
-
-    def bind_execution(self, context, node_id):
-        self._runtime.coordinator.bind_execution(context, node_id)
-        if self._prompt.response_format=='image':
-            from ..execution.run_context import current_action
-            from .media import media_limits
-            action=current_action()
-            stores=getattr(action,'object_sinks',{}) if action is not None else {}
-            store=stores.get(self._runtime.options['object_store'])
-            if store is None:
-                raise ValueError('Image output has no native artifact participant')
-            from ..execution.object_sink import check_image_replay,image_request_budget
-            check_image_replay(action)
-            self._runtime.coordinator._artifact_request_budget=image_request_budget(action)
-            store.reserve_capacity(self._operation.max_requests,
-                media_limits(self._runtime.options)['max_image_bytes'],node_id)
-            self._runtime.artifact_store=store
 
     def snapshot_state(self):
         return {}  # clients/leases/metrics are resources, not semantic row state
@@ -557,7 +532,7 @@ class PromptActor(BoundOperatorLLMMap):
         self._call_validations = {}
         self.environment = None
         self.label = operation.prompt_name
-        from demiflow.execution.stream_resources import CallMetrics
+        from demiflow.execution.journal.run_telemetry import CallMetrics
         self.call_metrics = CallMetrics()
 
     async def __call__(self, row):
@@ -587,7 +562,7 @@ class PromptActor(BoundOperatorLLMMap):
         except Exception as exc:
             self._observe_call(getattr(exc,'call',{}), error=True)
             from ..services import ModelServiceError
-            from demiflow.execution.request_limits import ServiceStopped
+            from demiflow.services.request_limits import ServiceStopped
             import sqlite3
             from ..data.runtime_contract import RuntimeContractError
             if isinstance(exc, RuntimeContractError) or isinstance(exc, (ModelServiceError, ServiceStopped, OSError, sqlite3.Error)) and not isinstance(exc, TimeoutError):

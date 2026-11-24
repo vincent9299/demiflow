@@ -16,9 +16,9 @@ from types import SimpleNamespace
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.plan_interpreter import EXECUTION_BINDINGS_SCHEMA_V2
-from demiflow.execution.recovery_contract import document, identity
-from demiflow.execution.recovery_identity import describe, source_identity
+from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA_V2
+from demiflow.execution.contracts.recovery_contract import document, identity
+from demiflow.execution.seal.program_identity import describe, source_identity
 from demiflow.planning.dag import (
     _operation_semantics, channel_id_for, compile_logical_dag,
     compile_physical_execution_plan,

@@ -22,7 +22,7 @@ import pytest
 import demiflow.data as data
 from demiflow.data.plan import LogicalPlan
 from demiflow.execution.seal.business_sources import _DEP_MAX_MODULES, business_dependency_modules
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 @pytest.fixture(autouse=True)

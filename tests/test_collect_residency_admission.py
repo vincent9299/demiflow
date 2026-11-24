@@ -7,7 +7,7 @@ from demiflow import data
 from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import CallableSpec, MapOp
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_native import collect_fixed_residency
+from demiflow.execution.compiler_support.dataflow_native import collect_fixed_residency
 from demiflow.planning.dataflow_budget import codec_window, default_profile
 from demiflow.planning.dataflow_compile import compile_kernel_spec
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -43,7 +43,7 @@ def test_actual_concurrency_counts_fixed_workspace_once(declared, actual):
 
 
 def test_concurrent_images_cannot_fit_by_shrinking_payload_defaults():
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError, match='Stream fixed residency exceeds'):
         default_profile(image_operation(2), bounds=bounds(512*MIB))
 

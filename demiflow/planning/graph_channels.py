@@ -14,7 +14,7 @@ counters, so a replayed record routes identically. Business target classes are
 declared, never guessed; the platform only picks among same-class replicas.
 """
 from ..execution.contracts.errors import ProtocolError
-from ..execution.recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from .dag import validate_channel_plan
 
 _MODES = frozenset({"memory_incremental", "durable_incremental", "finite_sealed"})

@@ -7,8 +7,8 @@ import sys
 import lance
 import pytest
 from demiflow import data
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
 from test_forge_native_values import catalog, fixture
 
@@ -49,7 +49,7 @@ def test_ordering_invalid_declarations_stay_rejected(tmp_path,catalog,expression
 
 
 def test_checked_registry_accepts_mixed_finite_and_stream_without_second_engine():
-    from demiflow.execution.capabilities import check_composition
+    from demiflow.planning.traits import check_composition
     assert check_composition([{'kind':'async_map','driver':'stream'},
         {'kind':'sort','driver':'pull'},{'kind':'limit','driver':'pull'}])['supported']
     assert not check_composition([{'kind':'invented','driver':'pull'}])['supported']
@@ -89,7 +89,7 @@ def test_async_join_sort_is_one_checked_pipeline(tmp_path,catalog,monkeypatch):
 
 
 def test_ordering_fact_registration_does_not_rewrite_historical_identity():
-    from demiflow.execution.recovery_identity import describe, operation_identity
+    from demiflow.execution.seal.program_identity import describe, operation_identity
     from demiflow.planning.dataflow_compile import _operation_semantic_facts
     for expression,_ in OPERATIONS:
         # Invoke the public builders only: their normalized plan is the same

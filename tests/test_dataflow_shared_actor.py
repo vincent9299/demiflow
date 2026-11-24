@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 class Counter:
@@ -44,8 +44,9 @@ async def identity(row):
 
 def capture_images(monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts.state_codec import PACK_MEDIA
+    from demiflow.execution.storage.streams import iter_kernel_images
+    from demiflow.execution.contracts import state_codec
     original = DataflowCheckpointCoordinator.commit
     traces = []
     def commit(coordinator, *args, **kwargs):
@@ -328,7 +329,7 @@ def test_mandatory_shared_placement_is_acyclic_and_preserves_requests(shape):
 @pytest.mark.parametrize('state', [None, {'mode': 'hooks', 'value': {}},
     {'mode': 'shared_owner', 'owner': 'wrong'}])
 def test_shared_restore_rejects_missing_or_wrong_alias(state):
-    from demiflow.execution.dataflow_shared import SharedActor
+    from demiflow.execution.kernels.shared import SharedActor
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     actor = SharedActor({'owner': 'a', 'members': ['a', 'b'], 'state_owner': 'b'}, object())
     with pytest.raises(DataflowError, match='Shared actor'):
@@ -349,7 +350,7 @@ def test_repeated_class_factory_is_not_a_shared_instance(tmp_path, monkeypatch):
 
 
 def test_same_function_remains_two_real_invocations(tmp_path):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     def increment(row):
         return {'id': row['id'] + 1}
     with RunContext.start(tmp_path/'run') as run:
@@ -365,9 +366,9 @@ def test_same_function_remains_two_real_invocations(tmp_path):
 def test_recipe_alias_validation_checks_both_directions(tmp_path, original_shared, current_shared, allowed):
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.executors.dataflow_api import _CompileContext
+    from demiflow.execution.pipeline.run_context import RunAction
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     action = RunAction(_CompileContext(), 'alias-history', {})
@@ -392,7 +393,7 @@ def test_recipe_alias_validation_checks_both_directions(tmp_path, original_share
 
 def test_unversioned_history_is_not_reinterpreted():
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     # No new marker => no capture or interpretation of a new recipe at all.
     class Refuse:
         def __getattribute__(self, name):
@@ -410,9 +411,9 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
     from demiflow.data.sources import ItemsSource, IterableSource, SqlSource
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.executors.dataflow_api import _CompileContext
+    from demiflow.execution.pipeline.run_context import RunAction
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     calls = []
@@ -443,7 +444,7 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
     graph = lower_action(request(True), bounds=bounds).graph
     # Guard every full-capture/row-schema path after the original plan exists.
     import demiflow.planning.dataflow_compile as compiler
-    import demiflow.execution.dataflow_schema as schema
+    import demiflow.execution.sources.materialized_input as schema
     monkeypatch.setattr(compiler, 'lower_action', refuse)
     monkeypatch.setattr(compiler, '_source_semantic_facts', refuse)
     monkeypatch.setattr(schema, 'literal_schema', refuse)
@@ -461,9 +462,9 @@ def test_alias_admission_never_reads_source_or_constructs_factory(tmp_path, monk
 def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkeypatch, shape, changed):
     from demiflow.execution.contracts.dataflow import ActionRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_shared import validate_shared_actor_binding
+    from demiflow.execution.executors.dataflow_api import _CompileContext
+    from demiflow.execution.pipeline.run_context import RunAction
+    from demiflow.execution.seal.program_identity import validate_shared_actor_binding
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     action = RunAction(_CompileContext(), 'alias-multi-input', {})
@@ -479,7 +480,7 @@ def test_passive_actor_relation_matches_multi_input_occurrences(tmp_path, monkey
             arguments={}, sink=None, programs=(), provider='local', action=action)
     _, bounds = resolve_runtime_policy({}, {}, provider='local')
     graph = lower_action(request(True), bounds=bounds).graph
-    import demiflow.execution.dataflow_schema as schema
+    import demiflow.execution.sources.materialized_input as schema
     def refuse(*args, **kwargs):
         raise AssertionError('alias validation read business rows')
     monkeypatch.setattr(schema, 'literal_schema', refuse)

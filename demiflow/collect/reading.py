@@ -252,7 +252,7 @@ class ReadDocuments:
     def recovery_identity(self):
         if self.pool is not None:
             raise ValueError('Document reading requires an unstarted actor declaration')
-        from ..execution.recovery_identity import describe
+        from demiflow.execution.seal.program_identity import describe
         return {key: describe(getattr(self, key)) for key in (
             'request', 'output', 'context', 'when', 'document_concurrency',
             'timeout_s', 'max_bytes', 'reuse_workers', 'reuse_worker_max_tasks')}
@@ -267,7 +267,7 @@ class ReadDocuments:
     async def astart(self):
         if self.reuse_workers:
             from functools import partial
-            from ..execution.isolated_pool import IsolatedWorkerPool
+            from demiflow.execution.hosts.isolated_pool import IsolatedWorkerPool
             self.pool = IsolatedWorkerPool({
                 'read': partial(read_document, max_bytes=self.max_bytes),
                 'select': partial(select_context, context=self.context),

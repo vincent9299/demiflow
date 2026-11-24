@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow.data.aggregate import Count, Sum
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_chain_compatibility import _entry
 
 

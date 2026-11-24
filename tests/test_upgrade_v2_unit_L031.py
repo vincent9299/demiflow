@@ -3,8 +3,9 @@ import copy
 
 import pytest
 
-from demiflow.execution.plan_interpreter import PlanContractError, interpret_physical_plan
-from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
+from demiflow.execution.contracts.errors import PlanContractError
+from demiflow.execution.seal.plan_interpreter import interpret_physical_plan
+from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from test_runtime_v3_sealed_version_selection import write_published_native_seal
 
 

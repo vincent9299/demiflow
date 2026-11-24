@@ -7,7 +7,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_fusion import fuse_single_worker_pipeline
 from demiflow.resources.contracts import ResourceProfile
 from test_runtime_v3_default_suffix_fusion import compiled, HOSTS

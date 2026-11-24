@@ -3,7 +3,7 @@ from pathlib import Path
 import shutil
 
 import pytest
-from demiflow.execution import datafusion as engine
+from demiflow.execution.hosts import datafusion as engine
 
 
 def test_retired_spill_directory_does_not_hide_surviving_files(tmp_path,monkeypatch):

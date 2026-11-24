@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from demiflow import data
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def _lines(path):
@@ -135,7 +135,7 @@ def test_cancel_during_native_publication_drains_without_aborting_acked_cut(tmp_
 def test_publication_obeys_encoded_byte_window_before_next_read(tmp_path, monkeypatch):
     observed = tmp_path/'byte-rows'
     rows = [{'id': i, 'value': 'x'*900} for i in range(30)]
-    from demiflow.execution.kernels.dataflow import _row_bytes
+    from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
     sizes = [_row_bytes(row, max_bytes=4096) for row in rows]
     window = sum(sizes[:12])
     def record(row):
@@ -181,14 +181,14 @@ def test_each_logical_edge_advances_checkpoint_trigger_without_depth_multiplicat
 
 def test_native_lance_row_trigger_counts_business_frontier_once(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     observed = tmp_path/'lance-input'
     async def record(row):
         with observed.open('a') as out:
             out.write(str(row['id'])+'\n')
         return row
-    from demiflow.execution.dataflow_sinks import NativeTerminalSink
+    from demiflow.execution.outputs.sinks import NativeTerminalSink
     original = NativeTerminalSink.prepare
     native = LanceSink.prepare
     preparation, native_preparation = [], []
@@ -216,7 +216,7 @@ def test_native_lance_row_trigger_counts_business_frontier_once(tmp_path, monkey
 
 
 def test_failed_original_prepare_cleans_workers_without_false_receipt(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+    from demiflow.execution.outputs.sinks import _DataflowArtifactSink
     def fail(sink, *args, **kwargs):
         raise OSError('original sink preparation failed')
     monkeypatch.setattr(_DataflowArtifactSink, 'prepare', fail)

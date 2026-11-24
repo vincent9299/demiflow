@@ -27,10 +27,10 @@ class CodexExecPromptClient:
         if set(options) - {'codex_exec', 'sqlite_journal', 'timeout_s'}:
             raise ValueError('Unknown Codex execution options')
         if native_journal is not None:
-            from ..execution.dataflow_model_journal import RemotePromptJournal
-            from ..execution.dataflow_prompt_journal import RemotePrivatePromptJournal
-            if (not isinstance(native_journal, RemotePromptJournal)
-                    or isinstance(native_journal, RemotePrivatePromptJournal)
+            from demiflow.execution.contracts.dataflow import (
+                PromptJournalPort, PrivatePromptJournalPort, inherits_bound_port)
+            if (not inherits_bound_port(native_journal, PromptJournalPort)
+                    or inherits_bound_port(native_journal, PrivatePromptJournalPort)
                     or native_journal.read_only or type(native_journal.limit) is not int
                     or native_journal.limit < 0):
                 raise ValueError('Codex native journal requires a writable bounded RemotePromptJournal')

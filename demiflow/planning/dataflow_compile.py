@@ -47,8 +47,8 @@ from ..execution.contracts.dataflow import (
 from ..execution.contracts.dataflow_codec import compute_graph_digest
 from ..execution.contracts.dataflow_errors import DataflowError
 from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, traits_of
-from ..execution.recovery_contract import identity
-from ..execution.recovery_identity import describe
+from demiflow.execution.contracts.recovery_contract import identity
+from demiflow.execution.seal.program_identity import describe
 from .dataflow_budget import (
     codec_window, default_profile, declare_codec_windows, relational_profile, terminal_budget,
 )
@@ -128,8 +128,8 @@ def _operation_semantic_facts(operation: LogicalOp) -> Mapping[str, Any]:
             "factory": _callable_code_identity(operation.factory),
         }
     if is_dataclass(operation):
-        from ..execution.plan_facts import operation_facts
-        from ..execution.recovery_identity import operation_identity
+        from demiflow.execution.seal.plan_facts import operation_facts
+        from demiflow.execution.seal.program_identity import operation_identity
         try:
             fact = operation_facts(operation)
         except (RuntimeError, ValueError, TypeError):
@@ -166,7 +166,7 @@ def _source_semantic_facts(source: SourcePlan) -> Mapping[str, Any]:
                 "options": dict(source.options),
                 "connection_factory": describe(source.connection_factory)}
     if isinstance(source, LanceSource):
-        from ..execution.dataflow_native import is_key_only
+        from demiflow.execution.compiler_support.dataflow_native import is_key_only
         key_only = is_key_only(source)
         return {"kind": "lance", "query": describe(source.query),
                 **({"key_only": True} if key_only else {})}
@@ -212,7 +212,7 @@ def _source_kind(source: SourcePlan) -> str:
     if isinstance(source, IterableSource):
         return "iterable"
     if isinstance(source, DatasourceSource):
-        from ..execution.dataflow_native import datasource_kind
+        from demiflow.execution.compiler_support.dataflow_native import datasource_kind
         return datasource_kind(source.datasource)
     if type(source) is _LiteralEmptySource:
         return "literal_empty"
@@ -268,8 +268,8 @@ def compile_kernel_spec(
     # Ray Data pool controls must not be silently discarded by this compiler.
     from ..data.native_options import validate_stream_native_options
     validate_stream_native_options(getattr(operation, 'native_options', None))
-    from ..execution.dataflow_model_factory import native_model_declaration
-    from ..execution.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.compiler_support.dataflow_native import cache_runtime_state, declaration_lowering, model_variant, native_variant
     native_declaration = native_model_declaration(operation)
     # The compiler asks which declaration this is; the classes stay on the execution side.
     model_kind = model_variant(native_declaration)
@@ -289,7 +289,7 @@ def compile_kernel_spec(
     if isinstance(declaration, CallableSpec):
         import functools
         import types
-        from ..execution.operator_policy import classify_operator_state
+        from demiflow.execution.compiler_support.operator_policy import classify_operator_state
         target = declaration.target
         if (type(target) is types.MethodWrapperType and target.__name__ == '__call__'
                 and type(target.__self__) is functools.partial):
@@ -300,7 +300,7 @@ def compile_kernel_spec(
         state = {"function": "none", "factory": "auto_json", "auto_json": "auto_json",
                  "hooks": "adapter", "unsupported": "nonrecoverable"}[policy.mode]
         if policy.mode == 'function':
-            from ..execution.kernels.task_scope import function_residency_kind
+            from demiflow.execution.compiler_support.operator_policy import function_residency_kind
             state = function_residency_kind(declaration.target, call_args=declaration.call_args,
                                             call_kwargs=declaration.call_kwargs)
         elif model_kind == 'cache':
@@ -323,8 +323,8 @@ def compile_kernel_spec(
     if kind == 'RandomShuffleOp':
         # New plans opt in. A sealed graph without this field keeps the exact
         # original occurrence/record-id shuffle formula when loaded or resumed.
-        from ..execution.kernels.shuffle_order import FIELD, VERSION
-        configuration[FIELD] = VERSION
+        from ..execution.contracts.dataflow_kinds import SHUFFLE_ORDER_FIELD, SHUFFLE_ORDER_VERSION
+        configuration[SHUFFLE_ORDER_FIELD] = SHUFFLE_ORDER_VERSION
     # Ordinary CPU kernels do not use native services. Importing every native
     # adapter here initializes Lance/Arrow and model modules even for a map.
     variant = native_variant(operation, native_declaration)
@@ -552,6 +552,7 @@ class _Capture:
         # executor defaults and the report bindings (execution.dataflow_compile_inputs).
         self.defaults = inputs.defaults
         self.report = inputs.report
+        self.source_schema = inputs.source_schema
         self.jobs = []
         self.value_edges = []
         self.fit_ids = {}
@@ -657,8 +658,8 @@ class _Capture:
         if source_registry().get(kind) is None and kind != "literal_empty":
             raise _error("UNSUPPORTED_CAPABILITY", "source kind is not registered: " + kind)
         semantic = _source_semantic_facts(source)
-        from ..execution.dataflow_schema import literal_schema, encode, KEY
-        schema = literal_schema(source, bounds=self.bounds)
+        from demiflow.execution.contracts.record_schema import encode, KEY
+        schema = self.source_schema(source, bounds=self.bounds)
         if schema is not None:
             semantic = {**semantic, KEY: encode(schema, bounds=self.bounds)}
         kernel = KernelSpec(
@@ -681,7 +682,7 @@ class _Capture:
         child_indices = []
         for binding in bindings:
             if isinstance(source, KeyedSource) and source.kind == "exclude_keys" and binding.port == "left":
-                from ..execution.dataflow_native import narrow_to_keys
+                from demiflow.execution.compiler_support.dataflow_native import narrow_to_keys
                 narrowed = narrow_to_keys(binding.source, source.on)
                 # Reading only the keys is still reading the declared source: the node keeps
                 # that source's report binding, so the report covers every node of the plan.
@@ -772,14 +773,14 @@ class _Capture:
                 if count is not None and count > self.bounds.max_partitions:
                     raise _error('BUDGET_EXCEEDED', 'logical block count exceeds max_partitions')
             callable_spec = getattr(operation, "callable", None)
-            from ..execution.dataflow_model_factory import native_model_declaration
+            from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
             native_declaration = native_model_declaration(operation)
             if native_declaration is not None:
                 callable_spec = replace(native_declaration,
                     runtime_contract=getattr(callable_spec, 'runtime_contract', None))
             if isinstance(operation, NativeOperation):
                 callable_spec = operation.factory
-            from ..execution.kernels.task_scope import TASK_KINDS
+            from demiflow.execution.contracts.dataflow_kinds import TASK_KINDS
             if kernel.kind in TASK_KINDS and not kernel.configuration.get('streaming_map'):
                 task_rows = self.defaults.task_batch_rows
                 state = kernel.state
@@ -899,7 +900,7 @@ def capture_graph(request: ActionRequest, *, bounds: Bounds, inputs=None, on_com
         raise _error("UNSUPPORTED_CAPABILITY", "terminal kind is not registered: " + request.kind)
     request = _lower_request(request)
     if inputs is None:
-        from ..execution.dataflow_compile_inputs import compile_inputs
+        from demiflow.execution.compiler_support.dataflow_compile_inputs import compile_inputs
         inputs = compile_inputs(request)
     capture = _Capture(request, bounds, inputs)
     producer = capture.capture_chain(request.source, request.plan, ())
@@ -1001,3 +1002,75 @@ def revalidate_action(request: ActionRequest, *, bounds: Bounds) -> CompiledData
     """
     from .dataflow_configuration import _HISTORY_REVALIDATION
     return lower_action(request, bounds=bounds, _configuration_purpose=_HISTORY_REVALIDATION)
+
+
+def explain_action(request, *, inputs, bounds, policy):
+    """Compile the supplied declaration and report unresolved recovery domains."""
+    from demiflow.planning.dataflow_place import infer_recovery
+    compiled = lower_action(request, bounds=bounds, inputs=inputs)
+    return infer_recovery(compiled.graph, (), policy=policy)
+
+
+def validate_stream_plan(plan, *, source=None):
+    """Validate all declared inputs through the same v3 compiler, without I/O.
+
+    A relational Dataset may have no top-level operations while its PlanInputs
+    contain the stream declaration. Traverse the compiler's actual input ports;
+    neither a second capability table nor an obsolete pull/stream split decides
+    which registered kernels can be composed.
+    """
+    from demiflow.data import plan as ops
+    from demiflow.planning.dataflow_compile import compile_kernel_spec, expand_relational_inputs, expand_operation_inputs
+    from demiflow.planning.dataflow_policy import resolve_runtime_policy
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.data.native_options import validate_stream_native_options
+
+    _, bounds = resolve_runtime_policy({}, {}, provider='local')
+    pending, seen = [(source, plan, ())], set()
+    count, edges, streaming = 0, 0, False
+    while pending:
+        current_source, current_plan, path = pending.pop()
+        key = (id(current_source), id(current_plan))
+        if key in seen:
+            continue
+        seen.add(key)
+        if not isinstance(current_plan, ops.LogicalPlan):
+            raise TypeError('stream input requires a LogicalPlan')
+        count += 1 + len(current_plan.operations)
+        if count > bounds.max_nodes:
+            raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds node budget')
+        children = list(expand_relational_inputs(current_source, path=path, bounds=bounds))
+        for operation in current_plan.operations:
+            streaming |= ops.is_stream_operation(operation)
+            validate_stream_native_options(getattr(operation, 'native_options', None))
+            if isinstance(operation, (ops.MapOp, ops.BoundMapOp)) and operation.stream_options is not None:
+                operation.stream_options.validate_callable(operation.callable)
+            compile_kernel_spec(operation, program_ref=None, bounds=bounds)
+            children.extend(expand_operation_inputs(operation, path=path, bounds=bounds))
+            if edges + len(children) > bounds.max_edges:
+                raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds edge budget')
+        edges += len(children)
+        if edges > bounds.max_edges:
+            raise DataflowError('BUDGET_EXCEEDED', 'stream preflight exceeds edge budget')
+        pending.extend((item.source, item.plan, item.path) for item in children)
+    if not streaming:
+        raise ValueError('run_stream requires map_async/batch_map or explicit map streaming options')
+
+
+def iter_declared_operations(source, plan, *, bounds):
+    """Walk structural input declarations without constructing native actors."""
+    pending, seen = [(source, plan)], set()
+    while pending:
+        source, plan = pending.pop()
+        key = (id(source), id(plan))
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(seen) > bounds.max_nodes:
+            raise DataflowError('BUDGET_EXCEEDED', 'Native declaration traversal exceeds graph bound')
+        for operation in plan.operations:
+            yield operation
+            pending.extend((binding.source, binding.plan) for binding in
+                expand_operation_inputs(operation, path=(), bounds=bounds))
+        pending.extend((binding.source, binding.plan) for binding in
+            expand_relational_inputs(source, path=(), bounds=bounds))

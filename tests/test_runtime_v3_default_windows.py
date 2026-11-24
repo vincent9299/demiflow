@@ -3,9 +3,10 @@ from dataclasses import replace
 import pytest
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.dataflow_api import make_action_request, resolve_action_runtime
+from demiflow.execution.executors.dataflow_api import make_action_request
+from demiflow.execution.action_driver.services import resolve_action_runtime
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_place import partition_stages
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -58,7 +59,7 @@ def test_finite_inputs_still_fit_the_downstream_streaming_component():
     from demiflow import data
     from test_runtime_v3_codec_profile_groups import request
     from test_runtime_v3_codec_profile_groups import physical
-    from demiflow.execution.dataflow_publication_budget import PublicationReservation
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
 
     def source():
         raise AssertionError('planning accessed the live iterator')

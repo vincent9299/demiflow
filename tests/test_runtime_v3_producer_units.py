@@ -7,8 +7,8 @@ import pytest
 from demiflow.data.api import _use_executor
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec
+from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_queue_business_scenarios import _producer, external_transport
 
 
@@ -24,7 +24,7 @@ def test_native_producer_unit_park_and_resume(tmp_path, monkeypatch, fault):
     executor = LocalDatasetExecutor(workers=4, resource_root=tmp_path)
     injected = []
     cuts = []
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     advance = DataflowExecution._advance_cut
     def observe(execution):
         value = advance(execution)

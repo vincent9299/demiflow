@@ -26,8 +26,8 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
 from demiflow.data.sources import ItemsSource
 from runtime_v3_history_scenarios import write_legacy_seal
-from demiflow.execution.recovery_contract import identity
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import identity
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.planning.dag import (
     compile_logical_dag, compile_physical_execution_plan,
     validate_logical_dag, validate_physical_execution_plan,

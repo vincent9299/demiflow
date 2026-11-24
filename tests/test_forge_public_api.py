@@ -12,7 +12,7 @@ from click.testing import CliRunner
 import pytest
 
 from demiflow.cli import main
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops

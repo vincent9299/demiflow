@@ -64,13 +64,13 @@ def _child(fx, root, *, task, mode, fault=None, extra=None):
 
 
 def _journal(directory):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     return RunJournal(directory)
 
 
 def _scope(directory):
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RunRef
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts.recovery_contract import RunRef
     prior = _journal(directory).recovery_identity() if directory.exists() else None
     if prior:
         return RunContext.resume(RunRef(str(directory), prior['run_id']))
@@ -126,9 +126,9 @@ def _run_child(config):
         return _run_model_child(config)
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), demiflow.__file__
-    from demiflow.execution import commit as protocol
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.checkpoint import commit as protocol
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
@@ -304,8 +304,8 @@ def _probe_worker(row):
     """Actual business worker counterexamples against process-wide guards."""
     import os
     import sqlite3
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     checked = {}
     for name, operation in (
         ('sqlite_forbidden', lambda: sqlite3.connect(os.environ['DF_V3_RECOVERY_DB'])),
@@ -358,7 +358,7 @@ def _native_calls(journal):
 def _run_model_child(config):
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     root, mode, fault = Path(config['root']), config['mode'], config['fault']
     directory = root / 'run'
@@ -470,9 +470,9 @@ if os.environ.get('DEMIFLOW_WORKER_LAUNCH') or 'default_worker.py' in sys.argv[0
             os.close(fd)
     try:
         import sqlite3
-        from demiflow.execution.run_journal import RunJournal
-        from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.dataflow_authority import WorkerJournalClient
+        from demiflow.execution.journal.run_journal import RunJournal
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
+        from demiflow.execution.worker.runtime import WorkerJournalClient
         def reject(kind):
             def denied(*args, **kwargs):
                 record(kind)

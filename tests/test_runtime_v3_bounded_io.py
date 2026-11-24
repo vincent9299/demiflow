@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 
 

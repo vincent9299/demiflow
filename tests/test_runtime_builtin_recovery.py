@@ -14,8 +14,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, RecoveryContractError
-from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RunRef
+from demiflow.execution.journal.run_journal import RunJournal
 from test_collect_flow_contract import document, picture
 
 
@@ -88,7 +88,7 @@ def collect_graph(root, family):
 
 
 def run_collect(root, family, window=None):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
 
     root = Path(root)
     directory = root / "run"
@@ -151,7 +151,7 @@ def child(root, function, *arguments):
 def test_builtin_partial_receipts_restore_without_serializing_resources(
     tmp_path, family
 ):
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
 
     if family == "lookup":
         lance.write_dataset(
@@ -230,7 +230,7 @@ def test_builtin_partial_receipts_restore_without_serializing_resources(
 def test_lookup_rebuilds_pinned_handle_and_discards_cache_on_restore_and_close(
     tmp_path,
 ):
-    from demiflow.execution.stream_lookup import LanceLookup
+    from demiflow.operators.lookup import LanceLookup
 
     lance.write_dataset(pa.table({"id": ["a"], "value": ["old"]}), tmp_path / "table")
     actor = LanceLookup(
@@ -297,7 +297,7 @@ def batch_graph():
 
 
 def run_batch(root, window=None):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
 
     root = Path(root)
     directory = root / "run"

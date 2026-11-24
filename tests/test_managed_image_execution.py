@@ -14,8 +14,8 @@ import lance
 import pytest
 
 from demiflow import data
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules,LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
@@ -26,8 +26,8 @@ from demiflow.operator_llm.parser import parse_prompt_pack
 from PIL import Image
 from dataclasses import asdict
 from demiflow.data.datasink import Datasink,WriteResult
-from demiflow.execution.run_context import current_action
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.pipeline.run_context import current_action
+from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.lance.model import LanceWriteSpec
 
 from image_http_fixture import fixture_http,definition,json_definition
@@ -402,16 +402,18 @@ def test_terminal_batch_byte_budget_checked_before_arrow_allocation(tmp_path,mon
     assert calls==[]
 
 
+from demiflow.execution.operator_bindings.dataflow_model_factory import PromptFactory as OriginalPromptFactory
+
+
 class DelayedNativePromptFactory:
     """A sealed worker fault: delay completion after the real native response."""
     def __new__(cls, operation, settings):
         import asyncio
         import os
         from pathlib import Path
-        from demiflow.execution.dataflow_model_factory import PromptFactory
-        # Workers import the actual platform factory; the driver's compiler
-        # binding below only substitutes this test declaration in the seal.
-        actor = PromptFactory(operation, settings)
+        # Retain the real constructor before replacing the declaration factory.
+        # Thread workers share the same module as the compiler.
+        actor = OriginalPromptFactory(operation, settings)
         original = actor._runtime.call_with_trace
         root = Path(operation.options['object_store'])
         async def delayed(name, values):
@@ -434,13 +436,14 @@ class DelayedNativePromptFactory:
 
 
 def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_path, fixture_http, monkeypatch):
-    import demiflow.execution.commit as protocol
-    import demiflow.execution.dataflow_model_factory as factories
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.state_artifacts import StateArtifacts
-    from demiflow.execution.sealed_plans import _v3_read_store
+    import demiflow.execution.checkpoint.commit as protocol
+    import demiflow.execution.operator_bindings.dataflow_model_factory as factories
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+    from demiflow.execution.seal.sealed_plans import sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
     monkeypatch.setattr(factories, 'PromptFactory', DelayedNativePromptFactory)
     monkeypatch.setenv('DEMIFLOW_TEST_PENDING_NATIVE', '1')
@@ -481,7 +484,8 @@ def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_pat
     carrier = StateArtifacts(run).read(first['prepared']['state']['dataflow-cut-v3'])
     assert not carrier['cut']['final']
     marker = run.journal.source_binding('action-1-dataflow-sealed')
-    store, bounds = _v3_read_store(run.directory, store_id=marker['physical_ref']['store_id'])
+    bounds = sealed_read_bounds()
+    store = readonly_run_store(run.directory, store_id=marker['physical_ref']['store_id'], bounds=bounds)
     pending = []
     for contribution in carrier['contributions']:
         for value in contribution['operator_states'].values():

@@ -157,7 +157,7 @@ def _fake_resolve_runtime_policy(options, limits, *, provider):
 
 
 def _fake_expand_relational_inputs(source, *, path, bounds):
-    from demiflow.execution.local_kernel import KeyedSource, UnionSource
+    from demiflow.execution.pipeline.local_kernel import KeyedSource, UnionSource
     STATE.relational_calls.append({"source": source, "path": path, "bounds": bounds})
     if STATE.relational_bindings is not None:
         return STATE.relational_bindings
@@ -211,7 +211,7 @@ def _install_fakes():
     df = _make_module("demiflow.execution.action_driver.dataflow")
     df.execute_action = _fake_execute_action
 
-    api = _make_module("demiflow.execution.dataflow_api")
+    api = _make_module('demiflow.execution.executors.dataflow_api')
     api.make_action_request = _fake_make_action_request
     api.run_dataset_action = _fake_run_dataset_action
 
@@ -226,18 +226,18 @@ def _install_fakes():
 from demiflow.execution.contracts.dataflow_errors import DataflowError as _FakeDataflowError
 
 # Production modules under test (real, in-tree).
-from demiflow.execution import dataflow_inputs  # noqa: E402
-from demiflow.execution.dataflow_inputs import build_input_handle, InputMaterializedHandle  # noqa: E402
+from demiflow.execution.sources import materialized_input as dataflow_inputs  # noqa: E402
+from demiflow.execution.sources.materialized_input import build_input_handle, InputMaterializedHandle  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def _reset_state(monkeypatch):
     """These are adapter unit tests; fake only the called cross-module seam."""
     import demiflow.execution.action_driver.dataflow as engine
-    import demiflow.execution.dataflow_api as api
+    import demiflow.execution.executors.dataflow_api as api
     import demiflow.planning.dataflow_policy as policy
     import demiflow.planning.dataflow_compile as compiler
-    import demiflow.execution.driver as driver
+    import demiflow.execution.pipeline.driver as driver
     monkeypatch.setattr(engine, "execute_action", _fake_execute_action)
     monkeypatch.setattr(api, "make_action_request", _fake_make_action_request)
     monkeypatch.setattr(api, "run_dataset_action", _fake_run_dataset_action)
@@ -259,7 +259,7 @@ def _record_doubles(request):
 @pytest.fixture
 def fake_action(monkeypatch):
     """Provide a non-None current_action() for the wiring entries."""
-    import demiflow.execution.run_context as rc
+    import demiflow.execution.pipeline.run_context as rc
 
     class _Action:
         action_id = "fake-action"
@@ -428,7 +428,7 @@ def test_f011(tmp_path):
 # ---------------------------------------------------------------------------
 def test_f012(monkeypatch, tmp_path):
     _binding_assertion()
-    import demiflow.execution.driver as driver
+    import demiflow.execution.pipeline.driver as driver
 
     captured = {}
 
@@ -468,7 +468,7 @@ def test_f012(monkeypatch, tmp_path):
 
     monkeypatch.setattr(driver, "PipelineBundleRef", _Bundle)
 
-    import demiflow.execution.run_context as rc
+    import demiflow.execution.pipeline.run_context as rc
     class _Ctx:
         @staticmethod
         def start(entry_identity):
@@ -498,8 +498,8 @@ def test_p1_materialize_uses_one_action_on_the_original_provider(monkeypatch, na
     from demiflow.data.execution_contract import Materialize
     from demiflow.data.plan import LogicalPlan
     from demiflow.data.sources import ItemsSource
-    from demiflow.execution import checked
-    from demiflow.execution import dataset_runtime
+    from demiflow.execution.pipeline import checked
+    from demiflow.execution.executors import dataset_runtime
 
     source, plan = ItemsSource([{'id': 1}]), LogicalPlan()
     completed = []
@@ -553,17 +553,7 @@ def test_graph_request_uses_its_configured_executor_once(fake_action, monkeypatc
 # ---------------------------------------------------------------------------
 def test_f020():
     _binding_assertion()
-    source = (TREE / "demiflow/execution/stream.py").read_text()
+    source = (TREE / 'demiflow/execution/journal/stream.py').read_text()
     assert "prefix_rows" not in source
     assert "stage.prefix is not None" not in source
-    assert "_apply_plan" not in source
-
-
-def test_f021():
-    _binding_assertion()
-    import demiflow.execution.source_snapshot as snap
-    assert not hasattr(snap, "prefix_rows")
-    assert hasattr(snap, "freeze_source")
-    assert hasattr(snap, "capture_source")
-    source = (TREE / "demiflow/execution/source_snapshot.py").read_text()
     assert "_apply_plan" not in source

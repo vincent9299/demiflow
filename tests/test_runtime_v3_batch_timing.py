@@ -9,7 +9,7 @@ import sys
 import pytest
 import pyarrow as pa
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_recovery_scenarios import _http_fixture, _provider
 
 
@@ -57,9 +57,9 @@ import json,os,sys,time
 from pathlib import Path
 import pyarrow as pa
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RunRef
 from runtime_v3_recovery_scenarios import _native_calls
 root=Path(sys.argv[1]);mode=sys.argv[2];kind=sys.argv[3]
 os.environ['DF_BATCH_TIMING_MODE']=mode
@@ -85,7 +85,7 @@ class Observe:
 run_holder=[]
 if mode=='crash':
     if kind in {'save','timer'}:
-        from demiflow.execution import commit
+        from demiflow.execution.checkpoint import commit
         def fault(name,cid):
             if name!=('after_checkpoint_committed' if kind=='timer' else 'after_acked'):return
             run=run_holder[0];fact=run.journal.execution_commit(cid)
@@ -112,7 +112,7 @@ if mode=='crash':
             os._exit(77)
         commit.fault_point=fault
     else:
-        from demiflow.operator_llm.stream_recovery import RunPromptJournal
+        from demiflow.execution.journal.prompt import RunPromptJournal
         original=RunPromptJournal.response
         def response(journal,*args,**kwargs):
             result=original(journal,*args,**kwargs)

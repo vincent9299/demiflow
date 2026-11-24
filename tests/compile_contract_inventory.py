@@ -24,25 +24,23 @@ COMPILER = 'planning/dataflow_compile.py'
 REGISTRY = 'planning/dataflow_registry.py'
 KERNELS = 'execution/kernels/dataflow.py'
 OPERATOR = 'execution/kernels/operator.py'
-TASK_SCOPE = 'execution/kernels/task_scope.py'
-BATCH_MEMBERSHIP = 'execution/dataflow_batch_membership.py'
-TERMINAL_BLOCKS = 'execution/worker/terminal_blocks.py'
+TERMINAL_BLOCKS = 'execution/outputs/terminal_blocks.py'
 SEAL = 'execution/seal/plan.py'
 KINDS = 'execution/contracts/dataflow_kinds.py'
-API = 'execution/dataflow_api.py'
+API = 'execution/executors/dataflow_api.py'
 SDK = 'data/dataset.py'
 DECLARATION = 'planning/dataflow_declaration.py'
 # An SDK entry preflights through the pure validator, which returns nothing. The node
 # constructor is recognised too: an entry that called it and kept the result would be listed as used.
 PREFLIGHT = ('validate_native_operation', 'make_native_operation')
-NATIVE_DECLARATION = 'execution/dataflow_model_factory.py'
-PLAN_FACTS = 'execution/plan_facts.py'
+NATIVE_DECLARATION = 'execution/operator_bindings/dataflow_model_factory.py'
+PLAN_FACTS = 'execution/seal/plan_facts.py'
 LEGACY_TRAITS = 'planning/traits.py'
 # Files on the call chain of capture_graph(): the compile stage proper.
 COMPILE_STAGE = (COMPILER, 'planning/dataflow_shared.py', 'planning/dataflow_graph_adapter.py',
                  REGISTRY, 'planning/dataflow_relational_regions.py')
 # The one module that reads the compiler's inputs from its surroundings and hands them over explicitly.
-INPUT_RESOLVER = 'execution/dataflow_compile_inputs.py'
+INPUT_RESOLVER = 'execution/compiler_support/dataflow_compile_inputs.py'
 
 
 def source(relative):
@@ -158,8 +156,8 @@ def tables():
         'compiler.native_traits': compiler.value('_NATIVE_TRAITS'),
         'compiler.finite_complete_kinds': compiler.value('_FINITE_COMPLETE_KINDS'),
         'compiler.ordering_kinds': compiler.value('_ORDERING_KINDS'),
-        'runtime.task_kinds': Constants(TASK_SCOPE).value('TASK_KINDS'),
-        'runtime.batch_membership_kinds': Constants(BATCH_MEMBERSHIP).value('KINDS'),
+        'runtime.task_kinds': kind_table().value('TASK_KINDS'),
+        'runtime.batch_membership_kinds': kind_table().value('NATIVE_BATCH_KINDS'),
         'runtime.instance_kinds': operator.value('_INSTANCE_KINDS'),
         'runtime.batch_instance_kinds': operator.value('_BATCH_INSTANCE_KINDS'),
     }
@@ -280,9 +278,14 @@ def _imported_type_predicates(function, relative):
     nodes = list(ast.walk(function))
     calls = {n.func.id for n in nodes if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
     for node in nodes:
-        if not isinstance(node, ast.ImportFrom) or not node.level or not node.module:
+        if not isinstance(node, ast.ImportFrom) or not node.module:
             continue
-        target = Path(relative).parents[node.level - 1] / (node.module.replace('.', '/') + '.py')
+        if node.level:
+            target = Path(relative).parents[node.level - 1] / (node.module.replace('.', '/') + '.py')
+        elif node.module.startswith('demiflow.'):
+            target = Path(node.module.removeprefix('demiflow.').replace('.', '/') + '.py')
+        else:
+            continue
         for alias in node.names:
             if alias.name.startswith('is_') and (alias.asname or alias.name) in calls:
                 yield target, alias.name
@@ -363,7 +366,7 @@ def configuration_access():
     written: subscript stores, ``configuration.update(k=...)`` and ``configuration={...}`` literals
     """
     literal, accessor, constant, written = (defaultdict(set) for _ in range(4))
-    for package in ('planning', 'execution'):
+    for package in ('planning', 'execution', 'operators'):
         for path in sorted((PACKAGE / package).rglob('*.py')):
             relative = path.relative_to(PACKAGE).as_posix()
             for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):

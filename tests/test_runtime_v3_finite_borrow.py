@@ -15,15 +15,15 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import Record, ProducerCompletion
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_finite_input import validate_finite_members, borrowed_records
-from demiflow.execution.dataflow_segments import FINITE_RECORDS_MEDIA
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
+from demiflow.execution.worker.finite_input import validate_finite_members, borrowed_records
+from demiflow.execution.storage.segments import FINITE_RECORDS_MEDIA
+from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
 from demiflow.execution.exchange.dataflow_channels import route_record, seal_scope
 from demiflow.execution.exchange.dataflow_state import RoutingCounters
 from demiflow.execution.kernels.operator import _SpoolPort
-from demiflow.execution.kernels import state_codec
-from demiflow.execution.recovery_contract import document, identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts import state_codec
+from demiflow.execution.contracts.recovery_contract import document, identity
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_c import make, bounds
 
@@ -122,7 +122,7 @@ def test_old_owned_prefix_and_pending_snapshot_remain_readable_in_order(tmp_path
 
 @pytest.mark.parametrize('routing', ['forward', 'rebalance', 'broadcast', 'hash', 'target'])
 def test_canonical_finite_payload_cannot_bypass_provenance_validation(tmp_path, routing):
-    from demiflow.execution.exchange.dataflow_bridge import _codec_dumps
+    from demiflow.execution.contracts.record_codec import _codec_dumps
     with store_fixture(tmp_path) as (_, store, _):
         svc, spec = fixture(store, routing=routing)
         def edit(part, items):
@@ -206,7 +206,7 @@ def test_public_typed_sort_borrows_without_second_payload_copy(tmp_path):
 
 
 def test_external_row_and_empty_member_keep_original_payload_and_bounds(tmp_path):
-    from demiflow.execution.kernels.dataflow import _materialize_row
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     with store_fixture(tmp_path) as (_,store,_):
         svc,spec=fixture(store)
         row={'value':'x'*4096}
@@ -224,7 +224,7 @@ def test_external_row_and_empty_member_keep_original_payload_and_bounds(tmp_path
         port=_SpoolPort('input',svc,4)
         for entry in entries:port.adopt(entry)
         port.finish()
-        assert [_materialize_row(r,svc) for r in port.records()]==[row]
+        assert [_materialize_row(r, store=svc.store, bounds=svc.bounds, assignment=getattr(svc, 'assignment', None)) for r in port.records()]==[row]
         assert [x['rows'] for x in entries]==[1,0]
         # The compact reference frame does not exempt a large external row.
         limited=SimpleNamespace(**{**vars(svc),'bounds':replace(svc.bounds,max_row_bytes=2048)})

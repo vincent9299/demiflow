@@ -5,8 +5,8 @@ import pyarrow.csv as pacsv
 
 from demiflow import data
 from demiflow.execution import RunContext
-from demiflow.execution import datafusion as host
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.hosts import datafusion as host
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 def csv_table(path, columns, rows):
@@ -33,7 +33,7 @@ def test_original_string_join_uses_raw_columns_after_structural_chain(tmp_path, 
         else:
             right = csv_table(tmp_path/'right.csv', ['j','r'], [('x','a'), ('x','b'), ('','blank')])
         return left.join(right, on="key", right_on="j", how=how)
-    from demiflow.execution import arrow_payload
+    from demiflow.execution.sources import arrow_payload
     monkeypatch.setattr(arrow_payload, 'fallback_row', lambda *a, **k: pytest.fail('qualified typed source lost original batch'))
     queries = []
     original = host.query_region_offsets
@@ -73,7 +73,7 @@ def test_fixed_typed_lance_join_keeps_original_sql_when_right_payload_exceeds_in
         if name == 'right':
             columns['body'] = ['r' * 2048] * len(keys)
         lance.write_dataset(pa.table(columns), str(tmp_path/name))
-    from demiflow.execution import arrow_payload
+    from demiflow.execution.sources import arrow_payload
     monkeypatch.setattr(arrow_payload, 'fallback_row', lambda *a, **k: pytest.fail('qualified typed source lost original batch'))
     queries = []
     original = host.query_region_offsets
@@ -157,7 +157,7 @@ def test_typed_join_completed_resume_does_not_scan_or_run_sql(tmp_path, monkeypa
 def test_legacy_partial_terminal_closure_is_rejected_before_workers_start(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     original = DataflowExecution.satisfy_terminal
     def legacy_close(execution):
         original(execution)
@@ -201,9 +201,10 @@ def test_legacy_partial_terminal_closure_is_rejected_before_workers_start(tmp_pa
 def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(tmp_path):
     from dataclasses import replace
     from demiflow.data.sources import FileSource
-    from demiflow.execution.source_readers import FileReader
-    from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record
-    from demiflow.execution.record_schema import RecordSchemas
+    from demiflow.execution.sources.source_readers import FileReader
+    from demiflow.execution.storage.arrow_payload import ArrowBatchCache
+    from demiflow.execution.contracts.record_codec import is_arrow_record
+    from demiflow.execution.storage.record_schema import RecordSchemas
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services, drain
     path = tmp_path/'rows.csv'
     path.write_text('k,v\na,1\nb,2\nc,3\nd,4\n')
@@ -226,7 +227,7 @@ def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(t
     restored.open(split, cursor)
     tail = drain(restored)
     restored.close()
-    cache = ArrowBatchCache(store, bounds, services=services)
+    cache = ArrowBatchCache(store, bounds, assignment=getattr(services, 'assignment', None))
     assert [cache.row(r) for r in tail] == [{'k':'b','v':'2'},{'k':'c','v':'3'},{'k':'d','v':'4'}]
     assert (tail[0].record_id, tail[0].sequence) == (first[-1].record_id, first[-1].sequence)
     schemas = RecordSchemas(services)

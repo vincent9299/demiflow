@@ -69,7 +69,7 @@ child.main(sys.argv[1])
 
 def test_worker_owner_and_outer_unit_do_not_kill_unknown_guardian(tmp_path, monkeypatch, request):
     """Real owner close timeout + original outer worker stop keep unknown charged."""
-    from demiflow.execution.dataflow_managed_http import freeze_managed_http
+    from demiflow.services.http import freeze_managed_http
     fixture = managed_fixture(tmp_path, monkeypatch, request=request, mode='detached')
     marker, observed = tmp_path / 'hold', tmp_path / 'unknown'
     ready, failed = tmp_path / 'owner-ready.json', tmp_path / 'owner-close.json'
@@ -88,7 +88,7 @@ child.main(sys.argv[1])
 '''
     worker_script = '''import asyncio,json,os,subprocess,sys,time
 from pathlib import Path
-from demiflow.execution.dataflow_managed_http import restore_worker_managed_http
+from demiflow.execution.operator_bindings.dataflow_managed_http import restore_worker_managed_http
 from demiflow.resources.process_observation import inherited_unit,UNIT_ENV
 from demiflow.resources.process_unit import birth_start
 service=restore_worker_managed_http(json.loads(sys.argv[1]))

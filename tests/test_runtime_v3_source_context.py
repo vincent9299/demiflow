@@ -5,8 +5,8 @@ import os
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext, current_run
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext, current_run
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 @pytest.mark.parametrize('mode', ['process', 'thread'])
@@ -15,8 +15,8 @@ def test_source_open_pull_close_has_only_original_run_view(tmp_path, mode, failu
     evidence = tmp_path / 'callbacks.jsonl'
 
     def factory():
-        from demiflow.execution.run_context import current_run, current_action
-        from demiflow.execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.pipeline.run_context import current_run, current_action
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
         def record(phase):
             run = current_run()

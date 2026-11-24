@@ -9,11 +9,11 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.queue import ProducerSourceSpec,task_message
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.queue_contract import QueueIncomplete,HistoryReadLimits
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.queue import ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.contracts.queue_contract import QueueIncomplete, HistoryReadLimits
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel,native_parent,publish,source
 from test_raw_fetch import origin_server
 
@@ -87,7 +87,7 @@ def test_business_rejection_retains_raw_settlement(channel,tmp_path):
 
 
 def test_shared_prepared_recovery_at_another_mount_root(channel,tmp_path,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     with origin_server() as (url,calls):
         p=seed(channel,tmp_path,url);fired=[]
         def fault(name,commit_id):
@@ -108,7 +108,7 @@ def test_shared_prepared_recovery_at_another_mount_root(channel,tmp_path,monkeyp
 
 
 def test_source_stop_during_final_artifact_inspection_does_not_ack(channel,tmp_path,monkeypatch):
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     original=QueueResultSink.verify_acquisition
     stop=tmp_path/'stop';fired=[]
     def inspection(self,prepared):
@@ -128,7 +128,7 @@ def test_source_stop_during_final_artifact_inspection_does_not_ack(channel,tmp_p
 
 
 def test_jsonl_producer_resumes_from_native_byte_cursor(channel,tmp_path,monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     path=tmp_path/'metadata.jsonl'
     path.write_text(''.join(json.dumps({'messages':[task_message('x'+str(i),{'value':i},pool='p')]})+'\n' for i in range(5)))
     p=channel.open('p',producer_id='jsonl',source=ProducerSourceSpec(kind='records',source_id='records',uri=path.as_uri(),sha256=hashlib.sha256(path.read_bytes()).hexdigest()))

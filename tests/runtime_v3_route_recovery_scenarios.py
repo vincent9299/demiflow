@@ -110,7 +110,7 @@ def _kill_owned_worker(execution,fx):
     else:
         # Verify the exact worker owns this execution's control socket/launch.
         command=(Path('/proc')/str(pid)/'cmdline').read_bytes().decode(errors='replace')
-        assert 'demiflow.execution.worker.bootstrap' in command,command
+        assert 'demiflow.execution.hosts.worker_bootstrap' in command,command
         os.kill(pid,signal.SIGKILL)
         fact.update(kind='actual Local worker SIGKILL',signal=signal.SIGKILL,command=command)
     return fact
@@ -121,8 +121,8 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from runtime_v3_residency_scenarios import _provider,_cut_facts
     from runtime_v3_support import _ExecuteActionRecorder,_RayDataBlocker
     root=fx.journal_dir/name
@@ -141,7 +141,7 @@ def _recover(fx,name,build,*,eligible=None,workers=8,first_run=None,parked=False
         value=thaw_record_value(event.payload) if event.payload is not None else {}
         row=None
         if event.kind=='data':
-            from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+            from demiflow.execution.contracts.record_codec import _decode_record_document
             from demiflow.execution.contracts.dataflow import ArtifactRef
             if 'ref' in value:
                 raw=b''.join(execution._store.read(ArtifactRef(**value['ref']),max_bytes=execution._bounds.max_row_bytes))
@@ -294,7 +294,7 @@ def _assert_actual_routes(result):
         if spec['routing']=='hash':
             from demiflow.execution.exchange.dataflow_channels import _route_targets
             from demiflow.execution.contracts.dataflow import ExchangeSpec,Record
-            from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+            from demiflow.execution.contracts.record_codec import _encode_payload
             row=event['row'];encoded=_encode_payload(row,max_bytes=65536)
             record=Record(payload['record_id'],{},None,row,len(encoded),payload['sequence'])
             assert (consumer,)==_route_targets(record,spec=ExchangeSpec(**spec),
@@ -386,19 +386,19 @@ def _first_native_action(fx,dataset,run,routing,evidence):
     """
     from dataclasses import replace
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_api import make_action_request
-    from demiflow.execution.dataflow_services import make_driver_services
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.executors.dataflow_api import make_action_request
+    from demiflow.execution.action_driver.services import make_driver_services
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from demiflow.planning.dataflow_place import (compile_physical_dataflow,validate_physical_dataflow,
         solve_residency)
     from demiflow.execution.seal.plan import (stage_dataflow_programs,resolve_execution_constants,seal_dataflow)
-    from demiflow.execution.dataflow_sources import snapshot_source,plan_source_splits
-    from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
+    from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
+    from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
     from demiflow.execution.contracts.dataflow_codec import compute_physical_digest
     from runtime_v3_residency_scenarios import _provider
-    from demiflow.execution.dataflow_terminals import open_terminal,collect_rows
+    from demiflow.execution.outputs.terminals import open_terminal, collect_rows
     request=make_action_request(dataset._executor,dataset._source,dataset._plan,kind='take_all',arguments={'limit':None})
     policy,bounds=resolve_runtime_policy({'worker_mode':'process'},run.limits,provider=fx.provider)
     policy=replace(policy,fusion=False,default_partitions=1,max_replicas=2)
@@ -523,7 +523,7 @@ def native_exchange(fx,routing):
 
 def native_unknown_target(fx):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_residency_scenarios import _provider
     evidence={}
@@ -544,7 +544,7 @@ def native_unknown_target(fx):
 
 
 def public_unknown_model(fx):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_residency_scenarios import _provider
     from test_runtime_v3_routed_prompt import _pipeline
     with _model_server() as calls:

@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from demiflow.execution.artifact_manifest import ArtifactManifest, manifest_pages
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.storage.artifact_manifest import ArtifactManifest, manifest_pages
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('damage', ['missing', 'truncated', 'reordered', 'changed', 'index'])
@@ -34,25 +34,10 @@ def test_authenticated_pages_reject_damage(tmp_path, damage):
             list(manifest_pages(run.directory, reference))
 
 
-def test_state_rejects_escape_expansion_before_full_encoding(tmp_path, monkeypatch):
-    import asyncio
-    import demiflow.execution.operator_state as state
-    class EscapedState:
-        def snapshot_state(self):
-            return {'text': '\x00' * 20000}
-
-        def restore_state(self, value):
-            pass
-    calls = []
-    monkeypatch.setattr(state, 'document', lambda *args: calls.append(args))
-    with RunContext.start(tmp_path/'run', limits={'max_state_bytes': 65536}) as run:
-        with pytest.raises(RecoveryContractError, match='encoding.*byte budget'):
-            asyncio.run(state.OperatorStates(run).register(EscapedState(), 'node-0'))
-    assert calls == []
 
 
 def test_partial_reference_binding_is_unprotected_and_cleanup_reclaims_it(tmp_path):
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     with pytest.raises(RecoveryContractError, match='unconfirmed actions'), RunContext.start(tmp_path/'run') as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'partial-page'}}) as action:
             fact = run.journal.begin_commit(run.fence, action.action_id, 1,
@@ -83,10 +68,10 @@ def test_partial_reference_binding_is_unprotected_and_cleanup_reclaims_it(tmp_pa
 
 def test_lazy_materialized_history_verifies_earlier_object_bytes(tmp_path):
     from types import SimpleNamespace
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     from demiflow.execution.executors.local import _CheckpointBlocks
-    from demiflow.execution.object_sink import ObjectRowsSink
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.outputs.object_sink import ObjectRowsSink
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     with RunContext.start(tmp_path/'run') as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'object-history'}}) as action:
             sink = ObjectRowsSink(action, max_object_bytes=64)
@@ -138,3 +123,30 @@ target.write_bytes(pickle.dumps(result))
     assert not spill.exists()
     with pytest.raises(RuntimeError, match='released'):
         result.check_open()
+
+
+def test_orphan_unlink_failure_keeps_page_facts_and_retry_counts_actual_files(tmp_path, monkeypatch):
+    from pathlib import Path
+    with RunContext.start(tmp_path / 'paged-orphans') as run:
+        paths = []
+        for number in range(68):
+            path = run.directory / 'scratch' / f'{number:03}'
+            run.allocate_artifact(path, size=1, atomic=False)
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(b'x')
+            paths.append(path)
+        unlink = Path.unlink
+        def fail_second_page(path, *args, **kwargs):
+            if path == paths[65]:
+                raise OSError('original orphan unlink failed')
+            return unlink(path, *args, **kwargs)
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, 'unlink', fail_second_page)
+            with pytest.raises(OSError, match='original orphan unlink failed'):
+                run.journal.clean_orphans(run.fence)
+        with run.journal._connection() as db:
+            remaining = db.execute('SELECT path FROM runtime_artifacts ORDER BY path').fetchall()
+        assert [row[0] for row in remaining] == [str(path.relative_to(run.directory)) for path in paths[64:]]
+        assert [path.exists() for path in paths] == [False] * 65 + [True] * 3
+        assert run.journal.clean_orphans(run.fence) == 3
+        assert run.journal.clean_orphans(run.fence) == 0

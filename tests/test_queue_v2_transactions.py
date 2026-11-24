@@ -11,13 +11,13 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy, HttpSource
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.queue import QueueChannel, ProducerSourceSpec, task_message
-from demiflow.execution.queue_commit import task_action
-from demiflow.execution.queue_contract import StaleQueueOwner
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.raw_budget import RawBudget
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.queue import QueueChannel, ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_commit import task_action
+from demiflow.execution.contracts.queue_contract import StaleQueueOwner
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.native_queue.raw_budget import RawBudget
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel, domain, native_parent, publish, source
 from test_raw_fetch import origin_server
 

@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_journal import ExecutionBudgetExceeded
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 
 

@@ -5,7 +5,7 @@ import os
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm import parse_prompt_pack
 from image_http_fixture import fixture_http, definition, json_definition
 
@@ -64,43 +64,48 @@ def test_nondeterministic_text_expansion_preserves_known_image_identity(tmp_path
 
 @pytest.mark.parametrize('confirmed_unsent', [True, False])
 def test_only_durably_confirmed_unsent_request_can_be_reserved_again(tmp_path, confirmed_unsent):
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal, CALL_RESERVATION
+    from demiflow.execution.journal.prompt import RunPromptJournal
+    from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
     from demiflow.operator_llm.journal import UncertainPromptCall
-    request = {'payload': 'same occurrence', 'native_response_bytes': 4096}
-    with pytest.raises(RuntimeError, match='lost owner'):
-        with RunContext.start(tmp_path/'run') as run:
-            reference = run.ref
+    reservation_token = CALL_RESERVATION.set(None)
+    try:
+        request = {'payload': 'same occurrence', 'native_response_bytes': 4096}
+        with pytest.raises(RuntimeError, match='lost owner'):
+            with RunContext.start(tmp_path/'run') as run:
+                reference = run.ref
+                journal = run._native_prompt_journal = RunPromptJournal(run)
+                CALL_RESERVATION.set(('attempt-one', {'requests': (1, 10)}))
+                assert journal.reserve(request)
+                if confirmed_unsent:
+                    error = RuntimeError('cancelled in transport batch queue')
+                    error.call = {'request_sent': False, 'batch_cancelled_before_dispatch': True}
+                    journal.failed(request, error, .01)
+                raise RuntimeError('lost owner')
+        with RunContext.resume(reference) as run:
             journal = run._native_prompt_journal = RunPromptJournal(run)
-            CALL_RESERVATION.set(('attempt-one', {'requests': (1, 10)}))
+            if not confirmed_unsent:
+                with pytest.raises(UncertainPromptCall, match='automatic regeneration is forbidden'):
+                    journal.check_recovery()
+                with pytest.raises(UncertainPromptCall):
+                    journal.lookup(request)
+                assert run.journal.budget_consumed('requests') == 1
+                return
+            journal.check_recovery()
+            assert journal.lookup(request) is None
+            CALL_RESERVATION.set(('attempt-two', {'requests': (1, 10)}))
             assert journal.reserve(request)
-            if confirmed_unsent:
-                error = RuntimeError('cancelled in transport batch queue')
-                error.call = {'request_sent': False, 'batch_cancelled_before_dispatch': True}
-                journal.failed(request, error, .01)
-            raise RuntimeError('lost owner')
-    with RunContext.resume(reference) as run:
-        journal = run._native_prompt_journal = RunPromptJournal(run)
-        if not confirmed_unsent:
-            with pytest.raises(UncertainPromptCall, match='automatic regeneration is forbidden'):
-                journal.check_recovery()
-            with pytest.raises(UncertainPromptCall):
-                journal.lookup(request)
-            assert run.journal.budget_consumed('requests') == 1
-            return
-        journal.check_recovery()
-        assert journal.lookup(request) is None
-        CALL_RESERVATION.set(('attempt-two', {'requests': (1, 10)}))
-        assert journal.reserve(request)
-        journal.response(request, {'body': 'known result'})
-        assert journal.lookup(request)['body'] == 'known result'
-        assert run.journal.budget_consumed('requests') == 2
-        with run.journal._connection() as db:
-            assert db.execute('SELECT count(*) FROM recovery_events').fetchone()[0] == 1
-            assert db.execute("SELECT value FROM journal_state WHERE name='native_response_reserved'").fetchone()[0] == '0'
+            journal.response(request, {'body': 'known result'})
+            assert journal.lookup(request)['body'] == 'known result'
+            assert run.journal.budget_consumed('requests') == 2
+            with run.journal._connection() as db:
+                assert db.execute('SELECT count(*) FROM recovery_events').fetchone()[0] == 1
+                assert db.execute("SELECT value FROM journal_state WHERE name='native_response_reserved'").fetchone()[0] == '0'
+    finally:
+        CALL_RESERVATION.reset(reservation_token)
 
 
 def test_control_capacity_rejection_precedes_provider_dispatch(tmp_path, fixture_http, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     monkeypatch.setenv('SYNTHETIC_JSON_KEY', 'fixture-only')
     config = parse_prompt_pack(json.dumps(json_definition(fixture_http['base'])))
     with pytest.raises(RecoveryContractError, match='before dispatch'):
@@ -114,18 +119,18 @@ def test_control_capacity_rejection_precedes_provider_dispatch(tmp_path, fixture
 
 
 def test_received_image_finishes_durability_during_cooperative_cancel(tmp_path, fixture_http, monkeypatch):
-    import demiflow.operator_llm.media as media
+    from demiflow.execution.outputs.object_sink import ObjectSink
     from test_managed_image_execution import native_dataset, run_limits
-    original = media._store_image
+    original = ObjectSink.store_image
     cancelled = []
 
-    def cancel_before_storage(raw, options, *, store=None):
+    def cancel_before_storage(store, raw, options):
         if not cancelled:
             cancelled.append(True)
             RunContext.cancel(store.run.ref)
-        return original(raw, options, store=store)
+        return original(store, raw, options)
 
-    monkeypatch.setattr(media, '_store_image', cancel_before_storage)
+    monkeypatch.setattr(ObjectSink, 'store_image', cancel_before_storage)
     with pytest.raises(Exception, match='cancellation requested'):
         with RunContext.start(tmp_path/'run', limits=run_limits()) as run:
             reference = run.ref

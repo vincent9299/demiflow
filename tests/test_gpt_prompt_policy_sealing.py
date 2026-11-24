@@ -7,9 +7,9 @@ import pytest
 from demiflow import data
 from demiflow.data.dataset import Dataset
 from demiflow.data.flow_contract import field, scalar
-from demiflow.execution.adaptive_requests import AdaptiveRequestGate
-from demiflow.execution.plan_facts import operation_facts
-from demiflow.execution.request_limits import RequestGate
+from demiflow.services.adaptive_requests import AdaptiveRequestGate
+from demiflow.execution.seal.plan_facts import operation_facts
+from demiflow.services.request_limits import RequestGate
 from demiflow.operator_llm.flow_contract import analyze_prompt, normalize_prompt, prompt_facts
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK
@@ -85,7 +85,7 @@ def test_caller_mutation_does_not_change_sealed_policy():
 def test_policy_preserves_real_stream_concurrency_and_usage(sse_server, tmp_path):
     import json
     from test_map_prompt_async import prompt
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from test_prompt_http_stream import journal_totals
     ds = prompt(data.from_items([{'item':i} for i in range(6)]), concurrency=3,
         request_policy=POLICY, options={'stream':True,'gateway':'litellm','trust_env':False},

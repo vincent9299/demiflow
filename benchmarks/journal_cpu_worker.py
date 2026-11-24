@@ -66,7 +66,7 @@ async def main(args):
     pack=parse_prompt_pack(yaml.safe_dump(doc,allow_unicode=True))
     submissions={}
     if args.diagnostic:
-        from demiflow.execution.blocking_io import BlockingIOPool
+        from demiflow.services.blocking_io import BlockingIOPool
         original_run=BlockingIOPool.run
         async def counted(self,fn,*a,**kw):
             submissions[self.name]=submissions.get(self.name,0)+1

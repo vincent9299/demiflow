@@ -1,7 +1,9 @@
 """Live incremental parking with real Dataset workers and native cut receipts."""
 
+from demiflow.execution.action_driver import services as action_services
+
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 LIMITS = {'memory_bytes': 40*1024, 'max_batch_bytes': 16*1024,
           'max_row_bytes': 8*1024, 'max_state_bytes': 128*1024,
@@ -21,7 +23,7 @@ def dataset():
 
 
 def facts(run):
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     commits = run.journal.execution_commits('action-1')
     return commits, [StateArtifacts(run).read(f['prepared']['state']['dataflow-cut-v3']) for f in commits]
 
@@ -166,8 +168,8 @@ def test_attempt_only_input_cannot_automatically_park(tmp_path, monkeypatch):
     from runtime_v3_resource_scenarios import observe_execution
 
     from dataclasses import replace
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_action_runtime
+    from demiflow.execution.executors import dataflow_api
+    resolve = action_services.resolve_action_runtime
 
     def unfused(request):
         policy, bounds = resolve(request)
@@ -175,7 +177,7 @@ def test_attempt_only_input_cannot_automatically_park(tmp_path, monkeypatch):
 
     # A genuinely separate source and terminal cannot park this iterator to
     # share one active worker slot. Check the original safety decision.
-    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', unfused)
+    monkeypatch.setattr(action_services, 'resolve_action_runtime', unfused)
     with observe_execution(workers=1, memory_bytes=LIMITS['memory_bytes']) as observed:
         with pytest.raises(DataflowError, match='cannot safely park'):
             with RunContext.start(tmp_path/'run', limits=LIMITS), data.local_execution(workers=1):
@@ -246,12 +248,11 @@ def test_durable_write_lance_recovers_without_empty_early_publication(tmp_path, 
 @pytest.mark.parametrize('schema', ['demiflow.durable_residency.v1', 'demiflow.durable_residency.v2'])
 def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_durable_residency import DurableResidency
-    from demiflow.execution.recovery_contract import RecoveryContractError, document
+    from demiflow.execution.action_driver.durable_residency import DurableResidency
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
     controller = object.__new__(DurableResidency)
     from demiflow.execution.exchange.deliveries import DeliveryExchange
     controller._bounds = SimpleNamespace(max_state_bytes=65536)
-    controller._finite_seals = {}
     controller._exchange = DeliveryExchange()
     controller._physical = SimpleNamespace(stages=(
         SimpleNamespace(stage_id='stage', partitions=('partition',)),))
@@ -260,7 +261,7 @@ def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     controller.groups = [('stage',)]
     controller.partition_groups = [('partition',)]
     controller.schema = schema
-    controller.visited = controller.completed = controller.edge_eoi = controller.satisfied_inputs = set()
+    controller.visited = controller.completed = set()
     controller._exchange._parked = {'delivery': {'payload': {'ref': 'durable-reference'}, 'consumed': False,
                                        'producer_cut': None, 'consumer_cut': None}}
     size_before = len(document(controller.metadata(False, ())))

@@ -24,16 +24,16 @@ from ..contracts.dataflow import (
 )
 from ..contracts.dataflow_errors import DataflowError
 from ..scheduler.placement import DataflowScheduler
-from ..dataflow_services import make_driver_services
-from ..dataflow_terminals import open_terminal, TerminalSubscription
+from demiflow.execution.action_driver.services import make_driver_services
+from demiflow.execution.outputs.terminals import open_terminal, TerminalSubscription
 from ..checkpoint.coordinator import DataflowCheckpointCoordinator
 from ..seal.plan import (
     seal_dataflow, stage_dataflow_programs, resolve_execution_constants,
 )
-from ..dataflow_sources import snapshot_source, plan_source_splits
-from ..dataflow_queue import NativeAcquisitionService
-from ..dataflow_artifacts import stage_runtime_bundle
-from ..dataflow_hosts import make_host_endpoint
+from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
+from demiflow.execution.native_queue.dataflow_queue import NativeAcquisitionService
+from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
+from demiflow.execution.hosts.endpoints import make_host_endpoint
 from ..exchange.dataflow_channels import close_channels
 from ..exchange.deliveries import DeliveryExchange
 from ...planning.dataflow_compile import lower_action
@@ -44,7 +44,7 @@ from ...resources.contracts import (
 )
 
 if TYPE_CHECKING:
-    from ..run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from ...resources.manager import ResourceManager
 
 
@@ -53,7 +53,7 @@ def _now_ms() -> int:
 
 
 def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds, after_prepare=None) -> ActionHandle:
-    from ..plan_capture import current_capture
+    from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()
     if capture is not None:
         capture.intercept(request, policy=policy, bounds=bounds)
@@ -74,7 +74,7 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
         except Exception as cleanup:
             failure.add_note("Execution cleanup also failed: " + str(cleanup))
         try:
-            from ..dataflow_api import record_execution_metadata
+            from demiflow.execution.journal.run_telemetry import record_execution_metadata
             record_execution_metadata(request, execution)
         except Exception as observation:
             failure.add_note('Execution metadata also failed: ' + str(observation))
@@ -83,7 +83,8 @@ def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bou
 
 def run_graph_action(request, *, control_timeout_s):
     from dataclasses import replace
-    from ..dataflow_api import resolve_action_runtime, record_execution_metadata
+    from demiflow.execution.action_driver.services import resolve_action_runtime
+    from demiflow.execution.journal.run_telemetry import record_execution_metadata
     from ...planning.dataflow_graph_adapter import graph_credit
     from ..seal.plan import validate_graph_replay
     policy, bounds = resolve_action_runtime(request)
@@ -146,7 +147,7 @@ class DataflowExecution:
         self._policy = services.policy
         self._active_worker_limit = self._policy.max_active_workers
         self._bounds = services.bounds
-        from ..dataflow_native_limits import NativeBudgetGuard
+        from demiflow.execution.hosts.configuration import NativeBudgetGuard
         self._native_limits = self._policy.native_limits
         self._native_guard = NativeBudgetGuard(self._native_limits)
         self._began_at = time.monotonic()
@@ -180,14 +181,11 @@ class DataflowExecution:
         self._scope_open = False
         self._by_partition = {}
         self._exchange = DeliveryExchange()
-        self._finite_completions = {}
-        self._finite_seals = {}
         self._phases = ()
         self._phase_index = 0
         self._completed_stages = set()
         self._durable_residency = None
         self._durable_peers_live = False
-        self._satisfied_consumers = {}
         self._terminal_stop_sources = {}
         self._terminal = None
         self._terminal_seen = 0
@@ -322,7 +320,7 @@ class DataflowExecution:
         self._native_guard.check()
         if (self._terminal_stop_deadline is not None and self._terminal_result is None
                 and time.monotonic() >= self._terminal_stop_deadline):
-            from ..recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Delivery exceeded cancel grace; unfinished writer is isolated while draining')
         self._check_checkpoint_deadline()
         if time.monotonic() - self._began_at >= self._bounds.timeout_ms / 1000:
@@ -386,7 +384,7 @@ class DataflowExecution:
         endpoint = make_host_endpoint(lease, services=self._services)
         self._services.journal_service.register_worker(lease, stage.occurrences)
         try:
-            from ..dataflow_durable_residency import participant_ids
+            from demiflow.execution.checkpoint.residency import participant_ids
             owns_image = self._restore_image is not None and any(
                 c.participant_id in participant_ids(self._physical, lease.partition_ids)
                 for c in self._restore_image.contributions)
@@ -416,11 +414,11 @@ class DataflowExecution:
         from ...planning.dataflow_compile import is_materialized_count
         if not is_materialized_count(self._request):
             return False
-        from ..checked import current
+        from demiflow.execution.pipeline.checked import current
         if (self._request.arguments or self._request.programs or current() is not None
                 or self._action.context.journal.source_binding(self._action.action_id + "-dataflow-sealed")):
             return False
-        from ..dataflow_sources import verified_materialized_count
+        from demiflow.execution.sources.snapshots import verified_materialized_count
         self._check_stop()
         source = self._request.source
         previous = self._action.record['result']
@@ -436,7 +434,10 @@ class DataflowExecution:
         if previous is not None and (type(previous.get('scalar')) is not int or receipt != previous):
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Completed count differs from its verified source')
         self._check_stop()
-        self._terminal = TerminalSubscription(self._bounds, self._exchange, ())
+        from functools import partial
+        from demiflow.execution.hosts.endpoints import batch_business_commands
+        self._terminal = TerminalSubscription(self._bounds, self._exchange,
+            batch_commands=partial(batch_business_commands, ()))
         if previous is None:
             self._action.complete(receipt)
         self._started = True
@@ -455,8 +456,8 @@ class DataflowExecution:
         self._check_stop()
         normalize_native_options(self._request.arguments.get("native_options"),
                                  operation_kind=self._request.kind)
-        from ..queue_producer import producer_actor
-        from ..dataflow_producer import NativeProducerService
+        from demiflow.execution.native_queue.queue_producer import producer_actor
+        from demiflow.execution.native_queue.dataflow_queue import NativeProducerService
         producer = producer_actor(self._request.plan)
         if producer is not None:
             if self._request.kind != 'run_stream':
@@ -479,18 +480,18 @@ class DataflowExecution:
             from ..seal.plan import load_dataflow, verify_action_programs
             graph, physical, sealed = load_dataflow(self._action.context.directory,
                 self._action.action_id, store=self._store, bounds=self._bounds)
-            from ..dataflow_shared import validate_shared_actor_binding
+            from demiflow.execution.seal.program_identity import validate_shared_actor_binding
             validate_shared_actor_binding(self._request, graph, bounds=physical.bounds)
-            from ..dataflow_schema import validate_literal_schema_replay
+            from demiflow.execution.seal.plan import validate_literal_schema_replay
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
-            from ..dataflow_native_limits import validate_execution_binding
+            from demiflow.execution.seal.plan import validate_execution_binding
             validate_execution_binding(self._request, graph)
             completed_live_nodes = verify_action_programs(
                 self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
-            from ..checked import current
-            from ..managed_native import NativeExecution
+            from demiflow.execution.pipeline.checked import current
+            from demiflow.execution.pipeline.managed_native import NativeExecution
             checked = current()
             if isinstance(checked, NativeExecution):
                 compiled = checked.admit_compiled(self._request, compiled, bounds=self._bounds)
@@ -527,7 +528,7 @@ class DataflowExecution:
                                                native.get('batch_rows', context.limits['batch_rows']))
                     self._policy = replace(self._policy, native_limits=native)
             from ...planning.dataflow_relational_regions import exclusion_read_bindings
-            from ..dataflow_schema import KEY, decode
+            from demiflow.execution.contracts.record_schema import KEY, decode
             scan_columns = (
                 (source.source_id, decode(source.immutable_identity[KEY], bounds=self._bounds).names)
                 for source in snapshots
@@ -552,8 +553,8 @@ class DataflowExecution:
                 self._policy = replace(self._policy, checkpoint_rows=context.limits['checkpoint_unconfirmed_rows'])
                 physical = compile_physical_dataflow(graph, tuple(snapshots), tuple(splits), policy=self._policy,
                     hosts=self._services.hosts, bounds=self._bounds, constants_ref=constants_ref)
-            from ..checked import current
-            from ..identity_bridge import build_identity_bridge
+            from demiflow.execution.pipeline.checked import current
+            from demiflow.execution.seal.identity_bridge import build_identity_bridge
             from ..contracts.dataflow import thaw_record_value
             checked = current()
             bridge = None
@@ -571,7 +572,8 @@ class DataflowExecution:
         # Preserve the sealed plan; current execution budgets only intersect
         # its original ceilings. The same store/journal/allocator retain ownership.
         from dataclasses import replace
-        from ..dataflow_native_limits import NativeBudgetGuard, intersect_bounds, intersect_native_limits
+        from demiflow.execution.hosts.configuration import NativeBudgetGuard
+        from demiflow.execution.scheduler.native_limits import intersect_bounds, intersect_native_limits
         self._bounds = intersect_bounds(physical.bounds, self._bounds)
         self._native_limits = intersect_native_limits(physical.policy.native_limits, self._native_limits)
         self._native_guard = NativeBudgetGuard(self._native_limits)
@@ -583,7 +585,7 @@ class DataflowExecution:
         self._store.bind_driver_bounds(self._bounds)
         self._services.journal_service.bind_bounds(self._bounds)
         self._check_stop()
-        from ..checked import current
+        from demiflow.execution.pipeline.checked import current
         self._checked = current()
         if self._checked is not None:
             bridge_doc = json.loads(b"".join(self._store.read(sealed.identity_bridge_ref,
@@ -594,17 +596,17 @@ class DataflowExecution:
                 self._checked.bind_observation_scope(
                     report_key, plan_id=physical.plan_id, dag_id=graph.dag_id,
                     plan_revision=physical.plan_revision, occurrence_id=occurrence)
-        from ..dataflow_publication_budget import PublicationReservation, with_publication_workspace
+        from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, with_publication_workspace
         publication_reservation = PublicationReservation(graph, physical.stages, physical.bounds,
             declared=physical.residency.control_reserved_bytes)
-        from ..dataflow_sinks import make_sink_adapter
+        from demiflow.execution.outputs.sinks import make_sink_adapter
         for node in graph.nodes:
             if node.kind == "terminal":
                 if node.kernel.kind == "fixed_dataset":
                     self._sinks[node.kernel.configuration['sink_id']] = make_sink_adapter(
                         node.kernel, services=self._services)
                 elif self._request.kind in ("write_lance", "write_datasink", "write_file"):
-                    from ..dataflow_sinks import make_native_terminal_sink
+                    from demiflow.execution.outputs.sinks import make_native_terminal_sink
                     self._sinks[node.kernel.kind] = make_native_terminal_sink(
                         with_publication_workspace(node.kernel, publication_reservation.bytes),
                         request=self._request, services=self._services,
@@ -612,7 +614,7 @@ class DataflowExecution:
                         admit_publication=lambda: self._scheduler.admit_publication())
                 else:
                     self._sinks[node.kernel.kind] = make_sink_adapter(node.kernel, services=self._services)
-        from ..dataflow_images import bind_image_sinks
+        from demiflow.execution.outputs.object_sink import bind_image_sinks
         bind_image_sinks(graph, services=self._services, sinks=self._sinks)
         self._graph = graph
         # The legacy graph declaration measures cut_rows in source ordinals.
@@ -627,7 +629,7 @@ class DataflowExecution:
         self._policy = live_policy
         self._services.journal_service.bind_recovery_policy(physical.policy)
         self._sealed = sealed
-        from ..dataflow_managed_devices import sealed_service_placements
+        from demiflow.execution.seal.plan import sealed_service_placements
         placements = sealed_service_placements(graph, physical, store=self._store)
         from ..contracts.dataflow_codec import runtime_scope_id
         self._scheduler = DataflowScheduler(physical, resources=self._services.resources, sealed=sealed,
@@ -662,7 +664,7 @@ class DataflowExecution:
             if existing is not None:
                 self._acquisition.configure(self._request.source, self._request.plan, None, graph=graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from ..queue_execution import queue_source
+        from demiflow.execution.native_queue.queue_execution import queue_source
         requires_acquisition = queue_source(self._request.source) is not None or any(
             node.kernel.configuration.get('native_operation') == 'acquire' for node in graph.nodes)
         if requires_acquisition:
@@ -674,17 +676,17 @@ class DataflowExecution:
                 self._acquisition = NativeAcquisitionService(self._action, services=self._services)
             self._acquisition.configure_searches(self._request.source, self._request.plan, graph)
             self._services.journal_service.bind_queue(self._acquisition)
-        from ..dataflow_batch_membership import bind_contracts
+        from demiflow.execution.journal.dataflow_authority import bind_batch_contracts as bind_contracts
         bind_contracts(self._services.journal_service, graph, physical)
-        from ..dataflow_embedding_journal import bind_private_embedding_contracts
+        from demiflow.execution.journal.dataflow_embedding_journal import bind_private_embedding_contracts
         bind_private_embedding_contracts(self._services.journal_service, graph)
-        from ..dataflow_prompt_journal import bind_private_prompt_contracts
+        from demiflow.execution.journal.dataflow_prompt_journal import bind_private_prompt_contracts
         bind_private_prompt_contracts(self._services.journal_service, graph)
-        from ..dataflow_private_storage import bind_private_storage
+        from demiflow.execution.journal.dataflow_authority import bind_private_storage
         bind_private_storage(self._services.journal_service)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
-            from ..dataflow_stream_lance import NativeStreamLanceService
+            from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
             self._stream_lance = NativeStreamLanceService(self)
             self._services.journal_service.bind_stream_writer(self._stream_lance)
         self._prepared = True
@@ -699,12 +701,15 @@ class DataflowExecution:
         if self._closed or self._cancelled:
             raise DataflowError("CANCELLED", "execution is closed")
         self._check_stop()
-        self._terminal = TerminalSubscription(self._bounds, self._exchange, self._endpoints.values(), store=self._store)
+        from functools import partial
+        from demiflow.execution.hosts.endpoints import batch_business_commands
+        self._terminal = TerminalSubscription(self._bounds, self._exchange,
+            batch_commands=partial(batch_business_commands, self._endpoints.values()), store=self._store)
         budget = {"cpu_millis": max(1, int(sum(h.logical_resources.get('cpu_millis', 0)
                                              for h in self._services.hosts))),
                   "memory_bytes": self._bounds.max_resident_bytes,
                   "max_workers": self._active_worker_limit or self._bounds.max_partitions}
-        from ..dataflow_native_limits import sealed_execution_ceilings
+        from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
         ceilings = sealed_execution_ceilings(self._graph)
         if 'cpu_millis' in ceilings:
             budget['cpu_millis'] = min(budget['cpu_millis'], ceilings['cpu_millis'])
@@ -716,7 +721,7 @@ class DataflowExecution:
             budget['accelerator_gpu'] = gpu_budget
         if self._fit:
             self._scheduler.bind_job_capacity(budget, self._services.job_gpu)
-        from ..dataflow_services import resource_scope_binding
+        from demiflow.execution.hosts.configuration import resource_scope_binding
         self._services.resources.state.operation_scope = self._scheduler.scope_id
         self._services.resources.state.open_scope(self._fence(), ResourceScope(
             self._scheduler.scope_id, self._run_id(), resource_scope_binding(self._services.resources, self._policy),
@@ -731,7 +736,7 @@ class DataflowExecution:
         self._restore_image = self._verified_completed_image or (self._checkpoint.recover(sinks=self._sinks)
             if self._action.replaying and not queue_owned_recovery else None)
         if self._restore_image is not None:
-            from ..dataflow_operator_observations import restore_operator_observations, restore_node_metrics
+            from demiflow.execution.journal.dataflow_operator_observations import restore_operator_observations, restore_node_metrics
             restore_operator_observations(self, self._restore_image)
             pub = self._publication(self._restore_image)
             self._terminal_seen = pub["manifest"]["total_rows"]
@@ -745,23 +750,23 @@ class DataflowExecution:
             self._last_checkpoint_rows, self._last_checkpoint_outputs = self._checkpoint_frontiers()
             # Validate all actor images before ANY participant executes again.
             # A completed final result is safe to read without recreating actors.
-            from ..kernels import state_codec
-            from ..dataflow_kernel_pack import read_kernel_image
+            from demiflow.execution.contracts import state_codec
+            from demiflow.execution.storage.streams import read_kernel_image
             from ..contracts.dataflow_codec import compute_participant_id
-            from ..recovery_contract import identity
+            from demiflow.execution.contracts.recovery_contract import identity
             partitions = {compute_participant_id(stage.stage_id, partition): partition
                           for stage in self._physical.stages for partition in stage.partitions}
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
             terminal_inputs = {edge.edge_id for edge in self._graph.edges
                                if edge.consumer in self._graph.terminals}
-            from ..dataflow_residency import participants_for
+            from demiflow.execution.checkpoint.residency import participants_for
             residency = self._checkpoint.residency or {}
             retired = set(residency.get('completed_stages', ()))
             if residency.get('phase_complete'):
                 retired.update(residency['active_stages'])
             retired_ids = set(participants_for(self._physical, retired))
             if residency.get('schema') == 'demiflow.durable_residency.v2':
-                from ..dataflow_durable_residency import member_partitions, participant_ids
+                from demiflow.execution.checkpoint.residency import member_partitions, participant_ids
                 parts = member_partitions(self._physical, residency, 'completed')
                 if residency['phase_complete']:
                     parts |= member_partitions(self._physical, residency, 'active')
@@ -817,7 +822,7 @@ class DataflowExecution:
         self._checkpoint_at = time.monotonic()
 
     def _configure_phases(self):
-        from ..dataflow_residency import pack_finite_phases
+        from demiflow.execution.scheduler.residency import pack_finite_phases
         stages = self._stage_order()
         def phase_fits(phase):
             group = [s for s in stages if s.stage_id in phase]
@@ -834,17 +839,14 @@ class DataflowExecution:
         waves = any(len(s.partitions) > s.replica_target for s in stages)
         if (durable or waves) and (not fits or waves or prior is not None and
                 prior.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2')):
-            from ..dataflow_durable_residency import DurableResidency
+            from demiflow.execution.action_driver.durable_residency import DurableResidency
             if any(source.replay == 'attempt_only' for source in self._physical.sources):
                 raise DataflowError('UNSUPPORTED_CAPABILITY', 'attempt-only source cannot park and restore within an action')
             if prior is not None:
-                self._finite_seals = {key: ArtifactRef(**ref) for key, ref in prior['finite_seals'].items()}
+                self._exchange.restore_finite(prior['finite_seals'])
             self._durable_residency = DurableResidency(self._physical, self._graph, self._exchange,
-                bounds=self._bounds, finite_seals=self._finite_seals, prior=prior, image=self._restore_image)
-            for edge_id, consumer in self._durable_residency.satisfied_inputs:
-                self._satisfied_consumers.setdefault(edge_id, set()).add(consumer)
+                bounds=self._bounds, prior=prior, image=self._restore_image)
             self._phases = self._durable_residency.groups
-            self._phase_index = self._durable_residency.active_index
         else:
             # A prepend cannot consume its live input until its finite prefix
             # has reached EOI. Admit that prefix's existing finite phase first.
@@ -864,13 +866,14 @@ class DataflowExecution:
             self._completed_stages = set(prior['completed_stages'])
             if prior['phase_complete']:
                 self._completed_stages.update(prior['active_stages'])
-            self._finite_seals = {key: ArtifactRef(**ref) for key, ref in prior['finite_seals'].items()}
+            self._exchange.restore_finite(prior['finite_seals'])
             self._phase_index = next((i for i, group in enumerate(self._phases)
                 if not set(group) <= self._completed_stages), len(self._phases))
             if self._phase_index == len(self._phases):
                 raise DataflowError('CORRUPT_ARTIFACT', 'completed residency lacks final publication')
 
     def _launch_phase(self):
+        phase_index = (self._durable_residency.active_index if self._durable_residency is not None else self._phase_index)
         # A durable handoff starts only after the original cut was ACKed and
         # every old owner was retired. K1/K2 admission performs no new business;
         # charging that idle boot time to the next checkpoint makes slow hosts
@@ -881,7 +884,7 @@ class DataflowExecution:
             and not handoff_image.cut.final and not self._endpoints
             and not self._active_worker_allocations and not self._by_partition
             and not self._lease_by_operation and self._checkpoint_progress() == 0)
-        phase = self._phases[self._phase_index]
+        phase = self._phases[phase_index]
         if self._fit:
             completed = self._completed_stages
             if self._durable_residency is not None:
@@ -892,13 +895,13 @@ class DataflowExecution:
                 return
             self._checkpoint_at = time.monotonic()
         stages = [s for s in self._stage_order() if s.stage_id in phase]
-        members = (set(self._durable_residency.partition_groups[self._phase_index])
+        members = (set(self._durable_residency.partition_groups[phase_index])
                    if self._durable_residency is not None else {p for s in stages for p in s.partitions})
         pending = [(stage, self._initial_work(stage, partition))
                    for stage in stages for partition in stage.partitions if partition in members]
         hosts = self._scheduler.place_hosts(pending)
         ready = []
-        from ..dataflow_native_limits import admission_timeout_ms
+        from demiflow.execution.scheduler.native_limits import admission_timeout_ms
         deadline = time.monotonic() + admission_timeout_ms(self._policy) / 1000
         while pending:
             deferred = []
@@ -934,7 +937,7 @@ class DataflowExecution:
             for target in self._durable_residency.launched(self._endpoints, self._by_partition):
                 self._idle.discard(target._allocation_id)
         for spec in self._physical.exchanges:
-            seal = self._finite_seals.get(spec.channel_id)
+            seal = self._exchange.finite_seals.get(spec.channel_id)
             if seal is not None:
                 self._deliver_finite(spec, seal)
 
@@ -943,6 +946,7 @@ class DataflowExecution:
             self._idle.discard(target._allocation_id)
 
     def _retire_phase(self, image):
+        phase_index = (self._durable_residency.active_index if self._durable_residency is not None else self._phase_index)
         # ACK is durable before any live participant disappears. The original
         # contribution keeps its original cut/boot in every subsequent carrier.
         receipt = image.confirmed_sinks[self._request.kind]
@@ -958,7 +962,7 @@ class DataflowExecution:
                 raise
             else:
                 self._drain_worker_observations(endpoint)
-        for stage_id in self._phases[self._phase_index]:
+        for stage_id in self._phases[phase_index]:
             self._scheduler.drain(stage_id, deadline_ms=self._policy.control_timeout_ms)
         for endpoint in self._endpoints.values():
             self._services.journal_service.retire_worker(endpoint._assignment.lease)
@@ -966,9 +970,8 @@ class DataflowExecution:
         recover_staging(self._request.action, bounds=self._bounds)
         if self._durable_residency is not None:
             self._durable_residency.committed(image, set(self._endpoints) <= self._done)
-            self._phase_index = self._durable_residency.active_index
         else:
-            self._completed_stages.update(self._phases[self._phase_index])
+            self._completed_stages.update(self._phases[phase_index])
             self._phase_index += 1
         self._active_worker_allocations.difference_update(self._endpoints)
         self._current_worker_observations.clear()
@@ -1086,7 +1089,7 @@ class DataflowExecution:
             if time.monotonic() >= deadline:
                 break
         self._pending_events = len(events)
-        from ..dataflow_hosts import batch_business_commands
+        from demiflow.execution.hosts.endpoints import batch_business_commands
         from contextlib import nullcontext
         commands = nullcontext() if draining else batch_business_commands(self._endpoints.values())
         self._update_checkpoint_wait_clock()
@@ -1201,7 +1204,7 @@ class DataflowExecution:
                 self._worker_detail_bytes += detail_bytes
             return
         if event.kind == "failure":
-            from ..dataflow_failures import restore_failure
+            from demiflow.execution.contracts.dataflow_failures import restore_failure
             self._failure = restore_failure(payload)
             self._state = "failed"
             raise self._failure
@@ -1210,17 +1213,17 @@ class DataflowExecution:
             assigned = {n for stage in endpoint._assignment.stages for n in stage.occurrences}
             if occ not in assigned or partition not in lease.partition_ids:
                 raise DataflowError("FENCED", "node observation is outside assigned stage")
-            from ..dataflow_operator_observations import validated_node_counters
+            from demiflow.execution.journal.dataflow_operator_observations import validated_node_counters
             metrics = validated_node_counters(payload['metrics'])
             old = self._node_metrics.get((occ, partition), {'rows_input': 0, 'rows_output': 0})
             if any(metrics[k] < old[k] for k in metrics):
                 raise DataflowError("FENCED", "node counters moved backwards within a worker boot")
             self._node_metrics[(occ, partition)] = metrics
-            from ..dataflow_usage import observe_prompt_usage
+            from demiflow.execution.journal.dataflow_usage import observe_prompt_usage
             observe_prompt_usage(self, event, payload)
-            from ..dataflow_model_observations import observe_models
+            from demiflow.execution.journal.dataflow_model_observations import observe_models
             observe_models(self, event, payload)
-            from ..dataflow_operator_observations import observe_operator
+            from demiflow.execution.journal.dataflow_operator_observations import observe_operator
             observe_operator(self, event, payload)
             from ..journal.run_telemetry import observe_graph_progress
             observe_graph_progress(self._graph_finished, self._graph, self._bounds, payload)
@@ -1272,24 +1275,16 @@ class DataflowExecution:
                                   and {edge.producer, edge.consumer} <= set(s.occurrences)), None)
                     if stage is None or consumer not in lease.partition_ids or consumer not in stage.partitions:
                         raise DataflowError('FENCED', 'internal input completion differs from sealed membership')
-                    self._satisfied_consumers.setdefault(edge.edge_id, set()).add(consumer)
+                    self._exchange.record_input_satisfied(edge.edge_id, consumer)
                     return
                 if consumer not in lease.partition_ids or consumer not in spec.consumer_partitions:
                     raise DataflowError("FENCED", "input completion differs from physical consumer membership")
-                done = self._satisfied_consumers.setdefault(spec.edge_id, set())
-                done.add(consumer)
-                if set(spec.consumer_partitions) <= done:
-                    for producer in spec.producer_partitions:
-                        target = self._by_partition.get(producer)
-                        if target is None:
-                            continue  # A finite producer was already durably retired.
-                        self._idle.discard(target._allocation_id)
-                        target.send_business({"kind": "close_output", "edge_id": spec.edge_id})
+                self._exchange.record_input_satisfied(spec.edge_id, consumer)
+                for target, command in self._exchange.close_satisfied_outputs(spec, self._by_partition):
+                    self._idle.discard(target._allocation_id)
+                    target.send_business(command)
             elif payload["scope"] == "finite":
                 from ..contracts.dataflow import ProducerCompletion
-                from ..exchange.dataflow_channels import seal_scope
-                from ..dataflow_sinks import _artifact_json
-                from ..recovery_contract import identity
                 spec = next(x for x in self._physical.exchanges if x.edge_id == payload["edge_id"])
                 producer = payload["producer_partition"]
                 if (spec.mode != "finite_sealed" or producer not in lease.partition_ids
@@ -1298,27 +1293,19 @@ class DataflowExecution:
                 completion = ProducerCompletion(partition_id=producer, generation=spec.route_epoch,
                     status="succeeded", manifest_ref=ArtifactRef(**payload["manifest_ref"]),
                     last_sequence=payload["last_sequence"])
-                members = self._finite_completions.setdefault(spec.channel_id, {})
-                if producer in members and members[producer] != completion:
-                    raise DataflowError("INVALID_CONTRACT", "conflicting finite producer completion")
-                members[producer] = completion
-                if set(members) == set(spec.producer_partitions):
-                    seal = seal_scope(spec.scope_id, tuple(members.values()), store=self._store)
-                    self._finite_seals[spec.channel_id] = seal
+                seal = self._exchange.record_finite_completion(spec, completion, store=self._store)
+                if seal is not None:
                     self._deliver_finite(spec, seal)
             elif payload["scope"] == "edge":
                 spec = next(x for x in self._physical.exchanges if x.edge_id == payload["edge_id"])
                 if payload["producer_partition"] not in lease.partition_ids:
                     raise DataflowError("FENCED", "EOI producer differs from allocation")
-                if self._durable_residency is not None:
-                    self._durable_residency.edge_eoi.add((spec.edge_id, payload['producer_partition']))
-                for target_id in spec.consumer_partitions:
-                    target = self._by_partition.get(target_id)
-                    if target is not None:
-                        self._idle.discard(target._allocation_id)
-                        target.send_business(dict(payload, kind="edge_eoi"))
+                for target, command in self._exchange.relay_edge_eoi(payload, spec, self._by_partition,
+                        parking=self._durable_residency is not None):
+                    self._idle.discard(target._allocation_id)
+                    target.send_business(command)
             else:
-                from ..checkpoint.coordinator import _cursor_from_json
+                from demiflow.execution.contracts.checkpoint import cursor_from_json as _cursor_from_json
                 assignment = endpoint._assignment
                 allowed = {s.split_id for s in assignment.source_splits}
                 cursors = tuple(_cursor_from_json(c) for c in payload["cursors"])
@@ -1401,7 +1388,7 @@ class DataflowExecution:
             else:
                 if set(event.payload) != {'contribution'} or type(event.payload['contribution']) is not str:
                     raise DataflowError('INVALID_CONTRACT', 'cut event needs its original encoded contribution')
-                from ..recovery_contract import MAX_DOCUMENT_BYTES
+                from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES
                 limit = min(self._bounds.max_control_bytes, MAX_DOCUMENT_BYTES)
                 if len(encode_wire(event, type_name='WorkerEvent', bounds=self._bounds)) > limit:
                     raise DataflowError('BUDGET_EXCEEDED', 'cut event exceeds the control envelope')
@@ -1432,18 +1419,19 @@ class DataflowExecution:
             return False
         for edge in outgoing:
             spec = next((x for x in self._physical.exchanges if x.edge_id == edge.edge_id), None)
-            if spec is not None and set(spec.consumer_partitions) <= self._satisfied_consumers.get(edge.edge_id, set()):
+            if spec is not None and self._exchange.consumers_satisfied(edge.edge_id, spec.consumer_partitions):
                 continue
             if spec is None:
                 stage = next((s for s in self._physical.stages
                               if {edge.producer, edge.consumer} <= set(s.occurrences)), None)
-                if stage is not None and set(stage.partitions) <= self._satisfied_consumers.get(edge.edge_id, set()):
+                if stage is not None and self._exchange.consumers_satisfied(edge.edge_id, stage.partitions):
                     continue
             if not self._source_demand_satisfied(edge.consumer):
                 return False
         return True
 
     def _advance_cut(self):
+        phase_index = (self._durable_residency.active_index if self._durable_residency is not None else self._phase_index)
         if self._publication_future is not None:
             self._poll_publication()
             return
@@ -1481,25 +1469,21 @@ class DataflowExecution:
             self._start_checkpoint_deadline()
             self._source_exhausted = self._checkpoint.sources_exhausted()
             phase_done = all_workers <= self._done
-            final = (phase_done and self._phase_index == len(self._phases) - 1
+            final = (phase_done and phase_index == len(self._phases) - 1
                      and self._checkpoint.inputs_complete())
             if durable is not None:
-                from ..dataflow_durable_residency import participant_ids
+                from demiflow.execution.checkpoint.residency import participant_ids
                 final = durable.final(phase_done) and self._checkpoint.inputs_complete()
                 self._cut = self._checkpoint.begin(final=final,
-                    participants=participant_ids(self._physical, durable.partition_groups[self._phase_index]),
+                    participants=participant_ids(self._physical, durable.partition_groups[phase_index]),
                     residency=durable.metadata(phase_done, self._checkpoint.satisfied_splits()))
             elif len(self._phases) > 1 or self._completed_stages:
-                from ..dataflow_residency import SCHEMA, participants_for
-                from ..dataflow_sinks import _artifact_json
-                residency = {'schema': SCHEMA,
-                    'active_stages': list(self._phases[self._phase_index]),
-                    'completed_stages': sorted(self._completed_stages),
-                    'phase_complete': phase_done,
-                    'satisfied_source_splits': list(self._checkpoint.satisfied_splits()),
-                    'finite_seals': {key: _artifact_json(ref) for key, ref in self._finite_seals.items()}}
+                from demiflow.execution.checkpoint.residency import finite_metadata, participants_for
+                residency = finite_metadata(active_stages=self._phases[phase_index],
+                    completed_stages=self._completed_stages, phase_done=phase_done,
+                    satisfied_splits=self._checkpoint.satisfied_splits(), finite_seals=self._exchange.finite_seals)
                 self._cut = self._checkpoint.begin(final=final,
-                    participants=participants_for(self._physical, self._phases[self._phase_index]),
+                    participants=participants_for(self._physical, self._phases[phase_index]),
                     residency=residency)
             else:
                 self._cut = self._checkpoint.begin(final=final)
@@ -1507,10 +1491,14 @@ class DataflowExecution:
                 endpoint.request_cut(self._cut)
         if self._cut is not None and set(self._cut.participants) <= self._contributions.keys():
             if durable is not None:
-                durable.before_commit(self._cut, self._contributions, self._store)
+                from demiflow.execution.checkpoint.residency import prove_durable_contributions
+                prove_durable_contributions(self._physical, self._cut, self._contributions,
+                    store=self._store, bounds=self._bounds,
+                    transform_occurrences=frozenset(n.occurrence_id for n in self._graph.nodes if n.kind == 'transform'),
+                    prove_frontier=self._exchange.prove_frontier)
                 self._checkpoint.update_residency(self._cut,
                     durable.metadata(all_workers <= self._done, self._checkpoint.satisfied_splits()))
-            from ..dataflow_producer import NativeProducerService
+            from demiflow.execution.native_queue.dataflow_queue import NativeProducerService
             if isinstance(self._acquisition, NativeProducerService):
                 # A parked physical owner is not the end of the native input
                 # unit. All downstream/fanout deliveries retain that ownership
@@ -1522,6 +1510,7 @@ class DataflowExecution:
             self._start_publication()
 
     def _finish_publication(self, image):
+        phase_index = (self._durable_residency.active_index if self._durable_residency is not None else self._phase_index)
         all_workers = set(self._endpoints)
         durable = self._durable_residency
         # ObjectSink.prepare already transfers exactly its generation.
@@ -1573,7 +1562,7 @@ class DataflowExecution:
                 self._continue_after_cut()
             else:
                 self._retire_phase(image)
-        elif all_workers <= self._done and self._phase_index < len(self._phases) - 1:
+        elif all_workers <= self._done and phase_index < len(self._phases) - 1:
             self._retire_phase(image)
         elif (all_workers <= self._done and self._checkpoint.inputs_complete()
               and not image.cut.final):
@@ -1697,7 +1686,7 @@ class DataflowExecution:
             # entire admitted row window. Its sealed prefix cannot release any
             # credit until the real receipt; an early resume can only go idle.
             return
-        from ..recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         commit_id = identity([self._run_id(), self._action.action_id, self._cut.sequence])
         fact = self._action.context.journal.execution_commit(commit_id)
         if fact is not None and fact['prepared'] is not None:
@@ -1756,9 +1745,8 @@ class DataflowExecution:
         self._confirmed_rows = rows
         self._source_exhausted = image.cut.final and all(c.end_of_input
             for contribution in image.contributions for c in contribution.sources)
-        write = None
+        receipt = None
         if self._request.kind in ("write_lance", "write_datasink", "write_file"):
-            from ...data.datasink import WriteResult
             fact = self._action.context.journal.execution_commit(image.commit_id)
             receipt_data = fact["receipts"][self._request.kind]["data"]
             if getattr(self._action, "object_sinks", None):
@@ -1766,12 +1754,11 @@ class DataflowExecution:
             receipt = receipt_data.get("native_receipt")
             if self._fit and self._request.kind == 'write_lance' and receipt:
                 self._fit.retain_table(receipt['data']['uri'], receipt=receipt)
-            write = WriteResult(written_rows=rows, blocks_written=len(publication["manifest"]["partitions"]),
-                                metadata={"native_receipt": receipt, "queue_settled": self._acquisition is not None and self._acquisition.binding.mode == "sink"})
-        self._terminal_result = TerminalResult(kind=self._request.kind, rows=rows,
-            scalar=rows if self._request.kind == "count" else publication["manifest"]["partitions"][0].get("scalar"),
-            result_ref=image.confirmed_sinks[self._request.kind], write_result=write, complete=True,
-            completion="source_exhausted" if self._source_exhausted else "terminal_satisfied")
+        from demiflow.execution.outputs.terminals import published_result
+        self._terminal_result = published_result(self._request.kind, publication,
+            result_ref=image.confirmed_sinks[self._request.kind], source_exhausted=self._source_exhausted,
+            native_receipt=receipt,
+            queue_settled=self._acquisition is not None and self._acquisition.binding.mode == "sink")
         self._state = "succeeded"
 
     # -- E006 finish ------------------------------------------------------
@@ -1860,7 +1847,7 @@ class DataflowExecution:
                 else:
                     cleanup_error.add_note("Physical cleanup also failed: " + str(exc))
         if not physical_closed and self._defer_live_thread_cleanup():
-            from ..recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             isolated = RecoveryContractError('Native writer is isolated while draining; run lease is retained')
             if cleanup_error is not None:
                 isolated.add_note('Original cleanup: ' + str(cleanup_error))
@@ -1877,17 +1864,8 @@ class DataflowExecution:
     def _defer_live_thread_cleanup(self):
         if self._policy.provider != 'local' or self._policy.worker_mode != 'thread':
             return False
-        connector = self._services.resources.provider._control
-        units = tuple(connector.units.values())
-        if not units:
-            return False
-        # A requested stop, closed mailbox or cancelled Future is not physical
-        # exit evidence. The original provider owns the real thread membership.
-        live = False
-        for unit in units:
-            with unit.owned_lock:
-                owned = tuple(unit.owned)
-            live |= unit.thread.is_alive() or any(thread.is_alive() for thread in owned)
+        from demiflow.execution.hosts.thread import live_thread_units
+        live = live_thread_units(self._services.resources.provider)
         if not live:
             return False
         from contextvars import copy_context
@@ -1971,7 +1949,7 @@ class DataflowExecution:
         self._active_worker_allocations.clear()
         self._current_worker_observations.clear()
         if physical_closed:
-            from ..dataflow_thread_programs import owner, release
+            from demiflow.execution.seal.thread_programs import owner, release
             release(owner(self._action))
         if cleanup_error is not None:
             raise cleanup_error

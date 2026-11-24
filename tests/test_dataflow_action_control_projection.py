@@ -3,9 +3,9 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import ControlReply, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_authority import DriverJournalService
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.journal.dataflow_authority import DriverJournalService
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def test_deep_action_retains_original_journal_but_control_reply_is_narrow(tmp_path):

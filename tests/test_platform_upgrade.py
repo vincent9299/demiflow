@@ -80,7 +80,7 @@ def test_externalized_input_and_content_hash(tmp_path):
 
 
 def test_empty_run_reset_and_activity_guard(tmp_path):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(tmp_path / 'run')
     journal.initialize({'code': 'draft'})
     journal.reset_empty(actor='tester', reason='finalize source')
@@ -92,8 +92,8 @@ def test_empty_run_reset_and_activity_guard(tmp_path):
 
 
 def test_empty_reset_excludes_writer(tmp_path):
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.artifacts import run_lock
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.storage.artifacts import run_lock
     journal = RunJournal(tmp_path)
     journal.initialize({'code': 'x'})
     with run_lock(tmp_path), pytest.raises(RuntimeError, match='Another writer'):
@@ -136,7 +136,7 @@ def test_public_sort_consumes_nonrepeatable_input_only_once(tmp_path):
 
 
 def test_isolated_stage_returns_or_propagates():
-    from demiflow.execution.isolation import run_isolated
+    from demiflow.execution.hosts.isolation import run_isolated
     assert run_isolated(os.getpid) != os.getpid()
     with pytest.raises(ZeroDivisionError):
         run_isolated(lambda: 1/0)
@@ -162,7 +162,7 @@ def test_append_commit_receipt_gap_and_uncertainty(tmp_path):
     import lance
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.dataset_commit import DatasetCommit, UncertainDatasetCommit
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit, UncertainDatasetCommit
     uri = str(tmp_path / 'data.lance')
     args = (tmp_path / 'control', 'batch-1', uri)
     source = data.from_items([{'v':1}])
@@ -190,7 +190,7 @@ def test_append_commit_receipt_gap_and_uncertainty(tmp_path):
 
 
 def test_explicit_append_recovery_checks_unchanged_target(tmp_path):
-    from demiflow.execution.dataset_commit import DatasetCommit
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit
     args = (tmp_path / 'control', 'batch', str(tmp_path / 'absent.lance'))
     with pytest.raises(OSError):
         with DatasetCommit(*args):
@@ -204,7 +204,7 @@ def test_explicit_append_recovery_checks_unchanged_target(tmp_path):
 def test_file_uri_and_path_share_append_intent_and_detect_changed_target(tmp_path):
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.dataset_commit import DatasetCommit, UncertainDatasetCommit
+    from demiflow.execution.checkpoint.dataset_commit import DatasetCommit, UncertainDatasetCommit
     path = tmp_path / 'data.lance'
     source = data.from_items([{'v': 1}])
     schema = pa.schema([('v', pa.int64())])

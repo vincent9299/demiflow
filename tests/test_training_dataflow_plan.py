@@ -134,7 +134,7 @@ def test_static_flow_resolves_training_and_selection_without_executing(tmp_path)
 
 
 def test_multiple_consumers_and_continuation_share_immutable_fit_occurrences():
-    from demiflow.execution.plan_capture import build_logical_plan_view
+    from demiflow.execution.journal.program_materials import build_logical_plan_view
     port = object()
     ds = Dataset(ItemsSource(({"x": "s"},)), LogicalPlan(), port)
     first = ds.fit(recipe=recipe()).checkpoints.select(steps=[2])

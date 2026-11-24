@@ -6,9 +6,9 @@ from demiflow import data
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import LogicalPlan, reject_streaming_map_options
 from demiflow.errors import UnsupportedExecutionOptionError
-from demiflow.execution.capabilities import validate_stream_plan
+from demiflow.planning.dataflow_compile import validate_stream_plan
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _worker_event_fixtures import emit, events
 from runtime_v3_recovery_scenarios import _provider
 from runtime_v3_support import _RayDataBlocker, _ExecuteActionRecorder
@@ -83,7 +83,7 @@ def test_stream_preflight_is_bounded_and_rejects_async_map_callables():
 def test_public_explain_separates_metadata_from_closed_runtime_policy(provider):
     from demiflow.execution.executors.local import LocalDatasetExecutor
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    from demiflow.execution.dataflow_api import explain_dataset
+    from demiflow.execution.executors.dataflow_api import explain_dataset
     from demiflow.data.api import DataAPI
     executor = LocalDatasetExecutor() if provider == 'local' else RayDatasetExecutor()
     def forbidden():

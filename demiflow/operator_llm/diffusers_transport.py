@@ -1,7 +1,7 @@
 """Local model transport; prompt runtime owns requests, journals and lifecycle."""
 import base64
 
-from demiflow.execution.blocking_io import BlockingIOPool
+from demiflow.services.blocking_io import BlockingIOPool
 from .media import BoundedImageBuffer, checked_image, media_limits
 
 

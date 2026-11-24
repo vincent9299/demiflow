@@ -6,8 +6,8 @@ import pytest
 from demiflow import data
 from demiflow.embeddings.runtime import EmbeddingMetrics
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.dataflow_model_observations import validate_summaries, observe_models
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.journal.dataflow_model_observations import validate_summaries, observe_models
 from test_embeddings import server
 from test_map_prompt_async import server as prompt_server, prompt
 
@@ -67,7 +67,7 @@ def test_real_final_metrics_and_original_history_audit_reach_on_drain(tmp_path, 
 
 
 def test_prompt_summary_has_no_invented_embedding_fields():
-    from demiflow.execution.stream_resources import CallMetrics
+    from demiflow.execution.journal.run_telemetry import CallMetrics
     value = CallMetrics().summary()
     assert validate_summaries([value], maximum=1, max_bytes=16384, kind='prompt') == [value]
     assert 'phases' not in value and 'profiled_batches' not in value and 'shared_admission' not in value
@@ -89,7 +89,7 @@ def test_real_prompt_and_embedding_keep_both_observed_models(server, prompt_serv
 
 
 def test_sealed_prompt_route_audit_skip_and_normalized_path_dedup(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_model_observations import finish_journal_audit
+    from demiflow.execution.journal.dataflow_model_observations import finish_journal_audit
     from demiflow.operator_llm import call_ref
     first, second = tmp_path/'calls.sqlite', tmp_path/'skipped.sqlite'
     calls = []
@@ -111,7 +111,7 @@ def test_sealed_prompt_route_audit_skip_and_normalized_path_dedup(tmp_path, monk
 
 
 def test_routed_observation_requires_each_sealed_child_once():
-    from demiflow.execution.stream_resources import CallMetrics
+    from demiflow.execution.journal.run_telemetry import CallMetrics
     node = SimpleNamespace(occurrence_id='o', kernel=SimpleNamespace(kind='prompt',
         configuration={'concurrency': 1, 'routes': {'a': {}, 'b': {}}}))
     execution = SimpleNamespace(_graph=SimpleNamespace(nodes=[node]), _bounds=SimpleNamespace(max_control_bytes=16384))

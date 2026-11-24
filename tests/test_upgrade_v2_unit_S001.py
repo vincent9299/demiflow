@@ -9,8 +9,8 @@ import threading
 import pytest
 import demiflow
 
-from demiflow.execution.operator_policy import classify_operator_state, StatePolicy
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.compiler_support.operator_policy import classify_operator_state, StatePolicy
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
 

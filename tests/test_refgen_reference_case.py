@@ -9,8 +9,9 @@ import lance
 import pytest
 
 from demiflow import data
-from demiflow.execution.plan_capture import capture_pipeline, build_logical_plan_view
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.managed_native import capture_pipeline
+from demiflow.execution.journal.program_materials import build_logical_plan_view
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.objects import ObjectRef
 
 

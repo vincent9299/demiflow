@@ -9,7 +9,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _before(row):
@@ -36,8 +36,8 @@ def _cuda(row, *, lane=0):
     import time
     import ray
     import torch
-    from demiflow.execution.dataflow_ray_devices import worker_device_binding
-    from demiflow.execution.dataflow_devices import gpu_capacity
+    from demiflow.execution.hosts.ray_devices import worker_device_binding
+    from demiflow.execution.hosts.devices import gpu_capacity
     if gpu_capacity('ray_core') != 0 or torch.cuda.device_count()!=1:
         raise RuntimeError('GPU worker did not receive exactly its original grant')
     binding=worker_device_binding()
@@ -207,7 +207,7 @@ def test_multi_host_remote_gpu_actor_loss_resumes_original_ack(tmp_path, monkeyp
     from demiflow.data.api import _use_executor
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     from demiflow.resources.device_pool import DevicePool
     from runtime_v3_support import _RayDataBlocker
     assert ray.is_initialized()
@@ -241,7 +241,7 @@ def test_multi_host_remote_gpu_actor_loss_resumes_original_ack(tmp_path, monkeyp
                      'rows': publication['manifest']['total_rows'], 'attempt': execution._attempt()})
         if not image.cut.final and cuts[-1]['rows'] and not killed:
             prefix = []
-            from demiflow.execution.dataflow_replay import PublishedRecordReader
+            from demiflow.execution.outputs.replay import PublishedRecordReader
             reader = PublishedRecordReader(publication, store=execution._store, bounds=execution._bounds)
             try:
                 while True:

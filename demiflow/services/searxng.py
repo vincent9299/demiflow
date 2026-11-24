@@ -39,7 +39,7 @@ class _SearxOwner:
         if self.owner is None:
             import yaml
             from .manage import _directory
-            from ..execution.artifacts import run_lock
+            from demiflow.execution.storage.artifacts import run_lock
             spec=self.spec; directory=_directory(spec.root,spec.name)
             settings=directory/(spec.fingerprint+'.yaml')
             config={'use_default_settings':{'engines':{'keep_only':list(spec.engines)}},

@@ -19,15 +19,15 @@ from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow import WorkerLease, RuntimeServices
 from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_api import make_action_request
-from demiflow.execution.dataflow_inputs import build_input_handle
+from demiflow.execution.executors.dataflow_api import make_action_request
+from demiflow.execution.sources.materialized_input import build_input_handle
 from demiflow.execution.seal.plan import load_dataflow
 from demiflow.execution.seal.plan import verify_dataflow_program
-from demiflow.execution.dataflow_services import make_driver_services
-from demiflow.execution.dataflow_sources import spool_record
-from demiflow.execution.dataflow_sources import open_source_reader
-from demiflow.execution.recovery_identity import source_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.action_driver.services import make_driver_services
+from demiflow.execution.sources.snapshots import spool_record
+from demiflow.execution.sources.snapshots import open_source_reader
+from demiflow.execution.seal.program_identity import source_identity
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
@@ -100,8 +100,8 @@ def test_literal_input_identity_preserves_historical_projection():
     assert source_identity(source) == source_identity(other)
     assert source_identity(source) != source_identity(changed)
     assert source.handle.row_count == 1
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import describe
     assert source_identity(source) == {
         "literal_materialization": identity(describe((({"x": 1},),))), "rows": 1}
     assert not hasattr(source.handle, "recovery_reference")
@@ -114,7 +114,7 @@ def test_record_fidelity_through_real_store(tmp_path):
     with prepared(tmp_path, data.from_iter(lambda: iter([]))) as (ex, services):
         ref = spool_record(record, split_id="b" * 64, sequence=0,
                            store=services.store, bounds=services.bounds)
-        from demiflow.execution.exchange.dataflow_bridge import _decode_payload
+        from demiflow.execution.contracts.record_codec import _decode_payload
         value = _decode_payload(b"".join(services.store.read(ref, max_bytes=services.bounds.max_row_bytes)),
                                 max_bytes=services.bounds.max_row_bytes)
         assert type(value["list"]) is list and len(value["list"]) == 2
@@ -126,7 +126,7 @@ def test_record_fidelity_through_real_store(tmp_path):
 
 
 def test_nested_literal_input_budget_is_checked_before_copy():
-    from demiflow.execution.dataflow_inputs import InputMaterializedHandle
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with pytest.raises(DataflowError, match="BUDGET_EXCEEDED"):
         InputMaterializedHandle([{"nested": {"wide": "x" * 10000}}], format="items", max_bytes=1024)
@@ -149,7 +149,8 @@ def reader_services(ex, services):
 
 
 def test_real_reader_and_callable_kernel_receive_sealed_parameters(tmp_path):
-    from demiflow.execution.kernels.dataflow import make_kernel, _materialize_row
+    from demiflow.execution.kernels.dataflow import make_kernel
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     dataset = data.from_iter(lambda: iter([{"x": 2}])).map(
         lambda row, delta: {"x": row["x"] + delta}, fn_kwargs={"delta": 3})
     with prepared(tmp_path, dataset) as (ex, services):
@@ -163,7 +164,7 @@ def test_real_reader_and_callable_kernel_receive_sealed_parameters(tmp_path):
             poll = reader.next_record()
             assert poll.status == "record"
             output = list(kernel.push("main", poll.record))
-            assert [_materialize_row(record, runtime) for record in output] == [{"x": 5}]
+            assert [_materialize_row(record, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for record in output] == [{"x": 5}]
             assert reader.next_record().status == "eoi"
         finally:
             kernel.close()
@@ -183,9 +184,9 @@ def test_assignment_only_contains_sources_owned_by_its_stage(tmp_path):
 
 def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, monkeypatch):
     from demiflow.execution.seal.plan import load_sealed_dataflow
-    from demiflow.execution.dataflow_services import _load_programs
+    from demiflow.execution.seal.plan import load_worker_programs as _load_programs
     from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    from demiflow.execution.dataflow_hosts import ControlMailbox
+    from demiflow.execution.worker.mailbox import ControlMailbox
     with prepared(tmp_path, data.from_items([{"x": 1}]).map(lambda r: r)) as (ex, services):
         runtime = reader_services(ex, services)
         def forbidden(*args, **kwargs):
@@ -212,7 +213,8 @@ def test_worker_reads_original_sealed_refs_without_opening_journal(tmp_path, mon
 
 def test_real_source_kernel_exchange_codec_roundtrip(tmp_path):
     from demiflow.execution.exchange.dataflow_channels import encode_record, resolve_record
-    from demiflow.execution.kernels.dataflow import make_kernel, _materialize_row
+    from demiflow.execution.kernels.dataflow import make_kernel
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     value = {"negative": [-0.0], "positive": [0.0], "tuple": (b"data", [None])}
     with prepared(tmp_path, data.from_items([value]).map(lambda r: r)) as (ex, services):
         runtime = reader_services(ex, services)
@@ -227,8 +229,7 @@ def test_real_source_kernel_exchange_codec_roundtrip(tmp_path):
             decoded = resolve_record(source_wire, store=services.store, bounds=services.bounds)
             output, = kernel.push("main", decoded)
             wire = encode_record(output, bounds=services.bounds)
-            actual = _materialize_row(resolve_record(wire, store=services.store,
-                                      bounds=services.bounds), runtime)
+            actual = _materialize_row(resolve_record(wire, store=services.store, bounds=services.bounds), store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))
             assert actual == value
             assert type(actual["tuple"]) is tuple and type(actual["tuple"][1]) is list
             assert math.copysign(1, actual["negative"][0]) == -1
@@ -288,9 +289,9 @@ def test_native_operation_has_one_type_authority():
 
 @pytest.mark.parametrize("override", [None, 0, -1, 1, 2, 4, 12])
 def test_input_block_boundaries_and_history_match_pre_v3(override):
-    from demiflow.execution.dataflow_inputs import build_input_handle
-    from demiflow.execution.recovery_identity import describe
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.sources.materialized_input import build_input_handle
+    from demiflow.execution.seal.program_identity import describe
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.data.sources import MaterializedSource
     rows = [{"x": i} for i in range(5)]
     count = max(1, int(override or 1))
@@ -310,7 +311,7 @@ def test_input_block_boundaries_and_history_match_pre_v3(override):
 
 def test_real_native_cut_commit_and_recovery_with_typed_sink_record(tmp_path):
     from demiflow.execution.contracts.dataflow import CutContribution, SourceCursor
-    from demiflow.execution.dataflow_sinks import make_sink_adapter, prepare_sink_partition
+    from demiflow.execution.outputs.sinks import make_sink_adapter, prepare_sink_partition
     from demiflow.execution.kernels.dataflow import _output_record
     with prepared(tmp_path, data.from_items([{"value": (b"a", [-0.0])}])) as (ex, services):
         runtime = reader_services(ex, services)
@@ -354,9 +355,9 @@ def test_real_local_host_verifies_loads_and_activates_map_program(tmp_path):
 
 
 def test_driver_control_repeated_reads_and_unread_reply_backpressure(tmp_path):
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.contracts.dataflow import WorkerEvent
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with prepared(tmp_path, data.from_items([])) as (ex, services):
         service = DriverJournalService(ex._action, store=services.store,
@@ -413,7 +414,7 @@ def test_snapshot_kind_is_the_registered_semantic_kind(tmp_path):
 
 def test_real_workbench_and_history_read_original_v3_store(tmp_path):
     from demiflow.workbench.runs.facts import read_sealed_plan
-    from demiflow.execution.dataflow_history import load_execution_version
+    from demiflow.execution.journal.dataflow_history import load_execution_version
     with prepared(tmp_path, data.from_items([{"x": 1}]).map(lambda r: r)) as (ex, services):
         root = services.action.context.directory
         before = sorted(str(p.relative_to(root)) for p in root.rglob("*"))
@@ -431,7 +432,7 @@ def test_real_workbench_and_history_read_original_v3_store(tmp_path):
 
 def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
     from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
-    from demiflow.execution.kernels.dataflow import _materialize_row
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     original = [{"x": 2, "typed": (-0.0, b"two")}, {"x": 1, "typed": [0.0, b"one"]}]
     with prepared(tmp_path, data.from_items(original).sort("x")) as (ex, services):
         runtime = reader_services(ex, services)
@@ -444,7 +445,7 @@ def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
             ordered = list(merge_sort_runs(runs, spec=spec, services=runtime))
             assert [r.record_id for r in ordered] == [records[1].record_id, records[0].record_id]
             assert [r.source_position for r in ordered] == [records[1].source_position, records[0].source_position]
-            rows = [_materialize_row(r, runtime) for r in ordered]
+            rows = [_materialize_row(r, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for r in ordered]
             assert rows == [original[1], original[0]]
             assert type(rows[0]["typed"]) is list
             assert type(rows[1]["typed"]) is tuple
@@ -463,8 +464,9 @@ def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
 
 
 def test_resume_validation_reads_wire_plan_and_checks_platform_pin(tmp_path):
-    from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
-    from demiflow.execution.recovery_identity import platform_identity
+    from demiflow.execution.journal.dataflow_history import load_execution_version
+    from demiflow.execution.checkpoint.history import validate_resume_compatibility
+    from demiflow.execution.seal.program_identity import platform_identity
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
         binding = load_execution_version(services.action.context.directory,
                          services.action.action_id, max_bytes=services.bounds.max_control_bytes)
@@ -485,7 +487,7 @@ def test_resume_validation_reads_wire_plan_and_checks_platform_pin(tmp_path):
 
 def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
     from demiflow.execution.kernels.relational import join_partitions
-    from demiflow.execution.kernels.dataflow import _materialize_row
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
     left = data.from_items([{"key": 1, "left": (b"one", -0.0)}, {"key": None, "left": ()}])
     right = data.from_items([{"key": 1, "right": [b"a"]}, {"key": 1, "right": [b"b"]}])
     with prepared(tmp_path, left.join(right, on="key")) as (ex, services):
@@ -505,7 +507,7 @@ def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
                     rows.append(poll.record)
                 sources.append(iter(rows))
             spec = next(n.kernel for n in ex._graph.nodes if n.kind == "relational")
-            rows = [_materialize_row(r, runtime) for r in join_partitions(
+            rows = [_materialize_row(r, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None)) for r in join_partitions(
                 sources[0], sources[1], spec=spec, services=runtime)]
             assert len(rows) == 2
             assert {r["right"][0] for r in rows} == {b"a", b"b"}
@@ -517,7 +519,7 @@ def test_real_join_kernel_uses_same_row_codec_on_write_and_read(tmp_path):
 
 def test_control_cancel_wakes_waiter_without_confirming_unknown_effect(tmp_path):
     import threading
-    from demiflow.execution.dataflow_hosts import ControlMailbox
+    from demiflow.execution.worker.mailbox import ControlMailbox
     from demiflow.execution.contracts.dataflow import WorkerEvent, ControlReply
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with prepared(tmp_path, data.from_items([])) as (ex, services):

@@ -3,6 +3,8 @@
 Materializing a request is not a provider call. Missing responses remain pending;
 submitted responses still pass through the normal actor's parser and schema.
 """
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 import hashlib
 import json
 from pathlib import Path
@@ -89,3 +91,31 @@ class OfflinePromptClient:
 
     async def aclose(self):
         pass
+
+
+class RemoteOfflinePromptClient:
+    def __init__(self, model, options, journal):
+        from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
+        if not inherits_bound_port(journal, PromptJournalPort):
+            raise ValueError('Offline input requires the verified native worker port')
+        if set(options) not in ({'offline_dir'}, {'offline_store'}):
+            raise ValueError('Offline input accepts exactly one declared store')
+        self.model, self.options, self.journal = model, options, journal
+
+    def lookup(self, request):
+        record = request_record(request)
+        reply = self.journal.offline_lookup(record)
+        if reply['status'] == 'pending':
+            error = PromptResponsePending(reply['detail'])
+            error.call = reply['call']
+            raise error
+        if reply['status'] != 'response':
+            raise DataflowError('INTERNAL_PROTOCOL', 'Unknown offline lookup result')
+        return OperatorLLMResponse(reply['content'], metadata=reply['metadata'])
+
+    async def execute(self, request):
+        from demiflow.operator_llm.client import _journal_io
+        return await _journal_io(self.lookup, request)
+
+    async def aclose(self):
+        pass  # The run owns the port; no worker file/database was opened.

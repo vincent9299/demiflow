@@ -1,7 +1,7 @@
 """The public batched document actor reaches its actual preparation and index."""
 from demiflow import data
 from demiflow.collect.document_library import DocumentLibrary
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def rows():

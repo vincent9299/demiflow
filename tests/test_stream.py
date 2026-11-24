@@ -12,8 +12,8 @@ import pytest
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.api import DataAPI
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def build(n=50):

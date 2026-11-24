@@ -57,7 +57,7 @@ def test_checked_flow_never_admits_retired_dataset_facades(entry, tmp_path):
     assert not Path(paths['target']).exists()
 
 
-@pytest.mark.parametrize('entry', ['stream_checkpoint', 'operator_checkpoint', 'map_async', 'batch_map'])
+@pytest.mark.parametrize('entry', ['stream_checkpoint', 'map_async', 'batch_map'])
 @pytest.mark.parametrize('cached', [False, True])
 def test_legacy_ledger_controls_cannot_allocate_or_recover(entry, cached, tmp_path):
     target = tmp_path / 'nested' / 'old-state'
@@ -70,9 +70,6 @@ def test_legacy_ledger_controls_cannot_allocate_or_recover(entry, cached, tmp_pa
         if entry == 'stream_checkpoint':
             from demiflow import StreamCheckpoint
             StreamCheckpoint(target, identity={'source': 1})
-        elif entry == 'operator_checkpoint':
-            from demiflow.execution.operator_checkpoint import OperatorCheckpoint
-            OperatorCheckpoint(target, operator='fixture')
         elif entry == 'map_async':
             data.from_items([]).map_async(convert, checkpoint=str(target))
         else:

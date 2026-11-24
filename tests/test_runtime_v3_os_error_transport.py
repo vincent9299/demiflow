@@ -5,7 +5,7 @@ import json
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 
 
 @pytest.mark.parametrize('original', [

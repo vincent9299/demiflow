@@ -7,8 +7,8 @@ import pytest
 from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_models import _model_profile
-from demiflow.execution.run_journal import RunJournal
+from demiflow.planning.dataflow_budget import _model_profile
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -59,8 +59,8 @@ def test_native_codec_targets_fit_one_original_incremental_component():
 
 def test_native_publication_is_separate_from_workers_and_must_be_sealed():
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_publication_budget import graph_workspace_bytes, workspace_bytes
-    from demiflow.execution.dataflow_sinks import make_native_terminal_sink
+    from demiflow.execution.scheduler.dataflow_publication_budget import graph_workspace_bytes, workspace_bytes
+    from demiflow.execution.outputs.sinks import make_native_terminal_sink
     policy, bounds = resolve_runtime_policy({}, {}, provider='local')
     action = replace(request(data.from_items([{'id': 1}])), kind='write_lance')
     graph = lower_action(action, bounds=bounds).graph

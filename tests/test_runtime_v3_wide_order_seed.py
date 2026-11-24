@@ -4,7 +4,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('copies,limits', [(160000, {}), (750000, {'max_batch_bytes': 64 * 1024**2})])

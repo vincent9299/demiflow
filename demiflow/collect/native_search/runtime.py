@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-from demiflow.execution.request_limits import RequestGate
+from demiflow.services.request_limits import RequestGate
 from .config import SearchConfig, RUNTIME_VERSION, runtime_id, digest, resolve, public, validate_language
 
 
@@ -211,7 +211,7 @@ class NativeSearchSession:
             if self.control_bytes is not None:
                 page=db.execute('PRAGMA page_size').fetchone()[0]
                 if db.execute('PRAGMA page_count').fetchone()[0]*page>self.control_bytes:
-                    from ...execution.recovery_contract import RecoveryContractError
+                    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                     raise RecoveryContractError('Search cache exceeds its native control byte budget')
                 db.execute('PRAGMA cache_size=-4096')
                 db.execute('PRAGMA max_page_count='+str(self.control_bytes//page))
@@ -318,7 +318,7 @@ class NativeSearchSession:
     def host_gate(self, host):
         if host not in self.hosts:
             if self.max_hosts is not None and len(self.hosts)>=self.max_hosts:
-                from ...execution.recovery_contract import RecoveryContractError
+                from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Native search host count budget exhausted')
             self.hosts[host] = RequestGate(self.config.host_concurrency, interval_s=self.config.host_interval_s)
         return self.hosts[host]

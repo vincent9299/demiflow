@@ -1,6 +1,13 @@
 """Exact Lance scan, vector search, and fragment-partitioned reads."""
 from __future__ import annotations
 
+from contextlib import closing
+
+import math
+
+import pyarrow.compute as pc
+from demiflow.lance.arrow_batches import ARROW_BATCH_BYTES
+
 import hashlib
 import json
 from dataclasses import replace
@@ -245,3 +252,148 @@ __all__ = [
     "constrain_lance_query", "fragment_inventory_hash", "iter_lance_batches",
     "iter_lance_partition_batches", "plan_lance_scan_partitions",
 ]
+
+
+def payload_schema(schema, references):
+    active = [ref for ref in references if ref['field'] in schema.names]
+    fields = {ref['field'] for ref in active}
+    return pa.schema([pa.field(f.name, pa.large_binary(), nullable=f.nullable)
+                      if f.name in fields else f for f in schema], metadata=schema.metadata), active
+
+def hydrate_payloads(batches, references, *, max_row_bytes, stats):
+    """Bound lookups before allocation using lengths saved with each envelope.
+
+    Offset/length arrays are query-batch bounded. Combined decoded envelope
+    bytes per lookup batch are <= 8 MiB, or one finite oversized row. Repeated
+    offsets share one native lookup within each admitted part; output expansion
+    still obeys the full row-byte cost above. Native buffers and Lance decoding
+    still require RSS headroom.
+    """
+    import lance
+    snapshots = {ref['field']: lance.dataset(**ref['source']) for ref in references}
+    for batch in batches:
+        sizes = [batch.column(ref['size_field']).to_pylist() for ref in references]
+        start, total = 0, 0
+        ranges = []
+        for i in range(batch.num_rows):
+            values = [column[i] for column in sizes]
+            if any(value is not None and (not isinstance(value, int) or value < 0) for value in values):
+                raise ValueError('Invalid private payload length')
+            cost = sum(value or 0 for value in values) + batch.slice(i, 1).nbytes
+            if cost > max_row_bytes:
+                raise MemoryError(f'Opaque joined row exceeds max_row_bytes={max_row_bytes}')
+            if i > start and total + cost > min(ARROW_BATCH_BYTES, max_row_bytes):
+                ranges.append((start, i))
+                start, total = i, 0
+            total += cost
+        if start < batch.num_rows:
+            ranges.append((start, batch.num_rows))
+        for start, end in ranges:
+            part = batch.slice(start, end - start)
+            for ref in references:
+                field = ref['field']
+                offsets = part.column(field).to_pylist()
+                lengths = part.column(ref['size_field']).to_pylist()
+                indices, positions, expected = [], [], []
+                unique = {}
+                for offset, length in zip(offsets, lengths):
+                    if offset is None:
+                        if length is not None:
+                            raise ValueError('Unmatched payload has a length')
+                        positions.append(None)
+                    else:
+                        if length is None:
+                            raise ValueError('Matched payload has no length')
+                        position = unique.get(offset)
+                        if position is None:
+                            position = len(indices)
+                            unique[offset] = position
+                            indices.append(offset)
+                            expected.append(length)
+                        elif expected[position] != length:
+                            raise RuntimeError('Pinned opaque payload lookup changed size or lost rows')
+                        positions.append(position)
+                if indices:
+                    lookup = snapshots[field].take(indices, columns=[field])
+                    if lookup.num_rows != len(indices) or pc.binary_length(lookup[field]).to_pylist() != expected:
+                        raise RuntimeError('Pinned opaque payload lookup changed size or lost rows')
+                    stats['max_lookup_bytes'] = max(stats['max_lookup_bytes'], lookup.nbytes)
+                    column = lookup[field]
+                    values = column.chunk(0) if column.num_chunks == 1 else column.combine_chunks()
+                    # Gather once into an Array, also compacting any borrowed
+                    # source slice. Taking a ChunkedArray then combining it
+                    # would copy the expanded payload a second time.
+                    values = pc.take(values, pa.array(positions, type=pa.int32()))
+                else:
+                    values = pa.nulls(part.num_rows, type=pa.large_binary())
+                part = part.set_column(part.schema.get_field_index(field), field, values)
+            stats['rows'] += part.num_rows
+            stats['batches'] += 1
+            stats['max_batch_bytes'] = max(stats['max_batch_bytes'], part.nbytes)
+            yield part
+
+
+def scalar_equal(name, value):
+    # Lance treats double quotes as string literals; identifiers use backticks.
+    identifier = '`' + name.replace('`', '``') + '`'
+    if value is None:
+        return identifier + ' IS NULL'
+    if isinstance(value, str):
+        literal = "'" + value.replace("'", "''") + "'"
+    elif type(value) is bool:
+        literal = 'TRUE' if value else 'FALSE'
+    elif type(value) is int:
+        literal = str(value)
+    elif type(value) is float and math.isfinite(value):
+        literal = repr(value)
+    else:
+        raise ValueError('Lance equality key requires a finite scalar')
+    return identifier + ' = ' + literal
+
+
+def open_lookup_source(source, on, columns, max_matches):
+    import lance
+    table = lance.dataset(**source)
+    names = table.schema.names
+    if on not in names:
+        raise ValueError('Lookup key absent from source')
+    # An indexed lookup already fetches only matching rows. Keep its native
+    # plan, and leave multi-match or unusual projections to that scanner:
+    # many separate payload takes are slower than one native multi-row read.
+    direct_projection = columns is None or (
+        isinstance(columns, (list, tuple)) and bool(columns)
+        and all(isinstance(c, str) and c in names for c in columns)
+        and len(set(columns)) == len(columns))
+    key_scan = False
+    if max_matches == 1 and direct_projection:
+        key_scan = not any(on in index.field_names for index in table.describe_indices())
+    return table, key_scan
+
+
+def lookup_batches(table, on, key, columns, max_matches, *, key_scan):
+    """Read the original indexed scan or bounded key-only row-ID scan."""
+    if not key_scan:
+        return table.scanner(columns=columns, filter=scalar_equal(on, key),
+            limit=max_matches+1, batch_size=1, batch_readahead=1,
+            fragment_readahead=1).to_batches()
+    def unindexed():
+        predicate = scalar_equal(on, key)
+        # batch_size=1 also splits an unindexed filter's *input* into individual
+        # rows. Scan only keys/row IDs in finite native batches instead. The
+        # result holds at most two uint64 IDs; no payload or full key index stays
+        # resident. Row IDs belong to this same pinned dataset, not row offsets.
+        batches = table.scanner(columns=[], filter=predicate, with_row_id=True,
+            limit=max_matches+1, batch_size=8192, batch_size_bytes=64*1024,
+            io_buffer_size=1024**2, batch_readahead=1, fragment_readahead=1).to_batches()
+        with closing(batches):
+            for batch in batches:
+                for row_id in batch.column('_rowid').to_pylist():
+                    # Keep the original one-row Arrow/Python payload checks.
+                    # Taking all matches together could allocate max_matches
+                    # oversized payloads before any size check can reject them.
+                    payload = table._take_rows([row_id], columns=columns)
+                    if payload.num_rows != 1:
+                        raise RuntimeError('Pinned Lance lookup did not return its matching row')
+                    yield payload
+
+    return unindexed()

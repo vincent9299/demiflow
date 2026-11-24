@@ -1,4 +1,5 @@
 """One real terminal document feeds the original spool and live transport."""
+from demiflow.execution.contracts import record_codec
 from collections import Counter
 import math
 from types import SimpleNamespace as NS
@@ -7,9 +8,9 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_record_frames import _typed_shape, encode_document
+from demiflow.execution.contracts.record_codec import _typed_shape, encode_document
 from demiflow.execution.exchange import dataflow_bridge as bridge
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_c import bounds
 from test_runtime_v3_record_frame_budget import _record
@@ -20,7 +21,7 @@ def project(row):
 
 
 def test_public_rows_and_final_replay_keep_original_document_and_ack(tmp_path, monkeypatch):
-    encode = bridge._encode_record_document
+    encode = record_codec._encode_record_document
     publish = WorkerGraphRunner._publish
     encodings, documents = Counter(), []
 
@@ -40,7 +41,7 @@ def test_public_rows_and_final_replay_keep_original_document_and_ack(tmp_path, m
             documents.append(record.record_id)
         return result
 
-    monkeypatch.setattr(bridge, '_encode_record_document', counted)
+    monkeypatch.setattr(record_codec, '_encode_record_document', counted)
     monkeypatch.setattr(WorkerGraphRunner, '_publish', observed)
     rows = [{'id': i} for i in range(24)]
     limits = {'memory_bytes': 1024 * 1024, 'max_row_bytes': 4096,
@@ -75,7 +76,7 @@ def test_reused_document_still_checks_current_workspace_before_peer_admission(po
     limits = bounds(max_resident_bytes=65536, max_control_bytes=32768)
     raw = encode_document(record, limits)
     native = _typed_shape(record.inline, limits.max_row_bytes)[1]
-    from demiflow.execution.dataflow_record_frames import admit_encoded_record
+    from demiflow.execution.contracts.record_codec import admit_encoded_record
     calls = []
     def frame(function, *args, **kwargs):
         calls.append(function)
@@ -88,13 +89,13 @@ def test_reused_document_still_checks_current_workspace_before_peer_admission(po
 
 
 def test_single_decode_measurement_keeps_both_admissions_before_parse(monkeypatch):
-    from demiflow.execution import dataflow_record_frames as frames
+    from demiflow.execution.contracts import record_codec as frames
     from dataclasses import replace
     record = _record({'value': b'x' * 4096})
     limits = bounds(max_resident_bytes=65536)
     raw = encode_document(record, limits)
     measured, allocations, callbacks = [], [], []
-    measure, decode = frames.raw_workspace, bridge._codec_loads
+    measure, decode = frames.raw_workspace, record_codec._codec_loads
     def counted(value, **kwargs):
         measured.append(value)
         return measure(value, **kwargs)
@@ -105,7 +106,7 @@ def test_single_decode_measurement_keeps_both_admissions_before_parse(monkeypatc
         callbacks.append(size)
         raise DataflowError('BUDGET_EXCEEDED', 'live collection and codec exceed grant')
     monkeypatch.setattr(frames, 'raw_workspace', counted)
-    monkeypatch.setattr(bridge, '_codec_loads', parsed)
+    monkeypatch.setattr(record_codec, '_codec_loads', parsed)
     kwargs = {'record_id': record.record_id, 'sequence': record.sequence}
     with pytest.raises(DataflowError, match='live collection'):
         frames.decode_document(raw, bounds=limits, check_workspace=rejected, **kwargs)

@@ -16,8 +16,8 @@ from demiflow import data
 from demiflow.execution.seal import business_sources
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from runtime_v3_program_probe import program_store, stage_callable
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext, RunAction
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext, RunAction
 
 
 def _module(name, path):

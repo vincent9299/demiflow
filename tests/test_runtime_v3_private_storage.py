@@ -7,10 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow import data
-from demiflow.execution.dataflow_private_storage import bind_private_storage, private_storage
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.run_context import RunContext, RunAction
-from demiflow.execution.run_journal import ExecutionBudgetExceeded
+from demiflow.execution.journal.dataflow_authority import bind_private_storage, private_storage
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.pipeline.run_context import RunContext, RunAction
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from test_runtime_v3_native_rpc_replay import IntentionalInterruption, service
 from test_runtime_v3_private_prompt_journal import _pipeline, _charged, native_server
@@ -150,7 +150,7 @@ def test_real_existing_artifact_prevents_mixed_cache_overcommit_before_http(tmp_
 
 
 def test_old_lease_history_is_count_bounded_and_untouched(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_private_storage as storage
+    from demiflow.execution.storage import private_journals as storage
     path = tmp_path/'history.sqlite'
     leases = tmp_path/'history.sqlite.leases'
     leases.mkdir()

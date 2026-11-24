@@ -2,8 +2,8 @@
 import pytest
 
 from demiflow.execution.seal.plan import load_native_execution
-from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_sealed_version_selection import write_published_native_seal
 
 

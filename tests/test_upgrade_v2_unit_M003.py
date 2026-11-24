@@ -1,9 +1,9 @@
 """M003: NativeEmbeddingRecovery.__init__ borrows the run-owned journal."""
 from types import SimpleNamespace
 
-from demiflow.execution.run_context import RunContext
-from demiflow.embeddings.stream_recovery import NativeEmbeddingRecovery
-from demiflow.operator_llm.stream_recovery import RunPromptJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
+from demiflow.execution.journal.prompt import RunPromptJournal
 
 
 def _action(run):

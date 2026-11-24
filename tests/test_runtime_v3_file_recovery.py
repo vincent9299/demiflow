@@ -6,14 +6,14 @@ import subprocess
 import sys
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 WORKTREE = Path(__file__).resolve().parents[1]
 CHILD = r'''
 import json,os,sys
 from pathlib import Path
 from demiflow import data
-from demiflow.execution import commit
+from demiflow.execution.checkpoint import commit
 from runtime_v3_recovery_scenarios import _scope
 root=Path(sys.argv[1]); boundary=sys.argv[2]; mode=sys.argv[3]; kind=sys.argv[4]
 if mode=='crash':
@@ -63,7 +63,7 @@ def test_file_failure_does_not_replace_existing_target(tmp_path):
 
 
 def test_file_concurrent_destination_is_not_adopted(tmp_path,monkeypatch):
-    from demiflow.execution.file_sink import FileSink
+    from demiflow.execution.outputs.file_sink import FileSink
     target=tmp_path/'out.json'
     prepare=FileSink.prepare
     def replace_target(self,blocks,context):
@@ -90,7 +90,7 @@ def test_file_resume_refuses_changed_published_bytes(tmp_path):
 
 
 def test_old_file_action_without_native_binding_still_rejects_replay(tmp_path):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError,match='unconfirmed'):
         with RunContext.start(tmp_path/'run') as run:
             with run.action({'kind':'write_file','source':None,'operations':[]}):

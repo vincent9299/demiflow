@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.workbench.projects import index
 from demiflow.workbench.runs import manager as runs
 from demiflow.workbench.projects import workspace as ws

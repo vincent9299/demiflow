@@ -13,9 +13,9 @@ from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_publication_budget import (
-    PublicationReservation, FIELD, SCHEMA, PHASE_SCHEMA, REF_CARRIER)
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, FIELD, SCHEMA, PHASE_SCHEMA
+from demiflow.execution.contracts.dataflow import REF_CARRIER
+from demiflow.execution.outputs.lance_sink import LanceSink
 
 
 class Interrupted(Exception):
@@ -90,10 +90,11 @@ def test_original_wide_join_native_return_loss_reuses_acked_phases(tmp_path, mon
 
 
 def _finite_payloads(execution):
-    from demiflow.execution.dataflow_segments import block_chunks
-    from demiflow.execution.dataflow_record_frames import frame_stream, decode_frame, decode_document, line_limit
+    from demiflow.execution.storage.segments import block_chunks
+    from demiflow.execution.storage.streams import frame_stream
+    from demiflow.execution.contracts.record_codec import decode_frame, decode_document, line_limit
     result = []
-    for channel, value in execution._finite_seals.items():
+    for channel, value in execution._exchange.finite_seals.items():
         ref = ArtifactRef(**value) if isinstance(value,dict) else value
         seal = json.loads(b''.join(execution._store.read(ref,max_bytes=execution._bounds.max_control_bytes)))
         for member in seal['producers']:
@@ -146,7 +147,7 @@ def test_join_phase_ack_keeps_payload_roots_and_resumes_or_rejects_corruption(tm
     assert execution._published_gc['blocked'] is None and execution._published_gc['removed'] > 0
     assert not execution._store.inspect(first['orphan'])
     assert all(execution._store.inspect(r) for r in first['payloads'])
-    from demiflow.execution.exchange.dataflow_bridge import _decode_payload
+    from demiflow.execution.contracts.record_codec import _decode_payload
     raw = execution._store._object_path(first['payloads'][0]).read_bytes()
     value = _decode_payload(raw,max_bytes=limits['max_row_bytes'])
     if value['typed'] is not None:
@@ -263,7 +264,8 @@ def test_writer_metadata_bounds_real_ipc_without_charging_a_fixed_64k():
     import io
     from dataclasses import replace
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
-    from demiflow.execution.batch_conversion import native_writer_workspace, admit_batch_conversion
+    from demiflow.execution.outputs.batch_conversion import native_writer_workspace
+    from demiflow.execution.contracts.record_codec import admit_batch_conversion
     _, bounds = resolve_runtime_policy({}, {}, provider='local')
     for schema, row in [
         (pa.schema([('n',pa.int64())]), {'n':1}),
@@ -287,7 +289,7 @@ def test_writer_metadata_bounds_real_ipc_without_charging_a_fixed_64k():
 def test_writer_metadata_covers_nested_variadic_view_buffers_before_construction():
     import io
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
-    from demiflow.execution.batch_conversion import admit_batch_conversion
+    from demiflow.execution.contracts.record_codec import admit_batch_conversion
     _,bounds=resolve_runtime_policy({}, {},provider='local')
     schema=pa.schema([('values',pa.list_(pa.binary_view()))])
     rows=[{'values':[b'x'*40000 for _ in range(200)]}]

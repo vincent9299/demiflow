@@ -18,7 +18,7 @@ from ._kv_sink import DurableKVSink
 
 
 def encode(value, limit):
-    from .execution.stream_grouping import row_size
+    from demiflow.operators.grouping import row_size
     try:
         size = row_size(value, limit)
     except ValueError as exc:

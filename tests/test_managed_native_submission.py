@@ -45,16 +45,17 @@ def test_capture_rejects_unbounded_append_before_effect(tmp_path):
 
 @pytest.mark.parametrize('inherited', [True, False])
 def test_native_forwarding_preserves_actual_sdk_declarations(monkeypatch, inherited):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
     from demiflow.execution.host.inspection import capture_pipeline
     calls = []
-    original = dataflow_api.resolve_runtime_policy
+    original = action_limits.resolve_runtime_policy
 
     def observe(options, limits, *, provider, explicit_limits=()):
         calls.append(set(explicit_limits))
         return original(options, limits, provider=provider, explicit_limits=explicit_limits)
 
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', observe)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', observe)
     native = {'max_row_bytes': DEFAULT_LIMITS['max_row_bytes'], 'batch_rows': 8}
 
     def construct():

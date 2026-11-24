@@ -8,7 +8,7 @@ import pytest
 
 import demiflow
 from demiflow.lance.search import VectorSearch
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 ROOT = Path(__file__).resolve().parents[1]
 

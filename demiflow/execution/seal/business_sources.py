@@ -8,7 +8,7 @@ import stat
 import sys
 
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 
 SOURCE_MEDIA = 'text/x-python'
 MAX_SOURCES = 64
@@ -176,7 +176,7 @@ def stage_sources(sources, *, store):
 def mount_sources(refs, expected, *, store, cache):
     """Populate the managed worker cache only from sealed, hash-verified bytes."""
     from .plan import _artifact_from_json, _artifact_chunks
-    from ..state_artifacts import atomic_chunks
+    from demiflow.execution.storage.state_artifacts import atomic_chunks
     if not isinstance(refs, dict) or set(refs) != set(expected) or len(refs) > MAX_SOURCES:
         raise DataflowError('CORRUPT_ARTIFACT', 'Business import membership differs')
     if not refs:
@@ -758,7 +758,7 @@ def business_dependency_modules(plan, *, source=None):
     import sys
     import types
     from collections import deque
-    from ..plan_facts import operation_facts
+    from demiflow.execution.seal.plan_facts import operation_facts
 
     def udfs():
         for operation in plan.operations:
@@ -857,7 +857,7 @@ def plan_code_pin(plan, *, source=None):
     callable dependencies (reducer/factory) to the same manifest; omitting it
     keeps the historical bytes exactly.
     """
-    from ..recovery_identity import operation_identity
+    from demiflow.execution.seal.program_identity import operation_identity
     operations = [operation_identity(operation) for operation in plan.operations]
     return {"operations": stable_code_identity(operations),
             "dependencies": _business_dependency_manifest(plan, source=source)}

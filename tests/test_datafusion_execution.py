@@ -14,8 +14,8 @@ import pyarrow as pa
 pytest.importorskip('datafusion')
 lance = pytest.importorskip('lance')
 from demiflow import data
-from demiflow.execution.datafusion import DataFusionOptions, DataFusionSession
-from demiflow.execution.datafusion import DataFusionQueryError, DataFusionQueryTimeout
+from demiflow.execution.hosts.datafusion import DataFusionOptions, DataFusionSession
+from demiflow.execution.hosts.datafusion import DataFusionQueryError, DataFusionQueryTimeout
 
 
 def options(**changes):
@@ -231,7 +231,7 @@ def test_parent_crash_releases_inherited_slot(tmp_path):
     code='''
 import sys,time
 from demiflow import data
-from demiflow.execution.datafusion import DataFusionOptions, DataFusionSession
+from demiflow.execution.hosts.datafusion import DataFusionOptions, DataFusionSession
 def hang(batch):
     time.sleep(30)
     return batch
@@ -301,7 +301,7 @@ def test_private_writer_admits_explicit_wide_row_and_still_rejects_over_budget(t
 
 
 def test_row_budget_preserves_prior_positional_options_and_old_parent_requests(tmp_path, monkeypatch):
-    import demiflow.execution.datafusion as native
+    import demiflow.execution.hosts.datafusion as native
     prior = DataFusionOptions(128 * 2**20, 2 * 2**30, 64 * 2**30, 2, 1, 8192, 15, 15, 2 * 2**30, False)
     assert prior.timeout_s == 15 and prior.prefer_hash_join is False
     assert prior.max_row_bytes == 8 * 2**20

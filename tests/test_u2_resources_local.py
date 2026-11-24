@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.resource_state import RunResourceState
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.hosts.run_state import RunResourceState
 from demiflow.resources.capacity import (
     ENVELOPE_ENV, LocalCapacityPool, inherited_envelope, write_envelope,
 )

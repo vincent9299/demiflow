@@ -3,8 +3,8 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.dataflow_operator_observations import CallbackObservations, observe_operator
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.dataflow_operator_observations import CallbackObservations, observe_operator
 
 
 def transform(row):

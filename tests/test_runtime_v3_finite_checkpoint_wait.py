@@ -12,8 +12,8 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_ray_terminal_seams import private_ray_provider
 
@@ -96,7 +96,7 @@ def test_admitted_cut_publication_and_terminal_stop_keep_original_deadline(monke
 
 
 def test_finite_business_never_extends_original_run_deadline(monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     driver, clock = _driver(monkeypatch)
     run = object.__new__(RunContext)
     run.active, run.started, run.deadline = True, 0.0, float('inf')
@@ -213,7 +213,7 @@ def test_actual_finite_iterator_reports_pause_before_or_during_finish(pause_firs
 
 def test_busy_event_uses_original_bounded_wire_and_activation_queue(monkeypatch):
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
-    from demiflow.execution.dataflow_hosts import _EndpointBase
+    from demiflow.execution.hosts.endpoints import _EndpointBase
     from test_runtime_v3_c import bounds
     driver, _ = _driver(monkeypatch)
     event = _wait(driver)

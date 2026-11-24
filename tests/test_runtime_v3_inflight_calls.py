@@ -6,12 +6,12 @@ import pytest
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.kernels.concurrent_calls import ConcurrentCalls, INVOCATION_SCOPE
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 
 
 def row(i):
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.contracts.record_codec import _encode_payload
     return Record(record_id=identity(['row', i]), source_position={'offset': i},
                   payload_ref=None, inline={'i': i}, encoded_bytes=len(_encode_payload({'i': i}, max_bytes=1024)), sequence=i)
 

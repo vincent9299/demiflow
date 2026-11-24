@@ -6,11 +6,12 @@ from pathlib import Path
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal, ExecutionBudgetExceeded
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit
 from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowUnresolvedCommit
-from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from test_execution_recovery_entrypoints import FormalSink
 
 
@@ -45,7 +46,7 @@ def test_plain_stream_seal_without_native_cut_does_not_authorize_recovery(tmp_pa
 
 @pytest.mark.parametrize('corrupt_marker',[False,True])
 def test_prepared_not_published_is_recoverable_only_with_matching_original_receipts(tmp_path,monkeypatch,corrupt_marker):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     inputs,calls=tmp_path/'inputs',tmp_path/'commits'
     def observed(row):
         with inputs.open('a') as output: output.write('row\n')
@@ -133,7 +134,7 @@ def test_unknown_transport_failure_cannot_be_reclassified_as_budget_rejection():
 def test_real_worker_budget_failure_keeps_class_name_and_message(tmp_path):
     events=tmp_path/'calls'
     def reject(row):
-        from demiflow.execution.run_journal import ExecutionBudgetExceeded
+        from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
         with events.open('a') as output: output.write('call\n')
         raise ExecutionBudgetExceeded('row_bytes',message='worker admitted row budget is exhausted')
     with pytest.raises(ExecutionBudgetExceeded,match='worker admitted row budget is exhausted') as caught:
@@ -145,7 +146,7 @@ def test_real_worker_budget_failure_keeps_class_name_and_message(tmp_path):
 
 @pytest.mark.parametrize('phase',['commit','recover'])
 def test_native_coordinator_budget_rejection_is_not_mislabeled_unknown(tmp_path,monkeypatch,phase):
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     def reject(*args,**kwargs):
         raise ExecutionBudgetExceeded('disk_bytes',message='original native storage admission rejected')
     if phase=='commit':
@@ -171,7 +172,7 @@ def test_native_coordinator_budget_rejection_is_not_mislabeled_unknown(tmp_path,
 
 @pytest.mark.parametrize('budget', ['image-requests-' + 'a'*64, 'requests-' + 'b'*64, '0-leading'])
 def test_original_journal_budget_identifiers_survive_both_rpc_hops(budget):
-    from demiflow.execution.recovery_contract import identifier
+    from demiflow.execution.contracts.recovery_contract import identifier
     identifier(budget)
     original = ExecutionBudgetExceeded(budget)
     error = original

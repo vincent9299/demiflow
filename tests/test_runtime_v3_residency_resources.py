@@ -12,8 +12,8 @@ from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
 
 @pytest.fixture
 def lifecycle_authority(local_env):
-    from demiflow.execution.run_context import RunAction
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.pipeline.run_context import RunAction
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     run = local_env[0]
     _, bounds = resolve_runtime_policy({}, run.limits, provider='local')
@@ -110,8 +110,8 @@ def test_worker_control_ids_change_on_boot_business_route_identity_does_not():
     from demiflow.execution.exchange.dataflow_channels import route_record
     from demiflow.execution.exchange.dataflow_state import RoutingCounters
     from demiflow.execution.contracts.dataflow import ExchangeSpec, Record
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.contracts.record_codec import _encode_payload
     def worker(boot, attempt):
         e = object.__new__(DataflowWorkerExecutor)
         e._event_sequence = 0
@@ -132,7 +132,7 @@ def test_worker_control_ids_change_on_boot_business_route_identity_does_not():
 
 def test_retirement_clears_only_volatile_native_replies_and_fences_old_boot(tmp_path):
     from test_runtime_v3_native_rpc_replay import interrupted_run, service, event, charged
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.process_unit import ManagedProcessUnit
     from demiflow.resources.local import LocalResourceProvider

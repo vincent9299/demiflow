@@ -4,8 +4,8 @@ import json
 import sqlite3
 import pytest
 
-from demiflow.execution.sealed_plans import PlanContractError, load_sealed_plan
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.seal.sealed_plans import PlanContractError, load_sealed_plan
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.runs.facts import read_sealed_plan
 from test_stage2_unified_plan import LIMITS
 from test_u2_chain_commit import original_chain
@@ -42,7 +42,7 @@ def test_current_reader_refuses_invalid_old_carriers(original_chain, tmp_path, d
         path.rename(new)
         path.symlink_to(new)
     elif damage == 'budget':
-        from demiflow.execution import sealed_plans
+        from demiflow.execution.seal import sealed_plans
         monkeypatch.setattr(sealed_plans, 'MAX_SEALED_PLAN_BYTES', 16)
     else:
         with sqlite3.connect(root / 'run.sqlite') as db:
@@ -92,8 +92,8 @@ def test_v3_local_caller_seals_and_persists(tmp_path):
 def test_v3_queue_caller_seals_and_persists(tmp_path):
     import demiflow.data as data
     from demiflow.collect import FetchPolicy, HttpSource
-    from demiflow.execution.queue import QueueChannel, QueueConfig
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.objects import LocalObjectStore
     from test_queue_v2_boundaries import seed
     from test_raw_fetch import origin_server

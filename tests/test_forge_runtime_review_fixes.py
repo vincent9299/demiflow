@@ -12,8 +12,8 @@ from contextlib import closing
 
 import pytest
 
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.run_telemetry import Telemetry, latest, series
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.journal.run_telemetry import Telemetry, latest, series
 from demiflow.workbench.projects import index
 from demiflow.workbench.runs import domain as run_domain
 from demiflow.workbench.runs import requests as run_requests
@@ -314,7 +314,7 @@ def test_r3_pending_cleanup_retains_device_reservation_until_reconcile(
         assert (scratch / "owned-residue").exists()
     # This control-only fixture needs a valid native protocol to reach the
     # cleanup gate. Claim/release is fixture setup, not native execution evidence.
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id="4"*32,
                          entry_identity=None, started_at=time.time(), limits_explicit=[],
                          platform_revision="original-platform", limits=execution_limits(None))

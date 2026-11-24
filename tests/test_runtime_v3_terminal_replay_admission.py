@@ -1,4 +1,7 @@
 """Real ACKed output replays through original read credit before data decoding."""
+from functools import partial
+from demiflow.execution.hosts.endpoints import batch_business_commands
+from demiflow.execution.contracts import record_codec
 import json
 import os
 from pathlib import Path
@@ -7,7 +10,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 class InterruptedAfterAction(Exception):
@@ -27,7 +30,7 @@ def _fd_count(directory):
 @pytest.mark.parametrize('limited', [True, False])
 def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monkeypatch, limited):
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
     rows = [{'i': i, 'payload': 'x' * 6000} for i in range(20)]
     source = tmp_path / 'input.jsonl'
@@ -39,7 +42,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
             assert data.read_json(str(source)).take_all() == rows
             previous = run.journal.execution_commits('action-1')
             raise InterruptedAfterAction()
-    decoder = dataflow_bridge._decode_record_document
+    decoder = record_codec._decode_record_document
     read = TerminalSubscription.read_admitted
     decoded, windows, coexistence = [], [], []
     active = [None]
@@ -56,7 +59,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
     def forbidden_launch(*args, **kwargs):
         raise AssertionError('ACKed final result must not launch a worker')
     with monkeypatch.context() as patch:
-        patch.setattr(dataflow_bridge, '_decode_record_document', observe_decode)
+        patch.setattr(record_codec, '_decode_record_document', observe_decode)
         patch.setattr(TerminalSubscription, 'read_admitted', observe_read)
         patch.setattr(dataflow.DataflowExecution, '_launch_phase', forbidden_launch)
         def replay():
@@ -76,7 +79,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
     assert limited or windows
     assert (0 < len(decoded) < 20) if limited else len(decoded) == 20
     assert max(coexistence) <= (96 if limited else 256)*1024
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     assert RunJournal(tmp_path/'run').execution_commits('action-1') == previous
     assert _fd_count(tmp_path / 'run') == 0
 
@@ -99,7 +102,7 @@ def test_shared_source_respects_total_limit(tmp_path,limit,overflow):
 @pytest.mark.parametrize('count,overflow',[(4,False),(5,True)])
 def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overflow):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     limits={'memory_bytes':40*1024,'max_batch_bytes':16*1024,'max_row_bytes':8*1024,'max_state_bytes':128*1024,'timeout_s':30,'checkpoint_rows':2,'checkpoint_interval_ms':60000,'max_output_rows':4}
     original=DataflowExecution._retire_phase;prefix=[]
     class Interrupted(Exception):pass
@@ -134,9 +137,9 @@ def test_checkpoint_prefix_counts_toward_limit(tmp_path,monkeypatch,count,overfl
 def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path, monkeypatch, limit):
     """A read-level negative proof over real ACKed blocks, with no new commit."""
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     captured = []
     original = dataflow.DataflowExecution._set_result
     def remember(execution, image):
@@ -149,10 +152,10 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
             assert data.from_items(rows).repartition(2).take_all() == rows
             before = run.journal.execution_commits('action-1')
     execution, publication = captured[-1]
-    subscription = TerminalSubscription(execution._bounds, execution._exchange, ())
+    subscription = TerminalSubscription(execution._bounds, execution._exchange, batch_commands=partial(batch_business_commands, ()))
     subscription.restore(publication, store=execution._store)
     decoded = []
-    decode = dataflow_bridge._decode_record_document
+    decode = record_codec._decode_record_document
     def observe(raw, **kwargs):
         value = decode(raw, **kwargs)
         decoded.append(value)
@@ -162,7 +165,7 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
             raise ValueError('take_all limit metadata probe')
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(dataflow_bridge, '_decode_record_document', observe)
+            patch.setattr(record_codec, '_decode_record_document', observe)
             with pytest.raises(ValueError, match='metadata probe'):
                 subscription.read_admitted(max_records=64, deadline_ms=0, admit=admit)
     finally:

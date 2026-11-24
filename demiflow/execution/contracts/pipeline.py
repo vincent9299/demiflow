@@ -1,6 +1,8 @@
 """Minimal contracts for running one immutable Pipeline bundle."""
 from __future__ import annotations
 
+from packaging.utils import canonicalize_name, parse_wheel_filename
+
 import hashlib
 import json
 import platform
@@ -10,11 +12,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
-if TYPE_CHECKING:
-    from ..requirements import ResolvedWheel
-
-from ...pipeline import PIPELINE_PACKAGE_PATH, discover_pipeline_definition
-from ..package_loader import RUNTIME_PACKAGE_PATH
 
 PIPELINE_RUNTIME_ABI = "demiflow-pipeline-v12"
 
@@ -61,7 +58,6 @@ class PlatformRuntimeIdentity:
             not isinstance(item, str) for item in imports
         ):
             raise ValueError("Platform runtime preflight imports are invalid")
-        from ..requirements import ResolvedWheel
         raw_wheels = value["platform_wheels"]
         if not isinstance(raw_wheels, list):
             raise ValueError("Platform runtime wheels are invalid")
@@ -110,108 +106,15 @@ class PlatformRuntimeIdentity:
 
 
 @dataclass(frozen=True)
-class PipelineExecutionEnvironment:
-    runtime: PlatformRuntimeIdentity
-    runtime_wheel: Path
-    platform_requirements: Path
-    local_environment_cache: Path
-    dependency_setup_timeout_seconds: int
-    planning_policy: Any
-    ray_job_enabled: bool = True
-    candidate_wheelhouse: Path | None = None
-    platform_wheel_directory: Path | None = None
-
-    def verify_artifacts(self) -> None:
-        values = (
-            (
-                self.runtime_wheel,
-                self.runtime.wheel_filename,
-                self.runtime.wheel_sha256,
-                "runtime wheel",
-            ),
-            (
-                self.platform_requirements,
-                self.runtime.platform_requirements_filename,
-                self.runtime.platform_requirements_sha256,
-                "platform requirements",
-            ),
-        )
-        for configured, filename, expected_sha256, label in values:
-            if configured.is_symlink():
-                raise ValueError(f"Configured {label} is unavailable")
-            path = configured.resolve()
-            if not path.is_file() or path.name != filename:
-                raise ValueError(f"Configured {label} is unavailable")
-            if hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256:
-                raise ValueError(f"Configured {label} digest mismatch")
-        from ..requirements import platform_wheel_paths
-        platform_wheel_paths(
-            self.runtime.platform_wheels, self.platform_wheel_directory,
-        )
-
-    def declaration_id(self, requirements_sha256: str) -> str:
-        payload = {
-            "environment_policy": self.runtime.environment_policy,
-            "runtime": self.runtime.to_dict(),
-            "requirements_sha256": str(requirements_sha256 or ""),
-            "python_cache_tag": str(sys.implementation.cache_tag or ""),
-            "platform": sys.platform,
-            "machine": platform.machine(),
-        }
-        encoded = json.dumps(
-            payload, sort_keys=True, separators=(",", ":"),
-        ).encode()
-        return hashlib.sha256(encoded).hexdigest()
-
-
-@dataclass(frozen=True)
-class PipelineBundleRef:
-    root: str
-    content_digest: str
-    runtime_abi: str = PIPELINE_RUNTIME_ABI
-
-    @classmethod
-    def load(cls, root: str | Path) -> "PipelineBundleRef":
-        bundle_root = Path(root).expanduser().resolve()
-        discover_pipeline_definition(bundle_root)
-        return cls(
-            root=str(bundle_root),
-            content_digest=pipeline_bundle_digest(bundle_root),
-        )
-
-    def verify(self) -> Path:
-        if self.runtime_abi != PIPELINE_RUNTIME_ABI:
-            raise ValueError(
-                f"unsupported Pipeline runtime ABI: {self.runtime_abi}"
-            )
-        root = Path(self.root).resolve()
-        if pipeline_bundle_digest(root) != self.content_digest:
-            raise ValueError("Pipeline bundle content digest mismatch")
-        discover_pipeline_definition(root)
-        return root
-
-    @property
-    def module_key(self) -> str:
-        value = self.content_digest.removeprefix("sha256:")
-        if not value or any(
-            character not in "0123456789abcdef" for character in value
-        ):
-            raise ValueError(
-                "Pipeline bundle digest is not a canonical sha256 value"
-            )
-        return "p_" + value[:24]
-
-
-@dataclass(frozen=True)
 class PipelineRunRequest:
     run_id: str
-    bundle: PipelineBundleRef
+    bundle: object
     target: Any
 
     def __post_init__(self) -> None:
         if not self.run_id.strip():
             raise ValueError("Pipeline run_id is required")
-        from ..target import PipelineExecutionTarget
+        from demiflow.execution.contracts.target import PipelineExecutionTarget
         if not isinstance(self.target, PipelineExecutionTarget):
             raise TypeError("PipelineRunRequest requires PipelineExecutionTarget")
 
@@ -280,29 +183,96 @@ class PipelineBackend(Protocol):
     ) -> PipelineRunResult: ...
 
 
-def pipeline_bundle_digest(root: str | Path) -> str:
-    bundle_root = Path(root).expanduser().resolve()
-    roots = [bundle_root / PIPELINE_PACKAGE_PATH]
-    runtime = bundle_root / RUNTIME_PACKAGE_PATH
-    if runtime.exists():
-        if not runtime.is_dir():
-            raise ValueError(f"Pipeline bundle runtime must be a directory: {runtime}")
-        roots.append(runtime)
-    digest = hashlib.sha256()
-    paths = []
-    for directory in roots:
-        if directory.is_symlink():
-            raise ValueError(f"Pipeline bundle directory symlinks are forbidden: {directory}")
-        if not directory.is_dir():
-            raise ValueError(f"Pipeline bundle directory is missing: {directory}")
-        paths.extend(path for path in directory.rglob("*") if path.is_file())
-    for path in sorted(set(paths)):
-        if "__pycache__" in path.parts:
-            continue
-        if path.is_symlink():
-            raise ValueError(f"Pipeline bundle symlinks are forbidden: {path}")
-        relative = str(path.relative_to(bundle_root)).replace("\\", "/")
-        digest.update(relative.encode())
-        digest.update(b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
-    return "sha256:" + digest.hexdigest()
+@dataclass(frozen=True)
+class FrozenRequirements:
+    path: Path | None
+    bundle_relative_path: str
+    text: str
+    sha256: str
+
+    @property
+    def nonempty(self) -> bool:
+        return bool(self.text.strip())
+
+@dataclass(frozen=True)
+class ResolvedWheel:
+    name: str
+    version: str
+    filename: str
+    sha256: str
+
+    def __post_init__(self) -> None:
+        if canonicalize_name(self.name) != self.name or not self.name:
+            raise ValueError("resolved wheel name must be canonical")
+        if not self.version:
+            raise ValueError("resolved wheel version is required")
+        if Path(self.filename).name != self.filename or not self.filename.endswith(".whl"):
+            raise ValueError("resolved wheel filename is invalid")
+        if len(self.sha256) != 64 or any(character not in "0123456789abcdef" for character in self.sha256):
+            raise ValueError("resolved wheel sha256 is invalid")
+        try:
+            distribution, version, _build, _tags = parse_wheel_filename(self.filename)
+        except Exception as exc:
+            raise ValueError("resolved wheel filename is invalid") from exc
+        if canonicalize_name(str(distribution)) != self.name or str(version) != self.version:
+            raise ValueError("resolved wheel filename does not match its identity")
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "name": self.name,
+            "version": self.version,
+            "filename": self.filename,
+            "sha256": self.sha256,
+        }
+
+    @classmethod
+    def from_mapping(cls, value) -> "ResolvedWheel":
+        if not isinstance(value, Mapping) or set(value) != {
+            "name", "version", "filename", "sha256",
+        }:
+            raise ValueError("resolved wheel fields are invalid")
+        return cls(
+            str(value["name"]), str(value["version"]),
+            str(value["filename"]), str(value["sha256"]),
+        )
+
+@dataclass(frozen=True)
+class PythonEnvironmentResolution:
+    platform_requirements_sha256: str
+    candidate_requirements_sha256: str
+    wheelhouse_sha256: str
+    wheels: tuple[ResolvedWheel, ...]
+    schema_version: str = "demiflow_python_environment_resolution_v1"
+
+    @property
+    def resolution_digest(self):
+        import json
+        return hashlib.sha256(json.dumps(
+            self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+
+    def to_dict(self):
+        return {
+            "schema_version": self.schema_version,
+            "platform_requirements_sha256": self.platform_requirements_sha256,
+            "candidate_requirements_sha256": self.candidate_requirements_sha256,
+            "wheelhouse_sha256": self.wheelhouse_sha256,
+            "wheels": [wheel.to_dict() for wheel in self.wheels],
+        }
+
+    @classmethod
+    def from_mapping(cls, value):
+        if not isinstance(value, Mapping) or set(value) != {
+            "schema_version", "platform_requirements_sha256",
+            "candidate_requirements_sha256", "wheelhouse_sha256", "wheels",
+        } or value["schema_version"] != "demiflow_python_environment_resolution_v1":
+            raise ValueError("unsupported Python environment resolution")
+        wheels = tuple(ResolvedWheel.from_mapping(wheel) for wheel in value["wheels"])
+        return cls(
+            str(value["platform_requirements_sha256"]),
+            str(value["candidate_requirements_sha256"]),
+            str(value["wheelhouse_sha256"]), wheels,
+        )
+
+
+NATIVE_SUBMISSION_FORMAT = 'demiflow.managed_native_submission.v1'

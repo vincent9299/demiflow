@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.data.plan import CallableSpec
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.seal.business_sources import business_sources, stage_sources
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_program_probe import program_store
 
 

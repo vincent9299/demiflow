@@ -3,26 +3,18 @@
 This is output layout, not a second scheduler. A single admitted kernel may
 produce N logical blocks without claiming N concurrent resource allocations.
 """
-from ..dataflow_records import clone_record
-import hashlib
+from demiflow.execution.contracts.dataflow import clone_record
 
 from ..contracts.dataflow import BlockPartition, Record
-from .dataflow import _err, _occurrence, _materialize_row, _group_key
-
-
-def block_count(spec, *, rows, bounds):
-    count = spec.configuration.get('num_blocks')
-    if count is None:
-        target = spec.configuration.get('target_num_rows_per_block')
-        count = max(1, (rows + target - 1) // target) if target is not None else 1
-    if type(count) is not int or not 1 <= count <= bounds.max_partitions:
-        raise _err('BUDGET_EXCEEDED', 'logical block count exceeds max_partitions')
-    return count
+from demiflow.execution.kernels.dataflow import _err, _occurrence
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
+from demiflow.operators.relational import group_key
+from demiflow.operators.block_partition import block_count, block_index, collect_block_identities, shuffled_layout
 
 
 def partition_records(records, *, spec, rows, services):
     """Keep no-shuffle order; key shuffle colocates equal keys in real blocks."""
-    count = block_count(spec, rows=rows, bounds=services.bounds)
+    count = block_count(spec.configuration, rows=rows, max_partitions=services.bounds.max_partitions)
     occurrence = _occurrence(spec)
     target = spec.configuration.get('target_num_rows_per_block')
     keys = tuple(spec.configuration.get('keys') or ())
@@ -33,17 +25,9 @@ def partition_records(records, *, spec, rows, services):
         raise _err('INVALID_CONTRACT', 'sorted repartition requires keys')
     for ordinal, record in enumerate(records):
         services.check_stop()
-        if keys:
-            key = _group_key(_materialize_row(record, services), keys)
-            index = int.from_bytes(hashlib.sha256(key.encode()).digest()[:8], 'big') % count
-        elif target is not None:
-            index = ordinal // target
-        else:
-            # Balanced contiguous blocks: first remainder blocks have one extra.
-            size, remainder = divmod(rows, count)
-            prefix = (size + 1) * remainder
-            index = (ordinal // (size + 1) if ordinal < prefix
-                     else remainder + (ordinal - prefix) // size)
+        key = (group_key(_materialize_row(record, store=services.store, bounds=services.bounds,
+                 assignment=getattr(services, 'assignment', None)), keys) if keys else None)
+        index = block_index(key=key, ordinal=ordinal, rows=rows, count=count, target=target)
         yield clone_record(record, block_partition=BlockPartition(occurrence, index, count))
 
 
@@ -57,7 +41,7 @@ def preserve_block(records, block):
 
 
 def block_identity(record):
-    from .dataflow import _canonical
+    from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
     tag = record.block_partition
     if tag is not None:
         return _canonical(['logical', tag.occurrence_id, tag.index])
@@ -66,25 +50,16 @@ def block_identity(record):
 
 
 def shuffled_block_layout(records, *, spec, services):
-    """Bounded block metadata only; record payloads stay in their native spool."""
-    from .dataflow import _canonical, _seed, _shuffle_key_bytes
-    blocks = set()
-    layouts = set()
-    for record in records:
-        services.check_stop()
-        tag = record.block_partition
-        if tag is not None and (tag.occurrence_id, tag.count) not in layouts:
-            if tag.count > services.bounds.max_partitions:
-                raise _err('BUDGET_EXCEEDED', 'logical block count exceeds bound')
-            layouts.add((tag.occurrence_id, tag.count))
-            blocks.update(_canonical(['logical', tag.occurrence_id, i]) for i in range(tag.count))
-        else:
-            blocks.add(block_identity(record))
-        if len(blocks) > services.bounds.max_partitions:
-            raise _err('BUDGET_EXCEEDED', 'randomized block metadata exceeds bound')
+    """Bind actual block identities; computation owns the bounded layout."""
+    from demiflow.execution.kernels.dataflow import _seed
+    def entries():
+        for record in records:
+            services.check_stop()
+            tag = record.block_partition
+            yield (None, block_identity(record)) if tag is None else ((tag.occurrence_id, tag.index, tag.count), None)
+    blocks = collect_block_identities(entries(), max_partitions=services.bounds.max_partitions)
     seed, occurrence = _seed(spec, services), _occurrence(spec)
-    ordered = sorted(blocks, key=lambda key: (_shuffle_key_bytes(key, seed=seed, occurrence_id=occurrence), key))
-    return {key: i for i, key in enumerate(ordered)}
+    return shuffled_layout(blocks, seed=seed, occurrence_id=occurrence)
 
 
 def reordered_records(records, *, layout, spec):

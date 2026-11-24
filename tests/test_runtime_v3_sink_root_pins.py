@@ -4,15 +4,13 @@ import json
 
 import pytest
 
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.gc import collect_published_orphans
-from demiflow.execution.dataflow_segments import (
-    SegmentForest, RECORDS_MEDIA, block_chunks, tree_refs,
-)
-from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
-from demiflow.execution.recovery_contract import SourcePosition
+from demiflow.execution.storage.segments import SegmentForest, RECORDS_MEDIA, block_chunks, tree_refs
+from demiflow.execution.outputs.sinks import _DataflowArtifactSink
+from demiflow.execution.contracts.recovery_contract import SourcePosition
 from test_runtime_v3_artifact_accounting import store_fixture
 
 
@@ -64,7 +62,7 @@ def test_original_gc_traces_publication_root_before_record_and_through_commit(tm
                 raise RuntimeError('publication reply lost')
 
         with monkeypatch.context() as patch:
-            patch.setattr('demiflow.execution.commit.fault_point', interrupt)
+            patch.setattr('demiflow.execution.checkpoint.commit.fault_point', interrupt)
             if window == 'acked':
                 CommitCoordinator(port._action).commit(1, outputs={'test': (sink, manifest)},
                     position=SourcePosition('fixture', forest.rows))

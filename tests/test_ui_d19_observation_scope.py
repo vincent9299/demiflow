@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from demiflow.execution.run_journal import _node_document
+from demiflow.execution.journal.run_journal import _node_document
 from demiflow.workbench.runs import facts, manager, view
 from demiflow.workbench.graph import model
 

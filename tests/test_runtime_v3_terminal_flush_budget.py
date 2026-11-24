@@ -4,7 +4,7 @@ import json
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize("row_count", [2, 6])
@@ -13,10 +13,10 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
     read_trace = str(tmp_path / 'actual-read-residency.jsonl')
     def observe(row):
         import sys
-        from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+        from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
         from demiflow.execution.storage.objects import RunArtifactStore
-        from demiflow.execution.dataflow_segments import RECORDS_MEDIA
-        from demiflow.execution.dataflow_scratch import ScratchStream
+        from demiflow.execution.storage.segments import RECORDS_MEDIA
+        from demiflow.execution.storage.scratch import ScratchStream
         if getattr(TerminalBlocks, '_owned_flush_trace', None) != trace:
             append, put, read = TerminalBlocks.append_parts, RunArtifactStore.put, ScratchStream.read
             active = {}
@@ -117,9 +117,9 @@ def test_real_store_chunking_preserves_segment_hashes_and_restore(tmp_path, monk
     from hashlib import sha256
     from types import SimpleNamespace
     from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition
-    from demiflow.execution.dataflow_scratch import ScratchStream
-    from demiflow.execution.dataflow_segments import block_chunks, segment_refs
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.storage.scratch import ScratchStream
+    from demiflow.execution.storage.segments import block_chunks, segment_refs
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
 
@@ -163,8 +163,8 @@ def test_real_store_chunking_preserves_segment_hashes_and_restore(tmp_path, monk
 def test_impossible_batch_rejects_before_scratch_read(tmp_path, monkeypatch, batch_bytes):
     from types import SimpleNamespace
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_scratch import ScratchStream
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.storage.scratch import ScratchStream
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     with store_fixture(tmp_path) as (_, store, _):
@@ -183,12 +183,12 @@ def test_impossible_batch_rejects_before_scratch_read(tmp_path, monkeypatch, bat
 def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
     from types import SimpleNamespace
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_sinks import _encode_record
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.contracts.record_codec import encode_record as _encode_record
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     row = {'value': 'x'*32}
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     record = make('Record', inline=row, encoded_bytes=len(_encode_payload(row, max_bytes=8192)))
     raw = _encode_record(record, bounds()) + b'\n'
     limits = bounds(max_row_bytes=len(raw)-1)
@@ -201,6 +201,6 @@ def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
         parts = state.manifest_partitions()
         assert state.rows == 1 and state.bytes == len(raw)
         from demiflow.execution.contracts.dataflow import ArtifactRef
-        from demiflow.execution.dataflow_segments import block_chunks
+        from demiflow.execution.storage.segments import block_chunks
         assert b''.join(block_chunks(store, ArtifactRef(**parts[0]['data_ref']), limits)) == raw
         state.close()

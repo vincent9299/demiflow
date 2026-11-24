@@ -8,7 +8,7 @@ are used — no private semantics helpers, no Forge descriptors, no runtime stat
 """
 from __future__ import annotations
 
-from ..execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from .dag import (
     compile_logical_dag,
     dag_id_for,

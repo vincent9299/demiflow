@@ -5,7 +5,7 @@ actor, HTTP journal, budget, metrics and lifetime. No business selection here.
 """
 import asyncio
 
-from ..execution.request_limits import ServiceStopped, is_cooperative_stop_error
+from demiflow.services.request_limits import ServiceStopped, is_cooperative_stop_error
 from ..services import ModelServiceError
 
 

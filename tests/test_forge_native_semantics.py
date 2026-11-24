@@ -13,7 +13,7 @@ from demiflow.data.flow_contract import (
     transfer_fields,
     validate_semantics,
 )
-from demiflow.execution.local_kernel import local_execution
+from demiflow.execution.pipeline.local_kernel import local_execution
 
 
 @contextmanager

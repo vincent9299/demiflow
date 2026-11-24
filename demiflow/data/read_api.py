@@ -12,7 +12,7 @@ from .flow_contract import flow_api as _flow_api
 from .api import DataAPI, _select_executor
 from .execution_contract import InputSpec, _current_executor
 from .dataset import Dataset, MaterializedDataset
-from ..execution import queue_flow as _queue_flow
+from demiflow.execution.executors import queue_flow as _queue_flow
 
 
 @_flow_api('read_queue', execution='stream', effects=('queue',),
@@ -24,7 +24,7 @@ def read_queue(config, *, pool='default', settlement='sink', max_inflight=8,
     Open-empty is not EOS. Historical completed rows are read explicitly with
     read_queue_records; workers never scan/replay the pool's completed history.
     """
-    from ..execution.queue_source import QueueDatasource
+    from demiflow.execution.native_queue.queue_source import QueueDatasource
     source=QueueDatasource(config,pool=pool,settlement=settlement,max_inflight=max_inflight,
         idle_timeout_s=idle_timeout_s,lease_s=lease_s,max_tasks=max_tasks,stop=stop)
     return DataAPI(_current_executor.get()).read_datasource(source)
@@ -39,7 +39,7 @@ def read_queue_records(config, *, pool, through, results=False, verify='artifact
     adds verification.status=not_checked. Finite limits raise HistoryReadLimit
     carrying the first undelivered cursor bound to this exact QueueSnapshot.
     """
-    from ..execution.queue_history import QueueHistoryDatasource
+    from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     source=QueueHistoryDatasource(config,pool=pool,through=through,results=results,verify=verify,limits=limits,after=after)
     return DataAPI(_current_executor.get()).read_datasource(source)
 
@@ -52,7 +52,7 @@ def read_legacy_queue_records(path, *, sha256, pool, through, results=False, lim
     This archive-only adapter has no publication, claim, repair or ACK methods.
     It preserves the stored v1 values and marks them legacy_not_certified.
     """
-    from ..execution.legacy_queue import LegacyQueueHistoryDatasource
+    from demiflow.execution.sources.legacy_queue import LegacyQueueHistoryDatasource
     source=LegacyQueueHistoryDatasource(path,sha256=sha256,pool=pool,through=through,results=results,
         limits=limits,max_journal_bytes=max_journal_bytes,after=after)
     return DataAPI(_current_executor.get()).read_datasource(source)
@@ -82,7 +82,7 @@ def from_items(items: list[Any]) -> MaterializedDataset:
     such as one aggregate-analysis request. Prefer lazy external sources for
     external data. Do not collect an external Dataset and pass its rows back
     to ``from_items`` solely to write the same detail rows."""
-    from ..execution.input_runtime import prepare_public_items
+    from demiflow.execution.executors.base import prepare_public_items
     from .plan import LogicalPlan
     from .sources import MaterializedSource
     handle, executor = prepare_public_items(

@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _action_spy(monkeypatch):

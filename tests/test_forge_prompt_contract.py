@@ -8,9 +8,9 @@ import pytest
 import yaml
 
 from demiflow import data
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.local_kernel import local_execution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.local_kernel import local_execution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS

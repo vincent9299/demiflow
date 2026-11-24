@@ -100,7 +100,7 @@ def producer_loss(fx):
     import ray.cloudpickle
     from demiflow import data
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_residency_scenarios import _provider
     root = fx.journal_dir/'producer-owner-loss'
@@ -238,7 +238,7 @@ def _accepted_http(root, on_request):
 def unknown_model_owner_loss(fx, kind):
     import ray
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_recovery_scenarios import _model_pipeline, _native_calls
     from runtime_v3_residency_scenarios import _provider
     root = fx.journal_dir/('unknown-owner-'+kind)

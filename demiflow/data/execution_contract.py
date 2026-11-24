@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from .sources import SourcePlan
     from ..lance.model import LanceWriteSpec, LanceWriteReceipt
     from ..execution.contracts.dataflow import MaterializedHandle
-    from ..execution.stream import StreamStats
+    from demiflow.execution.journal.stream import StreamStats
     from .stats import ExecutionMetadata
 
 

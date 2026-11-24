@@ -3,6 +3,7 @@
 Only the control transport is in-process. Seals, assignments, codecs, kernels,
 artifact grants and cleanup use their original implementation.
 """
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import copy_context
@@ -15,15 +16,15 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution import dataflow_finite_input as finite
+from demiflow.execution.worker import finite_input as finite
 from demiflow.execution.contracts.dataflow import WorkerLease
 from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_hosts import ControlMailbox
-from demiflow.execution.dataflow_model_journal import make_native_action_view
-from demiflow.execution.dataflow_services import make_runtime_services
-from demiflow.execution.recovery_contract import document, RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.worker.mailbox import ControlMailbox
+from demiflow.execution.operator_bindings.dataflow_model_journal import make_native_action_view
+from demiflow.execution.worker.runtime import make_runtime_services
+from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
 from test_runtime_v3_b import DirectTransport, _events
 from test_runtime_v3_finite_borrow import make_seal, record
@@ -199,8 +200,8 @@ def test_real_dataset_cancel_interrupts_finite_authentication_and_releases_worke
                     # so its test-owned waiter cannot hide the real failure.
                     cancelled.set()
     assert decoded and len(decoded) == 1
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     with RunJournal(tmp_path/'run')._connection() as db:
         allocations = db.execute('SELECT allocation_id,cleanup FROM resource_allocations').fetchall()
@@ -244,16 +245,16 @@ def test_cancel_inside_intermediate_sort_merge_stops_before_next_spill_frame(tmp
 
 
 def test_finite_credit_retry_checks_cancel_but_native_port_keeps_original_guard(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_record_frames import admit_workspace, resident_limit
+    from demiflow.execution.contracts.record_codec import admit_workspace, resident_limit
     with _join_worker(tmp_path) as item:
         runner = item.worker._runner
         held = runner._peer.put(b'x' * 4096)
         requests, sizes = [], []
-        def measure(bounds, *, services, retained):
+        def measure(bounds, *, resident_bytes, retained):
             requests.append(retained)
             if not sizes:
-                sizes.append(resident_limit(bounds, services) - retained + 2048)
-            return admit_workspace(sizes[0], bounds, services=services, retained=retained)
+                sizes.append(resident_limit(bounds, resident_bytes) - retained + 2048)
+            return admit_workspace(sizes[0], bounds, resident_bytes=resident_bytes, retained=retained)
         original_wait = runner._condition.wait
         def cancel_at_original_credit_wait(timeout):
             item.worker.cancel('cancel finite peer-credit wait', deadline_ms=100)

@@ -42,11 +42,14 @@ from demiflow.execution.contracts.dataflow import (  # noqa: E402
     RuntimePolicy, SealedExecution, SourceCursor, SourceSnapshot, SourceSplit, StageSpec,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: E402
-from demiflow.execution import dataflow_history as hist  # noqa: E402
-from demiflow.execution import sealed_plans  # noqa: E402
-from demiflow.execution.recovery_contract import RecoveryContractError  # noqa: E402
-from demiflow.execution.recovery_identity import platform_identity  # noqa: E402
-from demiflow.execution.run_journal import RunJournal  # noqa: E402
+from demiflow.execution.journal import dataflow_history as hist
+from demiflow.execution.checkpoint import history as recovery_hist
+from demiflow.execution.seal import history as sealed_hist
+from demiflow.execution.seal.plan import SEAL_SCHEMA  # noqa: E402
+from demiflow.execution.seal import sealed_plans  # noqa: E402
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError  # noqa: E402
+from demiflow.execution.seal.program_identity import platform_identity  # noqa: E402
+from demiflow.execution.journal.run_journal import RunJournal  # noqa: E402
 from demiflow.resources.contracts import ResourceProfile  # noqa: E402
 
 
@@ -217,7 +220,7 @@ def make_journal(tmp_path, *, run_id=None, platform_revision=None):
 def v3_marker(run_id, action_id="a0", *, dag_id=None, plan_id=None):
     dag_id = dag_id or sha("dag-" + action_id)
     plan_id = plan_id or sha("plan-" + action_id)
-    return {"schema": hist.DATAFLOW_SEALED_SCHEMA, "run_id": run_id, "action_id": action_id,
+    return {"schema": SEAL_SCHEMA, "run_id": run_id, "action_id": action_id,
             "dag_id": dag_id, "plan_id": plan_id, "logical_ref": ref_json(aref("logical")),
             "physical_ref": ref_json(aref("physical")), "programs": [ref_json(aref("program"))],
             "code_pin_ref": ref_json(aref("code-pin")), "identity_bridge_ref": ref_json(aref("bridge")),
@@ -237,7 +240,7 @@ def test_w001(tmp_path):
         # v3 happy path: journal-pointed marker binds by its original version.
         binding = hist.load_execution_version(target, action_id, max_bytes=1024 * 1024)
         assert isinstance(binding, HistoricalBinding)
-        assert binding.schema_version == hist.DATAFLOW_SEALED_SCHEMA
+        assert binding.schema_version == SEAL_SCHEMA
         assert binding.compatible is True and binding.reason is None
         assert binding.original_plan_ref.digest == ex._sealed.physical_ref.digest
         assert binding.original_code_pin_ref.digest == ex._sealed.code_pin_ref.digest
@@ -248,11 +251,11 @@ def test_w001(tmp_path):
         # current markers accept only the producer's two bounded metadata fields.
         historical = {key: value for key, value in original_marker.items()
                       if key not in {'sealed_at', 'observation_labels'}}
-        old_binding = hist._load_v3(journal, target, action_id, historical)
+        old_binding = sealed_hist.load_v3_binding(journal.recovery_identity()["run_id"], target, action_id, historical)
         assert old_binding.original_plan_ref == binding.original_plan_ref
         occurrences = [node.occurrence_id for node in ex._graph.nodes]
         valid = dict(original_marker, observation_labels={occurrences[0]: 'source'})
-        assert hist._load_v3(journal, target, action_id, valid).original_plan_ref == binding.original_plan_ref
+        assert sealed_hist.load_v3_binding(journal.recovery_identity()["run_id"], target, action_id, valid).original_plan_ref == binding.original_plan_ref
         invalid = [dict(original_marker, sealed_at=value) for value in (True, -1, 'now')]
         invalid += [dict(original_marker, observation_labels=labels) for labels in
                     ([], {'outside-original-graph': 'x'}, {occurrences[0]: ''},
@@ -260,7 +263,7 @@ def test_w001(tmp_path):
         invalid.append(dict(original_marker, future_metadata={}))
         for marker in invalid:
             with pytest.raises(DataflowError) as exc:
-                hist._load_v3(journal, target, action_id, marker)
+                sealed_hist.load_v3_binding(journal.recovery_identity()["run_id"], target, action_id, marker)
             assert exc.value.code == 'INVALID_CONTRACT'
         assert journal.source_binding(action_id + "-dataflow-sealed") == original_marker
         # Neither v3 nor v1 facts -> incompatible history, never a fabricated projection.
@@ -269,7 +272,7 @@ def test_w001(tmp_path):
         assert exc.value.code == "INCOMPATIBLE_HISTORY"
         # Both v3 and v1 facts bound -> invalid contract.
         journal.bind_source(fence, "both-dataflow-sealed", v3_marker(run_id, "both"))
-        journal.bind_source(fence, "both-sealed-plan", {"schema": hist.SEALED_PLAN_FACTS_SCHEMA})
+        journal.bind_source(fence, "both-sealed-plan", {"schema": sealed_hist.SEALED_PLAN_FACTS_SCHEMA})
         with pytest.raises(DataflowError) as exc:
             hist.load_execution_version(target, "both", max_bytes=1024 * 1024)
         assert exc.value.code == "INVALID_CONTRACT"
@@ -315,7 +318,7 @@ def test_w001(tmp_path):
 # --- W002 validate_resume_compatibility ------------------------------------
 
 def _v3_binding(plan_recovery="checkpoint"):
-    return HistoricalBinding(schema_version=hist.DATAFLOW_SEALED_SCHEMA,
+    return HistoricalBinding(schema_version=SEAL_SCHEMA,
                              original_plan_ref=aref("physical"), original_code_pin_ref=aref("code-pin"),
                              compatible=True, reason=None, restore_image=None)
 
@@ -348,45 +351,45 @@ def test_w002():
         store.add(plan_ref, raw)
         cut = CutRequest(sha("cut"), 1, 0, 0, (), True)
         restore = RecoveryImage(sha("commit"), cut, (), {}, ()) if image else None
-        return HistoricalBinding(hist.DATAFLOW_SEALED_SCHEMA, plan_ref, code_ref, True, None, restore)
+        return HistoricalBinding(SEAL_SCHEMA, plan_ref, code_ref, True, None, restore)
 
     binding = bind({"recovery": "checkpoint", "splits": [{"required_domain": "local"}, {"required_domain": "durable"}]})
-    report = hist.validate_resume_compatibility(binding, current_runtime="engine-x", store=store)
+    report = recovery_hist.validate_resume_compatibility(binding, current_runtime="engine-x", store=store)
     assert isinstance(report, CapabilityReport) and report.supported and report.reasons == ()
     assert report.recovery == "checkpoint" and report.required_domains == ("durable", "local")
     absent = bind({"recovery": "checkpoint", "splits": []}, image=False)
-    report = hist.validate_resume_compatibility(absent, current_runtime="engine-x", store=store)
+    report = recovery_hist.validate_resume_compatibility(absent, current_runtime="engine-x", store=store)
     assert not report.supported and any("journal-proven" in r for r in report.reasons)
-    drift = hist.validate_resume_compatibility(binding, current_runtime="other-engine", store=store)
+    drift = recovery_hist.validate_resume_compatibility(binding, current_runtime="other-engine", store=store)
     assert drift.supported and drift.reasons == ()  # Origin is not runtime admission.
     for recovery in ("attempt_only", "delivery_only"):
-        report = hist.validate_resume_compatibility(bind({"recovery": recovery, "splits": []}),
+        report = recovery_hist.validate_resume_compatibility(bind({"recovery": recovery, "splits": []}),
                                                     current_runtime="engine-x", store=store)
         assert not report.supported and report.recovery == recovery
         assert any(recovery in r for r in report.reasons)
     store.objects.pop(code_ref.digest)
     binding = bind({"recovery": "checkpoint", "splits": []})
-    report = hist.validate_resume_compatibility(binding, current_runtime="engine-x", store=store)
+    report = recovery_hist.validate_resume_compatibility(binding, current_runtime="engine-x", store=store)
     assert not report.supported and any("code pin" in r for r in report.reasons)
     assert binding.original_code_pin_ref == code_ref
     store.add(code_ref, code_raw)
     # Incompatible binding -> unsupported carrying its reason.
     plan_ref, raw = json_ref({"recovery": "checkpoint", "splits": []})
     store.add(plan_ref, raw)
-    incompat = HistoricalBinding(schema_version=hist.DATAFLOW_SEALED_SCHEMA,
+    incompat = HistoricalBinding(schema_version=SEAL_SCHEMA,
                                  original_plan_ref=plan_ref, original_code_pin_ref=code_ref,
                                  compatible=False, reason="source changed", restore_image=None)
-    report = hist.validate_resume_compatibility(incompat, current_runtime="engine-x", store=store)
+    report = recovery_hist.validate_resume_compatibility(incompat, current_runtime="engine-x", store=store)
     assert report.supported is False and report.reasons == ("source changed",)
     # Unknown schema -> unsupported.
     unknown = HistoricalBinding(schema_version="demiflow.unknown.v9", original_plan_ref=plan_ref,
                                 original_code_pin_ref=code_ref, compatible=True, reason=None,
                                 restore_image=None)
-    report = hist.validate_resume_compatibility(unknown, current_runtime="engine-x", store=store)
+    report = recovery_hist.validate_resume_compatibility(unknown, current_runtime="engine-x", store=store)
     assert report.supported is False and any("unsupported historical schema" in r for r in report.reasons)
     # Old keyword is accepted as provenance only, including callers omitting it.
-    assert hist.validate_resume_compatibility(binding, current_runtime="", store=store).supported
-    assert hist.validate_resume_compatibility(binding, store=store).supported
+    assert recovery_hist.validate_resume_compatibility(binding, current_runtime="", store=store).supported
+    assert recovery_hist.validate_resume_compatibility(binding, store=store).supported
 
 
 # --- W003 translate_native_checkpoint --------------------------------------
@@ -405,7 +408,7 @@ def _recovery_image(*, buffers=(), operator_states=None, splits=1):
 
 
 def _v1_binding(image):
-    return HistoricalBinding(schema_version=hist.SEALED_PLAN_FACTS_SCHEMA,
+    return HistoricalBinding(schema_version=sealed_hist.SEALED_PLAN_FACTS_SCHEMA,
                              original_plan_ref=aref("physical"), original_code_pin_ref=aref("code-pin"),
                              compatible=True, reason=None, restore_image=image)
 
@@ -416,14 +419,14 @@ def test_w003():
     store.add(state_ref, b"state")
     image = _recovery_image(operator_states={"occ0": state_ref})
     binding = _v1_binding(image)
-    result = hist.translate_native_checkpoint(binding, store=store, bounds=bounds())
+    result = recovery_hist.translate_native_checkpoint(binding, store=store, bounds=bounds())
     assert result is image  # original identity preserved, never rewritten
     assert result.commit_id == sha("commit")
     assert len(result.source_vector) == 1
     # Unsealed operator state -> incompatible history.
     store.unsealed.add(state_ref.digest)
     with pytest.raises(DataflowError) as exc:
-        hist.translate_native_checkpoint(binding, store=store, bounds=bounds())
+        recovery_hist.translate_native_checkpoint(binding, store=store, bounds=bounds())
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
     store.unsealed.clear()
     # Unsealed buffer -> incompatible history.
@@ -432,30 +435,30 @@ def test_w003():
     store.unsealed.add(buf_ref.digest)
     buf_image = _recovery_image(buffers=(buf_ref,))
     with pytest.raises(DataflowError) as exc:
-        hist.translate_native_checkpoint(_v1_binding(buf_image), store=store, bounds=bounds())
+        recovery_hist.translate_native_checkpoint(_v1_binding(buf_image), store=store, bounds=bounds())
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
     store.unsealed.clear()
     # Duplicate splits -> invalid contract.
     dup = _recovery_image(splits=2)
     object.__setattr__(dup, "source_vector", (dup.source_vector[0], dup.source_vector[0]))
     with pytest.raises(DataflowError) as exc:
-        hist.translate_native_checkpoint(_v1_binding(dup), store=store, bounds=bounds())
+        recovery_hist.translate_native_checkpoint(_v1_binding(dup), store=store, bounds=bounds())
     assert exc.value.code == "INVALID_CONTRACT"
     # No committed checkpoint -> incompatible history (files alone never authority).
     with pytest.raises(DataflowError) as exc:
-        hist.translate_native_checkpoint(_v1_binding(None), store=store, bounds=bounds())
+        recovery_hist.translate_native_checkpoint(_v1_binding(None), store=store, bounds=bounds())
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
     # Unknown schema -> no listed adapter.
     other = HistoricalBinding(schema_version="demiflow.unknown.v9", original_plan_ref=aref("physical"),
                               original_code_pin_ref=aref("code-pin"), compatible=True, reason=None,
                               restore_image=image)
     with pytest.raises(DataflowError) as exc:
-        hist.translate_native_checkpoint(other, store=store, bounds=bounds())
+        recovery_hist.translate_native_checkpoint(other, store=store, bounds=bounds())
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
     # _translate_manifest: one cursor per source, never a guessed multi-source vector.
     manifest = _checkpoint_manifest()
     fact = {"sequence": 3, "commit_id": sha("commit")}
-    translated = hist._translate_manifest(manifest, fact)
+    translated = recovery_hist._translate_manifest(manifest, fact)
     assert len(translated.source_vector) == 1
     assert translated.source_vector[0].offset == {"next_ordinal": 7}
     assert translated.commit_id == sha("commit")
@@ -464,25 +467,25 @@ def test_w003():
     bad = dict(manifest)
     bad["future_field"] = 1
     with pytest.raises(DataflowError) as exc:
-        hist._translate_manifest(bad, fact)
+        recovery_hist._translate_manifest(bad, fact)
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
     # Unsealed manifest -> rejected.
     unsealed = dict(manifest)
     unsealed["seal"] = {"sealed": False}
     with pytest.raises(DataflowError) as exc:
-        hist._translate_manifest(unsealed, fact)
+        recovery_hist._translate_manifest(unsealed, fact)
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
     # Identifier-only inflight effect -> rejected, never fabricated as an artifact.
     ident_effect = dict(manifest)
     ident_effect["inflight"] = [{"request_key": "k", "status": "known_completed", "effect_ref": "effect-id"}]
     with pytest.raises(DataflowError) as exc:
-        hist._translate_manifest(ident_effect, fact)
+        recovery_hist._translate_manifest(ident_effect, fact)
     assert exc.value.code == "INCOMPATIBLE_HISTORY"
 
 
 def _checkpoint_manifest():
     return {
-        "schema_version": hist.CHECKPOINT_MANIFEST_SCHEMA,
+        "schema_version": recovery_hist.CHECKPOINT_MANIFEST_SCHEMA,
         "checkpoint_id": sha("checkpoint"), "run_id": "r" + "1" * 24, "action_id": "a0",
         "epoch": 1, "topology_revision": 1, "route_epoch": 0, "plan_revision": 1,
         "artifact_manifest_ref": {"manifest_id": "m0", "sha256": sha("manifest")},
@@ -543,7 +546,7 @@ def test_w004():
 # --- W005 CheckedExecution.execution_bindings ------------------------------
 
 def _checked(tmp_path, **overrides):
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     kwargs = dict(nodes=[{"id": "a0", "kind": "take_all"}], edges=[], actions=["a0"],
                   operators=[], source_root=tmp_path, limits={}, record=lambda *a: None,
                   check_stop=lambda: None)
@@ -581,7 +584,7 @@ def test_w005(tmp_path):
 # --- W006 CheckedExecution.action driver_route -----------------------------
 
 def test_w006(tmp_path, monkeypatch):
-    import demiflow.execution.checked as checked
+    import demiflow.execution.pipeline.checked as checked
     events = []
     ce = _checked(tmp_path, edges=[{"from": "p0", "to": "a0", "port": 0}],
                   record=lambda identity, kind, value: events.append((identity, kind, value)))
@@ -609,7 +612,7 @@ def test_w006(tmp_path, monkeypatch):
 
 def test_w007(tmp_path):
     from demiflow import data
-    from demiflow.execution.plan_interpreter import PlanContractError
+    from demiflow.execution.contracts.errors import PlanContractError
     from test_runtime_v3_real_seams import prepared
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
         target = services.action.context.directory
@@ -644,7 +647,7 @@ def _v3_bundle(store, original, bridge_doc):
 
 def test_w008(tmp_path):
     from demiflow import data
-    from demiflow.execution.plan_interpreter import PlanContractError
+    from demiflow.execution.contracts.errors import PlanContractError
     from test_runtime_v3_real_seams import prepared
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (execution, services):
         target, action_id = services.action.context.directory, services.action.action_id
@@ -700,7 +703,7 @@ def test_w009(tmp_path):
 
 def test_w010():
     # The historical-layout summary is produced by the engine reader since P4.
-    from demiflow.execution import sealed_plan_facts as facts
+    from demiflow.execution.journal import sealed_plan_facts as facts
     graph, occs = make_graph("a0")
     physical = make_physical(graph, limitations=("limit",))
     view = hist.build_plan_view(graph, make_sealed(), physical, observations=())
@@ -742,7 +745,7 @@ def test_w011():
     # v1/v2 entry keeps the historical shape.
     # The engine reader hands the workbench the summarised physical plan in plan_view
     # (P4); the workbench passes it through without re-deriving it.
-    from demiflow.execution import sealed_plan_facts
+    from demiflow.execution.journal import sealed_plan_facts
     physical_plan = {"plan_id": "p", "plan_revision": 1, "recovery": {},
                      "worker_groups": [], "stages": [], "channels": []}
     summary = sealed_plan_facts._physical_summary(physical_plan)
@@ -785,7 +788,7 @@ def test_w012():
 # --- W013 RunContext.resume admission --------------------------------------
 
 def test_w013(tmp_path, monkeypatch):
-    from demiflow.execution.run_context import RunContext, RunRef
+    from demiflow.execution.pipeline.run_context import RunContext, RunRef
     target, journal, fence, run_id = make_journal(tmp_path)
     reference = RunRef(str(target), run_id)
     # Wrong reference type.
@@ -1161,11 +1164,11 @@ def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",), scoped=Tr
     from demiflow import data
     from demiflow.workbench.runs import manager
     from demiflow.forge.platform import content_digest
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.runtime_limits import execution_limits
-    from demiflow.execution.dataflow_api import declare_action_v3, make_action_request
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.planning.dataflow_policy import execution_limits
+    from demiflow.execution.executors.dataflow_api import declare_action_v3, make_action_request
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.execution.action_driver.services import make_driver_services
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from test_runtime_v3_real_seams import PreparationOnly
 

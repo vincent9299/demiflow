@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _counting_flow(state):
@@ -15,7 +15,7 @@ def _counting_flow(state):
 
 @pytest.mark.parametrize('mode', ['thread', 'process'])
 def test_real_host_mode_controls_borrowed_state_admission(tmp_path, mode):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     state = [0]
     with RunContext.start(tmp_path/'run') as run, data.local_execution(
             workers=2, worker_mode=mode):
@@ -59,7 +59,7 @@ def test_borrowed_json_state_cannot_resume_after_original_ack(tmp_path, monkeypa
                 _counting_flow(state).take_all()
     assert seen
     before = list(state)
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     journal = RunJournal(reference.directory)
     committed = journal.execution_commits('action-1')

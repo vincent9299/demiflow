@@ -2,7 +2,7 @@
 from pathlib import Path
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('phase', ['success', 'start', 'call_and_close', 'close', 'cancel', 'empty', 'stale_boot'])
@@ -18,7 +18,7 @@ def test_real_process_hooks_survive_cleanup_and_preserve_failures(tmp_path, monk
                 getattr(execution, '_operator_lifecycles', {}).values())
     monkeypatch.setattr(DataflowExecution, 'close', close)
     if phase == 'stale_boot':
-        from demiflow.execution.dataflow_hosts import _EndpointBase
+        from demiflow.execution.hosts.endpoints import _EndpointBase
         accept = _EndpointBase._accept_final_observations
         def stale(endpoint, response):
             if response.get('final_progress'):
@@ -80,8 +80,8 @@ def test_real_process_hooks_survive_cleanup_and_preserve_failures(tmp_path, monk
 
 
 def test_declared_payload_limits_are_not_silently_shrunk():
-    from demiflow.execution.payload_limits import stream_limits
-    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.compiler_support.payload_limits import stream_limits
+    from demiflow.execution.seal.plan_facts import operation_facts
     from demiflow.workbench.pipeline_policy import limits_with
     async def batch(rows): return rows
     flow = data.from_items([{'x':1}]).flat_map(lambda row:[row,row]).batch_map(

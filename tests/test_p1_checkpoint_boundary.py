@@ -19,8 +19,8 @@ from demiflow.data.execution_contract import _use_executor
 from demiflow.data.lance_declaration import make_lance_scan_source
 from demiflow.data.sources import LanceSource, MaterializedSource
 from demiflow.errors import InvalidLanceRequest
-from demiflow.execution.checkpoint_read import read_checkpoint_binding
-from demiflow.execution.stream_checkpoint import StreamCheckpoint, read_checkpoint
+from demiflow.execution.executors.stream_checkpoint import read_checkpoint_binding
+from demiflow.execution.executors.stream_checkpoint import StreamCheckpoint, read_checkpoint
 
 
 class _Port:
@@ -29,10 +29,10 @@ class _Port:
         self.inputs = []
 
     def prepare_input(self, request):
-        from demiflow.execution.input_runtime import prepare_input
+        from demiflow.execution.executors.base import DatasetExecutor
         self.events.append('input')
         self.inputs.append(request)
-        return prepare_input(self, request)
+        return DatasetExecutor.prepare_input(self, request)
 
 
 class _Lock:
@@ -74,7 +74,7 @@ def _checkpoint(tmp_path, events, *, version=None):
 
 
 def _checked_seam(monkeypatch, events, *, owner=None):
-    from demiflow.execution import checked
+    from demiflow.execution.pipeline import checked
     registrations, arguments = [], []
     class Checked:
         def checkpoint_read(self, source, reference):
@@ -162,8 +162,8 @@ def test_fixed_binding_snapshots_reference_once_before_selection_and_registers_s
     assert events == ['checked', 'lock', 'ownership', 'unlock', 'select', 'schema', 'register']
     expected = DataAPI(port).read_lance(opened[0]['uri'], version=1, columns=['id'],
                                      batch_readahead=1, fragment_readahead=1)._source
-    from demiflow.execution.plan_facts import source_facts
-    from demiflow.execution.recovery_identity import source_identity
+    from demiflow.execution.seal.plan_facts import source_facts
+    from demiflow.execution.seal.program_identity import source_identity
     assert result._source.query.to_dict() == expected.query.to_dict()
     assert result._source.native_options == expected.native_options
     assert source_facts(result._source) == source_facts(expected)
@@ -226,7 +226,7 @@ def test_managed_checkpoint_facts_stay_with_original_checked_owner(tmp_path, mon
 
 
 def test_real_capability_gate_still_rejects_checkpoint_before_host_selection(tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     import demiflow.data.api as api
     events = []
     checkpoint = _checkpoint(tmp_path, events)
@@ -235,15 +235,15 @@ def test_real_capability_gate_still_rejects_checkpoint_before_host_selection(tmp
         data.read_checkpoint(checkpoint, 'stage')
     assert events == []
     assert data.read_checkpoint is read_checkpoint
-    assert read_checkpoint.__module__ == 'demiflow.execution.stream_checkpoint'
+    assert read_checkpoint.__module__ == 'demiflow.execution.executors.stream_checkpoint'
 
 
 @pytest.mark.parametrize('projection', [False, True])
 @pytest.mark.parametrize('native', [False, True])
 def test_public_and_shared_lance_scan_have_identical_declaration_and_facts(tmp_path, projection, native):
     from demiflow.data.native_options import parse_native_options
-    from demiflow.execution.plan_facts import source_facts
-    from demiflow.execution.recovery_identity import source_identity
+    from demiflow.execution.seal.plan_facts import source_facts
+    from demiflow.execution.seal.program_identity import source_identity
     from demiflow.lance.model import LanceScanSpec
     options = dict(uri=str(tmp_path / 'input.lance'), version=4, filter='id >= 0', limit=9,
                    batch_size=2, batch_readahead=3, fragment_readahead=4,

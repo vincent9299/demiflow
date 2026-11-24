@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, WorkerEvent, WorkerLease
-from demiflow.execution.dataflow_authority import DriverJournalService
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.journal.dataflow_authority import DriverJournalService
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 
@@ -194,7 +194,7 @@ def test_native_close_failure_still_closes_both_notification_descriptors(tmp_pat
 
 @pytest.mark.parametrize('where', ['configure_socket', 'start_second_thread'])
 def test_partial_initialization_releases_owned_descriptors_and_threads(tmp_path, monkeypatch, where):
-    import demiflow.execution.dataflow_authority as authority
+    import demiflow.execution.journal.dataflow_authority as authority
     pairs, threads = [], []
     original_pair, original_start = socket.socketpair, threading.Thread.start
 

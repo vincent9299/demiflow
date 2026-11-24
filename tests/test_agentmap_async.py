@@ -187,7 +187,7 @@ def test_two_turn_native_read_and_replay(server, resource, tmp_path, monkeypatch
         assert len(trace['turns']) == 2 and len(trace['observations']) == 1
         assert any(m['text'] == 'Full qualifying context.' for m in trace['observations'][0]['result']['materials'])
     assert len(server['requests']) == 2
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     assert RunJournal(reference.directory).budget_consumed('requests') == 2
 
 

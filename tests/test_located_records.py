@@ -22,8 +22,8 @@ def test_located_gzip_invalid_rows_and_json_container(tmp_path):
 
 
 def test_native_union_is_lazy_repeatable_and_keeps_context(tmp_path):
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     data=DataAPI();seen=tmp_path/'source-calls'
     def rows():
         with seen.open('a') as stream:stream.write('read\n')

@@ -8,7 +8,7 @@ import pytest
 from demiflow import data
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _lance_key_fixtures import install_lance_key_probe
 from _worker_event_fixtures import emit, events
 

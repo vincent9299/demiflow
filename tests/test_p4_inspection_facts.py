@@ -5,8 +5,9 @@ from contextlib import closing
 
 import pytest
 
-from demiflow.execution.run_reader import read_run, RunReadError
-from demiflow.execution.publication_facts import verify_write_receipt, PublicationMismatch
+from demiflow.execution.journal.run_reader import read_run, RunReadError
+from demiflow.execution.journal.publication_facts import verify_write_receipt
+from demiflow.execution.contracts.errors import PublicationMismatch
 from demiflow.lance.model import LanceWriteReceipt
 from test_forge_history_admission import run_fixture, database
 
@@ -24,7 +25,7 @@ def test_projection_retains_prior_commit_but_current_failure_and_diagnostics(tmp
     journal.action_event('action-1','result',{'ref':{'lance_version':1},'location_id':'local'})
     state = journal.execution_status()
     journal.begin_attempt(expected_attempt=1, expected_revision=state['revision'])
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     second = RunJournal(target, attempt=2)
     second.action_event('action-1','intent',{'request_hash':'next'})
     second.action_event('action-1','failed',{'message':'current failure'})
@@ -74,7 +75,7 @@ def test_explicit_metadata_callback_and_recording_are_separate_from_projection(t
     def metadata(uri,version):
         calls.append((uri,version))
         return dict(version=1,schema_hash='schema',schema_identity='identity',row_count=2)
-    monkeypatch.setattr('demiflow.execution.publication_facts.inspect_write_receipt',lambda *a:raw)
+    monkeypatch.setattr('demiflow.execution.journal.publication_facts.inspect_write_receipt',lambda *a:raw)
     before=(target/'run.sqlite').read_bytes()
     with read_run(target) as reader:
         assert reader.output_projection(1,'action-1')['committed'] is False
@@ -149,8 +150,8 @@ def test_legacy_outputs_keep_implicit_attempt_and_reject_explicit_selector(tmp_p
 def test_old_absence_does_not_supply_a_new_attempt_intent(tmp_path):
     from test_p4_native_maintenance import native,create_action
     from test_p4_attempt_reservations import resume
-    from demiflow.execution.run_context import create_target_absent_binding
-    from demiflow.execution.publication_facts import action_recovery_facts
+    from demiflow.execution.outputs.lance_sink import create_target_absent_binding
+    from demiflow.execution.journal.run_reader import action_recovery_facts
     journal=native(tmp_path)
     create_action(journal,tmp_path/'missing.lance')
     with read_run(tmp_path) as reader:
@@ -181,10 +182,10 @@ def test_metadata_callback_does_not_hold_a_read_transaction_or_write_lease(tmp_p
 
 @pytest.mark.parametrize('deadline',[float('nan'),float('inf'),True,'later'])
 def test_nonfinite_or_invalid_deadlines_are_rejected(tmp_path,deadline):
-    from demiflow.execution.publication_facts import action_recovery_facts
-    from demiflow.execution.sealed_plan_facts import read_action_plan
-    from demiflow.execution.recovery_contract import RecoveryContractError
-    from demiflow.execution.run_reader import observe_storage
+    from demiflow.execution.journal.run_reader import action_recovery_facts
+    from demiflow.execution.journal.sealed_plan_facts import read_action_plan
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    from demiflow.execution.journal.run_reader import observe_storage
     for read in (lambda:action_recovery_facts(tmp_path,'a',deadline=deadline),
                  lambda:read_action_plan(tmp_path,'a',max_bytes=1024,deadline=deadline),
                  lambda:observe_storage(tmp_path,deadline=deadline).__enter__()):

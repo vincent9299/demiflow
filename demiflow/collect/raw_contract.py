@@ -10,7 +10,7 @@ import re
 from urllib.parse import parse_qsl, urlsplit
 
 from ..secrets import Secret, public
-from ..execution.recovery_contract import document, identifier
+from demiflow.execution.contracts.recovery_contract import document, identifier
 
 
 def integer(value, name, low, high):

@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 from demiflow import data
-from demiflow.execution.plan_capture import capture_pipeline
+from demiflow.execution.pipeline.managed_native import capture_pipeline
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.workbench.graph.plan_details import build_plan_details, material, safe_json
 from test_map_prompt_async import PACK

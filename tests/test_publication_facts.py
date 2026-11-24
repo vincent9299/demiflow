@@ -2,8 +2,9 @@
 from pathlib import Path
 from types import SimpleNamespace
 import pytest
-from demiflow.execution import publication_facts as facts
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.journal import publication_facts as facts
+from demiflow.execution.storage.object_resources import object_namespace
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def test_observation_context_is_the_shape_every_copy_built(tmp_path):
@@ -22,7 +23,7 @@ def test_observation_context_is_the_shape_every_copy_built(tmp_path):
 
 
 def test_observation_action_cannot_advance_a_real_journal(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     with RunContext.start(tmp_path / 'run') as run:
         journal, native_fence = run.journal, run.fence
     action = facts.observation_action(journal, 'action-1', {'kind': 'write_table'})
@@ -34,13 +35,13 @@ def test_observation_action_cannot_advance_a_real_journal(tmp_path):
 
 
 def test_object_namespace_matches_the_host_fabricated_context(tmp_path):
-    from demiflow.execution.object_resources import namespace_record
+    from demiflow.execution.storage.object_resources import namespace_record
     run_id = 'b' * 32
     for logical in (str(tmp_path / 'objects'), (tmp_path / 'objects').as_uri()):
         fabricated = SimpleNamespace(ref=SimpleNamespace(run_id=run_id))
-        assert facts.object_namespace(run_id, logical) == namespace_record(fabricated, logical)
+        assert object_namespace(run_id, logical) == namespace_record(fabricated, logical)
     with pytest.raises(RecoveryContractError):
-        facts.object_namespace(run_id, 's3://bucket/objects')
+        object_namespace(run_id, 's3://bucket/objects')
 
 
 def test_engine_module_does_not_load_hosts():
@@ -48,7 +49,7 @@ def test_engine_module_does_not_load_hosts():
     import sys
     root_dir = Path(__file__).resolve().parents[1]
     result = subprocess.run([sys.executable, '-I', '-B', '-c',
-        'import sys;sys.path.insert(0,sys.argv[1]);import demiflow.execution.publication_facts;'
+        'import sys;sys.path.insert(0,sys.argv[1]);import demiflow.execution.journal.publication_facts;'
         'assert not any(n.startswith(("demiflow.workbench","demiflow.forge")) for n in sys.modules)',
         str(root_dir)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr

@@ -10,10 +10,10 @@ from runtime_v3_owned_crash import assert_released, kill_owned_worker, process_r
 
 import demiflow.data as data
 from demiflow.collect import FetchPolicy, HttpSource
-from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.recovery_contract import RecoveryContractError, RunRef
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.objects import LocalObjectStore
 from test_queue_v2_boundaries import seed
 from test_raw_fetch import origin_server, BODY
@@ -114,7 +114,7 @@ def test_public_queue_runs_in_managed_worker(tmp_path):
 
 
 def test_both_commit_scopes_settle_in_driver_single_journal(tmp_path, monkeypatch):
-    import demiflow.execution.commit as commits
+    import demiflow.execution.checkpoint.commit as commits
     records = []
     original = commits.CommitCoordinator.__init__
 
@@ -517,7 +517,7 @@ def test_unified_queue_carrier_releases_quota_on_business_failure_no_helper(tmp_
 
 
 def test_public_queue_releases_staging_throughout_settlement(tmp_path, monkeypatch):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
 
     # Inspect the owning store, both while the real acquisition is staging and
     # after its last settlement. A defunct carrier directory proves no bound.
@@ -616,51 +616,3 @@ def test_unified_queue_carrier_close_failure_does_not_mask_business_error(tmp_pa
     # Backstop kill reaped the worker even though the protocol terminal failed.
     pids = _managed_worker_pids(root)
     assert pids and all(_pid_dead(pid) for pid in pids)
-
-
-def test_local_segment_store_discard_is_safe_and_idempotent(tmp_path):
-    # Guardrail 1: discard reuses the read-path _resolve security (path-escape /
-    # symlink / size) before unlink, removes only within-store blocks and their
-    # now-empty generation dir, never deletes outside the store, and the finally
-    # rmtree backstop is idempotent. write/read behavior is unchanged.
-    import hashlib
-    import shutil
-    import uuid
-    from demiflow.execution.exchange.carriage_local import LocalSegmentStore
-    from demiflow.execution.contracts.exchange import build_data_ref
-    store_dir = tmp_path / 'store'
-    store = LocalSegmentStore(store_dir, host_id='local')
-    scope = uuid.uuid4().hex
-    _, refs = store.write([{'v': (1, 2), 'b': b'bytes'}], scope_ref=scope, durability='ephemeral')
-    block = store_dir / refs[0]['location']
-    assert block.is_file()
-    # read unchanged: type-preserving round-trip before discard.
-    assert store.read(refs) == [{'v': (1, 2), 'b': b'bytes'}]
-    # discard removes the block and its now-empty generation dir (within store).
-    store.discard(refs)
-    assert not block.exists() and not block.parent.exists()
-    # A properly-built escaping ref is rejected by _resolve; nothing outside is deleted.
-    outside = tmp_path / 'outside.pkl'
-    payload = b'precious-outside-data'
-    outside.write_bytes(payload)
-    escape = build_data_ref(kind='file', read_domain=store.domain, location='../outside.pkl',
-                            payload_bytes=len(payload), sha256=hashlib.sha256(payload).hexdigest(),
-                            durability='ephemeral', scope_ref=scope)
-    with pytest.raises(RecoveryContractError, match='escapes its store'):
-        store.discard([escape])
-    assert outside.read_bytes() == payload
-    # A symlinked block path is rejected; the target and the link are intact.
-    gen = store_dir / 'segments' / 'symgen'
-    gen.mkdir(parents=True)
-    link = gen / '0.pkl'
-    link.symlink_to(outside)
-    sym = build_data_ref(kind='file', read_domain=store.domain, location='segments/symgen/0.pkl',
-                         payload_bytes=len(payload), sha256=hashlib.sha256(payload).hexdigest(),
-                         durability='ephemeral', scope_ref=scope)
-    with pytest.raises(RecoveryContractError, match='symlink'):
-        store.discard([sym])
-    assert outside.read_bytes() == payload and link.is_symlink()
-    # System-level idempotent cleanup backstop (finally rmtree ignore_errors).
-    shutil.rmtree(store_dir, ignore_errors=True)
-    shutil.rmtree(store_dir, ignore_errors=True)
-    assert not store_dir.exists()

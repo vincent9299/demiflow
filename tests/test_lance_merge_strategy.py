@@ -122,7 +122,7 @@ def test_isolated_prepare_commit_race_is_rejected(tmp_path, monkeypatch):
 def test_isolated_prepare_guard_cannot_commit(tmp_path, monkeypatch):
     import demiflow.lance.mutate as mutation
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     target, source = str(tmp_path / 'target.lance'), str(tmp_path / 'patch.lance')
     old = lance.write_dataset(pa.table({'id': [1, 2], 'value': ['old', 'old'], 'keep': [7, 8]}), target)
     lance.write_dataset(pa.table({'id': [1, 2], 'value': ['new', 'new']}), source)
@@ -184,7 +184,7 @@ def test_disk_keys_preserve_composite_binary_identity_and_cleanup(tmp_path, monk
 
 
 def test_large_reservation_excludes_other_native_jobs(tmp_path, monkeypatch):
-    import demiflow.execution.datafusion as native
+    import demiflow.execution.hosts.datafusion as native
     monkeypatch.setattr(native, '_cgroup_memory', lambda: None)
     monkeypatch.setattr(native, '_cpu_capacity', lambda: 4)
     options = native.DataFusionOptions(memory_bytes=16 * 1024**2, max_rss_bytes=64 * 1024**2,

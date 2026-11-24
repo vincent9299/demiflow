@@ -52,15 +52,16 @@ async def _batch(rows):
 @contextmanager
 def _provider(fx, *, workers=4, fusion=True):
     from demiflow import data
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    resolve = action_limits.resolve_runtime_policy
     def policy(options, limits, **kwargs):
         if fx.provider == 'local':
             options = {**options, 'worker_mode':'process'}
         value, bounds = resolve(options, limits, **kwargs)
         return replace(value, fusion=fusion), bounds
     with patch.dict(os.environ, {'DEMIFLOW_RESOURCE_ROOT': str(fx.root/'capacity')}), \
-            patch.object(dataflow_api, 'resolve_runtime_policy', policy):
+            patch.object(action_limits, 'resolve_runtime_policy', policy):
         if fx.provider == 'local':
             from demiflow.data.api import _use_executor
             from demiflow.execution.executors.local import LocalDatasetExecutor
@@ -91,8 +92,8 @@ def _provider(fx, *, workers=4, fusion=True):
 
 
 def _cut_facts(coordinator, image):
-    from demiflow.execution.checkpoint.coordinator import _contribution_json, _cursor_json
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts.checkpoint import contribution_json as _contribution_json, cursor_json as _cursor_json
+    from demiflow.execution.contracts import state_codec
     states = []
     for owner in image.contributions:
         for occurrence, ref in owner.operator_states.items():
@@ -119,9 +120,9 @@ def _cut_facts(coordinator, image):
 
 def _resume_after_ack(fx, name, build, *, eligible=None, workers=4, fusion=True, limits=None,
                       observations=None):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     directory = fx.journal_dir/name
     cuts, boundary = [], {}
@@ -266,7 +267,7 @@ def actor_state_lifecycle(fx,fault=None):
     if fault is not None:
         raise ValueError('actor lifecycle covers success, failure and cancellation together')
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     path = str(fx.evidence_dir/'accumulator.jsonl')
     def build():
@@ -401,8 +402,8 @@ def _channel_recovery(fx):
     from demiflow.execution.contracts.dataflow import Record, ExchangeSpec, CutRequest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.exchange import dataflow_channels as channels
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.record_codec import _encode_payload
+    from demiflow.execution.contracts.recovery_contract import identity
     from test_runtime_v3_artifact_accounting import store_fixture
     cases=[]
     for routing in ('hash','rebalance','target','broadcast'):

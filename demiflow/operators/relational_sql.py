@@ -221,3 +221,25 @@ def typed_join_query(types, how):
     lo = left.columns[-1].value
     ro = right.columns[-1].value if how in ('inner', 'left') else 'CAST(NULL AS BIGINT)'
     return builder.query(f'SELECT {lo} AS lo, {ro} AS ro FROM {joined.view}'), builder.key_functions
+
+
+def query_typed_join(tables, types, *, how, left_count, right_count, retained, query, check_stop):
+    from demiflow.execution.contracts.relational_region import SQL_CHILD_RSS, SQL_PARENT_WINDOW
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    # Prove a complete result bound before starting SQL. Once started, errors
+    # and cancellation propagate; there is no retry through another algorithm.
+    upper = left_count if how in ('semi', 'anti') else left_count * max(1, right_count)
+    if upper * 256 + retained > SQL_PARENT_WINDOW or upper * 224 > SQL_CHILD_RSS // 16:
+        return None
+    sql, functions = typed_join_query(types, how)
+    pairs = query(sql, tables=tables, max_pairs=upper, rss_bytes=SQL_CHILD_RSS,
+                                         check_stop=check_stop, key_functions=functions)
+    for li, ri in pairs:
+        if type(li) is not int or not 0 <= li < left_count or (
+                ri is not None and (type(ri) is not int or not 0 <= ri < right_count)):
+            raise DataflowError('INTERNAL_PROTOCOL', 'typed join returned invalid input offsets')
+    # Recovery replays an emitted prefix. Order only these pre-admitted offset
+    # pairs, never the business keys or full input rows. The 256 bytes/pair
+    # above include tuple/int/list storage, sort keys and Timsort scratch.
+    pairs.sort(key=lambda pair: (pair[0], -1 if pair[1] is None else pair[1]))
+    return pairs

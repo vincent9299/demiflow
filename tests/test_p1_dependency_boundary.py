@@ -43,12 +43,14 @@ def test_sdk_retained_runtime_dependencies_do_not_expand():
 
 
 def test_execution_rebinding_and_checkpoint_core_do_not_construct_sdk_objects():
-    for filename in ['demiflow/execution/checked.py', 'demiflow/execution/checkpoint_read.py',
+    for filename in ['demiflow/execution/pipeline/checked.py', 'demiflow/execution/executors/stream_checkpoint.py',
+                     'demiflow/execution/sources/checkpoint_read.py',
                      'demiflow/data/relational_declaration.py']:
         found = imports(ROOT / filename)
-        assert not {entry for entry in found if entry[1] in {'demiflow.data.api', 'demiflow.data.dataset'}}, found
+        core = {entry for entry in found if not (filename.endswith('/executors/stream_checkpoint.py') and entry[0] == 'read_checkpoint')}
+        assert not {entry for entry in core if entry[1] in {'demiflow.data.api', 'demiflow.data.dataset'}}, core
     # The canonical public checkpoint function is the sole assembly exception.
-    assembly = {entry for entry in imports(ROOT / 'demiflow/execution/stream_checkpoint.py')
+    assembly = {entry for entry in imports(ROOT / 'demiflow/execution/executors/stream_checkpoint.py')
                 if entry[1] in {'demiflow.data.api', 'demiflow.data.dataset'}}
     assert assembly <= {
         ('read_checkpoint', 'demiflow.data.api', '_select_executor'),

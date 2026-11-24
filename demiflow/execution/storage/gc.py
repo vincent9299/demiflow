@@ -13,12 +13,12 @@ import time
 
 from ..contracts.dataflow import ArtifactRef
 from ..contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.errors import UnprovenGC
 from .lease import exclusive_access, exclusive_here, journal_identity
 from .objects import RunArtifactStore, _no_symlink, _sync_directory
 
 
-class UnprovenGC(Exception):
-    pass
+
 
 
 def _fault(point):
@@ -26,7 +26,7 @@ def _fault(point):
 
 
 def gc_paths(journal, item):
-    from ..recovery_contract import identifier
+    from demiflow.execution.contracts.recovery_contract import identifier
     for name in ('store_id', 'digest', 'gc_id'):
         identifier(item[name])
     root = journal.directory / '.dataflow-store' / item['store_id']
@@ -113,10 +113,8 @@ def _exclusive(journal, fence):
             journal.directory / '.dataflow-store', journal_identity(protocol)):
         with journal.execution_guard(fence):
             pass
-        with journal._connection() as db:
-            if db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_allocations'").fetchone():
-                if db.execute("SELECT 1 FROM resource_allocations WHERE cleanup!='CONFIRMED' LIMIT 1").fetchone():
-                    raise UnprovenGC('Original resource cleanup is not confirmed for every allocation')
+        from demiflow.execution.journal.run_reader import require_gc_resource_cleanup
+        require_gc_resource_cleanup(journal)
         yield
 
 
@@ -243,14 +241,14 @@ class _Trace:
                     if len(self.states) >= self.maximum:
                         raise UnprovenGC('State carriers exceed trace budget')
                     self.states.add(path)
-                    from ..artifact_manifest import _read
+                    from demiflow.execution.storage.artifact_manifest import _read
                     raw = _read(self.journal.directory / path,
                                 min(self.bounds.max_state_bytes,self.bounds.max_resident_bytes//32),
                                 size=value['bytes'], digest=value['sha256'])
                     self.check(len(raw))
                     self.value(self.decode(raw), depth + 1)
             if value.get('format') == 'paged-artifacts-v1':
-                from ..artifact_manifest import manifest_pages
+                from demiflow.execution.storage.artifact_manifest import manifest_pages
                 for _, page in manifest_pages(self.journal.directory, value, maximum=self.maximum):
                     self.value(page, depth + 1)
             for field in ('data_b64', 'typed_result'):
@@ -276,62 +274,16 @@ class _Trace:
             self.value(nested, depth + 1)
 
     def roots(self):
-        columns = {'runtime_actions': ('declaration','snapshot','result'),
-            'runtime_sources': ('document',), 'runtime_commits': ('intent','prepared'),
-            'runtime_receipts': ('document',), 'runtime_effects': ('document',),
-            'runtime_commit_scopes': ('declaration',),
-            'calls': ('request_json','response_json','error_json')}
-        for table, fields in columns.items():
-            after = 0
-            with self.journal._connection() as db:
-                existing = {row[1] for row in db.execute('PRAGMA table_info(' + table + ')')}
-            if not existing:
-                continue
-            if not set(fields) <= existing:
-                raise UnprovenGC('Unrecognized journal root schema: ' + table)
-            while True:
-                with self.journal._connection() as db:
-                    sizes = db.execute('SELECT rowid,' + ','.join('length(CAST('+f+' AS BLOB))' for f in fields) +
-                        ' FROM ' + table + ' WHERE rowid>? ORDER BY rowid LIMIT 1', (after,)).fetchone()
-                    if sizes is None:
-                        break
-                    limit = min(self.bounds.max_control_bytes,self.bounds.max_resident_bytes//32)
-                    if any(size is not None and size > limit for size in sizes[1:]):
-                        raise UnprovenGC('Journal root exceeds collector decode bound')
-                    rows = db.execute('SELECT rowid,' + ','.join(fields) + ' FROM ' + table +
-                        ' WHERE rowid=?', (sizes[0],)).fetchall()
-                if not rows:
-                    break
-                for row in rows:
-                    after = row[0]
-                    for raw in row[1:]:
-                        if raw is not None:
-                            if len(raw.encode()) > self.bounds.max_control_bytes:
-                                raise UnprovenGC('Journal root exceeds control bound')
-                            self.check(len(raw.encode()))
-                            self.value(self.decode(raw.encode()))
-        # Owners lack media/size. Recover their exact immutable reference from
-        # original publication intent, never assume an owner points to a leaf.
-        with self.journal._connection() as db:
-            owners = db.execute('SELECT DISTINCT store_id,digest,key FROM artifact_owner LIMIT ?',
-                                (self.maximum + 1,)).fetchall()
-        if len(owners) > self.maximum:
-            raise UnprovenGC('Owner roots exceed trace budget')
-        for store, digest, key in owners:
-            after, found = '', False
-            while True:
-                with self.journal._connection() as db:
-                    rows = db.execute('SELECT s.reservation_id,s.publication FROM runtime_dataflow_staging s '
-                        'JOIN runtime_dataflow_settlements d ON s.reservation_id=d.reservation_id '
-                        'WHERE d.store_id=? AND d.digest=? AND s.publication IS NOT NULL '
-                        'AND s.reservation_id>? ORDER BY s.reservation_id LIMIT 16', (store,digest,after)).fetchall()
-                if not rows:
-                    break
-                for after, raw in rows:
-                    found = True
-                    self.value(self.decode(raw.encode()))
-            if not found or key != digest:
-                raise UnprovenGC('Owner lacks original typed publication proof')
+        from demiflow.execution.journal.run_reader import gc_root_documents, gc_owner_publications
+        limit = min(self.bounds.max_control_bytes, self.bounds.max_resident_bytes // 32)
+        for raw in gc_root_documents(self.journal, max_document_bytes=limit):
+            if len(raw.encode()) > self.bounds.max_control_bytes:
+                raise UnprovenGC('Journal root exceeds control bound')
+            self.check(len(raw.encode()))
+            self.value(self.decode(raw.encode()))
+        # Owners require the original typed publication, not an assumed leaf.
+        for raw in gc_owner_publications(self.journal, maximum=self.maximum):
+            self.value(self.decode(raw.encode()))
 
     def walk(self):
         self.roots()
@@ -340,7 +292,8 @@ class _Trace:
             store = RunArtifactStore(root=self.journal.directory / '.dataflow-store',
                 store_id=ref.store_id, journal=None, bounds=self.bounds, readonly=True)
             media = ref.media_type
-            from ..dataflow_kernel_pack import PACK_MEDIA, iter_kernel_images
+            from demiflow.execution.contracts.state_codec import PACK_MEDIA
+            from demiflow.execution.storage.streams import iter_kernel_images
             if media == PACK_MEDIA:
                 self.check(ref.size_bytes)
                 for _, raw in iter_kernel_images(store, ref, self.bounds):
@@ -419,17 +372,15 @@ def _collect(journal, fence, *, bounds, max_objects=64, deadline=None):
             # objects. Reconcile via the existing owner protocol first.
             if journal.pending_dataflow_staging(fence, limit=1):
                 raise UnprovenGC('Unresolved staging owner prevents complete root proof')
-            with journal._connection() as db:
-                legacy = db.execute("SELECT 1 FROM runtime_reservations r LEFT JOIN runtime_dataflow_settlements s ON s.reservation_id=r.reservation_id LEFT JOIN runtime_dataflow_staging t ON t.reservation_id=r.reservation_id WHERE r.name='artifact_staging_bytes' AND s.reservation_id IS NULL AND t.reservation_id IS NULL LIMIT 1").fetchone()
+            from demiflow.execution.journal.run_reader import has_unowned_staging_reservation, gc_object_page
+            legacy = has_unowned_staging_reservation(journal)
             if legacy:
                 raise UnprovenGC('Legacy unowned reservation prevents complete root proof')
             protected = _Trace(journal, bounds, deadline=deadline).walk()
             after = ('', '')
             while result['removed'] < max_objects:
                 _check_time(deadline)
-                with journal._connection() as db:
-                    rows = db.execute('SELECT store_id,digest,bytes,charge_id FROM runtime_dataflow_objects '
-                        'WHERE (store_id,digest)>(?,?) ORDER BY store_id,digest LIMIT 64', after).fetchall()
+                rows = gc_object_page(journal, after=after)
                 if not rows:
                     break
                 for store_id,digest,size,charge_id in rows:
@@ -437,7 +388,7 @@ def _collect(journal, fence, *, bounds, max_objects=64, deadline=None):
                     after = (store_id,digest)
                     if after in protected or charge_id is None:
                         continue
-                    from ..recovery_contract import identifier
+                    from demiflow.execution.contracts.recovery_contract import identifier
                     identifier(store_id)
                     if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
                         raise UnprovenGC('GC object registry has an invalid digest')
@@ -512,3 +463,14 @@ def finish_run_gc(run):
     except Exception as exc:
         # Cleanup failures never overwrite a business/cancellation exception.
         run._published_gc_result = {'removed':0,'bytes':0,'blocked':str(exc)}
+
+
+def unlink_unprotected_artifact(path):
+    """Unlink a path already selected by the journal, inside its publication guard."""
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    if any(p.is_symlink() for p in (path, *path.parents)):
+        raise RecoveryContractError('Orphan path contains a symlink')
+    if path.exists():
+        path.unlink()
+        return 1
+    return 0

@@ -12,8 +12,8 @@ from demiflow import data
 from demiflow.collect.documents import SCHEMA_VERSION
 from demiflow.collect.image_resize import resize_image
 from demiflow.collect.wiki_syntax import parse_wikitext
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.local_kernel import local_execution
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.local_kernel import local_execution
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
@@ -168,7 +168,7 @@ def test_wiki_syntax_is_bounded_and_contains_no_template_policy():
 
 def test_image_fixed_residency_rejects_smaller_native_budget(root, monkeypatch):
     from demiflow.execution import RunContext, RecoveryContractError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
 
     report, _ = inspected(root, 'image')
     assert report['status'] == 'checked', report['diagnostics']

@@ -5,7 +5,7 @@ import pytest
 
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.ray import RayDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('workers', [True, 0, -1, 1.5])
@@ -27,7 +27,7 @@ def test_ray_native_limit_declaration_is_closed_and_copied():
 @pytest.mark.parametrize('partitions', [1, 2])
 def test_real_ray_join_seals_public_native_limits(tmp_path, monkeypatch, partitions):
     ray = pytest.importorskip('ray')
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     assert not ray.is_initialized()
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path/'capacity'))
     native = dict(threads=2, partitions=partitions, memory_bytes=64*1024**2,

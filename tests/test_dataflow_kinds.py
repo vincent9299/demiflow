@@ -1,4 +1,5 @@
 """The kind table: one row per kernel kind, and every older table is a view of it."""
+from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS, TASK_KINDS
 import subprocess
 import sys
 from pathlib import Path
@@ -110,7 +111,7 @@ def test_a_native_declaration_is_refused_by_name_not_by_accident(tmp_path):
 
 
 def test_every_older_table_is_a_view_of_the_rows():
-    from demiflow.execution import dataflow_batch_membership
+    from demiflow.execution.kernels import batch_membership as dataflow_batch_membership
     from demiflow.execution.kernels import dataflow as kernels, operator, task_scope
     from demiflow.planning import dataflow_compile as compiler, dataflow_configuration
     views = {
@@ -118,7 +119,7 @@ def test_every_older_table_is_a_view_of_the_rows():
         'relational': kernels._RELATIONAL_KINDS, 'ordering': kernels._ORDERING_KINDS,
         'aggregate': kernels._AGGREGATE_KINDS, 'stream_group': kernels._STREAM_GROUP_KINDS,
         'instance': operator._INSTANCE_KINDS, 'batch_instance': operator._BATCH_INSTANCE_KINDS,
-        'task': task_scope.TASK_KINDS, 'batch_membership': dataflow_batch_membership.KINDS,
+        'task': TASK_KINDS, 'batch_membership': NATIVE_BATCH_KINDS,
         'global_ordering': compiler._ORDERING_KINDS, 'finite_complete': compiler._FINITE_COMPLETE_KINDS,
     }
     for role, view in views.items():
@@ -137,8 +138,8 @@ def test_the_literal_tables_are_gone():
         'execution/kernels/dataflow.py': '"MapOp", "FlatMapOp"',
         'execution/kernels/operator.py': 'frozenset({"MapOp"',
         'execution/kernels/task_scope.py': "frozenset({'MapOp'",
-        'execution/dataflow_batch_membership.py': "frozenset({'embedding'",
-        'execution/worker/terminal_blocks.py': '_UNARY_KINDS | _BATCH_KINDS',
+        'execution/kernels/batch_membership.py': "frozenset({'embedding'",
+        'execution/outputs/terminal_blocks.py': '_UNARY_KINDS | _BATCH_KINDS',
         'planning/dataflow_configuration.py': "frozenset({'MapOp'",
     }.items():
         assert gone not in (ROOT / 'demiflow' / relative).read_text(encoding='utf-8'), relative

@@ -17,7 +17,7 @@ STARTERS = (
     'from demiflow import Dataset',
     'from demiflow.data import Dataset',
     'from demiflow.pipeline import Pipeline',
-    'from demiflow.execution.stream_checkpoint import StreamCheckpoint',
+    'from demiflow.execution.executors.stream_checkpoint import StreamCheckpoint',
     'from demiflow.data.read_api import from_items',
     'from demiflow import *',
     'from demiflow.data import *',

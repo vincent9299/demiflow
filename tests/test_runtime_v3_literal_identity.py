@@ -7,10 +7,10 @@ import pytest
 
 from demiflow import data
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.literal_source_identity import literal_source_digest
-from demiflow.execution.recovery_contract import document, identity, RecoveryContractError
-from demiflow.execution.recovery_identity import describe, source_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.seal.program_identity import literal_source_digest
+from demiflow.execution.contracts.recovery_contract import document, identity, RecoveryContractError
+from demiflow.execution.seal.program_identity import describe, source_identity
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('count', [0, 1, 1024, 1025, 2500])

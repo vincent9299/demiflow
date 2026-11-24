@@ -327,7 +327,7 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         runs.validate_output_targets(value)
         for output in manifest['outputs'].values():
             Path(output['uri']).parent.mkdir(parents=True, exist_ok=True)
-        from demiflow.execution.output_watch import OutputWatch
+        from demiflow.execution.journal.output_watch import OutputWatch
         # A new native output directory may also contain business delivery
         # files (for example image archives). Account the admitted directory,
         # while published table identities remain the exact compiled URIs.

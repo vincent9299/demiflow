@@ -629,6 +629,7 @@ SOFTWARE.
             }
             merged.push(ev);
           }
+          merged.sort((a,b)=>(a?.sequence||0)-(b?.sequence||0));
           follow.setFollowing(false);
           chat.reset();
           state.renderedEvents=merged;

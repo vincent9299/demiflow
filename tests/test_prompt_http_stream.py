@@ -15,8 +15,8 @@ from demiflow.operator_llm.http_stream import ChatCompletionStream
 from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPart
 from demiflow.operator_llm.call_ref import PromptRecordRef, journal_totals
 from demiflow.operator_llm.journal import UncertainPromptCall
-from demiflow.execution.request_limits import RequestGate, ServiceStopped
-from demiflow.execution.run_context import RunContext
+from demiflow.services.request_limits import RequestGate, ServiceStopped
+from demiflow.execution.pipeline.run_context import RunContext
 from test_map_prompt_async import PACK, prompt
 
 
@@ -103,7 +103,7 @@ def sse_server(monkeypatch):
 @pytest.mark.parametrize('adaptive',[False,True])
 def test_concurrent_rows_pool_reuse_gate_lifetime_and_replay(sse_server,tmp_path,adaptive):
     if adaptive:
-        from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+        from demiflow.services.adaptive_requests import AdaptiveRequestGate
         gate=AdaptiveRequestGate(dict(initial_concurrency=2,max_concurrency=2),state_path=tmp_path/'gate.json')
     else:
         gate=RequestGate(2)

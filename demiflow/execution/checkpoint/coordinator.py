@@ -17,22 +17,27 @@ vector, and recovery must read them rather than skip sources by the scalar.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.checkpoint import (
+    artifact_from_json as _artifact_from_json,
+    cursor_json as _cursor_json,
+    cursor_from_json as _cursor_from_json,
+    cut_json as _cut_json,
+    cut_from_json as _cut_from_json,
+    contribution_json as _contribution_json,
+    contribution_from_json as _contribution_from_json,
+    contribution_digest as _contribution_digest,
+)
+
 import threading
 import weakref
 
-from ..commit import CommitCoordinator
-from ..contracts.dataflow import (
-    ArtifactRef, CutContribution, CutRequest, PhysicalDataflow, RecoveryImage,
-    SourceCursor,
-)
-from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import (
-    MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document,
-    identifier, identity,
-)
-from ..run_context import RunAction
-from ..run_journal import ExecutionBudgetExceeded
-from ..state_artifacts import StateArtifacts
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, CutRequest, PhysicalDataflow, RecoveryImage, SourceCursor
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.recovery_contract import MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document, identifier, identity
+from demiflow.execution.pipeline.run_context import RunAction
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 # Reserved vector slot named by ARCHITECTURE §6. It is nested inside the
 # native-safe carrier below because native state identifiers forbid '.'.
@@ -47,88 +52,6 @@ _MAX_CONTRIBUTION_REFS = 4096
 _OWNERS: "weakref.WeakValueDictionary[str, DataflowCheckpointCoordinator]" = (
     weakref.WeakValueDictionary())
 _OWNERS_LOCK = threading.Lock()
-
-
-def _artifact_json(ref: ArtifactRef) -> dict:
-    return {"digest": ref.digest, "size_bytes": ref.size_bytes,
-            "store_id": ref.store_id, "key": ref.key, "media_type": ref.media_type}
-
-
-def _artifact_from_json(value) -> ArtifactRef:
-    if type(value) is not dict or set(value) != {
-            "digest", "size_bytes", "store_id", "key", "media_type"}:
-        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in recovery image")
-    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
-                       store_id=value["store_id"], key=value["key"],
-                       media_type=value["media_type"])
-
-
-def _cursor_json(cursor: SourceCursor) -> dict:
-    from ..contracts.dataflow import thaw_record_value
-    return {"split_id": cursor.split_id, "offset": thaw_record_value(cursor.offset),
-            "next_sequence": cursor.next_sequence, "end_of_input": cursor.end_of_input,
-            "lease_ref": _artifact_json(cursor.lease_ref) if cursor.lease_ref is not None else None,
-            "pending_refs": [_artifact_json(r) for r in cursor.pending_refs]}
-
-
-def _cursor_from_json(value) -> SourceCursor:
-    if type(value) is not dict or set(value) != {
-            "split_id", "offset", "next_sequence", "end_of_input", "lease_ref", "pending_refs"}:
-        raise DataflowError("CORRUPT_ARTIFACT", "Invalid source cursor in recovery image")
-    return SourceCursor(
-        split_id=value["split_id"], offset=value["offset"],
-        next_sequence=value["next_sequence"], end_of_input=value["end_of_input"],
-        lease_ref=_artifact_from_json(value["lease_ref"]) if value["lease_ref"] is not None else None,
-        pending_refs=tuple(_artifact_from_json(r) for r in value["pending_refs"]))
-
-
-def _cut_json(cut: CutRequest) -> dict:
-    return {"cut_id": cut.cut_id, "sequence": cut.sequence,
-            "plan_revision": cut.plan_revision, "route_epoch": cut.route_epoch,
-            "participants": list(cut.participants), "final": cut.final}
-
-
-def _cut_from_json(value) -> CutRequest:
-    if type(value) is not dict or set(value) != {
-            "cut_id", "sequence", "plan_revision", "route_epoch", "participants", "final"}:
-        raise DataflowError("CORRUPT_ARTIFACT", "Invalid cut request in recovery image")
-    return CutRequest(cut_id=value["cut_id"], sequence=value["sequence"],
-                      plan_revision=value["plan_revision"], route_epoch=value["route_epoch"],
-                      participants=tuple(value["participants"]), final=value["final"])
-
-
-def _contribution_json(contribution: CutContribution) -> dict:
-    from ..contracts.dataflow import thaw_record_value
-    return {"cut_id": contribution.cut_id, "participant_id": contribution.participant_id,
-            "boot_id": contribution.boot_id,
-            "sources": [_cursor_json(c) for c in contribution.sources],
-            "operator_states": {k: _artifact_json(v) for k, v in contribution.operator_states.items()},
-            "channels": thaw_record_value(contribution.channels),
-            "buffers": [_artifact_json(r) for r in contribution.buffers],
-            "effects": [_artifact_json(r) for r in contribution.effects],
-            "sinks": {k: _artifact_json(v) for k, v in contribution.sinks.items()},
-            "final": contribution.final}
-
-
-def _contribution_from_json(value) -> CutContribution:
-    if type(value) is not dict or set(value) != {
-            "cut_id", "participant_id", "boot_id", "sources", "operator_states",
-            "channels", "buffers", "effects", "sinks", "final"}:
-        raise DataflowError("CORRUPT_ARTIFACT", "Invalid cut contribution in recovery image")
-    return CutContribution(
-        cut_id=value["cut_id"], participant_id=value["participant_id"],
-        boot_id=value["boot_id"],
-        sources=tuple(_cursor_from_json(c) for c in value["sources"]),
-        operator_states={k: _artifact_from_json(v) for k, v in value["operator_states"].items()},
-        channels={k: dict(v) for k, v in value["channels"].items()},
-        buffers=tuple(_artifact_from_json(r) for r in value["buffers"]),
-        effects=tuple(_artifact_from_json(r) for r in value["effects"]),
-        sinks={k: _artifact_from_json(v) for k, v in value["sinks"].items()},
-        final=value["final"])
-
-
-def _contribution_digest(contribution: CutContribution) -> str:
-    return identity(_contribution_json(contribution))
 
 
 def _validate_ref(ref, *, what: str) -> None:
@@ -179,7 +102,7 @@ class DataflowCheckpointCoordinator:
             raise DataflowError("FENCED", "Checkpoint coordinator requires the live driver context")
         if not isinstance(physical, PhysicalDataflow):
             raise DataflowError("INVALID_CONTRACT", "Checkpoint coordinator requires a PhysicalDataflow")
-        from ..contracts.dataflow_codec import compute_participant_id
+        from demiflow.execution.contracts.dataflow_codec import compute_participant_id
         participants = []
         for stage in physical.stages:
             for partition in stage.partitions:
@@ -389,8 +312,8 @@ class DataflowCheckpointCoordinator:
             if bindings is not None:
                 raise DataflowError('CORRUPT_ARTIFACT', 'Row-only cut has unexpected model bindings')
             return
-        from ..contracts.dataflow_codec import compute_participant_id
-        from ..recovery_contract import identity
+        from demiflow.execution.contracts.dataflow_codec import compute_participant_id
+        from demiflow.execution.contracts.recovery_contract import identity
         consumers = {e.consumer for e in self._physical.value_edges if e.input_port == 'model'}
         observed = {c.participant_id for c in contributions}
         required = {o for s in self._physical.stages if s.stage_id in consumers and
@@ -406,7 +329,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError('CORRUPT_ARTIFACT', 'Cut model digest differs from original action binding')
 
     def commit(self, cut_id: str, *, sinks, native_queue_state=None, model_bindings=None) -> RecoveryImage:
-        from ..dataflow_sinks import ack_source_claims, combine_prepared_sinks
+        from demiflow.execution.outputs.sinks import combine_prepared_sinks
         with self._lock:
             self._check_open()
             pending = self._pending.get(cut_id)
@@ -459,7 +382,7 @@ class DataflowCheckpointCoordinator:
                 sink_contributions = (contributions if self._physical.jobs or pending.residency is not None and
                     pending.residency.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2') else fresh)
                 refs = tuple(c.sinks[sink_id] for c in sink_contributions if sink_id in c.sinks)
-                manifest = combine_prepared_sinks(refs, sink_id=sink_id, services=self._driver_services())
+                manifest = combine_prepared_sinks(refs, sink_id=sink_id, store=self._store, bounds=self._physical.bounds)
                 outputs[sink_id] = (sink, {**manifest, "final": request.final})
             if not outputs:
                 raise DataflowError("INVALID_CONTRACT", "A commit requires at least one sink")
@@ -467,7 +390,7 @@ class DataflowCheckpointCoordinator:
                 fact = self._commit.commit(request.sequence, outputs=outputs,
                                            position=position, states=states, acknowledge=None)
             except UnresolvedCommit as exc:
-                from ..contracts.dataflow_errors import DataflowUnresolvedCommit
+                from demiflow.execution.contracts.dataflow_errors import DataflowUnresolvedCommit
                 if isinstance(exc, DataflowUnresolvedCommit):
                     raise
                 raise DataflowUnresolvedCommit(str(exc)) from exc
@@ -477,7 +400,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("INVALID_CONTRACT", str(exc)) from exc
             confirmed = {}
             for sink_id in sinks:
-                from ..dataflow_images import row_preparation
+                from demiflow.execution.outputs.object_sink import row_preparation
                 prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
@@ -494,18 +417,10 @@ class DataflowCheckpointCoordinator:
             self._last_image = image
             return image
 
-    def _driver_services(self):
-        # combine_prepared_sinks only needs the driver store; build the minimal
-        # frozen service view without re-deriving any authority.
-        from ..contracts.dataflow import DriverServices
-        return DriverServices(action=self._action, journal_service=None, store=self._store,
-                              resources=None, policy=self._physical.policy,
-                              bounds=self._physical.bounds, hosts=(),
-                              clock_ms=lambda: 0)
+
 
     # -- D005 -------------------------------------------------------------
     def recover(self, *, sinks) -> RecoveryImage | None:
-        from ..dataflow_sinks import ack_source_claims
         with self._lock:
             self._check_open()
             journal = self._action.context.journal
@@ -536,14 +451,14 @@ class DataflowCheckpointCoordinator:
             try:
                 self._commit.recover(sinks, acknowledge=None)
             except UnresolvedCommit as exc:
-                from ..contracts.dataflow_errors import DataflowUnresolvedCommit
+                from demiflow.execution.contracts.dataflow_errors import DataflowUnresolvedCommit
                 if isinstance(exc, DataflowUnresolvedCommit):
                     raise
                 raise DataflowUnresolvedCommit(str(exc)) from exc
             except ExecutionBudgetExceeded:
                 raise
             except RecoveryContractError as exc:
-                from ..contracts.dataflow_errors import DataflowRecoveryError
+                from demiflow.execution.contracts.dataflow_errors import DataflowRecoveryError
                 raise DataflowRecoveryError("UNKNOWN_EFFECT", str(exc)) from exc
             facts = journal.execution_commits(self._action.action_id)
             acked = [f for f in facts if f["status"] == "acked"
@@ -570,11 +485,11 @@ class DataflowCheckpointCoordinator:
                 if set(c.participant_id for c in contributions) != set(self._participants):
                     raise DataflowError("CORRUPT_ARTIFACT", "Recovered cut participant set differs")
             elif residency.get('schema') in ('demiflow.durable_residency.v1', 'demiflow.durable_residency.v2'):
-                from ..dataflow_durable_residency import validate_recovered
+                from demiflow.execution.checkpoint.residency import validate_durable_residency as validate_recovered
                 validate_recovered(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"], store=self._store)
             else:
-                from ..dataflow_residency import validate_recovered_residency
+                from demiflow.execution.checkpoint.residency import validate_recovered_residency
                 validate_recovered_residency(self._physical, cut, contributions, residency,
                     facts=acked, artifacts=self._artifacts, current_commit=fact["commit_id"])
             self.residency = residency
@@ -585,7 +500,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError("SOURCE_CHANGED", "Recovered source vector disagrees with contributions")
             confirmed = {}
             for sink_id in sinks:
-                from ..dataflow_images import row_preparation
+                from demiflow.execution.outputs.object_sink import row_preparation
                 prepared_sink = row_preparation(sinks[sink_id], fact["prepared"]["sinks"].get(sink_id))
                 if type(prepared_sink) is dict and "ref" in prepared_sink:
                     confirmed[sink_id] = _artifact_from_json(prepared_sink["ref"])
@@ -601,10 +516,8 @@ class DataflowCheckpointCoordinator:
             return image
 
     def _recover_historical(self, sinks) -> RecoveryImage:
-        from ..dataflow_history import (
-            load_execution_version, translate_native_checkpoint,
-            validate_resume_compatibility,
-        )
+        from demiflow.execution.journal.dataflow_history import load_execution_version
+        from demiflow.execution.checkpoint.history import translate_native_checkpoint, validate_resume_compatibility
         directory = self._action.context.directory
         binding = load_execution_version(directory, self._action.action_id,
                                          max_bytes=self._physical.bounds.max_state_bytes)
@@ -668,3 +581,26 @@ def source_vector_position(image: RecoveryImage, *, action_id: str) -> SourcePos
         seen.add(cursor.split_id)
     source_id = identity(["dataflow-vector", action_id])
     return SourcePosition(source_id=source_id, next_ordinal=image.cut.sequence)
+
+
+def ack_source_claims(image: RecoveryImage, *, action: RunAction) -> None:
+    """Verify the native finalize fact is acked; never issue a second ACK (C16).
+
+    The atomic queue settlement belongs to the native C16 service. This only
+    reconciles the image against the single native commit fact and advances the
+    confirmed frontier read-only, so a lost response retried here is idempotent.
+    """
+    if not isinstance(image, RecoveryImage):
+        raise DataflowError("INVALID_CONTRACT", "ack_source_claims requires a RecoveryImage")
+    journal = action.context.journal
+    fact = journal.execution_commit(image.commit_id)
+    if fact is None or fact["action_id"] != action.action_id:
+        raise DataflowError("INVALID_CONTRACT", "Recovery image is not a commit of this action")
+    if fact["status"] != "acked":
+        raise DataflowError("UNKNOWN_EFFECT", "Native finalize fact is not acked; cannot advance frontier")
+    for sink_id in image.confirmed_sinks:
+        if sink_id not in fact["receipts"]:
+            raise DataflowError("UNKNOWN_EFFECT", "Confirmed sink has no native receipt; not ACKed")
+    position = source_vector_position(image, action_id=action.action_id)
+    if fact["intent"]["position"] != position.to_dict():
+        raise DataflowError("SOURCE_CHANGED", "Confirmed source frontier differs from the committed position")

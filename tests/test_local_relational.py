@@ -30,8 +30,8 @@ def test_group_spill_batches_and_composite_keys():
 def test_checkpoint_cached_map_failure_resume(tmp_path):
     from functools import partial
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from _native_relational_history_fixtures import cached_transform
     from _worker_event_fixtures import events
     log, failure = tmp_path / 'calls.jsonl', tmp_path / 'failed-once'
@@ -84,7 +84,7 @@ def test_join_collision_rejected():
 
 def test_checkpoint_sync_and_mixed_prefix(tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from _native_relational_history_fixtures import double
     def rows():
         return (data.from_items([{'n': 1}, {'n': 2}])
@@ -106,7 +106,7 @@ def test_async_checkpoint_preserves_source_context_across_feed_chunks(tmp_path, 
     from functools import partial
     from demiflow import data
     from demiflow.observability import _CURRENT_ACTION
-    from demiflow.execution.run_context import RunContext, current_run, current_action
+    from demiflow.execution.pipeline.run_context import RunContext, current_run, current_action
     from _native_relational_history_fixtures import echo, source_with_context
     from _worker_event_fixtures import events
     before = _CURRENT_ACTION.get()
@@ -143,8 +143,8 @@ def test_checkpoint_async_in_running_loop_resume_and_version(tmp_path):
     import asyncio
     from functools import partial
     from demiflow import data
-    from demiflow.execution.run_context import RunContext, current_run
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.pipeline.run_context import RunContext, current_run
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from _native_relational_history_fixtures import cached_transform
     from _worker_event_fixtures import events
     log, failure = tmp_path / 'calls.jsonl', tmp_path / 'failed-once'
@@ -276,7 +276,7 @@ def test_public_sort_preserves_equal_key_order(tmp_path, workers):
 def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
     monkeypatch.setenv('DEMIFLOW_RESOURCE_ROOT', str(tmp_path / 'capacity'))
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.storage.objects import RunArtifactStore
     from demiflow.resources.thread import ThreadResourceProvider
     scratch, exits = [], []
@@ -335,7 +335,7 @@ def test_wide_sort_writes_payload_once_across_merge_passes(
         tmp_path, monkeypatch, width, key_padding, rows, uses_offsets):
     from demiflow import data
     from demiflow.execution import RunContext
-    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.storage.scratch import KernelScratch
     from demiflow.execution.kernels import ordering
 
     extents, references, runs = [], [], []

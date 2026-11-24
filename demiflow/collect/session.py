@@ -274,7 +274,7 @@ async def bounded(items, function, concurrency, *, return_exceptions=False):
 
 
 async def isolated(function, *args, timeout_s, **kwargs):
-    from demiflow.execution.isolation import run_isolated
+    from demiflow.execution.hosts.isolation import run_isolated
     task = asyncio.create_task(asyncio.to_thread(run_isolated, function, *args, timeout_s=timeout_s, **kwargs))
     try:
         return await asyncio.shield(task)

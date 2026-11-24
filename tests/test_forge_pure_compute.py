@@ -79,7 +79,7 @@ def convert(row: Row) -> Result:
     check_value(result, port['returns'], 'result')
     # The ordinary callable also passes the real plan boundary and native sink.
     from demiflow import data
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.forge.flow_check import FlowChecker
     from demiflow.forge.platform import inspect_modules, LIMITS
     from demiflow.workbench.runs.manager import DEFAULT_LIMITS

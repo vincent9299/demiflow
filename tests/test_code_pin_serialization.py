@@ -40,8 +40,8 @@ from types import SimpleNamespace
 import pytest
 
 import demiflow.data as data
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext, RunAction
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext, RunAction
 
 from test_stage2_unified_plan import (
     LIMITS, _crash_hook, _load_modules, _map_plan,
@@ -136,7 +136,8 @@ def run(*, source, target):
     # The v3 worker loads the original code-pin/program bundle before emitting
     # any cut. Read that bundle and its original ACK, not retired chain keys.
     import json
-    from demiflow.execution.sealed_plans import load_sealed_plan, _v3_read_store
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan, sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
     from demiflow.execution.seal.plan import _read_json, CODE_PIN_MEDIA, PROGRAM_MEDIA
     journal = runs.journal(root, result['run_id'])
     with journal._connection() as db:
@@ -147,7 +148,8 @@ def run(*, source, target):
     for seal in seals:
         directory = runs.directory(root, result['run_id'])
         bundle = load_sealed_plan(directory, seal['action_id'])
-        store, bounds = _v3_read_store(directory, store_id=bundle['sealed'].code_pin_ref.store_id)
+        bounds = sealed_read_bounds()
+        store = readonly_run_store(directory, store_id=bundle['sealed'].code_pin_ref.store_id, bounds=bounds)
         pin = _read_json(store,bundle['sealed'].code_pin_ref,max_bytes=bounds.max_control_bytes,
                          media_type=CODE_PIN_MEDIA)
         assert pin['action_id'] == seal['action_id']
@@ -206,7 +208,7 @@ def test_f9_by_value_registration_roundtrip(tmp_path, monkeypatch):
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg1_" + form)
     transform = FACTORIES[form](helper_mod)
     hook, marker = _crash_hook(tmp_path)
