@@ -204,3 +204,18 @@ def test_hygiene_flags_notebook_ui_in_operators_and_dangling_test_imports(tmp_pa
     assert 'tests/test_broken_direct.py' in flagged and 'flows.deleted_flow' in flagged['tests/test_broken_direct.py']
     assert 'tests/test_broken_pkg.py' in flagged and 'moved_mod' in flagged['tests/test_broken_pkg.py']
     assert 'tests/test_ok.py' not in flagged
+
+
+def test_hygiene_keeps_prompt_referenced_by_alternate_branch_declared_operator(tmp_path):
+    root = _make_clean_project(tmp_path / 'branch_proj')
+    (root / 'prompts' / 'alt_schema').mkdir(parents=True)
+    (root / 'prompts' / 'alt_schema' / 'response.json').write_text('{"type": "object"}\n')
+    (root / 'operators' / 'alt_op.py').write_text(
+        '__demiflow_operators__ = ["adapt"]\n'
+        'SCHEMA_REF = "prompts/alt_schema/response.json"\n'
+        'def adapt(row):\n'
+        '    return row\n'
+    )
+    report = check_project(root)
+    assert report['status'] == 'passed', report
+    assert report['diagnostic_count'] == 0

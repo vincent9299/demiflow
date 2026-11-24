@@ -1168,7 +1168,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     from demiflow.forge.pipeline_check import check_project, result as check_result
                     from demiflow.forge.project_rules import diagnostic
                     try:
-                        report = check_project(project['root'], paths=[change['path'] for change in changes],
+                        changed_paths = [change['path'] for change in changes]
+                        # Large cleanup/reorganization turns (>256 changed paths) fall back
+                        # to full-project inspection instead of hitting the changed-path cap.
+                        check_paths = () if len(changed_paths) > 256 else changed_paths
+                        report = check_project(project['root'], paths=check_paths,
                                                reference=coding, exclude=excluded)
                         if (sdk_identity(coding['catalog']) != coding['sdk_revision']
                                 or capture(project['root'], watched, exclude=excluded) != after):
