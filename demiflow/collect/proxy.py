@@ -14,7 +14,7 @@ from urllib.parse import urlsplit, unquote, quote
 
 
 def proxy_declaration(value):
-    from .native_search.config import Secret
+    from ..secrets import Secret
     if value is None or isinstance(value, Secret):
         return value
     if isinstance(value, dict) and set(value)=={'secret_env'}:

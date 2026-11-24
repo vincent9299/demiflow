@@ -55,6 +55,8 @@ class LanceRun:
         return ref
 
     def lance_checkpoint(self, dataset, name, extra=None, row_transform=None):
+        from demiflow.execution.compiler_support.capabilities import require_action
+        require_action('checkpoint_lance')
         args = self.checkpoint_lance_args(name, extra)
         upstream = self.stages[name]['upstream_identity']
         transform = row_transform or (lambda row: row)

@@ -17,6 +17,7 @@ from collections.abc import Mapping
 import math
 import re
 from collections.abc import Mapping as _RuntimeMapping
+from copy import copy
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import (
@@ -1556,6 +1557,11 @@ class RuntimeServices:
     # to the operator; this one port supervises the process under the grant.
     query_region_offsets: Callable[..., list[tuple[int | None, ...]] | bytearray] | None = None
 
+    # Installed by the worker once it has loaded and verified this assignment's
+    # sealed plan: its pinned source snapshots by source_id. A reader takes its
+    # snapshot here and does not load the sealed plan again.
+    source_snapshots: Mapping[str, SourceSnapshot] | None = None
+
     def __post_init__(self):
         if not isinstance(self.bounds, Bounds):
             raise _err("RuntimeServices.bounds must be a Bounds")
@@ -1571,6 +1577,29 @@ class RuntimeServices:
                 raise _err("RuntimeServices.programs values must be LoadedProgram")
             programs[key] = value
         object.__setattr__(self, "programs", MappingProxyType(programs))
+        if self.source_snapshots is not None:
+            object.__setattr__(self, "source_snapshots", _source_snapshots(self.source_snapshots))
+
+    def with_source_snapshots(self, snapshots):
+        """This value plus the worker's verified snapshots.
+
+        The other fields were validated when this value was built and are shared
+        unchanged; rebuilding it would validate its frozen constants a second time.
+        """
+        bound = copy(self)
+        object.__setattr__(bound, "source_snapshots", _source_snapshots(snapshots))
+        return bound
+
+
+def _source_snapshots(value):
+    if not isinstance(value, _RuntimeMapping):
+        raise _err("RuntimeServices.source_snapshots must be a mapping")
+    snapshots = {}
+    for key, snapshot in value.items():
+        if not isinstance(snapshot, SourceSnapshot) or snapshot.source_id != key:
+            raise _err("RuntimeServices.source_snapshots must map source_id to its SourceSnapshot")
+        snapshots[key] = snapshot
+    return MappingProxyType(snapshots)
 
 
 @dataclass(frozen=True)
@@ -1933,6 +1962,9 @@ class ActionRequest:
     programs: tuple[ActionProgram, ...]
     provider: Provider
     action: RunAction
+    # The executor that issued this request. In-process only; each request keeps
+    # its own, so two requests under one action never read each other's settings.
+    executor: "DatasetExecutor | None" = None
 
     def __post_init__(self):
         _enum(self.kind, "ActionRequest.kind", _ACTION_KINDS)
@@ -2111,11 +2143,10 @@ def clone_record(record, **changes):
     are frozen JSON arrays, unlike business payload tuples whose type matters.
     Do not broaden Record's public constructor to accept arbitrary objects.
     """
-    from demiflow.execution.contracts.dataflow_codec import _thaw_json
     if type(record) is not Record:
         raise DataflowError('INVALID_CONTRACT', 'clone_record requires a validated Record')
     if 'source_position' not in changes:
-        changes['source_position'] = _thaw_json(record.source_position)
+        changes['source_position'] = thaw_json(record.source_position)
     return replace(record, **changes)
 
 

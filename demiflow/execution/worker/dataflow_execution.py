@@ -210,6 +210,12 @@ class DataflowWorkerExecutor:
                 owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
                 if set(programs) != set(pin["programs"]).intersection(owned):
                     raise _dataflow_error("CODE_MISMATCH", "verified program membership differs")
+                # Readers take pinned snapshots from the plan verified above; the
+                # first snapshot of a source_id wins, as a scan of the tuple would.
+                snapshots = {}
+                for snapshot in physical.sources:
+                    snapshots.setdefault(snapshot.source_id, snapshot)
+                self._services = self._services.with_source_snapshots(snapshots)
                 self._prepare_factories(assignment, graph, physical)
             except BaseException:
                 self._cleanup_cache()

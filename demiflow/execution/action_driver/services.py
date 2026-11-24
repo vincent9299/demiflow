@@ -44,7 +44,7 @@ def make_driver_services(action: "RunAction", *, policy: RuntimePolicy, bounds: 
 
 def resolve_action_runtime(request):
     """Bind the current public executor and run envelope to one action policy."""
-    executor = getattr(request.action, '_dataflow_executor', None)
+    executor = getattr(request, 'executor', None)
     local = getattr(executor, '_local_kernel', None)
     options = {}
     workers = getattr(executor, '_workers', None)

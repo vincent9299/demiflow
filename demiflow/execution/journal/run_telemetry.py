@@ -533,7 +533,7 @@ def committed_graph_metrics(graph, physical, image, store, *, max_state_bytes):
 
 def record_execution_metadata(request, execution):
     """Project only observed workers/counters and confirmed completion facts."""
-    executor = getattr(request.action, '_dataflow_executor', None)
+    executor = getattr(request, 'executor', None)
     if executor is None:
         return
     from demiflow.execution.journal.dataflow_usage import publish_prompt_usage
