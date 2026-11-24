@@ -34,20 +34,26 @@ from demiflow import data
 from demiflow.collect import SearchConfig,Secret,search_source_inventory
 from demiflow.collect.session import WebSession
 from demiflow.collect.native_search.config import runtime_id
+from demiflow.execution import RunContext
 import sqlite3
 import demiflow
 assert Path(demiflow.__file__).is_relative_to(Path(sys.argv[1]))
 with sqlite3.connect('source.sqlite') as db:
  db.execute('create table documents (title text, url text, content text)')
  db.execute("insert into documents values ('native wheel', 'https://example.org/wheel', 'installed')")
+# Bounded search budgets keep the stage inside the default run memory budget, as in the runtime
+# tests; rows come back through take_all (map callbacks do not run in this process).
+BUDGET=dict(max_bytes=65536,max_results=8)
 web=WebSession(cache_path='cache.sqlite',object_directory='objects',search=SearchConfig(
  engines=({'name':'demo','engine':'sqlite','database':'source.sqlite',
-  'query_str':'select title,url,content from documents where title like :wildcard'},),language='en',workers=1))
-rows=[]
-stats=(data.from_items([{'requests':[{'request_id':'installed','query':'native wheel','bindings':[]}]}])
- .search_web(requests='requests',output='found',session=web)
- .map(lambda row:rows.append(row) or row).run_stream())
-assert rows[0]['found'][0]['status']=='ok',rows
+  'query_str':'select title,url,content from documents where title like :wildcard'},),language='en',workers=1,**BUDGET))
+def pipeline(session,request_id,query):
+ return data.from_items([{'requests':[{'request_id':request_id,'query':query,'bindings':[]}]}]).search_web(
+  requests='requests',output='found',session=session,request_concurrency=1,concurrency=1,queue_depth=1)
+with RunContext.start(str(Path('run').absolute())):
+ stats=pipeline(web,'installed','native wheel').run_stream()
+ rows=pipeline(web,'installed','native wheel').take_all()
+assert stats.emitted==1 and rows[0]['found'][0]['status']=='ok',rows
 assert 'searx' not in sys.modules
 for name,mod in list(sys.modules.items()):
  if name.startswith('demiflow') and getattr(mod,'__file__',None):
@@ -56,18 +62,18 @@ inv=search_source_inventory()
 metrics=stats.metrics['resources']['WebSession:0']['native_search']
 assert metrics['http_requests']==0
 assert metrics['worker_starts']==1
-receipt={'status':'passed','runtime_id':runtime_id(),'resource_root':os.environ['DEMIFLOW_RESOURCE_ROOT'],
+receipt={'status':'passed','runtime_id':runtime_id(),'resource_root':os.environ['DEMIFLOW_RESOURCE_ROOT'],'search_budget':BUDGET,
  'named_sources':len(inv['sources']),'platform_sources':len(inv['platform_sources']),
  'metrics':metrics,'candidate_count':len(rows[0]['found'][0]['candidates']),
  'imports_from_installed_wheel':True,'vendor_absent_in_pipeline_interpreter':True}
 if len(sys.argv)>2 and sys.argv[2]:
  live=WebSession(cache_path='live.sqlite',object_directory='live-objects',search=SearchConfig(
   engines=('wikisearch','wikipedia'),language='en',workers=2,request_concurrency=2,
-  host_concurrency=1,host_interval_s=.5,retries=0,timeout_s=25,proxy=Secret(sys.argv[2])))
- live_rows=[]
- live_stats=(data.from_items([{'requests':[{'request_id':'installed-live','query':'Ginkgo biloba','bindings':[]}]}])
-  .search_web(requests='requests',output='found',session=live)
-  .map(lambda row:live_rows.append(row) or row).run_stream())
+  host_concurrency=1,host_interval_s=.5,retries=0,timeout_s=25,proxy=Secret(sys.argv[2]),
+  max_bytes=262144,max_results=8))
+ with RunContext.start(str(Path('live-run').absolute())):
+  live_stats=pipeline(live,'installed-live','Ginkgo biloba').run_stream()
+  live_rows=pipeline(live,'installed-live','Ginkgo biloba').take_all()
  receipt['live']={'rows':live_rows,'metrics':live_stats.metrics}
 print(json.dumps(receipt))
 '''
