@@ -294,7 +294,6 @@ def file_diff(root, path):
     if not _is_text_filename(target.name):
         raise ForgeError('File type cannot be previewed', code='invalid_request')
     writable, readonly_reason = editable_status(root, path)
-    env_exists = (Path(root).absolute() / '.env').is_file() if path == '.env.example' else None
     modified, sha256, exists = '', '', False
     if target.exists():
         try:
@@ -310,12 +309,9 @@ def file_diff(root, path):
     if repo is None:
         if not exists:
             raise ForgeError('Document no longer exists', code='not_found')
-        result = dict(path=path, is_git=False, status='clean', sha256=sha256,
-                      original=None, modified=modified, changed=False, added=0, removed=0,
-                      writable=writable, readonly_reason=readonly_reason)
-        if env_exists is not None:
-            result['env_exists'] = env_exists
-        return result
+        return dict(path=path, is_git=False, status='clean', sha256=sha256,
+                    original=None, modified=modified, changed=False, added=0, removed=0,
+                    writable=writable, readonly_reason=readonly_reason)
     base, _, prefix, _ = repo
     git_rel = prefix + path
     head_proc = _git_run(base, ['show', 'HEAD:' + git_rel])
@@ -349,13 +345,10 @@ def file_diff(root, path):
                 added += 1
             elif line.startswith('-') and not line.startswith('---'):
                 removed += 1
-    result = dict(path=path, is_git=True, status=status, sha256=sha256,
-                  original=original if status in {'M', 'D', 'clean'} else '',
-                  modified=modified, changed=status != 'clean', added=added, removed=removed,
-                  writable=writable, readonly_reason=readonly_reason)
-    if env_exists is not None:
-        result['env_exists'] = env_exists
-    return result
+    return dict(path=path, is_git=True, status=status, sha256=sha256,
+                original=original if status in {'M', 'D', 'clean'} else '',
+                modified=modified, changed=status != 'clean', added=added, removed=removed,
+                writable=writable, readonly_reason=readonly_reason)
 
 
 def save_file(root, path, text, *, expected_sha256=None, authorize=None):
@@ -388,28 +381,42 @@ def save_file(root, path, text, *, expected_sha256=None, authorize=None):
     return dict(path=path, sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
 
 
-def init_env_file(root, *, authorize=None):
-    """Create project-local .env from .env.example without overwriting an existing .env."""
-    from demiflow.forge.project_env import ensure_gitignore_env
-
+def create_file(root, path, text=None, *, authorize=None):
+    """Create a new editable UTF-8 project text file without overwriting existing files."""
+    if not isinstance(path, str):
+        raise ForgeError('请输入有效的文件路径', code='invalid_request')
+    clean = path.strip().lstrip('/')
+    if not clean or clean.endswith('/'):
+        raise ForgeError('请输入有效的文件路径（如 .env 或 configs/a.json）', code='invalid_request')
+    writable, reason = editable_status(root, clean)
+    if not writable:
+        raise ForgeError(reason or '该路径不支持新建文本文件', code='operation_rejected')
+    if text is not None:
+        if not isinstance(text, str) or '\x00' in text:
+            raise ForgeError('文件内容必须是合法 UTF-8 文本', code='invalid_request')
+        if len(text.encode('utf-8')) > DOCUMENT_BYTES:
+            raise ForgeError('文件内容超过 1 MiB 大小限制', code='resource_limit')
     root = Path(root).absolute()
     with control_lock(root):
         if authorize is not None:
             authorize()
-        env_path = no_symlinks(root / '.env')
-        if env_path.exists():
-            if not env_path.is_file():
-                raise ForgeError('.env 不是普通文件', code='conflict')
-            return dict(path='.env', created=False, already_exists=True)
-        example_path = no_symlinks(root / '.env.example')
-        if example_path.is_file():
+        target = _path(root, clean)
+        no_symlinks(target.parent)
+        if target.exists() or target.is_symlink():
+            raise ForgeError('文件已存在：' + clean, code='conflict')
+        if text is not None:
+            content = text
+        elif clean == '.env' and (root / '.env.example').is_file() and not (root / '.env.example').is_symlink():
             try:
-                content = read_bounded(example_path, 64 * 1024).decode('utf-8')
-            except (OSError, UnicodeError) as exc:
-                raise ForgeError('无法读取 .env.example 模板', code='invalid_request') from exc
+                content = read_bounded(root / '.env.example', 64 * 1024).decode('utf-8')
+            except (OSError, UnicodeError):
+                content = ''
         else:
-            content = '# Project local runtime environment (never commit real secrets)\n'
-        atomic_write_text(env_path, content)
-        os.chmod(env_path, 0o600)
-        ensure_gitignore_env(root)
-    return dict(path='.env', created=True, already_exists=False)
+            content = ''
+        raw = content.encode('utf-8')
+        atomic_write_text(target, content)
+        if target.name in SECRET_DOTFILES:
+            os.chmod(target, 0o600)
+            from demiflow.forge.project_env import ensure_gitignore_env
+            ensure_gitignore_env(root)
+    return dict(path=clean, sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))

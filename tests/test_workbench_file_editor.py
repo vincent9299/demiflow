@@ -83,42 +83,59 @@ def test_save_file_cas_and_protection_boundaries(tmp_path):
             documents.save_file(root, blocked, 'nope\n')
 
 
-def test_init_env_file_and_edit_sets_private_permissions(tmp_path):
+def test_create_file_general_and_dotenv_seeding(tmp_path):
     root = _setup_project(tmp_path / 'proj')
-    ex_diff = documents.file_diff(root, '.env.example')
-    assert ex_diff['writable'] is True
-    assert ex_diff['env_exists'] is False
 
-    res = documents.init_env_file(root)
-    assert res == {'path': '.env', 'created': True, 'already_exists': False}
+    # Creating .env auto-seeds from .env.example and sets 0o600 permissions
+    res = documents.create_file(root, '.env')
+    assert res['path'] == '.env'
     env_file = root / '.env'
     assert env_file.read_text(encoding='utf-8') == 'DEMO_API_KEY=\n'
     assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
 
-    # Second call does not overwrite existing .env
+    # Duplicate creation fails with conflict without overwriting
     env_diff = documents.file_diff(root, '.env')
-    assert env_diff['writable'] is True
     documents.save_file(root, '.env', 'DEMO_API_KEY=real-local-val\n', expected_sha256=env_diff['sha256'])
-    assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
-
-    again = documents.init_env_file(root)
-    assert again == {'path': '.env', 'created': False, 'already_exists': True}
+    with pytest.raises(ForgeError) as exc_dup:
+        documents.create_file(root, '.env')
+    assert exc_dup.value.code == 'conflict'
     assert env_file.read_text(encoding='utf-8') == 'DEMO_API_KEY=real-local-val\n'
 
+    # Creating arbitrary nested business files works cleanly
+    nested = documents.create_file(root, 'docs/notes/plan.md', '# Plan\n')
+    assert nested['path'] == 'docs/notes/plan.md'
+    assert (root / 'docs/notes/plan.md').read_text(encoding='utf-8') == '# Plan\n'
 
-def test_http_file_save_and_env_init_endpoints(tmp_path):
+    cfg = documents.create_file(root, 'configs/extra.json')
+    assert cfg['path'] == 'configs/extra.json'
+    assert (root / 'configs/extra.json').read_text(encoding='utf-8') == ''
+
+    # Protected & disallowed paths rejected
+    for blocked in ('workspace.json', 'data/out.txt', 'tables/new.json', '.git/hooks.sh', '.unknown_dot'):
+        with pytest.raises(ForgeError):
+            documents.create_file(root, blocked)
+
+
+def test_http_file_create_and_save_endpoints(tmp_path):
     from test_forge_public_api import request, service
     root = _setup_project(tmp_path / 'proj')
     with service(root, enable_config_write=True, workspace_config_write=True) as app:
-        # 1. Init .env via POST /api/project-env-init
-        code, init_res = request(app, '/api/project-env-init', {})
-        assert code == 200 and init_res['created'] is True
+        # 1. Create .env via POST /api/project-file-create
+        code, create_res = request(app, '/api/project-file-create', {'path': '.env'})
+        assert code == 200 and create_res['path'] == '.env'
+        assert (root / '.env').read_text(encoding='utf-8') == 'DEMO_API_KEY=\n'
 
-        # 2. Read .env via GET /api/project-file-diff
+        # 2. Duplicate creation returns 409 conflict
+        code, _ = request(app, '/api/project-file-create', {'path': '.env'})
+        assert code == 409
+
+        # 3. Create general config file via POST /api/project-file-create
+        code, cfg_res = request(app, '/api/project-file-create', {'path': 'configs/new.json'})
+        assert code == 200 and cfg_res['path'] == 'configs/new.json'
+
+        # 4. Read & save .env via GET /api/project-file-diff + POST /api/project-file-save
         code, diff_res = request(app, '/api/project-file-diff?path=.env')
         assert code == 200 and diff_res['writable'] is True
-
-        # 3. Save .env via POST /api/project-file-save
         code, save_res = request(app, '/api/project-file-save', {
             'path': '.env',
             'text': 'DEMO_API_KEY=updated-via-http\n',
@@ -127,13 +144,17 @@ def test_http_file_save_and_env_init_endpoints(tmp_path):
         assert code == 200 and save_res['path'] == '.env'
         assert (root / '.env').read_text(encoding='utf-8') == 'DEMO_API_KEY=updated-via-http\n'
 
-        # 4. Saving workspace.json fails with 422 (operation_rejected)
+        # 5. Saving or creating protected files fails with 422 (operation_rejected)
         code, _ = request(app, '/api/project-file-save', {'path': 'workspace.json', 'text': '{}'})
         assert code == 422
+        code, _ = request(app, '/api/project-file-create', {'path': 'data/nope.txt'})
+        assert code == 422
 
-    # 5. Read-only server disables editing and rejects save with 403
+    # 6. Read-only server disables editing and rejects create/save with 403
     with service(root, enable_config_write=False, workspace_config_write=False) as ro_app:
         code, ro_diff = request(ro_app, '/api/project-file-diff?path=.env')
         assert code == 200 and ro_diff['writable'] is False
         code, _ = request(ro_app, '/api/project-file-save', {'path': '.env', 'text': 'X=1\n'})
+        assert code == 403
+        code, _ = request(ro_app, '/api/project-file-create', {'path': 'docs/new.md'})
         assert code == 403
