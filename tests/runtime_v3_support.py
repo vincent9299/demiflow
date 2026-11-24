@@ -114,7 +114,7 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "queue_full_business": (('demiflow.execution.native_queue.dataflow_queue', "Q"), ('demiflow.execution.native_queue.queue_execution', "Q")),
     "memory_peak": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.planning.dataflow_policy", "E")),
     "disk_gc": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.storage.objects", "H")),
-    "remote_journal": (('demiflow.execution.journal.dataflow_authority', "H"), ("demiflow.execution.worker.dataflow_host", "H")),
+    "remote_journal": (('demiflow.execution.journal.dataflow_authority', "H"), ('demiflow.execution.hosts.dataflow_worker_host', "H")),
     "two_hosts": (('demiflow.execution.hosts.endpoints', "H"), ("demiflow.execution.storage.objects", "H")),
     "node_loss": (('demiflow.execution.hosts.endpoints', "H"), ("demiflow.execution.checkpoint.coordinator", "D")),
     "driver_restart": (('demiflow.execution.journal.dataflow_authority', "H"), ("demiflow.execution.action_driver.dataflow", "E")),

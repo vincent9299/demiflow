@@ -542,7 +542,7 @@ def test_b018(tmp_path):
 
 
 def test_b019():
-    from demiflow.execution.worker.bootstrap import _validate_v3_launch
+    from demiflow.execution.hosts.worker_bootstrap import _validate_v3_launch
     good = {'dataflow_v3': {'entrypoint': 'dataflow_worker_v3', 'code_pin': 'd' * 64, 'assignment': {}}}
     _validate_v3_launch(good)
     with pytest.raises(DataflowError, match='INVALID_CONTRACT'):
@@ -567,7 +567,7 @@ def _bootstrap_launch(tmp_path):
 
 
 def test_b020(tmp_path):
-    from demiflow.execution.worker.bootstrap import _run_v3_worker
+    from demiflow.execution.hosts.worker_bootstrap import _run_v3_worker
     launch = _bootstrap_launch(tmp_path)
     driver_sock, child_sock = socket.socketpair()
     driver_sock.settimeout(5)  # bootstrap failure must fail, never hang the suite
@@ -582,7 +582,7 @@ def test_b020(tmp_path):
     thread = threading.Thread(target=worker)
     thread.start()
     # driver reads the Register envelope then sends Cancel
-    from demiflow.execution.worker.bootstrap import recv_message, send_message
+    from demiflow.execution.hosts.worker_bootstrap import recv_message, send_message
     register = recv_message(driver_sock)
     assert register["kind"] == "Register"
     cancel = {

@@ -100,7 +100,7 @@ def test_thread_exit_evidence_waits_for_framework_work(tmp_path, monkeypatch):
     import threading
     import time
     from demiflow.execution.hosts.thread import _ThreadUnit
-    from demiflow.execution.worker import dataflow_host
+    from demiflow.execution.hosts import dataflow_worker_host as dataflow_host
     from demiflow.resources.capacity import inherited_envelope, track_owned_thread
     entered, release = threading.Event(), threading.Event()
     class Shell:
@@ -130,7 +130,7 @@ def test_thread_exit_evidence_waits_for_framework_work(tmp_path, monkeypatch):
 def test_hook_failure_never_substitutes_for_physical_exit(tmp_path, monkeypatch):
     import threading
     from demiflow.execution.hosts.thread import _ThreadUnit
-    from demiflow.execution.worker import dataflow_host
+    from demiflow.execution.hosts import dataflow_worker_host as dataflow_host
     from demiflow.resources.capacity import track_owned_thread
     release = threading.Event()
     class Shell:
@@ -252,7 +252,7 @@ def test_recovery_uses_original_sealed_thread_mode(tmp_path, monkeypatch):
 
 def test_original_capacity_remains_charged_until_real_thread_exit(tmp_path, monkeypatch):
     import threading
-    from demiflow.execution.worker import dataflow_host
+    from demiflow.execution.hosts import dataflow_worker_host as dataflow_host
     from demiflow.execution.hosts.thread import DataflowThreadConnector
     from demiflow.resources.thread import ThreadResourceProvider
     from demiflow.resources.capacity import LocalCapacityPool, track_owned_thread

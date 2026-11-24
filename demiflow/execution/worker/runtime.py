@@ -33,10 +33,8 @@ import uuid
 from pathlib import Path
 
 from ..contracts.artifact import verify_manifest
-from ..contracts.envelope import (
-    WORKER_PROTOCOL_VERSION, OperationReceipts, check_boot, check_controller_epoch,
-    check_grant, require_capabilities,
-)
+from demiflow.execution.contracts.envelope import WORKER_PROTOCOL_VERSION, check_boot, check_controller_epoch, check_grant, require_capabilities
+from demiflow.execution.worker.control_receipts import OperationReceipts
 from ..contracts.errors import ProtocolError
 from ..contracts.worker import apply_assignment, next_worker_state, validate_message
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
@@ -360,6 +358,121 @@ class WorkerRuntime:
         if self.authority is not None:
             self.authority.__exit__(None, None, None)
             self.authority = None
+
+
+    def activate_assignment(self, assignment: "WorkerAssignment") -> None:
+        from demiflow.execution.contracts.worker import make_worker_control_assignment
+        grant = self.grant
+        if grant is None:
+            raise DataflowError("INVALID_CONTRACT", "worker has no delivered grant")
+        manifest_ref = {"manifest_id": assignment.sealed.code_pin_ref.digest,
+                        "sha256": assignment.sealed.code_pin_ref.digest}
+        v3_config = getattr(self, "_v3_config", None)
+        if v3_config is not None:
+            v3_config["assignment"] = assignment
+        control = make_worker_control_assignment(
+            assignment, grant=grant, manifest_ref=manifest_ref,
+            ready_deadline_ms=int(assignment.bounds.timeout_ms) + 60000)
+        now_ms = int(time.time() * 1000)
+        self._local_command("VerifyArtifactAndCapabilities",
+                      {"artifact_manifest_ref": manifest_ref, "required_capabilities": []}, now_ms)
+        self._local_command("Restore", {"assignment_ref": assignment.action_id,
+                                  "restore_point": control["restore_point"], "state_refs": []}, now_ms)
+        self._local_command("Activate", {"grant_ref": grant["grant_id"],
+                                   "controller_epoch": assignment.attempt,
+                                   "operation_id": uuid.uuid4().hex}, now_ms)
+        self._local_command("Assign", {"assignment": control}, now_ms)
+
+    def _local_command(self, kind: str, payload: dict, now_ms: int) -> dict:
+        envelope = {
+            "protocol_version": dict(WORKER_PROTOCOL_VERSION), "kind": kind,
+            "scope_id": self.scope_id, "run_id": self.run_id,
+            "operation_id": uuid.uuid4().hex, "controller_epoch": self.controller_epoch,
+            "authority_ref": self.grant["grant_id"] if self.grant else self.boot_id,
+            "allocation_id": self.allocation_id, "boot_id": self.boot_id, "payload": payload,
+        }
+        return self.handle(envelope, now_ms=now_ms)
+
+    def handle_host_command(self, message: dict) -> dict:
+        executor = self._v3_executor
+        try:
+            receipt = self.handle(message, now_ms=int(time.time() * 1000))
+            if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                self.close()
+        except ProtocolError as exc:
+            return {"error": exc.to_dict(), **self._final_observations(message, executor)}
+        except Exception as exc:
+            from demiflow.execution.contracts.dataflow_failures import failure_payload
+            return {"error": failure_payload(exc), **self._final_observations(message, executor)}
+        if message["kind"] == "Restore":
+            self.ready(message["payload"]["assignment_ref"])
+        return {"receipt": receipt, **self._final_observations(message, executor)}
+
+    def _final_observations(self, message, executor):
+        if message.get('kind') not in ('Drain', 'Quiesce', 'Cancel'):
+            return {}
+        events = getattr(executor, '_final_progress', ())
+        return {'final_progress': list(events)} if events else {}
+
+    def deliver_receipt(self, receipt: dict) -> None:
+        if receipt.get("boot_id") not in (None, self.boot_id):
+            raise DataflowError("FENCED", "commit receipt belongs to a different boot")
+        executor = self._v3_executor
+        if executor is None:
+            raise DataflowError("FENCED", "worker executor is not assigned")
+        commit_id = receipt.get("commit_id")
+        cut_id = receipt.get("cut_id")
+        if type(commit_id) is not str or type(cut_id) is not str:
+            raise DataflowError("INVALID_CONTRACT", "commit receipt needs commit_id and cut_id")
+        executor.accept_receipt(commit_id, cut_id=cut_id)
+
+    def receive(self, command):
+        self._v3_ensure_executor().receive(command)
+
+    def request_cut(self, request):
+        if self._v3_executor is None:
+            raise DataflowError("FENCED", "worker executor is not assigned")
+        self._v3_executor.request_cut(request)
+
+    def cancel_execution(self, reason, *, deadline_ms):
+        if self._v3_executor is not None:
+            self._v3_executor.cancel(reason, deadline_ms=deadline_ms)
+
+    def execution_closed(self, *, default=False):
+        if self._v3_executor is None:
+            return default
+        return bool(getattr(self._v3_executor, '_closed', False))
+
+
+    def handle_socket_command(self, message, *, bounds, send):
+        from demiflow.execution.contracts.dataflow_codec import decode_wire
+        executor = getattr(self, '_v3_executor', None)
+        try:
+            if message.get("type") == "dataflow_command":
+                self._v3_ensure_executor().receive(message["command"])
+                return False
+            if message.get("type") == "cut_request":
+                request = decode_wire(message["wire"].encode(), type_name="CutRequest", bounds=bounds)
+                self._v3_ensure_executor().request_cut(request)
+                return False
+            receipt = self.handle(message, now_ms=int(time.time() * 1000))
+            if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                # Acknowledgment means lifecycle cleanup finished. The
+                # main socket loop still services journal RPCs meanwhile.
+                self.close()
+            send({"response_to": message["operation_id"], "receipt": receipt, **self._final_observations(message, executor)})
+            if message["kind"] == "Restore":
+                self.ready(message["payload"]["assignment_ref"])
+            if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                return True
+        except (ProtocolError, DataflowError) as exc:
+            error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
+            send({"response_to": message.get("operation_id"), "error": error, **self._final_observations(message, executor)})
+        except BaseException as exc:
+            from demiflow.execution.contracts.dataflow_failures import failure_payload
+            send({"response_to": message.get("operation_id"), "error": failure_payload(exc), **self._final_observations(message, executor)})
+        return False
+
 
 
 def _bind_prediction_program(program, binding, configuration):

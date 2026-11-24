@@ -118,7 +118,7 @@ def test_explicit_null_recovery_reference_cannot_become_fresh_execution(tmp_path
 
 def test_real_process_assignment_and_restore_launch_stay_below_original_64k(tmp_path, monkeypatch):
     from demiflow.execution.hosts.endpoints import _EndpointBase
-    from demiflow.execution.worker.bootstrap import _MAX_LAUNCH_BYTES
+    from demiflow.execution.hosts.worker_bootstrap import _MAX_LAUNCH_BYTES
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     observed, restores = [], []
     build, commit = _EndpointBase._build_launch, DataflowCheckpointCoordinator.commit
@@ -164,10 +164,10 @@ def test_actual_bootstrap_still_rejects_oversized_launch_before_control(tmp_path
     import os
     import subprocess
     import sys
-    from demiflow.execution.worker.bootstrap import LAUNCH_ENV, CONTROL_FD_ENV
+    from demiflow.execution.hosts.worker_bootstrap import LAUNCH_ENV, CONTROL_FD_ENV
     path = tmp_path/'oversized-launch.json'
     path.write_bytes(b' ' * 65537)
-    result = subprocess.run([sys.executable, '-B', '-m', 'demiflow.execution.worker.bootstrap'],
+    result = subprocess.run([sys.executable, '-B', '-m', 'demiflow.execution.hosts.worker_bootstrap'],
         env={**os.environ, LAUNCH_ENV: str(path), CONTROL_FD_ENV: '-1'},
         capture_output=True, text=True, timeout=15)
     assert result.returncode != 0 and 'Worker launch spec exceeds byte budget' in result.stderr

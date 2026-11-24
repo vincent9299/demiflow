@@ -5,6 +5,9 @@ no real channels. Node ids map one-to-one to the reviewed design matrix.
 PRT-01/PRT-02 are covered by the separate baseline regression run and the
 protection evidence, not by this file.
 """
+from demiflow.execution.hosts.endpoints import WorkerProtocolModel
+from demiflow.execution.worker.control_receipts import OperationReceipts
+
 import threading
 
 import pytest
@@ -107,7 +110,7 @@ def _message(operation_id, kind, payload, *, epoch=3, boot="bo1", allocation="al
 
 
 def _model(**kwargs):
-    return worker.WorkerProtocolModel(
+    return WorkerProtocolModel(
         scope_id="sc1", run_id="run-1", allocation_id="al1", boot_id="bo1",
         controller_epoch=3, grant=_grant(), capabilities=["gpu"], **kwargs)
 
@@ -225,7 +228,7 @@ def test_ver_03_required_capability_missing_rejects():
 # --- IDE: idempotency -------------------------------------------------------
 
 def test_ide_01_same_operation_same_payload_returns_original_receipt():
-    ledger = envelope.OperationReceipts()
+    ledger = OperationReceipts()
     calls = []
     first = ledger.apply("op-1", {"a": 1}, lambda: calls.append(1) or {"ok": True})
     second = ledger.apply("op-1", {"a": 1}, lambda: calls.append(2) or {"ok": False})
@@ -234,7 +237,7 @@ def test_ide_01_same_operation_same_payload_returns_original_receipt():
 
 
 def test_ide_02_same_operation_different_payload_conflicts():
-    ledger = envelope.OperationReceipts()
+    ledger = OperationReceipts()
     ledger.apply("op-1", {"a": 1}, lambda: {"ok": True})
     with pytest.raises(ProtocolError) as error:
         ledger.apply("op-1", {"a": 2}, lambda: {"ok": True})

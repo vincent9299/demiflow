@@ -41,7 +41,7 @@ class _ThreadUnit:
 
     def _run(self):
         from demiflow.resources.capacity import allocation_envelope
-        from demiflow.execution.worker.dataflow_host import HostedDataflowWorker
+        from demiflow.execution.hosts.dataflow_worker_host import HostedDataflowWorker
         try:
             with allocation_envelope(self.envelope, track_thread=self._track):
                 self.host = HostedDataflowWorker(self.launch, self.spec_hash, self.launch['boot_id'])
@@ -174,10 +174,10 @@ class ThreadHostEndpoint(_EndpointBase):
 
     def __init__(self, lease, *, services):
         super().__init__(lease, services=services)
-        self._argv = (sys.executable, '-B', '-m', 'demiflow.execution.worker.dataflow_host')
+        self._argv = (sys.executable, '-B', '-m', 'demiflow.execution.hosts.dataflow_worker_host')
 
     def activate(self, assignment):
-        from demiflow.execution.worker.dataflow_host import make_worker_control_assignment
+        from demiflow.execution.contracts.worker import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError('FENCED', 'thread worker assignment was not staged')
         _, grant, manifest_ref = self._build_launch(assignment)

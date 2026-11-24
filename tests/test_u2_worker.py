@@ -26,7 +26,7 @@ from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext, run_scope, current_run
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.execution.worker.runtime import WorkerAuthority
-from demiflow.execution.worker.bootstrap import recv_message, send_message, spawn_local_worker
+from demiflow.execution.hosts.worker_bootstrap import recv_message, send_message, spawn_local_worker
 from demiflow.execution.worker.runtime import WorkerRuntime
 
 
@@ -418,7 +418,7 @@ def test_local_worker_rejects_stale_boot_real_process(env):
         Path(launch_path).unlink(missing_ok=True)
 
 def test_retired_execution_launch_never_enters_a_control_connector(tmp_path):
-    from demiflow.execution.worker.bootstrap import LocalControlConnector
+    from demiflow.execution.hosts.worker_bootstrap import LocalControlConnector
 
     invalid = {'execution': {}}
     with pytest.raises(ProtocolError, match='retired'):

@@ -135,10 +135,10 @@ def test_worker_sigkill_retains_unit_until_actual_service_tree_exits(tmp_path, m
                 service = next(r for r in rows if r['event'] == 'start')
                 worker = psutil.Process(service['pid']).parent()
                 for _ in range(3):
-                    if 'demiflow.execution.worker.bootstrap' in worker.cmdline():
+                    if 'demiflow.execution.hosts.worker_bootstrap' in worker.cmdline():
                         break
                     worker = worker.parent()
-                assert 'demiflow.execution.worker.bootstrap' in worker.cmdline()
+                assert 'demiflow.execution.hosts.worker_bootstrap' in worker.cmdline()
                 proof['kill'] = {'pid': worker.pid, 'birth': worker.create_time()}
                 worker.kill()
                 records = Path(os.environ['DEMIFLOW_RESOURCE_ROOT']) / 'capacity/allocations'

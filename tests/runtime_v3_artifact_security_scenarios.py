@@ -206,10 +206,10 @@ def _bootstrap_attack(root):
     import os
     import subprocess
     import sys
-    from demiflow.execution.worker.bootstrap import LAUNCH_ENV, CONTROL_FD_ENV, _MAX_LAUNCH_BYTES
+    from demiflow.execution.hosts.worker_bootstrap import LAUNCH_ENV, CONTROL_FD_ENV, _MAX_LAUNCH_BYTES
     path = root/'oversized-launch.json'
     path.write_bytes(b' '*(_MAX_LAUNCH_BYTES+1))
-    command = [sys.executable, '-B', '-m', 'demiflow.execution.worker.bootstrap']
+    command = [sys.executable, '-B', '-m', 'demiflow.execution.hosts.worker_bootstrap']
     tree = str(Path(__file__).resolve().parents[1])
     result = subprocess.run(command, cwd=tree, env={**os.environ, 'PYTHONPATH':tree,
         LAUNCH_ENV: str(path), CONTROL_FD_ENV:'-1'}, capture_output=True, text=True, timeout=20)

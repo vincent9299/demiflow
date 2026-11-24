@@ -1,6 +1,11 @@
 """Local and Ray endpoints, actual process connections and bounded transport."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.worker import COORD_COMMANDS, next_worker_state, apply_assignment, validate_message
+from demiflow.execution.contracts.envelope import check_boot, check_controller_epoch, check_grant
+from demiflow.execution.contracts.errors import ProtocolError
+from demiflow.execution.worker.control_receipts import OperationReceipts
+
 import importlib.util
 import json
 import sys
@@ -13,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, event_from_dict as _event_from_dict, reply_frame as _reply_frame
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.worker.bootstrap import LocalControlConnector
+from demiflow.execution.hosts.worker_bootstrap import LocalControlConnector
 
 if TYPE_CHECKING:
     from demiflow.execution.contracts.dataflow import Bounds, ControlReply, CutRequest, DriverServices, WorkerAssignment, WorkerEvent, WorkerLease
@@ -66,13 +71,13 @@ class DataflowLocalConnector(LocalControlConnector):
         return payload
 
     def request_cut(self, allocation_id: str, request: "CutRequest") -> None:
-        from demiflow.execution.worker.bootstrap import send_message
+        from demiflow.execution.hosts.worker_bootstrap import send_message
         bounds = self._bounds_by_allocation[allocation_id]
         send_message(self.driver_socks[allocation_id], {"type": "cut_request", "wire":
             encode_wire(request, type_name="CutRequest", bounds=bounds).decode()})
 
     def deliver_control_reply(self, allocation_id: str, reply: "ControlReply") -> None:
-        from demiflow.execution.worker.bootstrap import send_message
+        from demiflow.execution.hosts.worker_bootstrap import send_message
         bounds = self._bounds_by_allocation[allocation_id]
         send_message(self.driver_socks[allocation_id], _reply_frame(reply, bounds=bounds))
 
@@ -212,7 +217,7 @@ class _EndpointBase:
         self._business_batch = []
         self._business_bytes = 0
         if hasattr(self, "_sock"):
-            from demiflow.execution.worker.bootstrap import _send_encoded_messages
+            from demiflow.execution.hosts.worker_bootstrap import _send_encoded_messages
             _send_encoded_messages(self._sock, (raw for _, raw in pending))
         else:
             actor = self._connector._actor(self._allocation_id)
@@ -232,7 +237,7 @@ class _EndpointBase:
         return dict(command, activity_generation=generation)
 
     def send_business(self, command):
-        from demiflow.execution.worker.bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
+        from demiflow.execution.hosts.worker_bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
         from demiflow.execution.contracts.recovery_contract import document
         command = self._activity_command(command)
         raw = document({"type": "dataflow_command", "command": command})
@@ -338,12 +343,12 @@ class LocalHostEndpoint(_EndpointBase):
     def __init__(self, lease: "WorkerLease", *, services: "DriverServices"):
         super().__init__(lease, services=services)
         self._sock = None
-        self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.bootstrap")
+        self._argv = (sys.executable, "-B", "-m", 'demiflow.execution.hosts.worker_bootstrap')
 
     def activate(self, assignment: "WorkerAssignment") -> None:
-        from demiflow.execution.contracts.worker import WorkerProtocolModel
-        from demiflow.execution.worker.bootstrap import ControlFrameReader
-        from demiflow.execution.worker.dataflow_host import make_worker_control_assignment
+        
+        from demiflow.execution.hosts.worker_bootstrap import ControlFrameReader
+        from demiflow.execution.contracts.worker import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
         _, grant, manifest_ref = self._build_launch(assignment)
@@ -370,7 +375,7 @@ class LocalHostEndpoint(_EndpointBase):
         self._activated = True
 
     def _receive_registration(self):
-        from demiflow.execution.worker.bootstrap import recv_message
+        from demiflow.execution.hosts.worker_bootstrap import recv_message
         context = {"allocation_id": self._allocation_id, "boot_id": self._boot_id}
 
         def lost_registration():
@@ -407,7 +412,7 @@ class LocalHostEndpoint(_EndpointBase):
             raise DataflowError("UNKNOWN_EFFECT", "worker control connection terminated before confirmation") from exc
 
     def _send_k3(self, kind: str, payload: dict) -> dict:
-        from demiflow.execution.worker.bootstrap import send_message
+        from demiflow.execution.hosts.worker_bootstrap import send_message
         self.flush_business()
         envelope = self._k3_envelope(kind, payload)
         send_message(self._sock, envelope)
@@ -535,7 +540,7 @@ class DataflowRayConnector(_RayControlConnector):
             self._environments.pop(allocation_id, None)
 
     def host_class(self):
-        from demiflow.execution.worker.dataflow_host import HostedDataflowWorker
+        from demiflow.execution.hosts.dataflow_worker_host import HostedDataflowWorker
         return ray.remote(max_restarts=0, max_task_retries=0, max_concurrency=8)(HostedDataflowWorker)
 
     def placement_options(self, allocation_id):
@@ -564,7 +569,7 @@ class RayHostEndpoint(_EndpointBase):
         if not _RAY_AVAILABLE:
             raise DataflowError("UNSUPPORTED_CAPABILITY", "Ray Core provider requires the ray package")
         super().__init__(lease, services=services)
-        self._argv = (sys.executable, "-B", "-m", "demiflow.execution.worker.dataflow_host")
+        self._argv = (sys.executable, "-B", "-m", 'demiflow.execution.hosts.dataflow_worker_host')
         self._pending_pull = None
         self._pull_limit = 0
         self._pull_started = 0.0
@@ -618,7 +623,7 @@ class RayHostEndpoint(_EndpointBase):
             raise
 
     def activate(self, assignment: "WorkerAssignment") -> None:
-        from demiflow.execution.worker.dataflow_host import make_worker_control_assignment
+        from demiflow.execution.contracts.worker import make_worker_control_assignment
         if self._assignment != assignment:
             raise DataflowError("FENCED", "worker assignment was not staged before allocation")
         binding = self._services.resources.state.read_allocation_identity(self._scope_id, self._allocation_id)
@@ -693,3 +698,91 @@ class RayHostEndpoint(_EndpointBase):
     def deliver_reply(self, reply: "ControlReply") -> None:
         self.flush_business()
         self._connector.deliver_control_reply(self._allocation_id, reply)
+
+
+class WorkerProtocolModel:
+    """Pure conformance model: one worker boot, no transport or scheduling.
+
+    Commands are fenced by controller epoch/boot/grant, deduplicated by
+    operation_id, and gated by the inherited state machine. Business input is
+    admitted only after activate with a live grant (resource v1 activation rule).
+    """
+
+    def __init__(self, *, scope_id, run_id, allocation_id, boot_id,
+                 controller_epoch, grant, plan_revision=0, capabilities=()):
+        self.scope_id, self.run_id = scope_id, run_id
+        self.allocation_id, self.boot_id = allocation_id, boot_id
+        self.controller_epoch = controller_epoch
+        self.grant = grant
+        self.plan_revision = plan_revision
+        self.capabilities = list(capabilities)
+        self.state = "REGISTERED"
+        self.receipts = OperationReceipts()
+        self.assignment = None
+
+    def handle(self, envelope, *, now_ms):
+        validate_message(envelope)
+        if envelope["scope_id"] != self.scope_id or envelope["run_id"] != self.run_id:
+            raise ProtocolError("FENCED", "message belongs to another scope/run")
+        check_controller_epoch(self.controller_epoch, envelope["controller_epoch"])
+        kind, payload = envelope["kind"], envelope["payload"]
+        if kind in COORD_COMMANDS or kind in ("Ready", "Heartbeat"):
+            check_boot(self.boot_id, envelope["boot_id"])
+        if kind in ("Register", "Ready", "Heartbeat"):
+            check_boot(self.boot_id, payload["boot_id"])
+        if kind == "Register":
+            if payload["boot_id"] != self.boot_id or payload["allocation_id"] != self.allocation_id:
+                raise ProtocolError("BOOT_FENCED", "registration boot/allocation mismatch")
+
+        def execute():
+            return self._apply(kind, payload, now_ms)
+
+        return self.receipts.apply(envelope["operation_id"], payload, execute)
+
+    def _apply(self, kind, payload, now_ms):
+        if kind == "Register":
+            return {"kind": "Registered", "state": self.state}
+        if kind == "VerifyArtifactAndCapabilities":
+            from demiflow.execution.contracts.envelope import require_capabilities
+            require_capabilities(self.capabilities, payload["required_capabilities"])
+            self.state = next_worker_state(self.state, "VERIFIED")
+            return {"kind": "Verified", "state": self.state}
+        if kind == "Restore":
+            self.state = next_worker_state(self.state, "RESTORING")
+            self.state = next_worker_state(self.state, "READY")
+            return {"kind": "Restored", "state": self.state, "state_checksums": []}
+        if kind == "Ready":
+            if self.state == "VERIFIED":
+                self.state = next_worker_state(self.state, "READY")
+            return {"kind": "ReadyAck", "state": self.state}
+        if kind == "Activate":
+            check_grant(self.grant, controller_epoch=self.controller_epoch,
+                        allocation_id=self.allocation_id, boot_id=self.boot_id, now_ms=now_ms)
+            self.state = next_worker_state(self.state, "ACTIVATED")
+            return {"kind": "Activated", "state": self.state}
+        if kind == "Assign":
+            self.plan_revision = apply_assignment(self.plan_revision, payload["assignment"])
+            self.assignment = payload["assignment"]
+            return {"kind": "Assigned", "plan_revision": self.plan_revision}
+        if kind == "CheckpointRequest":
+            return {"kind": "CheckpointAck", "state_refs": [], "inflight_desc": [],
+                    "channel_cuts": []}
+        if kind in ("Quiesce", "Drain"):
+            if self.state == "ACTIVATED":
+                self.state = next_worker_state(self.state, "DRAINING")
+            return {"kind": "DrainProof", "state": self.state, "release_hint": "DRAINED"}
+        if kind == "Cancel":
+            if self.state != "RETIRED":
+                self.state = next_worker_state(self.state, "RETIRED")
+            return {"kind": "Cancelled", "state": self.state}
+        if kind == "Heartbeat":
+            # Liveness only: never extends control leases or admits input.
+            return {"kind": "HeartbeatAck", "state": self.state}
+        raise ProtocolError("INVALID_SPEC", "unhandled kind")
+
+    def admit_business_input(self, *, now_ms):
+        if self.state != "ACTIVATED":
+            raise ProtocolError("FENCED", "business input requires activation")
+        check_grant(self.grant, controller_epoch=self.controller_epoch,
+                    allocation_id=self.allocation_id, boot_id=self.boot_id, now_ms=now_ms)
+        return True

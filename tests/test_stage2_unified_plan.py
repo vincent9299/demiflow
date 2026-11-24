@@ -591,7 +591,8 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
 # --- Gate 4: worker zero CommitCoordinator (AST) + driver single journal (spy) ---
 
 def test_worker_constructs_zero_commit_coordinator():
-    from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner, dataflow_host
+    from demiflow.execution.worker import dataflow_execution, dataflow_graph_runner
+    from demiflow.execution.hosts import dataflow_worker_host as dataflow_host
     for module in (dataflow_execution, dataflow_graph_runner, dataflow_host):
         tree = ast.parse(Path(module.__file__).read_text())
         referenced, imported_modules = set(), set()

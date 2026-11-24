@@ -62,7 +62,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import ARTIFACT_STAGING_BUDGET, RunArtifactStore
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.worker import dataflow_host as WH
+from demiflow.execution.hosts import dataflow_worker_host as WH
 from demiflow.resources.manager import ResourceManager
 
 del sys.modules['ray'], sys.modules['ray.exceptions']
@@ -646,8 +646,8 @@ def test_h015():
 
 
 def test_h016(monkeypatch):
-    import demiflow.execution.contracts.worker as W
-    import demiflow.execution.worker.bootstrap as B
+    import demiflow.execution.hosts.endpoints as W
+    import demiflow.execution.hosts.worker_bootstrap as B
     with driver_env('h016') as e:
         services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST,))
         ep = doubled_endpoint(HOSTS.LocalHostEndpoint, services)
@@ -679,7 +679,7 @@ def test_h016(monkeypatch):
 def test_h017(monkeypatch):
     import socket
     from collections import deque
-    import demiflow.execution.worker.bootstrap as B
+    import demiflow.execution.hosts.worker_bootstrap as B
     ep = HOSTS.LocalHostEndpoint.__new__(HOSTS.LocalHostEndpoint)
     ev = mk_event('e')
     payload = json.loads(codec.encode_wire(ev, type_name='WorkerEvent', bounds=BIG))['payload']

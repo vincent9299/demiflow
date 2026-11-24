@@ -279,7 +279,7 @@ class DataflowScheduler:
             "location": "store://" + self._physical.constants_ref.store_id + "/" + self._physical.constants_ref.key}
         return WorkerLaunchSpec(
             artifact_refs=artifact_refs, entrypoint="demiflow-worker",
-            argv=(sys.executable, "-B", "-m", "demiflow.execution.worker.bootstrap"),
+            argv=(sys.executable, "-B", "-m", 'demiflow.execution.hosts.worker_bootstrap'),
             bootstrap_ref="bootstrap-ref", access_refs={},
             runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
 

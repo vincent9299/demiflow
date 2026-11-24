@@ -4,8 +4,8 @@ Pure functions and bounded ledgers only; no transport, no scheduling. Receipt,
 revision and fence semantics are inherited from resource protocol v1 §03; the
 resource-side apply/close implementation remains owned by module A.
 """
-from demiflow.execution.contracts.recovery_contract import document, identifier, identity
-from .errors import ProtocolError
+from demiflow.execution.contracts.recovery_contract import document, identifier
+from demiflow.execution.contracts.errors import ProtocolError
 
 WORKER_PROTOCOL_VERSION = {"major": 1, "minor": 0}
 EXCHANGE_PROTOCOL_VERSION = {"major": 1, "minor": 0}
@@ -94,34 +94,7 @@ def validate_envelope(value, *, kinds, require_allocation=False, require_boot=Fa
     return value
 
 
-class OperationReceipts:
-    """Bounded message-level idempotency ledger (resource v1 §03 rules).
 
-    Same operation_id + same payload returns the original receipt without
-    re-execution; same id with a different payload is IDEMPOTENCY_CONFLICT.
-    """
-
-    def __init__(self, maximum=4096):
-        if type(maximum) is not int or maximum < 1:
-            raise ValueError("receipt ledger maximum must be positive")
-        self.maximum = maximum
-        self._entries = {}
-
-    def apply(self, operation_id, payload, execute):
-        identifier(operation_id)
-        payload_id = identity(payload)
-        entry = self._entries.get(operation_id)
-        if entry is not None:
-            if entry["payload_id"] != payload_id:
-                raise ProtocolError("IDEMPOTENCY_CONFLICT",
-                                    "operation_id reused with a different payload")
-            return entry["receipt"]
-        if len(self._entries) >= self.maximum:
-            raise ProtocolError("EXPIRED_OPERATION", "receipt ledger is full")
-        receipt = execute()
-        document(receipt)
-        self._entries[operation_id] = {"payload_id": payload_id, "receipt": receipt}
-        return receipt
 
 
 def check_controller_epoch(current, observed):

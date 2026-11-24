@@ -20,9 +20,9 @@ from dataclasses import asdict
 from pathlib import Path
 
 from demiflow.execution.storage.artifacts import read
-from ..contracts.errors import ProtocolError
+from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
-from .runtime import validate_worker_launch
+from demiflow.execution.worker.runtime import validate_worker_launch
 
 LAUNCH_ENV = "DEMIFLOW_WORKER_LAUNCH"
 CONTROL_FD_ENV = "DEMIFLOW_WORKER_CONTROL_FD"
@@ -183,12 +183,12 @@ def _run_v3_worker(launch_spec, sock):
     import queue
     import select
     import socket
-    from ..contracts.dataflow import Bounds
-    from ..contracts.dataflow_codec import encode_wire, decode_wire
-    from ..contracts.dataflow_errors import DataflowError
+    from demiflow.execution.contracts.dataflow import Bounds
+    from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.worker.mailbox import ControlMailbox
-    from ..storage.objects import RunArtifactStore
-    from .runtime import WorkerRuntime
+    from demiflow.execution.storage.objects import RunArtifactStore
+    from demiflow.execution.worker.runtime import WorkerRuntime
 
     config = dict(launch_spec["dataflow_v3"])
     bounds = Bounds(**config["bounds"])
@@ -236,36 +236,9 @@ def _run_v3_worker(launch_spec, sock):
                     message = commands.get(timeout=0.05)
                 except queue.Empty:
                     continue
-                executor = getattr(runtime, '_v3_executor', None)
-                def final_observations():
-                    if message.get('kind') not in ('Drain', 'Quiesce', 'Cancel'):
-                        return {}
-                    events = getattr(executor, '_final_progress', ())
-                    return {'final_progress': list(events)} if events else {}
                 try:
-                    if message.get("type") == "dataflow_command":
-                        runtime._v3_ensure_executor().receive(message["command"])
-                        continue
-                    if message.get("type") == "cut_request":
-                        request = decode_wire(message["wire"].encode(), type_name="CutRequest", bounds=bounds)
-                        runtime._v3_ensure_executor().request_cut(request)
-                        continue
-                    receipt = runtime.handle(message, now_ms=int(time.time() * 1000))
-                    if message["kind"] in ("Drain", "Quiesce", "Cancel"):
-                        # Acknowledgment means lifecycle cleanup finished. The
-                        # main socket loop still services journal RPCs meanwhile.
-                        runtime.close()
-                    send({"response_to": message["operation_id"], "receipt": receipt, **final_observations()})
-                    if message["kind"] == "Restore":
-                        runtime.ready(message["payload"]["assignment_ref"])
-                    if message["kind"] in ("Drain", "Quiesce", "Cancel"):
+                    if runtime.handle_socket_command(message, bounds=bounds, send=send):
                         stop.set()
-                except (ProtocolError, DataflowError) as exc:
-                    error = exc.to_dict() if isinstance(exc, ProtocolError) else {"code": exc.code, "message": str(exc)}
-                    send({"response_to": message.get("operation_id"), "error": error, **final_observations()})
-                except BaseException as exc:
-                    from demiflow.execution.contracts.dataflow_failures import failure_payload
-                    send({"response_to": message.get("operation_id"), "error": failure_payload(exc), **final_observations()})
                 finally:
                     commands.task_done()
         finally:
@@ -321,7 +294,7 @@ def _run_v3_worker(launch_spec, sock):
 def run_worker(launch_spec, sock):
     if "dataflow_v3" in launch_spec:
         return _run_v3_worker(launch_spec, sock)
-    from .runtime import WorkerRuntime
+    from demiflow.execution.worker.runtime import WorkerRuntime
 
     def send(frame):
         send_message(sock, frame)
@@ -356,7 +329,7 @@ def run_worker(launch_spec, sock):
 
 def _validate_v3_launch(launch_spec):
     """Fail before business on a wrong entrypoint or malformed code pin (B019)."""
-    from ..contracts.dataflow_errors import DataflowError
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
     v3 = launch_spec.get("dataflow_v3")
     if not isinstance(v3, dict):
         raise DataflowError("INVALID_CONTRACT", "v3 launch payload is missing")
@@ -400,7 +373,7 @@ def spawn_local_worker(launch_spec, *, log_path=None):
         env = dict(os.environ)
         env[LAUNCH_ENV] = launch_path
         env[CONTROL_FD_ENV] = str(child_sock.fileno())
-        argv = [sys.executable, "-B", "-m", "demiflow.execution.worker.bootstrap"]
+        argv = [sys.executable, "-B", "-m", 'demiflow.execution.hosts.worker_bootstrap']
         stdout = subprocess.DEVNULL if log_path is None else open(log_path, "ab")
         try:
             process = subprocess.Popen(

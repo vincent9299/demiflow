@@ -110,7 +110,7 @@ def _kill_owned_worker(execution,fx):
     else:
         # Verify the exact worker owns this execution's control socket/launch.
         command=(Path('/proc')/str(pid)/'cmdline').read_bytes().decode(errors='replace')
-        assert 'demiflow.execution.worker.bootstrap' in command,command
+        assert 'demiflow.execution.hosts.worker_bootstrap' in command,command
         os.kill(pid,signal.SIGKILL)
         fact.update(kind='actual Local worker SIGKILL',signal=signal.SIGKILL,command=command)
     return fact
