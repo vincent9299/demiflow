@@ -14,6 +14,8 @@ rejects duplicate occurrence_id / self-loop / cycle / dangling edge, but never
 blanket-rejects a repeated logical_node_id. K1-K6 contracts are byte-frozen;
 the wire-stability category proves the recomputed identities flow through them.
 """
+
+from demiflow.execution.compiler_support import operator_policy
 import copy
 import json
 import os
@@ -261,7 +263,7 @@ def test_recomputed_identities_pass_frozen_operator_and_exchange_wire():
         identifier(node["logical_node_id"])         # format-valid sha256 identifier
         identifier(node["occurrence_id"])
         # K2 OperatorSpec accepts the positional identity (shape unchanged).
-        spec = operator.compile_operator_spec(
+        spec = operator_policy.compile_operator_spec(
             CallableSpec.create(_passthrough), logical_node_id=node["logical_node_id"],
             occurrence_id=node["occurrence_id"], artifact_manifest_ref=ref,
             module_key="p_" + "b" * 24)

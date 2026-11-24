@@ -1,7 +1,7 @@
 """S009 · _adapter_present — frozen probe; class factory is deferred adaptation."""
 import threading
 
-from demiflow.execution.contracts.operator import _adapter_present
+from demiflow.execution.compiler_support.operator_policy import _adapter_present
 
 
 class Hooked:

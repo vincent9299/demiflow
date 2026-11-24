@@ -1,4 +1,6 @@
 """S010 · compile_operator_spec — C04 state admission in the durable protocol."""
+
+from demiflow.execution.compiler_support import operator_policy
 import threading
 
 import pytest
@@ -50,7 +52,7 @@ KW = dict(logical_node_id="n1", occurrence_id="o1",
 
 
 def compile(target, ownership="none"):
-    return operator.compile_operator_spec(
+    return operator_policy.compile_operator_spec(
         CallableSpec.create(target), traits={"state_ownership": ownership}, **KW)
 
 

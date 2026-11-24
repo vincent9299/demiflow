@@ -5,6 +5,8 @@ no real channels. Node ids map one-to-one to the reviewed design matrix.
 PRT-01/PRT-02 are covered by the separate baseline regression run and the
 protection evidence, not by this file.
 """
+
+from demiflow.execution.compiler_support import operator_policy
 from demiflow.execution.hosts.endpoints import WorkerProtocolModel
 from demiflow.execution.worker.control_receipts import OperationReceipts
 
@@ -415,8 +417,8 @@ def test_id_02_worker_count_and_chunking_do_not_change_logical_identity():
     spec_kwargs = dict(logical_node_id="n1", occurrence_id="o1",
                        artifact_manifest_ref={"manifest_id": "m" * 64, "sha256": "a" * 64},
                        module_key="p_" + "b" * 24)
-    spec_a = operator.compile_operator_spec(CallableSpec.create(_double), **spec_kwargs)
-    spec_b = operator.compile_operator_spec(CallableSpec.create(_double), **spec_kwargs)
+    spec_a = operator_policy.compile_operator_spec(CallableSpec.create(_double), **spec_kwargs)
+    spec_b = operator_policy.compile_operator_spec(CallableSpec.create(_double), **spec_kwargs)
     assert spec_a["spec_id"] == spec_b["spec_id"]
 
 
@@ -605,10 +607,10 @@ def test_ckp_06_unknown_paid_effects_are_never_auto_replayed():
 def test_op_01_fn_and_actor_compile_from_existing_callable_spec():
     ref = {"manifest_id": "m" * 64, "sha256": "a" * 64}
     kwargs = dict(artifact_manifest_ref=ref, module_key="p_" + "b" * 24)
-    fn_spec = operator.compile_operator_spec(
+    fn_spec = operator_policy.compile_operator_spec(
         CallableSpec.create(_double), logical_node_id="n1", occurrence_id="o1", **kwargs)
     assert fn_spec["lifecycle"] == {"kind": "fn", "astart": False, "astop": False, "aclose": False}
-    actor_spec = operator.compile_operator_spec(
+    actor_spec = operator_policy.compile_operator_spec(
         CallableSpec.create(_Counter, fn_constructor_kwargs={"start": 3}),
         logical_node_id="n2", occurrence_id="o2",
         traits={"state_ownership": "partitionable"}, **kwargs)
@@ -626,9 +628,9 @@ def test_op_02_pickle_only_closures_do_not_enter_durable_protocol():
                   artifact_manifest_ref=ref, module_key="p_" + "b" * 24)
     closure_fn = lambda row: row  # noqa: E731 - intentionally unpicklable-by-path
     with pytest.raises(ProtocolError):
-        operator.compile_operator_spec(CallableSpec.create(closure_fn), **kwargs)
+        operator_policy.compile_operator_spec(CallableSpec.create(closure_fn), **kwargs)
     with pytest.raises(ProtocolError):
-        operator.compile_operator_spec(
+        operator_policy.compile_operator_spec(
             CallableSpec.create(_double, fn_args=({"opaque object"},)), **kwargs)
 
 
@@ -641,12 +643,12 @@ def test_op_03_missing_state_adapter_fails_precheck():
     ref = {"manifest_id": "m" * 64, "sha256": "a" * 64}
     kwargs = dict(logical_node_id="n1", occurrence_id="o1",
                   artifact_manifest_ref=ref, module_key="p_" + "b" * 24)
-    factory = operator.compile_operator_spec(
+    factory = operator_policy.compile_operator_spec(
         CallableSpec.create(_StatefulNoAdapter),
         traits={"state_ownership": "shared_colocated"}, **kwargs)
     assert factory["state"] == {"ownership": "shared_colocated", "adapter_present": True}
     with pytest.raises(ProtocolError) as error:
-        operator.compile_operator_spec(
+        operator_policy.compile_operator_spec(
             CallableSpec.create(_LockedNoAdapter()),
             traits={"state_ownership": "shared_colocated"}, **kwargs)
     assert _code(error) == "STATE_ADAPTER_MISSING"
