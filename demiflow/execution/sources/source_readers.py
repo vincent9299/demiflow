@@ -23,7 +23,6 @@ from typing import Any, Iterator, Mapping
 from demiflow.data.sources import DatasourceSource, FileSource, ItemsSource, IterableSource, LanceSource, MaterializedSource, RangeSource, SqlSource
 from demiflow.execution.contracts.dataflow import ArtifactRef, QueueBinding, QueueCommand, Record, RuntimeServices, SourceCursor, SourcePoll, SourceSnapshot, SourceSplit
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.sources.snapshots import spool_record
 from demiflow.execution.contracts.dataflow import thaw_record_value
 from demiflow.execution.contracts.recovery_contract import identity
 

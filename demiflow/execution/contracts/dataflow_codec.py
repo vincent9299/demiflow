@@ -1290,6 +1290,15 @@ def artifact_reference_fields(ref: "ArtifactRef") -> dict:
             "key": ref.key, "media_type": ref.media_type}
 
 
+def artifact_reference_from_fields(value) -> ArtifactRef:
+    if type(value) is not dict or set(value) != {
+            "digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in sealed execution")
+    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
+                       store_id=value["store_id"], key=value["key"],
+                       media_type=value["media_type"])
+
+
 def history_carrier_reference(ref, *, media_type=_JSON_MEDIA):
     """Present a run-relative {path, sha256, bytes} carrier as an ArtifactRef."""
     return ArtifactRef(digest=ref["sha256"], size_bytes=ref["bytes"],

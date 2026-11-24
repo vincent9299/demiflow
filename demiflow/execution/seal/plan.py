@@ -21,8 +21,8 @@ from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS, DELIVERY_LIM
 import json
 from demiflow.execution.contracts.dataflow import WorkerAssignment
 from demiflow.execution.storage.objects import RunArtifactStore
+from demiflow.execution.storage.reading import read_sealed_chunks
 
-import hashlib
 import secrets
 from dataclasses import replace
 from pathlib import Path
@@ -37,6 +37,7 @@ from ..contracts.dataflow import (
     PhysicalDataflow, ProgramDeclaration, SealedExecution, thaw_json,
 )
 from ..contracts.dataflow_codec import (
+    artifact_reference_fields, artifact_reference_from_fields,
     compute_graph_digest, compute_physical_digest, decode_wire, encode_wire,
 )
 from ..contracts.dataflow_errors import DataflowError
@@ -102,42 +103,8 @@ def _builtin_node(node):
     return node.kind != "source" and node.kernel.kind in table
 
 
-def _artifact_json(ref: ArtifactRef) -> dict:
-    return {"digest": ref.digest, "size_bytes": ref.size_bytes,
-            "store_id": ref.store_id, "key": ref.key, "media_type": ref.media_type}
-
-
-def _artifact_from_json(value) -> ArtifactRef:
-    if type(value) is not dict or set(value) != {
-            "digest", "size_bytes", "store_id", "key", "media_type"}:
-        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in sealed execution")
-    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
-                       store_id=value["store_id"], key=value["key"],
-                       media_type=value["media_type"])
-
-
-def _artifact_chunks(store, ref: ArtifactRef, *, media_type: str, max_bytes=None):
-    if ref.media_type != media_type:
-        raise DataflowError("INVALID_CONTRACT", "Sealed artifact media type differs")
-    if max_bytes is None:
-        max_bytes = max(1, ref.size_bytes)
-    if ref.size_bytes > max_bytes:
-        raise DataflowError("BUDGET_EXCEEDED", "Sealed artifact exceeds read budget")
-    digest = hashlib.sha256()
-    size = 0
-    for chunk in store.read(ref, max_bytes=max_bytes):
-        size += len(chunk)
-        if size > ref.size_bytes:
-            raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length differs")
-        digest.update(chunk)
-        yield chunk
-        del chunk
-    if size != ref.size_bytes or digest.hexdigest() != ref.digest:
-        raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length or digest differs")
-
-
 def _read_bytes(store, ref: ArtifactRef, *, max_bytes: int, media_type: str) -> bytes:
-    return b"".join(_artifact_chunks(store, ref, media_type=media_type, max_bytes=max_bytes))
+    return b"".join(read_sealed_chunks(store, ref, media_type=media_type, max_bytes=max_bytes))
 
 
 def _read_json(store, ref: ArtifactRef, *, max_bytes: int, media_type: str):
@@ -247,7 +214,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
         from demiflow.execution.seal.thread_programs import marker
         manifest['thread_attempt'] = marker(declaration.occurrence_id, code_identity)
     else:
-        manifest['payload_ref'] = _artifact_json(payload_ref)
+        manifest['payload_ref'] = artifact_reference_fields(payload_ref)
     manifest['business_sources'] = stage_sources(sources, store=store)
     raw = document(manifest, bounds.max_control_bytes)
     ref = store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
@@ -384,7 +351,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
         value = lookup(manifest['thread_attempt'], binding=live_binding,
                        occurrence_id=manifest['occurrence_id'])
     else:
-        payload_ref = _artifact_from_json(manifest["payload_ref"])
+        payload_ref = artifact_reference_from_fields(manifest["payload_ref"])
         from demiflow.execution.contracts.dataflow import shared_binding
         binding = shared_binding(manifest, manifest['occurrence_id'])
         cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
@@ -402,7 +369,7 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
             try:
                 if private:
                     return load_private_payload(store, payload_ref)
-                return load_payload(_artifact_chunks(store, payload_ref, media_type=PAYLOAD_MEDIA))
+                return load_payload(read_sealed_chunks(store, payload_ref, media_type=PAYLOAD_MEDIA))
             except DataflowError as exc:
                 if exc.code not in {'CORRUPT_ARTIFACT', 'INVALID_CONTRACT', 'UNKNOWN_EFFECT'}:
                     raise
@@ -451,10 +418,10 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     if type(sources) is not dict or set(sources) != set(imports) or len(sources) > MAX_SOURCES:
         raise DataflowError('CORRUPT_ARTIFACT', 'completed live program source membership differs')
     for name, fact in imports.items():
-        source = _artifact_from_json(sources[name])
+        source = artifact_reference_from_fields(sources[name])
         if source.digest != fact['sha256'] or source.size_bytes != fact['bytes']:
             raise DataflowError('CODE_MISMATCH', 'completed live source differs from the sealed pin')
-        for _ in _artifact_chunks(store, source, media_type=source_media(name)):
+        for _ in read_sealed_chunks(store, source, media_type=source_media(name)):
             pass
 
 
@@ -520,7 +487,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
     existing = journal.source_binding(key)
     if existing is not None:
         # Recovery reads the original constants; never re-generate seed=None.
-        return _artifact_from_json(existing)
+        return artifact_reference_from_fields(existing)
     constants = _generate_constants(graph)
     for occurrence, binding in (column_bindings or {}).items():
         constants.setdefault(occurrence, {}).update(binding)
@@ -532,7 +499,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
                    action.context.limits["max_state_bytes"])
     ref = store.put(iter([raw]), max_bytes=action.context.limits["max_state_bytes"],
                     media_type=CONSTANTS_MEDIA)
-    journal.bind_source(action.context.fence, key, _artifact_json(ref))
+    journal.bind_source(action.context.fence, key, artifact_reference_fields(ref))
     return ref
 
 
@@ -590,12 +557,12 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
     facts = {"schema": SEAL_SCHEMA, "run_id": context.ref.run_id, "action_id": action.action_id,
              "dag_id": graph.dag_id, "plan_id": physical.plan_id,
              "plan_revision": physical.plan_revision,
-             "logical_ref": _artifact_json(logical_ref), "physical_ref": _artifact_json(physical_ref),
-             "programs": [_artifact_json(r) for r in programs],
-             "code_pin_ref": _artifact_json(code_pin_ref),
-             "identity_bridge_ref": _artifact_json(identity_bridge_ref),
-             "source_refs": [_artifact_json(r) for r in source_refs],
-             "constants_ref": _artifact_json(constants_ref),
+             "logical_ref": artifact_reference_fields(logical_ref), "physical_ref": artifact_reference_fields(physical_ref),
+             "programs": [artifact_reference_fields(r) for r in programs],
+             "code_pin_ref": artifact_reference_fields(code_pin_ref),
+             "identity_bridge_ref": artifact_reference_fields(identity_bridge_ref),
+             "source_refs": [artifact_reference_fields(r) for r in source_refs],
+             "constants_ref": artifact_reference_fields(constants_ref),
              "graph_digest": compute_graph_digest(graph),
              "physical_digest": compute_physical_digest(physical)}
     if graph.jobs:
@@ -671,16 +638,16 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds, _re
         references.extend(facts['programs']); references.extend(facts['source_refs'])
         for raw_ref in references:
             check_read()
-            if _artifact_from_json(raw_ref).size_bytes > _max_carrier_bytes:
+            if artifact_reference_from_fields(raw_ref).size_bytes > _max_carrier_bytes:
                 raise DataflowError('BUDGET_EXCEEDED', 'Historical carrier exceeds read budget')
     if facts.get("action_id") != action_id:
         raise DataflowError("INVALID_CONTRACT", "Sealed action differs from the requested action")
-    logical_ref = _artifact_from_json(facts["logical_ref"])
+    logical_ref = artifact_reference_from_fields(facts["logical_ref"])
     graph = decode_wire(_read_bytes(store, logical_ref, max_bytes=bounds.max_control_bytes,
                                     media_type=GRAPH_MEDIA),
                         type_name="DataflowGraph", bounds=bounds)
     check_read()
-    physical_ref = _artifact_from_json(facts["physical_ref"])
+    physical_ref = artifact_reference_from_fields(facts["physical_ref"])
     physical = decode_wire(_read_bytes(store, physical_ref, max_bytes=bounds.max_control_bytes,
                                        media_type=PHYSICAL_MEDIA),
                            type_name="PhysicalDataflow", bounds=bounds)
@@ -693,11 +660,11 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds, _re
         raise DataflowError("INVALID_CONTRACT", "Sealed graph identity differs")
     if physical.plan_id != facts["plan_id"] or physical.dag_id != facts["dag_id"]:
         raise DataflowError("INVALID_CONTRACT", "Sealed physical identity differs")
-    programs = tuple(_artifact_from_json(r) for r in facts["programs"])
-    code_pin_ref = _artifact_from_json(facts["code_pin_ref"])
-    identity_bridge_ref = _artifact_from_json(facts["identity_bridge_ref"])
-    source_refs = tuple(_artifact_from_json(r) for r in facts["source_refs"])
-    constants_ref = _artifact_from_json(facts["constants_ref"])
+    programs = tuple(artifact_reference_from_fields(r) for r in facts["programs"])
+    code_pin_ref = artifact_reference_from_fields(facts["code_pin_ref"])
+    identity_bridge_ref = artifact_reference_from_fields(facts["identity_bridge_ref"])
+    source_refs = tuple(artifact_reference_from_fields(r) for r in facts["source_refs"])
+    constants_ref = artifact_reference_from_fields(facts["constants_ref"])
     for ref in (*programs, code_pin_ref, identity_bridge_ref, *source_refs, constants_ref):
         check_read()
         if not store.inspect(ref):

@@ -175,7 +175,8 @@ def stage_sources(sources, *, store):
 
 def mount_sources(refs, expected, *, store, cache):
     """Populate the managed worker cache only from sealed, hash-verified bytes."""
-    from .plan import _artifact_from_json, _artifact_chunks
+    from demiflow.execution.contracts.dataflow_codec import artifact_reference_from_fields
+    from demiflow.execution.storage.reading import read_sealed_chunks
     from demiflow.execution.storage.state_artifacts import atomic_chunks
     if not isinstance(refs, dict) or set(refs) != set(expected) or len(refs) > MAX_SOURCES:
         raise DataflowError('CORRUPT_ARTIFACT', 'Business import membership differs')
@@ -195,10 +196,10 @@ def mount_sources(refs, expected, *, store, cache):
         target = root / relative
         if any(path.is_symlink() for path in (target, *target.parents)):
             raise DataflowError('CORRUPT_ARTIFACT', 'Business code cache contains a symlink')
-        ref = _artifact_from_json(refs[name])
+        ref = artifact_reference_from_fields(refs[name])
         if ref.digest != fact['sha256'] or ref.size_bytes != fact['bytes']:
             raise DataflowError('CODE_MISMATCH', 'Business source differs from the program pin')
-        chunks = _artifact_chunks(store, ref, media_type=source_media(name))
+        chunks = read_sealed_chunks(store, ref, media_type=source_media(name))
         if target.exists():
             for _ in chunks:
                 pass

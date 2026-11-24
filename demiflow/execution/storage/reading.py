@@ -85,6 +85,27 @@ def read_json_artifact(store, ref, *, max_bytes):
     return value
 
 
+def read_sealed_chunks(store, ref: ArtifactRef, *, media_type: str, max_bytes=None):
+    """Stream one sealed artifact, gated by media type and budget, verified by length and digest."""
+    if ref.media_type != media_type:
+        raise DataflowError("INVALID_CONTRACT", "Sealed artifact media type differs")
+    if max_bytes is None:
+        max_bytes = max(1, ref.size_bytes)
+    if ref.size_bytes > max_bytes:
+        raise DataflowError("BUDGET_EXCEEDED", "Sealed artifact exceeds read budget")
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in store.read(ref, max_bytes=max_bytes):
+        size += len(chunk)
+        if size > ref.size_bytes:
+            raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length differs")
+        digest.update(chunk)
+        yield chunk
+        del chunk
+    if size != ref.size_bytes or digest.hexdigest() != ref.digest:
+        raise DataflowError("CORRUPT_ARTIFACT", "Sealed artifact length or digest differs")
+
+
 def read_sink_json(store, ref: ArtifactRef, *, max_bytes: int, media_type: str):
     _validate_ref(ref, what="sink artifact")
     if ref.media_type != media_type:
