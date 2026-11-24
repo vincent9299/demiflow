@@ -12,7 +12,7 @@ import types
 from contextvars import ContextVar
 from demiflow.execution.contracts.recovery_sdk_v3 import code_record
 from demiflow.execution.contracts.recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
-from demiflow.execution.seal.recovery_sdk_v3 import class_method_pins, function_pin, persistent_source_module, persistent_source_name
+from demiflow.execution.seal.recovery_sdk_v3 import class_method_pins, function_pin, persistent_source_module, persistent_source_name, _layout_source_type
 
 from demiflow.data.plan import actor_owner
 from demiflow.execution.contracts.dataflow import shared_binding
@@ -536,7 +536,13 @@ def literal_source_digest(value, *, max_bytes=256 * 1024**2):
                 emit(b':', sink)
                 visit(getattr(item, name), depth + 1, sink)
             emit(b'},"type":', sink)
-            string(_persistent_module(type(item)) + '.' + type(item).__qualname__, sink)
+            # Literal values historically used their physical class module,
+            # unlike describe's older declaration-name projection. Only an
+            # authenticated, measured literal relocation may change that name.
+            relocation = _layout_source_type(kind)
+            module = (relocation.get('literal_module', kind.__module__)
+                      if relocation is not None else kind.__module__)
+            string(module + '.' + kind.__qualname__, sink)
             emit(b'}', sink)
         elif not projected:
 

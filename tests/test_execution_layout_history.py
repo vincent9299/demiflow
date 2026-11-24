@@ -136,6 +136,18 @@ result['bundle_loader'] = base64.b64encode(buffer.getvalue()).decode()
 from demiflow.execution.artifacts import digest, encoded
 for fn in (digest, encoded):
     result['codec.' + fn.__name__] = base64.b64encode(pickle.dumps(fn, protocol=5)).decode()
+from demiflow.collect.native_search.runtime import NativeSearchSession
+from demiflow.operator_llm.runtime import InProcessOperatorLLMCoordinator
+for cls in (NativeSearchSession, InProcessOperatorLLMCoordinator):
+    result['public.' + cls.__name__] = [base64.b64encode(pickle.dumps(cls, protocol=5)).decode(), describe(cls)]
+from demiflow.execution.literal_source_identity import literal_source_digest
+from demiflow.execution.recovery_contract import RunRef, CommitContext, SourcePosition
+from demiflow.data.sources import PlanInput, UnionSource, KeyedSource, ItemsSource
+from demiflow.data.plan import LogicalPlan
+base = PlanInput(ItemsSource(({'foo': 1},)), LogicalPlan(()))
+values = [base, UnionSource((base,)), KeyedSource('groups', base, ('foo',)),
+          RunRef('/fixed/run', 'r1'), CommitContext('r1', 'a1', 'c1', 1, 'f1'), SourcePosition('s1', 10)]
+result['literal.values'] = [literal_source_digest(value) for value in values]
 print(json.dumps(result))
 '''
     child = subprocess.run([sys.executable, '-P', '-B', '-c', script, str(original), json.dumps(CARRIERS)],
@@ -172,6 +184,30 @@ def test_published_source_carrier_decodes_with_same_identity(original_carriers, 
             assert prior is not sys.modules[loaded.__module__]
         else:
             assert expected['module'] not in sys.modules
+
+
+@pytest.mark.parametrize('name,method', [
+    ('NativeSearchSession', 'host_gate'),
+    ('InProcessOperatorLLMCoordinator', 'bind_execution'),
+])
+def test_class_import_move_preserves_real_methods_only(original_carriers, monkeypatch, name, method):
+    raw, expected = original_carriers['public.' + name]
+    cls = load_payload([base64.b64decode(raw)])
+    assert describe(cls) == expected
+    fn = vars(cls)[method]
+    monkeypatch.setattr(fn, '__code__', fn.__code__.replace(co_consts=(*fn.__code__.co_consts, 'changed')))
+    assert describe(cls) != expected
+
+
+def test_literal_names_remain_distinct_from_declaration_aliases(original_carriers):
+    from demiflow.execution.seal.program_identity import literal_source_digest
+    from demiflow.execution.contracts.recovery_contract import RunRef, CommitContext, SourcePosition
+    from demiflow.data.sources import PlanInput, UnionSource, KeyedSource, ItemsSource
+    from demiflow.data.plan import LogicalPlan
+    base = PlanInput(ItemsSource(({'foo': 1},)), LogicalPlan(()))
+    values = [base, UnionSource((base,)), KeyedSource('groups', base, ('foo',)),
+              RunRef('/fixed/run', 'r1'), CommitContext('r1', 'a1', 'c1', 1, 'f1'), SourcePosition('s1', 10)]
+    assert [literal_source_digest(value) for value in values] == original_carriers['literal.values']
 
 
 def test_changed_source_method_cannot_impersonate_published_carrier(original_carriers, monkeypatch):
