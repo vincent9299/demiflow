@@ -319,8 +319,8 @@
    ],
    "limits": [
     "execution/hosts/execution_recovery.py",
+    "execution/journal/run_journal.py",
     "execution/pipeline/run_context.py",
-    "execution/run_journal.py",
     "execution/worker/authority.py"
    ],
    "limits_explicit": [
@@ -468,9 +468,9 @@
    ],
    "run_id": [
     "execution/hosts/execution_recovery.py",
+    "execution/journal/run_journal.py",
     "execution/journal/run_reader.py",
     "execution/pipeline/run_context.py",
-    "execution/run_journal.py",
     "execution/worker/authority.py"
    ],
    "seed": [

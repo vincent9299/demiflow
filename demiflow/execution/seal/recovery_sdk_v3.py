@@ -38,7 +38,7 @@ _REVISIONS.update({'demiflow.data.read_api': ('f3237c8a7de9cf5b7c1d920e7cabd19d4
                             '1ff5e8431b684f758d2bc2bbe4818783c58ef4fb604e1ad564c4bc9c61f650f1'),
  'demiflow.data.guards': ('77fca99debe0b691ef1a64a75de9fae0f8bb1f2921c5ecd20b0b3e6cfed77c7c',
                           'ce6022c75921d310d962578306c85ed71bd4fa76e88164efcd8834c848c17cec'),
- 'demiflow.lance.registered_write': ('9f515121aca863e91938b410e8cad85204cdabe741ad825bbded3ed36fe467a5',
+ 'demiflow.lance.registered_write': ('0476b16950d5c448a263cecc39f7fcb4e6646b11e364e8d489034d716b731fb1',
                                      '6f04e5f92a72de79c08a8a9d73eaff71f984bb69cc59faf17852e799889456ec')})
 
 # Measured import operands only; executable bodies are authenticated below.
