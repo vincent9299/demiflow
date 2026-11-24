@@ -12,7 +12,9 @@ function icon(doc,name,label,action){
   svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');path.setAttribute('d',icons[name]);svg.append(path);button.append(svg);button.onclick=action;return button;
 }
 
-export function mountCards({desk,controls,panel,storage,app,api,project,alive,permissions,tables,catalogCommand,layout}){
+const NO_PYTHON_MSG='当前项目尚未配置业务 Python 环境（Notebook 内核不继承平台环境），请先在右上角「设置 → 项目设置」中指定独立 Python 路径。';
+
+export function mountCards({desk,controls,panel,storage,app,api,project,alive,permissions,hasProjectPython,tables,catalogCommand,layout}){
   const book=panel.content,doc=book.node.ownerDocument,win=doc.defaultView;
   const frameTables='.jp-RenderedHTMLCommon table.dataframe';
   const renderTables=node=>{
@@ -276,9 +278,13 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       return {state:'edited'};
     }
     if(name!=='cell.run'||!pending.allowRun||!permissions().analysis_execute)throw Error('本轮未获运行许可。');
+    if(hasProjectPython&&!hasProjectPython())throw Error(NO_PYTHON_MSG);
     await panel.sessionContext.ready;
     if(!valid()||cell.isDisposed||sourceOf(cell)!==source||!writable()||!permissions().analysis_execute)
       throw Error('cell 或运行权限已变更。');
+    if(!panel.sessionContext.session?.kernel){
+      await panel.sessionContext.changeKernel({name:'python3'});
+    }
     if(!panel.sessionContext.session?.kernel)throw Error('当前 Notebook 内核未连接。');
     const reply=await cell.constructor.execute(cell,panel.sessionContext);
     if(!reply||reply.content.status!=='ok')throw Error([reply?.content?.ename,reply?.content?.evalue].filter(Boolean).join(': ')||'内核未成功执行。');
@@ -350,7 +356,12 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
           if(!permissions().analysis_execute)return;
           run.disabled=true;cell.node.querySelector('.df-run-error')?.remove();
           try{
+            if(hasProjectPython&&!hasProjectPython())throw Error(NO_PYTHON_MSG);
             await panel.sessionContext.ready;
+            if(!valid()||cell.isDisposed)return;
+            if(!panel.sessionContext.session?.kernel){
+              await panel.sessionContext.changeKernel({name:'python3'});
+            }
             if(!valid()||cell.isDisposed)return;
             focusCell(cell);
             const ok=await app.commands.execute('notebook:run-cell',{widgetId:panel.id,activate:false});

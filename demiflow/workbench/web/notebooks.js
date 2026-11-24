@@ -106,10 +106,11 @@
     });
   }
   function makeRoom(){
-    if(sessions.size<4)return;
+    if(sessions.size<16)return;
     const old=[...sessions].find(item=>!item.host?.isConnected&&item.readyPanel&&!dirty(item)
       &&!['busy','starting','restarting'].includes(item.readyPanel.sessionContext?.kernelDisplayStatus));
     if(!old)throw Error('打开的 Notebook 已满，请先保存修改并等待运行完成。');
+    try{old.readyPanel.sessionContext?.shutdown?.().catch(()=>{});}catch{}
     old.frame.remove();sessions.delete(old);
   }
   function attach(host,project,base,url){
@@ -178,15 +179,16 @@
     const navigation=ForgeNavigation.header({title:'数据',searchLabel:'搜索数据字典',placeholder:'表名或已读取字段',onSearch:()=>filterLists()});
     const {search}=navigation;
     const list=node('div',undefined,'dictionary-list');
-    const panes={dictionary:list,tools:node('div')};
-    const labels={dictionary:'数据字典',tools:'工具'};
-    const filters={dictionary:'',tools:''};
+    const notebookList=node('div',undefined,'notebook-directory');
+    const panes={dictionary:list,tools:node('div'),notebooks:notebookList};
+    const labels={dictionary:'数据字典',tools:'工具',notebooks:'Notebook'};
+    const filters={dictionary:'',tools:'',notebooks:''};
     let activeTab='dictionary',toolIndex=null,loadingTools=false;
     const tabs=ForgeNavigation.categoryTabs('数据分类',Object.entries(labels),key=>{
       filters[activeTab]=search.value;activeTab=key;search.value=filters[key];
-      navigation.searchScope('搜索'+labels[key],key==='dictionary'?'表名或已读取字段':'名称、说明或文件名');
+      navigation.searchScope('搜索'+labels[key],key==='dictionary'?'表名或已读取字段':key==='notebooks'?'Notebook 文件名':'名称、说明或文件名');
       for(const [name,pane] of Object.entries(panes))pane.hidden=name!==key;
-      filterLists();if(key!=='dictionary')loadTools();
+      filterLists();if(key==='tools')loadTools();
     });
     for(const tab of tabs.element.children){
       const key=tab.dataset.kind,pane=panes[key];tab.id='data-tab-'+key;pane.id='data-pane-'+key;
@@ -205,12 +207,14 @@
     enableRun.title='允许此项目的 Notebook 运行 Python 代码';
     const controls=node('div',undefined,'df-book-controls');
     strip.append(bookTabs,create);header.append(strip,enableRun,controls);
+    const pythonBanner=node('div','尚未配置项目业务 Python 环境（Notebook 内核不继承平台环境），请先在右上角「设置 → 项目设置」中指定独立的 venv / conda Python 路径。','df-python-banner');
+    pythonBanner.setAttribute('role','alert');pythonBanner.hidden=true;
     const notice=node('p',undefined,'df-book-notice');notice.setAttribute('role','status');notice.hidden=true;
     const confirmation=node('div',undefined,'df-book-confirm');confirmation.hidden=true;
     const question=node('span'),cancel=node('button','取消'),confirm=node('button','确认删除');
     confirm.className='df-confirm-delete';cancel.type=confirm.type='button';
     confirmation.append(question,cancel,confirm);
-    documentPane.append(header,confirmation,notice,native);desk.append(documentPane);root.append(dictionary,desk);
+    documentPane.append(header,pythonBanner,confirmation,notice,native);desk.append(documentPane);root.append(dictionary,desk);
     const dictionaryNavigation=ForgeNavigation.collapsible({layout:root,sidebar:dictionary,header:navigation,label:'数据字典目录'});
     let disposed=false,session=null;
     const alive=()=>!disposed&&root.isConnected;
@@ -384,6 +388,8 @@
       const value=search.value.trim().toLocaleLowerCase();
       if(activeTab==='dictionary'){
         for(const {row,item,fieldNames} of tables.values())row.hidden=![item.label,...fieldNames].some(name=>name.toLocaleLowerCase().includes(value));
+      }else if(activeTab==='notebooks'){
+        paintSidebarNotebooks();
       }else if(toolIndex){
         const toolPane=panes[activeTab];
         if(toolPane.dataset.revision===toolIndex.revision&&toolPane.dataset.query===value)return;
@@ -393,70 +399,197 @@
         for(const issue of toolIndex.diagnostics)toolPane.append(node('p',issue.path+' · '+issue.detail,'op-error'));
       }
     }
-    let base='',documents=[],busy=false;
+    let base='',documents=[],openDocuments=[],busy=false;
+    const openKey=()=>'demiflow-jupyter-open:'+project;
+    function saveOpenDocuments(){try{sessionStorage.setItem(openKey(),JSON.stringify(openDocuments));}catch{}}
+    function loadOpenDocuments(available){
+      try{
+        const raw=JSON.parse(sessionStorage.getItem(openKey())||'[]');
+        if(Array.isArray(raw))return [...new Set(raw.filter(p=>typeof p==='string'&&available.has(p)))];
+      }catch{}
+      return [];
+    }
+    function ensureOpen(path){
+      if(path&&!openDocuments.includes(path)){openDocuments.push(path);saveOpenDocuments();}
+    }
     function documentUrl(path){return base+'notebooks/'+path.split('/').map(encodeURIComponent).join('/');}
     function pathFrom(url){
       const prefix=base+'notebooks/';
       return url?.startsWith(prefix)?decodeURIComponent(url.slice(prefix.length)):null;
     }
-    let deletion=null;
-    function cancelDelete(){deletion=null;confirmation.hidden=true;}
-    cancel.onclick=()=>{cancelDelete();bookTabs.querySelector('[aria-selected=true]')?.focus();};
+    function sessionForPath(path){
+      if(!base||!path)return null;
+      const targetUrl=documentUrl(path);
+      return [...sessions].find(item=>item.project===project&&item.url===targetUrl)||null;
+    }
+    function kernelState(path){
+      if(!openDocuments.includes(path))return 'closed';
+      const target=sessionForPath(path);
+      const ctx=target?.readyPanel?.sessionContext;
+      if(ctx?.session?.kernel&&!['dead','terminating'].includes(ctx.kernelDisplayStatus))return 'running';
+      return 'open';
+    }
+    function trashIcon(){
+      const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),line=document.createElementNS(svg.namespaceURI,'path');
+      svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');line.setAttribute('d','M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7');
+      svg.append(line);return svg;
+    }
+    function paintSidebarNotebooks(){
+      notebookList.replaceChildren();
+      const query=activeTab==='notebooks'?search.value.trim().toLocaleLowerCase():'';
+      const activePath=pathFrom(session?.url);
+      for(const path of documents){
+        const title=path.replace(/\.ipynb$/,'');
+        if(query&&!path.toLocaleLowerCase().includes(query)&&!title.toLocaleLowerCase().includes(query))continue;
+        const row=node('div',undefined,'df-nb-row');
+        const active=activePath===path;
+        const isOpen=openDocuments.includes(path);
+        const state=kernelState(path);
+        row.dataset.active=String(active);row.dataset.path=path;row.dataset.state=state;
+        const item=node('button',undefined,'df-nb-item');item.type='button';item.title=path;
+        if(active)item.setAttribute('aria-current','true');
+        const dot=node('span',undefined,'df-nb-dot');dot.dataset.state=state;
+        dot.title=state==='running'?'内核运行中':isOpen?'已打开（内核未运行）':'未打开';
+        item.append(dot,node('span',title,'df-nb-name'));
+        item.onclick=()=>{if(!busy)try{ensureOpen(path);activate(documentUrl(path),true);}catch(error){fail(error);}};
+        row.append(item);
+        if(isOpen){
+          const closeBtn=node('button','×','df-nb-action');closeBtn.type='button';
+          closeBtn.title='关闭「'+title+'」（停止内核，不删除文件）';closeBtn.setAttribute('aria-label',closeBtn.title);
+          closeBtn.onclick=()=>askClose(path);
+          row.append(closeBtn);
+        }
+        if(context.capabilities?.analysis_write){
+          const delBtn=node('button',undefined,'df-nb-action df-nb-del');delBtn.type='button';
+          delBtn.title='从目录删除「'+title+'」';delBtn.setAttribute('aria-label',delBtn.title);
+          delBtn.append(trashIcon());delBtn.onclick=()=>askDelete(path);
+          row.append(delBtn);
+        }
+        notebookList.append(row);
+      }
+      if(!notebookList.childElementCount){
+        notebookList.append(node('p',query?'没有匹配的 Notebook。':'尚未创建 Notebook。','dictionary-empty'));
+      }
+    }
+    let pendingAction=null;
+    function cancelAction(){pendingAction=null;confirmation.hidden=true;}
+    cancel.onclick=()=>{cancelAction();bookTabs.querySelector('[aria-selected=true]')?.focus();};
     confirmation.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();cancel.click();}};
+    async function performClose(path,target){
+      busy=true;accessState();
+      const idx=openDocuments.indexOf(path);
+      if(session===target)detach();
+      if(target){
+        try{await target.readyPanel?.sessionContext?.shutdown?.();}catch{}
+        target.frame.remove();sessions.delete(target);
+      }
+      openDocuments=openDocuments.filter(item=>item!==path);saveOpenDocuments();
+      try{if(sessionStorage.getItem('demiflow-jupyter:'+project)===documentUrl(path))sessionStorage.removeItem('demiflow-jupyter:'+project);}catch{}
+      busy=false;
+      if(!alive())return;
+      if(!session){
+        if(openDocuments.length)activate(documentUrl(openDocuments[Math.min(Math.max(0,idx),openDocuments.length-1)]),true);
+        else{paintTabs();accessState();status.hidden=false;status.textContent='从左侧「Notebook」目录打开已有文档，或点击上方 ＋ 新建 Notebook。';}
+      }else{
+        paintTabs();accessState();
+      }
+    }
+    function askClose(path){
+      if(busy)return;
+      const target=sessionForPath(path);
+      if(target&&((session===target&&cards?.pending())||target.readyPanel?.sessionContext?.kernelDisplayStatus==='busy')){
+        fail(Error('请等待当前分析运行结束后再关闭。'));return;
+      }
+      const hasUnsaved=target&&(target.storage?.hasDrafts?target.storage.hasDrafts():dirty(target));
+      if(hasUnsaved){
+        pendingAction={kind:'close',path,owner:target};
+        question.textContent='「'+path.replace(/\.ipynb$/,'')+'」有未保存的修改，仍要关闭并停止内核？';
+        confirm.textContent='确认关闭';
+        confirmation.hidden=false;cancel.focus();
+        return;
+      }
+      performClose(path,target);
+    }
     function askDelete(path){
-      if(busy||!context.capabilities?.analysis_write||path!==pathFrom(session?.url))return;
-      if(!session.readyPanel||cards?.pending()){fail(Error('请等当前卡片准备好后再删除。'));return;}
-      deletion={path,owner:session};
+      if(busy||!context.capabilities?.analysis_write)return;
+      const owner=sessionForPath(path);
+      if(owner&&((session===owner&&(!owner.readyPanel||cards?.pending()))||['busy','starting','restarting'].includes(owner.readyPanel?.sessionContext?.kernelDisplayStatus))){
+        fail(Error('请等当前卡片准备好后再删除。'));return;
+      }
+      pendingAction={kind:'delete',path,owner};
       question.textContent='删除「'+path.replace(/\.ipynb$/,'')+'」及其中的全部卡片？';
+      confirm.textContent='确认删除';
       confirmation.hidden=false;cancel.focus();
     }
     confirm.onclick=async()=>{
-      if(!deletion||busy)return;
-      const {path,owner}=deletion;cancelDelete();
-      if(session!==owner||owner.readyPanel?.context.path!==path||!context.capabilities?.analysis_write)return;
-      if(cards?.pending()||['busy','starting','restarting'].includes(owner.readyPanel.sessionContext.kernelDisplayStatus)){
+      if(!pendingAction||busy)return;
+      const action=pendingAction;cancelAction();
+      if(action.kind==='close'){
+        await performClose(action.path,action.owner);
+        return;
+      }
+      const {path,owner}=action;
+      if(!context.capabilities?.analysis_write)return;
+      if(owner&&((session===owner&&cards?.pending())||['busy','starting','restarting'].includes(owner.readyPanel?.sessionContext?.kernelDisplayStatus))){
         fail(Error('请等待当前分析运行结束后再删除。'));return;
       }
-      const index=documents.indexOf(path),app=owner.frame.contentWindow.jupyterapp;
-      busy=true;accessState();detach();
+      const openIdx=openDocuments.indexOf(path);
+      const wasActive=session&&session===owner;
+      busy=true;accessState();
+      if(wasActive)detach();
       try{
-        await app.commands.execute('docmanager:delete-file',{path});
+        if(owner?.readyPanel?.sessionContext)try{await owner.readyPanel.sessionContext.shutdown();}catch{}
+        const app=owner?.frame?.contentWindow?.jupyterapp;
+        if(app){
+          await app.commands.execute('docmanager:delete-file',{path});
+        }else{
+          const resp=await fetch(base+'api/contents/'+path.split('/').map(encodeURIComponent).join('/'),{method:'DELETE',credentials:'same-origin'});
+          if(!resp.ok&&resp.status!==404)throw Error('删除 Notebook 失败（HTTP '+resp.status+'）。');
+        }
       }catch(error){
-        busy=false;if(alive()){activate(owner.url,true);fail(error);}return;
+        busy=false;if(alive()){if(wasActive&&owner)activate(owner.url,true);fail(error);}return;
       }
-      owner.storage?.forget();owner.frame.remove();sessions.delete(owner);
+      if(owner){owner.storage?.forget();owner.frame.remove();sessions.delete(owner);}
       documents=documents.filter(item=>item!==path);
-      try{if(sessionStorage.getItem('demiflow-jupyter:'+project)===owner.url)sessionStorage.removeItem('demiflow-jupyter:'+project);}catch{}
+      openDocuments=openDocuments.filter(item=>item!==path);saveOpenDocuments();
+      try{if(sessionStorage.getItem('demiflow-jupyter:'+project)===documentUrl(path))sessionStorage.removeItem('demiflow-jupyter:'+project);}catch{}
       busy=false;
       if(!alive())return;
-      if(documents.length)activate(documentUrl(documents[Math.min(index,documents.length-1)]),true);
-      else{paintTabs();accessState();status.hidden=false;status.textContent='点击上方 ＋ 新建第一份 Notebook。';create.focus();}
+      if(wasActive){
+        if(openDocuments.length)activate(documentUrl(openDocuments[Math.min(Math.max(0,openIdx),openDocuments.length-1)]),true);
+        else{paintTabs();accessState();status.hidden=false;status.textContent=documents.length?'从左侧「Notebook」目录打开已有文档，或点击上方 ＋ 新建 Notebook。':'点击上方 ＋ 新建第一份 Notebook。';create.focus();}
+      }else{
+        paintTabs();accessState();
+      }
     };
     function paintTabs(focus=false){
       bookTabs.replaceChildren();
       const activePath=pathFrom(session?.url);
-      for(const path of documents){
-        const tab=node('button',path.replace(/\.ipynb$/,''));tab.type='button';tab.title=path;
+      for(const path of openDocuments){
+        const title=path.replace(/\.ipynb$/,'');
+        const tab=node('button',title);tab.type='button';tab.title=path;
         tab.setAttribute('role','tab');const selected=session?.url===documentUrl(path);
-        tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected||(!activePath&&path===documents[0])?0:-1;
+        tab.setAttribute('aria-selected',String(selected));tab.tabIndex=selected||(!activePath&&path===openDocuments[0])?0:-1;
         tab.onclick=()=>{if(!busy)try{activate(documentUrl(path),true);}catch(error){fail(error);}};
         tab.onkeydown=event=>{
-          const offsets={ArrowLeft:-1,ArrowRight:1,Home:-documents.indexOf(path),End:documents.length-1-documents.indexOf(path)};
+          const offsets={ArrowLeft:-1,ArrowRight:1,Home:-openDocuments.indexOf(path),End:openDocuments.length-1-openDocuments.indexOf(path)};
           if(!(event.key in offsets))return;
           event.preventDefault();
-          const index=(documents.indexOf(path)+offsets[event.key]+documents.length)%documents.length;
+          const index=(openDocuments.indexOf(path)+offsets[event.key]+openDocuments.length)%openDocuments.length;
           bookTabs.querySelectorAll('[role=tab]')[index].click();
         };
         bookTabs.append(tab);
+        const close=node('button','×','df-close-book');close.type='button';
+        close.title='关闭「'+title+'」（不删除文件）';close.setAttribute('aria-label','关闭「'+title+'」');
+        close.onclick=()=>askClose(path);bookTabs.append(close);
         if(selected&&context.capabilities?.analysis_write){
           const remove=node('button',undefined,'df-delete-book');remove.type='button';
-          remove.title='删除「'+tab.textContent+'」';remove.setAttribute('aria-label',remove.title);
-          const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),line=document.createElementNS(svg.namespaceURI,'path');
-          svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('aria-hidden','true');line.setAttribute('d','M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7');
-          svg.append(line);remove.append(svg);remove.onclick=()=>askDelete(path);bookTabs.append(remove);
+          remove.title='删除「'+title+'」';remove.setAttribute('aria-label',remove.title);
+          remove.append(trashIcon());remove.onclick=()=>askDelete(path);bookTabs.append(remove);
         }
         if(selected&&focus){tab.focus();tab.scrollIntoView({block:'nearest',inline:'nearest'});}
       }
+      paintSidebarNotebooks();
     }
     function accessState(){
       const caps=context.capabilities||{};
@@ -464,27 +597,37 @@
       create.title=!caps.analysis_write&&notebookAccess.canGrant('analysis_write')?'新建 Notebook 并开启项目保存权限':'新建 Notebook';
       enableRun.hidden=!context.native_notebook||!session||caps.analysis_execute||!notebookAccess.canGrant('analysis_execute');
       enableRun.disabled=busy;
+      pythonBanner.hidden=!context.native_notebook||!!context.project_python;
     }
+    let disconnectKernel=null;
     function detach(){
-      cancelDelete();++cardsEpoch;cards?.dispose();cards=null;
+      cancelAction();++cardsEpoch;cards?.dispose();cards=null;
+      disconnectKernel?.();disconnectKernel=null;
       if(session){session.onPanel=null;session.onPath=null;session.onReady=null;session.host=null;position(session);session=null;}
     }
     function activate(url,focus=false){
       if(cards?.pending()&&url!==session?.url)throw Error('当前卡片正在更新，请在更新完成后切换。');
+      const targetPath=pathFrom(url);
+      if(targetPath)ensureOpen(targetPath);
       if(session?.url!==url){
         const next=attach(native,project,base,url);
         detach();session=next;
       }
       notice.hidden=true;status.textContent='正在打开 Notebook…';status.hidden=!session.frame.hasAttribute('data-loading');resize();
-      session.onReady=error=>{status.hidden=true;if(error)fail(error);};
+      session.onReady=error=>{status.hidden=true;if(error)fail(error);paintSidebarNotebooks();};
       session.onPath=(previous,current)=>{
         const old=pathFrom(previous),path=pathFrom(current);
-        if(old!==path&&old)documents=documents.map(item=>item===old?path:item);
+        if(old!==path&&old){
+          documents=documents.map(item=>item===old?path:item);
+          openDocuments=openDocuments.map(item=>item===old?path:item);saveOpenDocuments();
+        }
         if(path&&!documents.includes(path))documents.push(path);
+        if(path&&!openDocuments.includes(path)){openDocuments.push(path);saveOpenDocuments();}
         paintTabs();
       };
       session.onPanel=async panel=>{
         const epoch=++cardsEpoch;cards?.dispose();cards=null;
+        disconnectKernel?.();disconnectKernel=null;
         session.frame.setAttribute('data-loading','');
         if(!panel?.content?.activeCellChanged)return;
         try{
@@ -493,11 +636,23 @@
           const storage=await cellStorage(panel,project,base);
           if(!alive()||epoch!==cardsEpoch)return;
           const kernel=panel.sessionContext;
-          if(context.capabilities?.analysis_execute && kernel.kernelPreference.shouldStart===false)
-            kernel.kernelPreference={...kernel.kernelPreference,shouldStart:true,autoStartDefault:true};
+          if(context.capabilities?.analysis_execute&&context.project_python){
+            if(kernel.kernelPreference.shouldStart===false)
+              kernel.kernelPreference={...kernel.kernelPreference,shouldStart:true,autoStartDefault:true,name:'python3'};
+          }else if(!context.project_python){
+            kernel.kernelPreference={...kernel.kernelPreference,shouldStart:false,autoStartDefault:false};
+          }
+          const onKernelUpdate=()=>{if(alive())paintSidebarNotebooks();};
+          kernel.kernelChanged.connect(onKernelUpdate);
+          kernel.statusChanged.connect(onKernelUpdate);
+          disconnectKernel=()=>{
+            try{kernel.kernelChanged.disconnect(onKernelUpdate);}catch{}
+            try{kernel.statusChanged.disconnect(onKernelUpdate);}catch{}
+          };
           session.storage=storage;
           cards=mountCards({desk,controls,panel,storage,app:session.frame.contentWindow.jupyterapp,api,project,alive,
-            permissions:()=>context.capabilities||{},tables:()=>[...tables.values()].map(({item,fieldNames})=>({
+            permissions:()=>context.capabilities||{},hasProjectPython:()=>!!context.project_python,
+            tables:()=>[...tables.values()].map(({item,fieldNames})=>({
               table:item.label,version:item.version,fields:fieldNames,
               reader:'demiflow.workbench.notebooks.data.sample'})),
             catalogCommand,layout:resize});
@@ -509,7 +664,7 @@
     }
     async function connect(createNew=false){
       if(busy)return;
-      cancelDelete();busy=true;accessState();notice.hidden=true;
+      cancelAction();busy=true;accessState();notice.hidden=true;
       if(createNew&&!session){status.textContent='正在新建 Notebook…';status.hidden=false;}
       try{
         if(createNew||![...sessions].some(item=>item.project===project))makeRoom();
@@ -534,6 +689,8 @@
         base=opened.base_url;
         const available=new Set(opened.documents);
         documents=[...new Set([...documents.filter(path=>available.has(path)),...opened.documents])];
+        if(!openDocuments.length)openDocuments=loadOpenDocuments(available);
+        else openDocuments=openDocuments.filter(path=>available.has(path));
         if(!session)try{await recoverDrafts(project,opened);}catch(error){if(alive())dictionary.append(node('p',error.message,'dictionary-meta'));}
         if(!alive())return;
         let url=opened.url;
@@ -542,10 +699,12 @@
           const path=pathFrom(previous);
           if(path&&(documents.includes(path)||(path.includes('/')&&!path.split('/').includes('..'))))url=previous;
         }catch{}
-        if(!pathFrom(url)){
+        const initialPath=pathFrom(url);
+        if(!initialPath){
           status.textContent=notebookAccess.canGrant('analysis_write')?'点击上方 ＋ 新建第一份 Notebook。':'此项目尚无可查看的 Notebook。请联系项目管理员开启保存权限。';
           return;
         }
+        ensureOpen(initialPath);
         activate(url,createNew);
       }catch(error){if(!session)status.hidden=true;paintTabs();fail(error);}
       finally{busy=false;if(alive())accessState();}
@@ -557,7 +716,7 @@
     };
     enableRun.onclick=async()=>{
       if(busy)return;
-      cancelDelete();busy=true;accessState();notice.hidden=true;
+      cancelAction();busy=true;accessState();notice.hidden=true;
       try{
         context=await notebookAccess.enable({analysis_execute:true});
         if(!alive())return;
@@ -569,7 +728,18 @@
     if(context.native_notebook)connect();else status.textContent='此服务尚未启用原生 Jupyter Notebook。';
     return {
       canLeave:()=>true,
-      updateContext(fresh){if(alive()){context=fresh;if(!fresh.capabilities?.analysis_write)cancelDelete();paintTabs();accessState();populate(fresh);scanning=scanDirectory();}},
+      updateContext(fresh){
+        if(!alive())return;
+        const hadPython=!!context.project_python;
+        context=fresh;
+        if(!fresh.capabilities?.analysis_write)cancelAction();
+        paintTabs();accessState();populate(fresh);scanning=scanDirectory();
+        if(!hadPython&&fresh.project_python&&fresh.capabilities?.analysis_execute&&session?.readyPanel){
+          const kernel=session.readyPanel.sessionContext;
+          kernel.kernelPreference={...kernel.kernelPreference,shouldStart:true,autoStartDefault:true,name:'python3'};
+          if(!kernel.session?.kernel)kernel.changeKernel({name:'python3'}).catch(()=>{});
+        }
+      },
       dispose(){if(disposed)return;disposed=true;if(toolsDialog?.open)toolsDialog.close();detach();dictionaryNavigation.dispose();observer.disconnect();window.removeEventListener('resize',resize);window.removeEventListener('scroll',resize,true);parent.classList.remove('native-data-active');}
     };
   }
