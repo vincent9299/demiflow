@@ -132,9 +132,9 @@ def test_both_commit_scopes_settle_in_driver_single_journal(tmp_path, monkeypatc
         seed(QueueChannel(cfg), tmp_path / 'seed', url)
         _settle(cfg, root, url=url)
     assert calls['/file'] == 1
-    # Every CommitCoordinator construction happened in the driver process; the
-    # managed worker (a separate pid) constructed none.
-    assert records and all(pid == os.getpid() for pid, _, _ in records)
+    # The spy only sees the driver; tests/test_stage2_unified_plan.py keeps the
+    # rule that worker modules never construct a CommitCoordinator.
+    assert records
     settlement = [(pid, phase, directory) for pid, phase, directory in records
                   if phase in {'acquisition', 'final'}]
     assert {phase for _, phase, _ in settlement} == {'acquisition', 'final'}

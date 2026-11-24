@@ -53,6 +53,7 @@ from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
 from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.lance.model import LanceWriteSpec
 
 from test_stage2_unified_plan import LIMITS, _crash_hook
@@ -465,7 +466,6 @@ def _clean_baseline(tmp_path, rows_in, transform):
 
 
 def test_s6_gate9_real_worker_sigkill_recovery_same_quota(tmp_path, monkeypatch):
-    from test_u2_chain_faults import _release_crash_orphans
     rows_in = [{"x": i} for i in range(8)]
 
     def transform(row):
@@ -480,16 +480,15 @@ def test_s6_gate9_real_worker_sigkill_recovery_same_quota(tmp_path, monkeypatch)
                 .map_async(hook, concurrency=1))
 
     root = tmp_path / "run"
-    with pytest.raises((RecoveryContractError, OSError)):
+    with pytest.raises(DataflowError, match="UNKNOWN_EFFECT: worker connection closed"):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 pipeline().materialize().take_all()
     assert marker.exists(), "first run must SIGKILL the worker after acked cuts"
     with RunContext.resume(reference):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             resumed = pipeline().materialize().take_all()
-    _release_crash_orphans(tmp_path / "run-resources")
     assert {r["input"]: r["value"] for r in resumed} == clean_values
     assert _output_budgets(root) == clean_budget, "real-worker SIGKILL recovery doubled output quota"
     assert RunJournal(root).execution_status()["status"] == "succeeded"
@@ -500,7 +499,6 @@ def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch)
     # window-3 (after prepare, before the prepared record), leaving a pending commit.
     # Resume re-produces the same logical cut and re-prepares the pending commit:
     # commit-keyed attribution must reuse the charge, not double it.
-    from test_u2_chain_faults import _release_crash_orphans
     rows_in = [{"x": i} for i in range(8)]
 
     def transform(row):
@@ -526,19 +524,18 @@ def test_s6_gate9_real_worker_window3_recovery_same_quota(tmp_path, monkeypatch)
     with pytest.raises((RecoveryContractError, OSError)):
         with RunContext.start(root, limits=LIMITS) as run:
             reference = run.ref
-            with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+            with data.local_execution(workers=1, worker_mode="process", partitions=1):
                 (data.from_items(rows_in).map_async(transform, concurrency=1)
                  .materialize().take_all())
     assert crashed[0], "driver must crash in window-3 with a real worker running"
     assert any(c["status"] == "pending"
-               for c in RunJournal(root).execution_commits("action-1-chain")), \
+               for c in RunJournal(root).execution_commits("action-1")), \
         "window-3 must leave a pending commit to re-prepare on resume"
     monkeypatch.setattr(commit_module, "fault_point", lambda *_: None)
     with RunContext.resume(reference):
-        with data.local_execution(workers=1, worker_mode="thread", partitions=1):
+        with data.local_execution(workers=1, worker_mode="process", partitions=1):
             resumed = (data.from_items(rows_in).map_async(transform, concurrency=1)
                        .materialize().take_all())
-    _release_crash_orphans(tmp_path / "run-resources")
     assert {r["input"]: r["value"] for r in resumed} == clean_values
     assert _output_budgets(root) == clean_budget, "window-3 re-prepare doubled output quota"
     assert RunJournal(root).execution_status()["status"] == "succeeded"

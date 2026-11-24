@@ -80,17 +80,12 @@ def test_declared_admission_bounds_fresh_calls_and_excludes_replay(kind, prompt_
     assert second.metrics['native_journal_totals_skipped']
 
 
-@pytest.mark.parametrize('kind', ['prompt', 'embedding'])
-def test_policy_and_explicit_shared_gate_conflict_before_http(kind, prompt_server, embedding_server):
-    kwargs = dict(concurrency=2, request_gate=RequestGate(2),
-                  request_policy={'initial_concurrency': 1, 'max_concurrency': 2})
+def test_embedding_policy_and_explicit_shared_gate_conflict_before_http(embedding_server):
     with pytest.raises(ValueError, match='Choose request_policy or request_gate'):
-        if kind == 'prompt':
-            prompt(data.from_items([{'item': 1}]), **kwargs)
-        else:
-            data.from_items([{'text': 'a'}]).map_embeddings(model=embedding_server['model'],
-                inputs={'text': 'text'}, **kwargs)
-    assert not prompt_server['requests'] and not embedding_server['bodies']
+        data.from_items([{'text': 'a'}]).map_embeddings(model=embedding_server['model'],
+            inputs={'text': 'text'}, concurrency=2, request_gate=RequestGate(2),
+            request_policy={'initial_concurrency': 1, 'max_concurrency': 2})
+    assert not embedding_server['bodies']
 
 
 def test_same_execution_configuration_works_for_two_model_identities(embedding_server):

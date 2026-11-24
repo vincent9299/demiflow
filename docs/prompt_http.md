@@ -181,7 +181,7 @@ result = source.map_prompt_async(
 # result.run_stream(...)
 ```
 
-The prompt pack still supplies model/endpoint, placeholders, schema and explicit schema retry allowance. A `request_gate` bounds calls shared by several nodes. Alternatively, `request_policy={'initial_concurrency': 2, 'max_concurrency': 4}` declares an operator-owned adaptive gate; its maximum must not exceed node concurrency. Supplying both interfaces is rejected before execution. The public `demiflow.inference.request_admission_config` validator is shared with embeddings. Policy observations reset per action and exclude journal replay. Streaming does not bypass token admission or either request budget.
+The prompt pack still supplies model/endpoint, placeholders, schema and explicit schema retry allowance. `request_policy={'initial_concurrency': 2, 'max_concurrency': 4}` declares an operator-owned adaptive gate; its maximum must not exceed node concurrency. A caller-built gate object is not accepted: it cannot cross the worker boundary. The public `demiflow.inference.request_admission_config` validator is shared with embeddings. Policy observations reset per action and exclude journal replay. Streaming does not bypass token admission or either request budget.
 
 ## Parallel routes in one streaming node
 
@@ -287,6 +287,7 @@ fails, retrying with the same `operation_id` applies only the remaining shards
 and is idempotent (`reused` becomes true once every shard has recorded it). A
 single-shard journal still applies a multi-key recovery atomically.
 `max_requests` is coordinated inside one process, not a distributed quota.
+It is a per-action limit: running the same node in another action starts a new count.
 `call_snapshot`, `journal_totals` and `journal_observation` read independent
 shard files and are not one cross-file snapshot; `journal_observation` merges
 raw timing rows before computing mean/P50/P95. `call_page` keeps recency order

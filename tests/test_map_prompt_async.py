@@ -2,7 +2,6 @@
 import asyncio
 import json
 import threading
-import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -71,19 +70,6 @@ def test_schema_retry_shared_usage_and_feedback(server):
     assert usage['provider_requests_failed']==1 and usage['provider_requests_completed']==1
     assert usage['input_tokens']==20 and usage['output_tokens']==4
     assert 'previous response failed' in server['requests'][1]['body']['messages'][0]['content']
-
-
-def test_sync_and_async_nodes_have_independent_budgets(server):
-    ctx=DataAPI()
-    sync=ctx.from_items([{'item':1}]).map_prompt('enrich', config=parse_prompt_pack(PACK),
-        inputs={'payload':'item'}, output='out', max_requests=1)
-    sync.take_all()
-    stream=prompt(ctx.from_items([{'item':2}]), max_requests=1)
-    stream.run_stream()
-    assert len(server['requests'])==2
-    with pytest.raises(PromptBudgetExceededError):sync.take_all()
-    with pytest.raises(PromptBudgetExceededError):stream.run_stream()
-    assert len(server['requests'])==2
 
 
 def test_invalid_bindings_rejected_without_request(server):

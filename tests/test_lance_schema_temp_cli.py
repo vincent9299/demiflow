@@ -240,7 +240,7 @@ def test_managed_prompt_contract_accepts_explicit_temperature():
         'when': None, 'call_output': None, 'error_output': None,
         'options': {'timeout_s': 30, 'trust_env': False, 'max_request_bytes': 4096, 'max_response_bytes': 2 * 1024 * 1024},
         'temperature': 0.5,
-        'max_requests': 2, 'service': None, 'request_gate': None,
+        'max_requests': 2, 'service': None,
         'request_policy': None, 'token_budget': None,
         'routes': None, 'route': None, 'isolate_route_failures': False,
     }

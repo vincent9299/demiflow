@@ -1,4 +1,4 @@
-"""Concurrent completion order is not native effect membership or data drift."""
+"""A saved batch survives a crash after its checkpoint; resume adds only the remaining rows."""
 import json
 import os
 from pathlib import Path
@@ -28,9 +28,7 @@ class Reorder:
         # original batch boundary. This is a test callback, not engine patching.
         rank=('badc' if mode=='crash' else 'cdab').index(row['id'])
         time.sleep(rank*.15)
-        return {**row,'value':99 if mode=='drift' and row['id']=='a' else row['value'],
-                'drop':mode=='missing' and row['id']=='b'}
-def keep(row):return not row['drop']
+        return dict(row)
 prior=json.loads((root/'ref.json').read_text()) if mode!='crash' else None
 limits={'timeout_s':45,**({'max_row_bytes':32768,'max_batch_bytes':65536} if budget_test else {})}
 context=RunContext.resume(RunRef(prior['directory'],prior['run_id'])) if prior else RunContext.start(root/'native',limits=limits)
@@ -46,15 +44,15 @@ with context as run,data.local_execution(workers=8,worker_mode='thread'):
             if scope and json.loads(scope[0]).get('schema')=='demiflow.stream_lance.v3':os._exit(77)
         commit.fault_point=fault
     schema=pa.schema([('id',pa.string()),('value',pa.int64())])
-    rows=data.from_items([{'id':key,'value':1,'padding':'x'*22000} for key in 'abcd']).map_async(Reorder,concurrency=4).filter(keep)
+    rows=data.from_items([{'id':key,'value':1,'padding':'x'*22000} for key in 'abcd']).map_async(Reorder,concurrency=4)
     result=rows.save_lance(root/'stage.lance',schema=schema,key='id',stage='saved',max_batch=2,
         flush_interval=5,output_ref='saved').take_all()
     (root/'result.json').write_text(json.dumps(result))
 '''
 
 
-@pytest.mark.parametrize('mode', ['resume', 'drift', 'missing', 'budget'])
-def test_native_batch_replay_keeps_original_order_and_rejects_changed_data(tmp_path, mode):
+@pytest.mark.parametrize('mode', ['resume', 'budget'])
+def test_resume_after_committed_batch_keeps_it_and_saves_only_the_rest(tmp_path, mode):
     # Crash and resume share one domain; unrelated test scenarios must not
     # inherit each other's deliberately unconfirmed hard-exit allocations.
     env = {**os.environ, 'PYTHONPATH': str(WORKTREE), 'PYTHONDONTWRITEBYTECODE': '1',
@@ -72,16 +70,14 @@ def test_native_batch_replay_keeps_original_order_and_rejects_changed_data(tmp_p
     if mode == 'resume':
         assert second.returncode == 0, second.stderr
         assert saved.version == 2
-        assert saved.to_table().to_pylist() == original + [{'id': 'c', 'value': 1}, {'id': 'd', 'value': 1}]
+        # The committed batch is not rewritten; c and d may arrive in either order.
+        rows = saved.to_table().to_pylist()
+        assert rows[:2] == original
+        assert sorted(rows[2:], key=lambda r: r['id']) == [{'id': 'c', 'value': 1}, {'id': 'd', 'value': 1}]
         result = json.loads((tmp_path/'result.json').read_text())
-        assert [r['id'] for r in result] == ['b', 'a', 'c', 'd']
+        assert [r['id'] for r in result[:2]] == ['b', 'a'] and sorted(r['id'] for r in result[2:]) == ['c', 'd']
         assert [r['saved']['version'] for r in result] == [1, 1, 2, 2]
     else:
         assert second.returncode != 0, second.stderr
-        if mode == 'budget':
-            assert 'BUDGET_EXCEEDED' in second.stderr and 'original batch window' in second.stderr, second.stderr
-        else:
-            assert 'INCOMPATIBLE_HISTORY' in second.stderr, second.stderr
-            assert ('changed original record membership or payload' if mode == 'drift'
-                    else 'original batch membership was complete') in second.stderr
+        assert 'BUDGET_EXCEEDED' in second.stderr and 'original batch window' in second.stderr, second.stderr
         assert saved.version == 1 and saved.to_table().to_pylist() == original

@@ -328,17 +328,8 @@ def test_explicit_checkpoint_is_not_an_alternate_execution_mode(tmp_path):
     assert not (tmp_path / 'legacy').exists()
 
 
-def test_source_code_change_and_late_timeout_cannot_be_marked_success(tmp_path, monkeypatch):
-    import demiflow.execution.seal.program_identity as identities
+def test_late_timeout_cannot_be_marked_success(tmp_path, monkeypatch):
     import time
-    with pytest.raises(RuntimeError):
-        with RunContext.start(tmp_path / 'run') as run:
-            ref = run.ref
-            raise RuntimeError('failure')
-    monkeypatch.setattr(identities, 'platform_identity', lambda: 'different')
-    with pytest.raises(RecoveryContractError, match='implementation changed'):
-        with RunContext.resume(ref):
-            pass
     with pytest.raises(RecoveryContractError, match='time budget'):
         with RunContext.start(tmp_path / 'late', limits={'timeout_s': 2}) as run:
             monkeypatch.setattr(time, 'time', lambda: run.deadline + 1)

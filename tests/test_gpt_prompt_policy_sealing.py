@@ -9,7 +9,6 @@ from demiflow.data.dataset import Dataset
 from demiflow.data.flow_contract import field, scalar
 from demiflow.services.adaptive_requests import AdaptiveRequestGate
 from demiflow.execution.seal.plan_facts import operation_facts
-from demiflow.services.request_limits import RequestGate
 from demiflow.operator_llm.flow_contract import analyze_prompt, normalize_prompt, prompt_facts
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK
@@ -50,10 +49,9 @@ def test_policy_facts_match_static_contract_and_survive_serialization():
     assert prompt_facts(build(request_policy={**POLICY,'initial_concurrency':1})._stages[-1]) != actual
 
 
-@pytest.mark.parametrize('gate', [RequestGate(2), AdaptiveRequestGate(POLICY)])
-def test_explicit_shared_gate_remains_rejected(gate):
-    with pytest.raises(ValueError, match='configuration copies differ'):
-        operation_facts(build(request_gate=gate)._plan.operations[-1])
+def test_caller_built_gate_is_not_a_prompt_argument():
+    with pytest.raises(TypeError, match='request_gate'):
+        build(request_gate=AdaptiveRequestGate(POLICY))
 
 
 @pytest.mark.parametrize('mutation', ['policy', 'replacement', 'path', 'failures', 'environment',
