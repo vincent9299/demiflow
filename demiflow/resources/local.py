@@ -8,16 +8,51 @@ from pathlib import Path
 import sys
 import time
 
+from .capacity import OBSERVED_EXIT, observed_exit_reference
 from .contracts import (
     HOST_PHASES, ResourceError, document, identifier, spec_hash, validate_observation,
 )
-from .process_observation import require_pidfds
+from .process_observation import require_pidfds, unit_stopped, visibility
+from .process_unit import _live, process_identity
 
 PAGE_SIZE = 64
+# One process looks for physically exited units at most this often while it waits.
+OBSERVE_INTERVAL_S = 1.0
 
 
 def _now_ms():
     return int(time.time() * 1000)
+
+
+def _unit_state(record, here):
+    """How the unit behind a live capacity record looks from this process.
+
+    'gone'     its creating driver and the unit itself have physically exited: the
+               conditions of ledger-observed release in the cleanup contract;
+    'running'  its creating driver is alive and remains responsible for it;
+    'orphaned' that driver has exited but the unit's exit cannot be established
+               here: thread units, device work, a held, missing or replaced lock;
+    'unknown'  no origin, or one this process cannot observe.
+    """
+    origin, identity = record.get("origin"), record.get("identity")
+    try:
+        if (origin["boot_id"], origin["pid_namespace"]) != (here["boot_id"], here["pid_namespace"]):
+            return "unknown"
+        owner = origin["owner"]
+        if _live(owner["pid"], owner["start"]):
+            return "running"
+        if identity is None or origin["accelerators"] or type(identity["unit"]) is not dict:
+            return "orphaned"
+        if _live(identity["pid"], identity["start"]):
+            return "orphaned"
+        lock = Path(origin["directory"]) / "unit.lock"
+    except (KeyError, TypeError):
+        return "unknown"
+    try:
+        # Every process still doing this unit's work holds the lock it inherited.
+        return "gone" if unit_stopped(lock, identity["unit"]) else "orphaned"
+    except OSError:
+        return "orphaned"
 
 
 def _provider_uid(identity):
@@ -39,6 +74,8 @@ class LocalResourceProvider:
         # The spawning controller is the parent and must reap its own children;
         # a zombie with a matching birth identity is not a live host.
         self._spawned = {}
+        self._observe_after = 0.0
+        self._holders = None
 
     def device_authority(self):
         if self._device_pool is None:
@@ -49,6 +86,54 @@ class LocalResourceProvider:
         if self._device_pool is None:
             return None
         return self._device_pool.released_device_seconds(allocation_id, spec_hash, device_type)
+
+    def _reserve(self, allocation_id, spec_hash_value, effective, deadline_ms, directory):
+        """Reserve for a unit that will live in `directory`, recording who creates it.
+
+        When the domain is full, units whose physical exit this process can prove
+        are released first; the request is then tried once more.
+        """
+        origin = {"owner": process_identity(os.getpid()), **visibility(), "directory": str(directory),
+                  "accelerators": bool(effective.get("accelerators"))}
+        try:
+            return self.pool.reserve(allocation_id, spec_hash_value, effective, deadline_ms, origin=origin)
+        except ResourceError as exc:
+            if exc.code not in ("CAPACITY_PENDING", "QUOTA_EXCEEDED") or not self._release_gone():
+                raise
+        return self.pool.reserve(allocation_id, spec_hash_value, effective, deadline_ms, origin=origin)
+
+    def _release_gone(self):
+        now = time.monotonic()
+        if now < self._observe_after:
+            return 0
+        self._observe_after = now + OBSERVE_INTERVAL_S
+        here = visibility()
+        released, held = 0, {"running": [0, 0], "orphaned": [0, 0], "unknown": [0, 0]}
+        for record in self.pool.live_records():
+            state = _unit_state(record, here)
+            if state == "gone":
+                try:
+                    # The ledger rechecks the record under its lock. An owner that
+                    # released first keeps its evidence; nothing is refunded twice.
+                    self.pool.release(record["allocation_id"], {
+                        "confirmed": True, "identity": record["identity"],
+                        "evidence_ref": observed_exit_reference(self.pool.root, record)})
+                    released += 1
+                    continue
+                except ResourceError:
+                    state = "orphaned"
+            held[state][0] += 1
+            held[state][1] += record["effective"]["cpu_millis"]
+        # For a caller that keeps waiting: who still holds the domain, as record
+        # count and CPU millis per state of the unit's creating driver.
+        self._holders = "capacity_holders " + " ".join(
+            name + "=" + str(count) + "/" + str(millis) + "m" for name, (count, millis) in held.items())
+        return released
+
+    def _capacity_pending(self, scope_id, allocation_id, effective):
+        conditions = ["capacity_pending"] + ([self._holders] if self._holders else [])
+        return self._observation(scope_id, allocation_id, "PENDING", "FRESH",
+                                 effective=effective, conditions=conditions)
 
     def describe_and_normalize(self, binding, requirements, spec):
         if not sys.platform.startswith("linux"):
@@ -127,7 +212,28 @@ class LocalResourceProvider:
             })
 
     def resolve_evidence(self, scope_id, allocation_id, reference):
+        if type(reference) is str and reference.startswith(OBSERVED_EXIT):
+            return self._observed_exit(allocation_id, reference)
         return self.unit.resolve_evidence(scope_id, allocation_id, reference)
+
+    def _observed_exit(self, allocation_id, reference=None):
+        """The ledger's own release record of this allocation, verified, or None.
+
+        A released state alone proves nothing here: the reference must be the one
+        this ledger root derives from the record it actually stores.
+        """
+        record = self.pool.record(allocation_id)
+        if record is None or record["state"] != "RELEASED" or not str(
+                record.get("release_evidence")).startswith(OBSERVED_EXIT):
+            if reference is not None:
+                raise ResourceError("ARTIFACT_MISMATCH", "no ledger-observed release for this allocation",
+                                    allocation_id=allocation_id)
+            return None
+        if record["release_evidence"] != observed_exit_reference(self.pool.root, record) or (
+                reference is not None and reference != record["release_evidence"]):
+            raise ResourceError("ARTIFACT_MISMATCH", "ledger-observed release does not match its record",
+                                allocation_id=allocation_id)
+        return record
 
     def _device_placement(self, allocation_id):
         if self._device_pool is None:
@@ -164,12 +270,12 @@ class LocalResourceProvider:
                                      conditions=["identity_or_lock_unverified"], evidence_ref=found["evidence_ref"],
                                      placement=self._device_placement(allocation_id))
         try:
-            self.pool.reserve(allocation_id, immutable_spec["spec_hash"], effective,
-                              immutable_spec["request"]["provision_deadline_ms"])
+            self._reserve(allocation_id, immutable_spec["spec_hash"], effective,
+                          immutable_spec["request"]["provision_deadline_ms"],
+                          self.unit.directory(scope_id, allocation_id))
         except ResourceError as exc:
             if exc.code == "CAPACITY_PENDING":
-                return self._observation(scope_id, allocation_id, "PENDING", "FRESH",
-                                         effective=effective, conditions=["capacity_pending"])
+                return self._capacity_pending(scope_id, allocation_id, effective)
             raise
         if self._device_pool is not None and effective.get("accelerators"):
             # Independent device pool: all-or-nothing per allocation. A device
@@ -303,6 +409,20 @@ class LocalResourceProvider:
         identifier(scope_id)
         identifier(allocation_id)
         process = self._spawned.get(allocation_id)
+        observed = self._observed_exit(allocation_id)
+        if observed is not None:
+            # The ledger already released this unit on its own proof of exit. It
+            # stands for the unit this run spawned only if the identities agree;
+            # the unit's lock is not consulted again and may be gone by now.
+            spawned = self.unit.resolve_evidence(
+                scope_id, allocation_id, self.unit.evidence_ref(scope_id, allocation_id, "process.json"))
+            if spawned is None or spawned["identity"] != observed["identity"]:
+                raise ResourceError("ARTIFACT_MISMATCH", "ledger-observed release names another physical unit",
+                                    allocation_id=allocation_id)
+            self._spawned.pop(allocation_id, None)
+            self._close_confirmed_control(allocation_id)
+            return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
+                    "evidence_ref": observed["release_evidence"], "observed_at_ms": _now_ms()}
         found = self.unit.inspect(scope_id, allocation_id, process=process)
         if found["phase"] == "REQUESTED":
             # A capacity-pending request may never have reserved anything.

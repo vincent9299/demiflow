@@ -48,7 +48,17 @@ MAX_ACTIVE_RECORDS = 1024
 # Released records met by one scan that leave the active directory under the
 # caller's lock: enough to drain a backlog in a few admissions, bounded I/O.
 MAX_ARCHIVED_PER_SCAN = 64
+# A release made by the ledger's own observation of a physical exit (see the
+# cleanup contract). The reference binds the ledger root and the whole record:
+# identity, spec, and the origin naming the scope, unit and observing domain.
+OBSERVED_EXIT = "df-capacity-observed-exit:v1:"
 _ENVELOPE_KEYS = frozenset({"allocation_id", "spec_hash", "cpu_millis", "memory_bytes", "resource_directory"})
+
+
+def observed_exit_reference(root, record):
+    binding = {"root": str(root), "allocation_id": record["allocation_id"], "spec_hash": record["spec_hash"],
+               "identity": record["identity"], "origin": record.get("origin")}
+    return OBSERVED_EXIT + hashlib.sha256(document(binding)).hexdigest()
 
 
 def _save_atomic(path, value):
@@ -293,8 +303,14 @@ class LocalCapacityPool(AllocationRecords):
             "identity": record.get("identity"),
         }
 
-    def reserve(self, allocation_id, spec_hash_value, effective_profile, deadline_ms):
+    def reserve(self, allocation_id, spec_hash_value, effective_profile, deadline_ms, *, origin=None):
+        """`origin` is the reserving provider's bounded description of who created
+        the allocation and where its unit lives; the ledger stores it verbatim."""
         identifier(allocation_id)
+        if origin is not None:
+            if type(origin) is not dict:
+                raise ResourceError("INVALID_SPEC", "allocation origin must be an object")
+            document(origin, 2048)
         if type(spec_hash_value) is not str or len(spec_hash_value) != 64:
             raise ResourceError("INVALID_SPEC", "spec_hash must be sha256 hex")
         if type(effective_profile) is not dict or not {"cpu_millis", "memory_bytes"} <= set(effective_profile):
@@ -338,6 +354,8 @@ class LocalCapacityPool(AllocationRecords):
             }
             if "scratch_bytes" in effective_profile:
                 record["effective"]["scratch_bytes"] = effective_profile["scratch_bytes"]
+            if origin is not None:
+                record["origin"] = origin
             _save_atomic(self._records / (allocation_id + ".json"), record)
             return self._view(record)
         finally:
@@ -397,8 +415,13 @@ class LocalCapacityPool(AllocationRecords):
             if record is None:
                 raise ResourceError("INVALID_SPEC", "release needs a known reservation", allocation_id=allocation_id)
             if record["state"] == "RELEASED":
-                if cleanup_evidence["confirmed"] and record.get("release_evidence") == cleanup_evidence["evidence_ref"]:
-                    return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": True}
+                # The first durable release stands. A later confirmed exit of the
+                # same physical identity is that same exit; it refunds nothing.
+                same_exit = record["identity"] is not None and cleanup_evidence["identity"] == record["identity"]
+                if cleanup_evidence["confirmed"] and (
+                        same_exit or record.get("release_evidence") == cleanup_evidence["evidence_ref"]):
+                    return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": True,
+                            "release_evidence": record["release_evidence"]}
                 raise ResourceError("CLEANUP_UNCONFIRMED", "released allocation lacks matching evidence",
                                     allocation_id=allocation_id)
             if not cleanup_evidence["confirmed"] or not cleanup_evidence["evidence_ref"]:
@@ -411,7 +434,8 @@ class LocalCapacityPool(AllocationRecords):
             record["release_evidence"] = cleanup_evidence["evidence_ref"]
             record["released_ms"] = int(time.time() * 1000)
             _save_atomic(self._records / (allocation_id + ".json"), record)
-            return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": False}
+            return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": False,
+                    "release_evidence": record["release_evidence"]}
         finally:
             os.close(fd)
 
@@ -421,6 +445,23 @@ class LocalCapacityPool(AllocationRecords):
             active = self._active()
             return {"charged": self._charged(active), "capacity": dict(self.capacity),
                     "active": [self._view(r) for r in active]}
+        finally:
+            os.close(fd)
+
+    def live_records(self):
+        """Complete live records, including each one's origin, for the provider
+        that proves physical exits. A copy: the ledger remains the only writer."""
+        fd = self._lock()
+        try:
+            return self._active()
+        finally:
+            os.close(fd)
+
+    def record(self, allocation_id):
+        identifier(allocation_id)
+        fd = self._lock()
+        try:
+            return self._read(allocation_id)
         finally:
             os.close(fd)
 

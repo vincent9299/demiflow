@@ -21,7 +21,7 @@
 - 原 provider：Local process/thread 必须回到原 run 的 sibling driver-resources 根；使用原 process/unit.lock 或 thread 证据。先核 scope/allocation/spec_hash/effective、capacity reservation 与物理身份，再调用原 ensure_absent。任何冲突、双路径、证据缺失或原域无法确认都拒绝。不能绕开父子/单位锁退出证明，也不信任 provider 的缺池线程快捷成功。旧孤儿 process 活着不是单独的拒绝条件；允许原 provider 安全终止并生成退出证明，未证实才拒绝。
 - 新 scope 在原 provider_binding 记录 worker_mode 与原 capacity_root；这是运行时清理位置，不改变封存编译产物/计划ID。必须与本次明确使用的原容量域一致；资源域改变时拒绝，不跨域猜测。旧 scope 不补写旧事实；仅当当前明确域中有精确匹配的 reservation 和单一原 unit 证据时兼容恢复。无证据的旧记录不猜测 never-spawned。新记录只有显式原域/模式、Journal仍为REQUESTED/PENDING、无任何原unit目录，且无reservation或原reservation为RESERVED/RELEASED且identity为空时，才可按尚未spawn处理。已有prepared目录但缺process身份时无法证明原锁inode，必须拒绝；当前路径上的空闲锁不构成原worker退出证明。RELEASED是原池已归还终态，重试只补Journal观察，原provider不再次退款；无需新增release_evidence接口。
 - GPU/Ray：不得把 GPU 当 CPU 清理或用 Local provider 处理 Ray。原 provider/设备绑定可完整恢复才执行；没有可验证绑定时明确拒绝并保持占用。本批必须验 Local CPU process/thread，其他路径未经真实验证不宣称支持新增恢复能力。
-- 历史/部署：不扫描并清全机池，不删除历史/改默认容量或超时。已有默认池本轮只读；53 条有证据记录可后续按原 run 逐一维护，5 条须先找回证据。预览不重启。
+- 历史/部署：除下文“2026-11-24 修订”的账本物理观察回收外，不扫描并清全机池，不删除历史/改默认容量或超时。已有默认池本轮只读；53 条有证据记录可后续按原 run 逐一维护，5 条须先找回证据。预览不重启。
 
 ## 落点及并行边界
 
@@ -47,3 +47,18 @@
 - 最后生产差异仅放行严格未启动条件下的原池RELEASED终态；定向注入原provider已释放而Journal尚未确认，重试后scope CLOSED、容量记录字节不变且禁止二次release。
 - 默认池原58条活动记录hash全部保持；未清理当前机器旧占用，未重启服务、修改业务数据或更改容量上限。Local CPU process/thread验证通过；缺原证据、GPU/Ray绑定不足的恢复明确拒绝。
 - 完整证据：工作区 `_demiflow/shared-review/sdk-capacity-cleanup-20261119/` 中的 `validation.json`、`combined-result.xml`、`final-retry-tests.xml`、`combined-pool-protection.json` 与独立Review记录。
+
+## 2026-11-24 修订：账本物理观察回收
+
+真人决定：执行单元确实已经退出的额度应当归还，不能只等原 run 恢复。原因是额度由整台机器的所有 run 共用，而崩溃的 run 经常不再恢复；实测 driver 被 `kill -9` 后 0.2 秒内 worker 全部退出、unit 锁全部空闲，账本记录却一直占用。本节在“原 run 持租约恢复”和“停机维护”之外增加第三个释放入口，上文的证据标准不变。
+
+- **入口。** 同一容量域内的进程在本地额度不足（或活动记录数达到上限）时，对账本中的活动记录做一次核实，每个进程每秒至多一次；判定在账本锁外进行，释放时由账本在锁内重新核对记录。没有常驻进程。实现在 `resources/local.py` 的 `_unit_state` 与 `_release_gone`。
+- **条件，全部成立才释放。** 记录带有创建来源（`origin`：创建它的 driver 的进程身份、启动周期、进程命名空间、单元目录、是否含加速器）；记录与观察者处于同一启动周期和同一进程命名空间；创建它的 driver 已不存在（进程号与启动时间同时相符才算仍在）；记录已绑定进程单元的物理身份，且该进程已不存在；在原 `unit.lock` 的同一个描述符上核对设备号和 inode 与记录一致，并取得排他锁。
+- **保持占用。** 任何一项无法确定即不释放：线程单元、含加速器的分配、未绑定的预留、没有来源的旧记录、driver 仍在的记录、锁被持有、被替换或已不存在、启动周期或进程命名空间不同。等待方在准入超时的错误里得到占用方的分类统计。
+- **只写容量账本。** 不写原 run 的证据文件和运行账本，不向任何进程发信号。释放引用为 `df-capacity-observed-exit:v1:` 加上对账本根目录、分配标识、规格、物理身份和来源的摘要，可由账本记录重算核验。
+- **先落盘的释放为准。** 记录已释放后，另一方以同一物理身份提交的已确认退出视为同一次退出：返回先落盘的引用，不再次退款，记录字节不变。物理身份不符或未确认的仍被拒绝。
+- **原 run 之后的恢复与维护。** 在自己的租约下先核验账本的释放：引用须与账本记录重算一致，记录的物理身份须与原 `process.json` 一致；相符则把清理记为已确认并补记运行账本，不再打开原锁；不符则拒绝并保持未确认。
+- **锁覆盖的范围。** 平台自己的子进程启动原语（`run_isolated`、隔离进程池、SQL 子进程、受管进程组）让子进程继承 unit 锁，子进程未退出时单元不算退出。算子自行启动的有界子进程不持有该锁；`tests/test_unit_child_processes.py` 列出平台内每一个启动点及其归类，新增启动点必须归类。
+- **未覆盖。** 机器重启后仍保留的账本记录、跨容器或跨主机共用账本目录的记录、锁文件已丢失的记录，以及上面列出的保持占用的各类，仍然只能由原 run 的恢复或停机维护处理。
+
+验证见 `tests/test_capacity_observed_release.py`：真实进程下的回收与原 run 恢复（含释放后锁被删除、停机维护、回收者与原 run 恢复并发）、各类保持占用的反例、并发回收只释放一次、先落盘者为准、准入超时错误内容。
