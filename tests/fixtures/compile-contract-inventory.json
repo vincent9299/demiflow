@@ -321,11 +321,11 @@
     "execution/hosts/execution_recovery.py",
     "execution/journal/run_journal.py",
     "execution/pipeline/run_context.py",
-    "execution/worker/authority.py"
+    "execution/worker/runtime.py"
    ],
    "limits_explicit": [
     "execution/pipeline/run_context.py",
-    "execution/worker/authority.py"
+    "execution/worker/runtime.py"
    ],
    "managed_http_service_digest": [
     "execution/operator_bindings/dataflow_prompt_service.py"
@@ -470,7 +470,7 @@
     "execution/journal/run_journal.py",
     "execution/journal/run_reader.py",
     "execution/pipeline/run_context.py",
-    "execution/worker/authority.py"
+    "execution/worker/runtime.py"
    ],
    "seed": [
     "execution/kernels/dataflow.py"
@@ -507,7 +507,7 @@
    ],
    "started_at": [
     "execution/pipeline/run_context.py",
-    "execution/worker/authority.py"
+    "execution/worker/runtime.py"
    ],
    "stream_protocol": [
     "execution/pipeline/run_context.py"
