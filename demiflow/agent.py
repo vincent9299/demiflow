@@ -20,7 +20,7 @@ def _validate_settings(runtime, pack, options, max_requests):
     options = deepcopy(options)
     if not isinstance(options, dict):
         raise TypeError('Agent options must be a mapping')
-    if set(options) & {'codex_exec', 'offline_dir', 'offline_store', 'sqlite_journal', 'journal_dir'}:
+    if set(options) & {'codex_exec', 'cli', 'offline_dir', 'offline_store', 'sqlite_journal', 'journal_dir'}:
         raise ValueError('Agent configuration owns runtime settings; journals/replay belong to the node')
     if runtime == 'codex':
         from .operator_llm.codex_agent import validate_options

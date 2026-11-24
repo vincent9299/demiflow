@@ -38,7 +38,9 @@ def normalize_prompt(arguments):
         raise ValueError('Prompt concurrency and queue depth must be integers')
     if result['concurrency'] < 1 or result['queue_depth'] is not None and result['queue_depth'] < 1:
         raise ValueError('Prompt concurrency and queue depth must be positive')
-    result['options'] = dict(result['options'] or {})
+    from .http_options import merge_temperature_option
+    temperature = result.pop('temperature', None)
+    result['options'] = merge_temperature_option(dict(result['options'] or {}), temperature) or {}
     if not result['prompt'] or type(result['config']) is not str:
         raise ValueError('Managed prompt requires a named prompt and sealed configuration file')
     if (result['output'] is None) == (result['outputs'] is None):
@@ -187,7 +189,10 @@ def analyze_prompt(arguments, *, inputs, callables, resources):
         options=execution_options(prompt,options,a['max_requests'])
         options['object_store']=resources['objects']['root']
     elif set(options) - allowed:
-        raise ValueError('Prompt option has no bounded managed contract')
+        extra = set(options) - allowed
+        req_opts = options.get('request_options')
+        if not (extra == {'request_options'} and isinstance(req_opts, dict) and set(req_opts) <= {'temperature'}):
+            raise ValueError('Prompt option has no bounded managed contract')
     validate_http_options(options)
     if options.get('trust_env') is not False:
         raise ValueError('Managed HTTP requires trust_env=False')
@@ -312,7 +317,7 @@ def private_prompt_declaration(options):
     timeout = value.get('timeout_s', 30)
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
         raise ValueError('Private Prompt lock deadline must be finite')
-    if any(key in options for key in ('journal_dir', 'offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
+    if any(key in options for key in ('journal_dir', 'offline_dir', 'offline_store', 'codex_exec', 'codex_agent', 'cli')):
         raise ValueError('Private Prompt cache requires a single explicit HTTP journal')
     return dict(value)
 

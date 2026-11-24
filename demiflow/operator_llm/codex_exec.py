@@ -39,8 +39,17 @@ class CodexExecPromptClient:
         self.options = dict(options)
         self.settings = dict(options['codex_exec'])
         if set(self.settings) - {'bin', 'reasoning_effort', 'output_schema', 'web_search',
-                                 'image_generation', 'artifact_store', 'max_artifact_files', 'max_artifact_bytes'}:
+                                 'image_generation', 'artifact_store', 'max_artifact_files', 'max_artifact_bytes',
+                                 'extra_args'}:
             raise ValueError('Unknown codex_exec settings')
+        raw_extra = self.settings.get('extra_args')
+        if raw_extra is not None:
+            if (not isinstance(raw_extra, (list, tuple)) or len(raw_extra) > 64
+                    or any(type(item) is not str or not item or '\x00' in item for item in raw_extra)):
+                raise ValueError('codex_exec extra_args must be a list of nonempty strings')
+            self.extra_args = list(raw_extra)
+        else:
+            self.extra_args = []
         # None preserves the original CLI default and request identity for T2I.
         self.image_generation = self.settings.get('image_generation')
         if self.image_generation is not None and type(self.image_generation) is not bool:
@@ -86,6 +95,8 @@ class CodexExecPromptClient:
                      'ignore_user_config': True, 'project_doc_max_bytes': 0, 'web_search': self.web_search}
         if self.image_generation is not None:
             execution['image_generation'] = self.image_generation
+        if self.extra_args:
+            execution['extra_args'] = list(self.extra_args)
         if self.artifact_store:
             execution.update(artifact_protocol='codex-files/2', artifact_store=self.artifact_options,
                              max_artifact_files=self.max_artifact_files, max_artifact_bytes=self.max_artifact_bytes,
@@ -211,6 +222,8 @@ class CodexExecPromptClient:
                                 '-c', 'sandbox_workspace_write.network_access=false']
                 if self.settings.get('reasoning_effort'):
                     command += ['-c', 'model_reasoning_effort=' + json.dumps(self.settings['reasoning_effort'])]
+                if self.extra_args:
+                    command += list(self.extra_args)
                 text, input_images = [], []
                 for message in source['messages']:
                     text.append(message['role'].upper() + ':')

@@ -1806,7 +1806,12 @@ def admit_batch_conversion(rows, batch_format, *, schema, bounds, reserved_bytes
                 if schema is not None:
                     admission.writer_overhead += writer_metadata_bytes(schema.field(index).metadata)
                 admission.check(admission.builder)
-            admission.arrow(column, dtype)
+            try:
+                admission.arrow(column, dtype)
+            except (TypeError, ValueError) as exc:
+                raise type(exc)(
+                    f"Schema mismatch on column '{name}': expected {dtype} ({exc})"
+                ) from None
     if fmt == 'pandas':
         # Object staging, inferred/native column arrays, block consolidation and
         # index/column metadata remain live during construction. Typed conversion
