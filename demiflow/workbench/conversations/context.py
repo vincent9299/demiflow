@@ -117,11 +117,12 @@ PROJECT_LAYOUT_TOOL = dict(
         'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
         'bind_table registers a read-only input location in workspace.json (if needed) and pins a Lance table control under tables/<alias>.json for {"kind":"table","alias":"..."} parameters; '
         'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
-        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries.'
+        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
+        'sync_env_example generates/updates root .env.example (empty-value template ONLY, never real secrets) from prompts/*.yaml api_key_env/base_url_env declarations (plus optional extra variable names) and ensures .gitignore ignores .env.'
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
         'action': dict(type='string', enum=[
-            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path',
+            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path', 'sync_env_example',
         ]),
         'dirs': dict(type='array', items=dict(type='string')),
         'entry': dict(type='string'),
@@ -134,6 +135,7 @@ PROJECT_LAYOUT_TOOL = dict(
         'src': dict(type='string'),
         'dst': dict(type='string'),
         'paths': dict(type='array', items=dict(type='string')),
+        'variables': dict(type='array', items=dict(type='string')),
     }),
 )
 
@@ -314,6 +316,35 @@ def _run_project_layout(project_root, arguments):
                     target.unlink()
                 removed.append(rel)
         return dict(status='removed', removed=removed)
+    if action == 'sync_env_example':
+        import re
+        from demiflow.forge.io import atomic_write_text
+        from demiflow.forge.project_env import declared_prompt_env_names, ensure_gitignore_env, load_project_env
+        extra = arguments.get('variables')
+        names = set(declared_prompt_env_names(root))
+        if extra is not None:
+            if not isinstance(extra, list) or len(extra) > 64:
+                reject('sync_env_example variables must be a list of at most 64 env variable names', 'invalid_request')
+            for item in extra:
+                if not isinstance(item, str) or not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', item.strip()):
+                    reject(f'Invalid environment variable name: {item!r}', 'invalid_request')
+                names.add(item.strip())
+        # Preserve any existing declared variable names already in .env.example (values are always cleared).
+        example_path = root / '.env.example'
+        if example_path.is_symlink():
+            reject('.env.example must be a regular file, not a symlink', 'operation_rejected')
+        if example_path.is_file():
+            names.update(load_project_env(root, filename='.env.example', allow_empty=True).keys())
+        sorted_names = sorted(names)
+        lines = [
+            '# Project runtime environment template (copy to .env locally; never commit real secrets)',
+            *(f'{name}=' for name in sorted_names),
+        ]
+        content = '\n'.join(lines) + '\n'
+        with control_lock(root):
+            atomic_write_text(example_path, content)
+            gi_updated = ensure_gitignore_env(root)
+        return dict(status='synced', path='.env.example', variables=sorted_names, gitignore_updated=gi_updated)
     reject('Unsupported manage_project_layout action', 'invalid_request')
 
 
@@ -377,6 +408,10 @@ class BridgeServer:
             alias = answer.get('alias')
             if isinstance(alias, str) and alias:
                 recorded.add(f'tables/{alias}.json')
+        elif action == 'sync_env_example':
+            recorded.add('.env.example')
+            if answer.get('gitignore_updated'):
+                recorded.add('.gitignore')
         if recorded:
             with self.lock:
                 self.authorized_layout_paths.update(recorded)
