@@ -7,7 +7,74 @@
 检索从住宅会话池切换到静态路由时，`WebSession.search_reuse_session_pools=[{"identity": "旧池摘要", "search": 原检索声明}]` 显式授权读取同一日志中的旧池回执。声明必须与当前检索语义一致（只允许代理变化），最多16个池、合计10万个历史profile；不创建旧会话、不恢复旧连接、不清空旧池的熔断记录。完整查询复用原成功、无结果和失败选择；未结算的单源请求保留未知状态，不因切换代理重试。原始来源回执和查询选择保持。历史缺失或超限明确失败。
 
 
-SearXNG 的检索适配器、五类请求处理器、语言/地区数据、结果类型及合并排序代码已随 demiflow 交付。原生路径不启动 SearXNG HTTP 服务，不需要其地址、端口、源码目录或独立 Python 环境。2026-10-01 经用户明确要求，已接入实际 demiflow 工作区与 concepts pipeline；新启动的入口使用原生检索，已运行的进程不会热切换。接入记录见 `native-search-handoff.md`。
+原生检索由 DemiFlow 自己实现（2026-11-24 起不再内置 SearXNG，见下文“兼容性声明”）。父进程负责准入、限速、回执、缓存与取消；私有 worker 子进程加载来源适配器、发起受准入的 HTTP、解析并合并结果。模块：`native_search/worker_network.py`（HTTP）、`sources.py`（适配器加载）、`results.py`（合并）、`errors.py`、`adapter.py`（适配器可导入的辅助函数）、`catalog.py`（内置来源名与默认配置）、`locales.py`（各来源的语言/地区参数）、`engines/`（内置适配器）。内置来源：google, bing, yandex, mwmbl, wikipedia, wikisearch, google images, bing images, yandex images, baidu images, brave.images, sogou images, quark images, duckduckgo images, qwant images, pinterest, wikicommons.images, public domain image archive, pexels, openverse, unsplash；另有 `demiflow.services.engines.*` 的 15 个平台图片适配器（以 `module=` 声明）和只读 SQLite 来源 `sqlite`。原生路径不启动任何 SearXNG 服务；需要其他来源时可用 `search_url` 连接自行部署的 SearXNG，或以 `module=` 提供自定义适配器。2026-10-01 起 concepts pipeline 使用原生检索，接入记录见 `native-search-handoff.md`。
+
+## 兼容性声明（2026-11-24 去除内置 SearXNG）
+
+本次交付删除 `demiflow/_vendor/searxng`（AGPL-3.0-or-later）。下列收窄与身份变化由用户在 2026-11-24 授权裁定（记录与证据见 `_demiflow/shared-review/CLAUDE-SEARCH-DELIVERY-20261124.md`）。
+
+**不变**
+
+- 接口：`Dataset.search_web`、`WebSession` 各参数、`SearchConfig` 字段与 `from_mapping`。
+- 来源声明：`module=` 加 `revision` 的声明方式；业务配置使用的全部来源名（上列 21 个）和 15 个平台图片模块路径。
+- 回执与状态：`SEARCH_RESULT` 结构及其 `runtime` 字段（仍为 `native-search-1`）；状态分类和暂停规则。
+- 合并：结果的字段、去重、打分和分组顺序。
+- 请求构造：各内置来源的 URL、参数、请求头、Cookie 与 TLS 指纹，包括 `zh-tw` 这类大小写不同的语言写法。
+- 内置来源的设置：目录默认设置逐键相同（包括适配器名 `engine`，如 duckduckgo images 的 `duckduckgo_extra`）；端点、每页条数等选项的名称和覆盖效果不变（如 `base_url`、`api_url`、`rest_v1_summary_url`、`page_size`、`results_per_page`）。决定搜索请求内容的表和模板也保留原名和效果：`search_string`（openverse，可在查询串里加 `license=cc0` 这类过滤条件）、`time_map`（bing images）、`time_range_dict` 与 `nokia_useragents`（google）、`time_range_map`（pexels）、`yandex_supported_langs`（yandex）。
+
+合并、请求构造和内置来源的设置这三项与旧实现的对照证据见上述交付报告和下文“兼容性实测”。
+
+**收窄**
+
+- **来源名**：内置来源名由 344 个减为上列 21 个，其余名称报 `Unknown search source`。需要更多来源时，可用 `search_url` 连接自部署的 SearXNG，或用 `module=` 自定义来源。来源的 `network` 写成这些已移除的名称、而会话又没有定义同名的具名网络时，该来源报 `configuration_error`，其他来源不受影响；定义了同名的会话级具名网络时就用它（旧实现此时仍取那个已移除来源的默认设置）。其余网络名的含义不变（见“请求与来源配置”）。
+- **处理器族**：只保留 online 与 offline 两类。online_dictionary、online_currency、online_url_search 返回 `unsupported_processor`。
+- **非 HTTP 来源**：只保留只读 SQLite。MySQL、MariaDB、PostgreSQL、MongoDB、Valkey、command 来源及 `search-mysql`、`search-mariadb`、`search-postgresql`、`search-mongodb` extras 一并移除；`[search]` 只含 httpx、babel、lxml、curl_cffi。
+- **自定义适配器契约**：
+  - HTTP 与辅助函数改从 `demiflow.collect.native_search.adapter` 导入，取代 `searx.network`、`searx.utils`、`searx.exceptions`。只提供“自定义来源”一节列出的辅助；`searx.utils` 的其余函数、`EngineCache`、engine traits 和 `result_types` 类不再提供；
+  - 请求参数 `locale` 取代 `searxng_locale`；
+  - 失败用 `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError` 表示；
+  - `about` 里的未知键不再导致加载失败；
+  - 重定向的“同源”指协议、主机和端口都相同：主机不分大小写，写出默认端口（http 80、https 443）与省略等价；换协议（包括 http 升级到 https）、换主机、换端口，以及目标自带登录信息，都算另一个源。同源时，认证信息、Cookie 和辅助函数的 `params`（查询参数）每一跳都带上；到另一个源时都不带过去，新站点只收到重定向目标自带的查询串。与此前有两点差别：旧实现把 `params` 一并发给了新站点，尽管它已去掉认证信息和 Cookie；旧实现只比较网址里的 `host:port` 文本，同一个源写法不同（主机大小写、默认端口）时会丢掉认证信息和 Cookie 而保留 `params`，现在这几项一起按同源处理。
+  - 其余约定不变，例如 `setup(settings)` 不返回值即表示接受，请求级的 `impersonate`、`curl_options`、`verify`，响应的 `url.host`、`url.path`。
+- **`services.searxng.SearxNGService`**：
+  - 不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`。名单里的来源是否可用由外部部署决定；DemiFlow 自己的 wikisearch 只作为原生来源提供。
+  - 外部运行时通过它自己的入口启动（`python -m searx.webapp`），DemiFlow 的代码不再导入它。
+  - 服务指纹不再包含 wikisearch 适配器字节，启动命令也变了：同一 profile 的设置文件名、`secret_key` 和启动配置随之改变，运行中的旧服务按服务流程换版重启。
+- **网络选项**：
+  - 来源级生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`，含义与此前相同：`proxies` 可以是一个 URL，或“模式 → URL 或 URL 列表”的映射；`local_addresses` 可以是一个地址、列表或网段；列表逐请求轮换。网段里的地址轮到时才取，不在启动时展开，所以 IPv6 `/64` 这样的网段可以直接写；一个网络最多保留 32 个 HTTP 客户端供复用，超出时关闭最久没用的一个。
+  - 会话级（`SearchConfig.networks` 的出口配置）生效的是 `proxies`、`verify`、`enable_http2`、`source_ips`、`max_redirects`，以及 `networks`（可供来源按名字引用的具名网络）。
+  - 来源映射里的 `retries`、`retry_on_http_error`、`request_timeout`、`max_connections`、`using_tor_proxy` 接受但不生效：重试由 demiflow 统一控制，超时用 `timeout_s`，每个工作进程一次只做一个交换，不再校验 Tor 出口；其他未知选项报配置错误。
+- **内置适配器不再接受的选项**：下面这些名字此前可以写在来源声明里并且真的起作用，现在不再是选项。声明里写了其中任何一个，`SearchConfig` 在声明时就报错，并写明来源、适配器和选项名，不会悄悄忽略：
+  - 安全搜索级别到站点取值的表：`safesearch_map`（brave）、`safesearch_cookies`（duckduckgo_extra）、`filter_mapping`（google、google_images）。这些表以数字为键，而来源声明里的映射只能带文本键；旧实现下一旦写了，brave 的安全搜索恒为 off，duckduckgo 不再带安全搜索参数，google 在安全搜索为 1、2 时以 `KeyError` 失败；
+  - 类别到端点的表 `search_path_map`（duckduckgo_extra）：适配器只保留图片搜索；
+  - 读取页面用的选择器和标记：`suggestion_xpath`（google）、`content_xpath`、`results_xpath`、`title_xpath`、`url_xpath`（yandex，网页与图片两个来源共用这个适配器）、`pdia_config_start`、`pdia_config_end`（public_domain_image_archive）。
+- **此前就不起作用的名字**：下面这些名字在旧实现里对这 21 个来源本来就没有作用，现在依然接受、依然没有作用：`time_range_dict`（baidu、quark）、`time_range_map`（brave）、`safesearch_args`（duckduckgo images）、`skip_countries`（google）、写在 google images 上的 `nokia_useragents`、`qwant_news_locales`（qwant）、`lang_map`、`list_of_wikipedias`、`wiki_lc_locale_variants`、`wikipedia_article_depth`、`wikipedia_script_variants`（wikipedia）、wikisearch 的 `base_url`。
+- **`search_source_inventory()`**：返回新结构（`runtime`、`scope`、`sources`、`platform_sources`），由 `tools/build_native_search_inventory.py` 生成。
+- **Pexels**：不再内置 Web 端密钥。页面取不到密钥时，使用来源配置的 `api_key`（名称不变）；没有配置时该来源以 `parse_error` 结束，不发搜索请求。
+- **Unsplash**：内置来源 unsplash 和平台模块 `unsplash_images` 请求的 User-Agent 由 SearXNG 标识改为 DemiFlow 标识。
+
+**持久格式**
+
+- 回执 `reason` 中的异常类名改为 DemiFlow 名称（对应的 `status` 不变，下游应按 `status` 判定）：
+  - `SearxEngineCaptchaException` → `SourceCaptcha`；
+  - `SearxEngineTooManyRequestsException` → `SourceRateLimited`；
+  - `SearxEngineAccessDeniedException` → `SourceAccessDenied`；
+  - `SearxEngineAPIException`（baidu、quark、qwant、pexels）、`SearxEngineException`（public domain image archive）、`SearxEngineResponseException`（wikisearch）→ `SourceError`。
+  - 其他解析异常仍记录原异常类名（如 `KeyError`）。
+- 一次搜索的结果字节超过回复上限时，回执记录的 `reason` 由 `Worker output limit` 改为 `ResponseTooLarge`（与结果数超限相同，`status` 都是 `response_too_large`）：结果现在逐条计字节，在越过上限的那一条处停止。原来对整份回复的检查仍在，只在回复因结果以外的内容超限时触发。
+- 只读 SQLite 来源：查询执行中需要的单个值或单条记录超过 32 MiB（一次回复可以更大时取回复的字节数）时，以 `resource_limit` 结束，`reason` 为 `ValueTooLarge`；此前会把它读进内存，只受 SQLite 自己的 1 GB 上限约束。返回的行在交给 worker 之前按字节计数，此前是读出之后才检查（见“只读 SQLite 来源”一段）。
+- 离线来源的 `search` 返回的对象有 `close()` 时，检索结束后会被调用一次；此前不会调用。
+- 旧回执里的 `searx.result_types.*` 结果仍可解码、合并。
+- 由带类型结果产生的 `response_json` 字段集合保持不变（`adapter.main_result`、`image_result`、`key_value`）。
+- 自定义适配器声明的 `language_support` 按声明记录。旧实现对没有内置语言表的来源一律记为 False，于是回执把 `language` 列为被忽略；内置来源的取值与此前相同。
+- 用自定义名称复用内置适配器（来源声明里写 `engine`）时，请求语言按适配器生效。旧实现只在名称或适配器名与某个内置来源同名时才有语言表，因此有三个适配器的结果不同：`bing_images` 此前不带语言参数并把 `language` 记为被忽略，`google_images` 和 `duckduckgo_extra` 此前以 `parse_error`（`KeyError`）结束；现在三者都按请求语言正常搜索。其余适配器（包括业务配置使用的 `engine: google`）与此前相同。
+
+**源码身份与恢复**
+
+- `runtime_id()` 不再包含 SearXNG 基线摘要，改由 `native_search` 与 `engines/` 的源码摘要和依赖版本组成。
+- 因此本版本的检索 profile 与此前不同，相当于新的缓存命名空间：此前的来源回执不会被新运行零请求复用，新的检索会话中未完成或新的查询会重新请求。用户已接受这一点。
+- **未完成的旧 Dataset 检索运行不能由本版本续跑完成。** 本版本按新 profile 查不到旧版本写下的来源回执；而前一次尝试已准入、没有提交结果的检索交换，平台不允许重新执行，于是在第一条这样的交换处以 `UNKNOWN_EFFECT` 停止，不会重复请求。该运行仍可由旧版本续跑完成。**换版前应先用旧版本跑完（排空）进行中的检索运行**，或重新开始这些运行。
+- 实测的冷读与续跑行为见“兼容性实测”。
 
 
 当前原生 Dataset 身份/资源准入只接精确 WebSession + 有界 SearchConfig HTTP adapter，
@@ -15,6 +82,40 @@ SearXNG 的检索适配器、五类请求处理器、语言/地区数据、结�
 下面这些低层资源与历史配置仍保留，不代表全部已获当前原生 Dataset 或队列生产准入。
 新队列 producer 用同一 SearchWeb 节点固定每个关键词的有限结果后增量发布，见
 [原生任务队列](dataset-fetch.md)。真实供应商可用性仍以各来源自己的证据为准。
+
+## 兼容性实测（2026-11-24）
+
+**实测方法**：在私有目录和私有资源域中使用本地夹具 HTTP 服务，不访问外网；先由 main 9bad3137 的旧实现写入数据，再由本实现读取或续用。Dataset 运行声明 1 GiB 内存预算（`RunContext` 的 `limits`）；本机按默认 256 MiB 预算在规划阶段就拒绝该管线，新旧实现相同。结果如下：
+
+| 场景 | 结果 |
+| --- | --- |
+| 冷读旧缓存 | 旧来源回执（包括类型化的 MainResult）都能解码、合并，没有错误。 |
+| 同一缓存、同一配置再次检索 | profile 不同（新的缓存命名空间）：3 个查询各重新请求 1 次；状态和候选 URL 与旧结果一致。 |
+| 在旧路线池库上检索 | 打开旧库正常；同样重新请求，状态一致。 |
+| 用 `restore_results` 导入旧回执 | 明确拒绝（`Restored result does not match declared request semantics`），没有写入，也没有请求。 |
+| 旧版本运行被协作式取消（`RunContext.cancel`，cut 中 2 条检索已完成、1 条未发出）后续跑 | 旧版本续跑（对照）：完成，3 行均为 ok，只补发那 1 条未发出的请求。本版本续跑：补发那 1 条请求后，在第一条旧版本已完成的检索处以 `UNKNOWN_EFFECT` 停止，没有重发。之后改用旧版本续跑同一运行：零新增请求完成，3 行均为 ok。 |
+| 旧版本运行在请求途中被硬杀后续跑 | 旧版本、本版本都以 `UNKNOWN_EFFECT` 停止：结果未知的交换不自动重发，这是平台原有行为。 |
+
+**结论**：旧数据可以读取，不会被当作本版本的结果复用；本版本的新运行在新命名空间下重新请求，请求预算按新请求计算。未完成的旧 Dataset 检索运行要用旧版本跑完，见“源码身份与恢复”。
+
+**行为一致性证据**：
+- 与旧实现逐项对照，没有差异：
+  - 请求构造：13 组共 66,266 个离线用例，包括 1134 个语言标签在 9 个依赖语言的来源上的全部取值、这些标签的 1946 种大小写写法在 21 个来源上的取值，以及分页、安全搜索、时间范围组合。另有 2 个 babel 无法解析的标签（`az-TR`、`no-NO`）结果不同，它们在进入来源前就被 `validate_language` 拒绝。
+  - 结果合并：13,000 个随机用例；
+  - 响应解析：21 个来源的合成响应。
+- 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
+- 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
+- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 14 组 1,424 个场景：
+  - HTTP 层 94 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
+  - 超时、会话级出口配置、TLS 与自定义 CA 共 13 个；
+  - 网络名 25 个：引用已声明的来源、未声明的目录来源、`ipv4`/`ipv6`、会话级具名网络，以及 yandex images、brave.images、qwant images 默认的网络名；
+  - 适配器加载 59 个，SQLite 来源 27 个；
+  - 21 个内置来源、2 个显式 Google 后端和 15 个平台图片模块共 228 个，只把最终目的地换成本机服务；
+  - 选项覆盖 142 个：36 个来源的 71 个选项（端点、数值、开关）逐个改值后搜索；
+  - 异常应答 836 个：38 个来源各遇到 11 种应答（HTML、空内容、空对象、空列表、`null`、纯文本、403、429、500、404、跳转到验证页），分“只替换搜索应答”和“替换全部应答”两种范围；回执状态全部相同。
+  - 另有四项逐项比对：目录默认设置与旧实现的默认设置逐键相同（20 个来源，wikisearch 是 DemiFlow 自己的适配器）；运行时读取的来源属性 609 个全部相同；20 个来源各用另一个名称声明后按两种语言搜索共 80 次，74 次相同，其余 6 次是“持久格式”一节声明的三个适配器；旧适配器里除端点和页长以外的 25 个名字，在用到它们的来源上逐个改值（36 个组合，各 8 种查询）：6 个名字的效果新旧相同，11 个名字（分布在 6 个适配器上，共 12 处）在声明时被拒绝，其余 8 个两边都不起作用。
+  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 612 个场景固化在 `tests/test_native_search_exchange.py`。
+- 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用
 
@@ -24,7 +125,7 @@ SearXNG 的检索适配器、五类请求处理器、语言/地区数据、结�
 python -m pip install '/path/to/delivery/dist/demiflow-0.2.0-py3-none-any.whl[search]'
 ```
 
-从本次源码目录安装可使用 `python -m pip install '.[search]'`。同版本旧包可能被 pip 视为已安装；在准备好的目标隔离环境使用 `--force-reinstall` 安装交付 wheel，不要直接操作仍在运行的业务环境。SQL/Mongo 来源的可选驱动分别在 `search-mysql`、`search-mariadb`、`search-postgresql`、`search-mongodb` extra；MariaDB 驱动另受其系统客户端库要求约束。选择这些来源时仍需配置目标数据库。可选 Chromium 传输见下文；SearXNG 站点服务、偏好和插件 UI 不属于原生执行范围。
+从本次源码目录安装可使用 `python -m pip install '.[search]'`（httpx、babel、lxml、curl_cffi）。同版本旧包可能被 pip 视为已安装；在准备好的目标隔离环境使用 `--force-reinstall` 安装交付 wheel，不要直接操作仍在运行的业务环境。可选 Chromium 传输见下文（`[search-browser]`）。
 
 ## Google 的显式 HTTP 与浏览器后端
 
@@ -123,8 +224,8 @@ Dataset 管理 session 关闭。直接使用异步 `WebSession.search` 时，调
 
 | 请求字段 | 行为与边界 |
 | --- | --- |
-| `query` | 非空查询；保留所选适配器自己的查询语法，例如词典的 `en-de hello`、货币的 `10 USD to EUR`、URL 搜索。 |
-| `language` | 明确的 Babel/SearXNG locale，如 `en`、`zh-CN`、`ja`；可在 SearchConfig 设置默认值。没有默认值就必须逐请求声明，不按文字猜语言。`all` 是显式选择；`wikisearch` 拒绝 `all`。 |
+| `query` | 非空查询；原样交给所选适配器。 |
+| `language` | 明确的 Babel locale，如 `en`、`zh-CN`、`ja`；可在 SearchConfig 设置默认值。没有默认值就必须逐请求声明，不按文字猜语言。`all` 是显式选择；`wikisearch` 拒绝 `all`。 |
 | `pageno` | 从 1 开始。来源不支持翻页或超过其页数上限时，返回 `unsupported_parameters`。 |
 | `safesearch` | 0/1/2。传给适配器；不支持时在 `ignored_parameters` 中说明，不伪造过滤保证。 |
 | `time_range` | `None/day/week/month/year`；不支持的来源明确拒绝本次参数。 |
@@ -133,13 +234,13 @@ Dataset 管理 session 关闭。直接使用异步 `WebSession.search` 时，调
 | `engine_data` | 按来源名组织的分页 continuation 数据；下一页可使用 `response_json.engine_data`。 |
 | `network` | 选择 SearchConfig.networks 中的请求网络配置，默认 `default`；不接受逐行明文认证参数。 |
 
-`SearchConfig.engines` 支持注册表名称和来源配置字典。字典字段沿用该适配器的 SearXNG 配置，包括 `engine`、`categories`、`weight`、`timeout`、API endpoint 等。显式选择会启用默认 disabled 来源；默认 inactive 来源必须通过字典显式 `inactive=False`。这只代表允许加载，不证明当前可用。
+`SearchConfig.engines` 支持内置来源名和来源配置字典。字典中的字段覆盖目录默认值和适配器模块的同名选项，包括 `engine`、`categories`、`weight`、`timeout`、`base_url` 及适配器自己的选项（例如平台图片模块的 `min_short_side`）。`network` 可写选项映射（如 `{"proxies": {"all://": Secret("ENV")}}`）或一个网络名（见下文）。显式选择会启用目录中默认 disabled 的来源。这只代表允许加载，不证明当前可用。
 
 ```python
 search = SearchConfig(
     engines=(
         "wikisearch",
-        {"name": "my api", "engine": "braveapi", "api_key": Secret("BRAVE_SEARCH_KEY")},
+        {"name": "museum", "module": "demiflow.services.engines.metmuseum_images", "revision": "met-1"},
     ),
     networks={
         "east": {"proxies": {"all://": Secret("SEARCH_PROXY_EAST")}},
@@ -148,13 +249,33 @@ search = SearchConfig(
 )
 ```
 
-代理支持底层 curl_cffi 的 HTTP/HTTPS/SOCKS 及认证方式。适配器的 POST、headers、cookies、Basic auth、TLS impersonation、证书验证等使用同一网络 ABI。不会暗中继承 HTTP_PROXY 等进程代理变量；必须显式引用所需环境变量。这里没有隐式多级代理串联；若出口需要代理链，应提供已配置的链式出口。
+代理支持底层 curl_cffi 的 HTTP/HTTPS/SOCKS 及认证方式。适配器的 POST、headers、cookies、Basic auth、TLS impersonation、证书验证等都经过 `native_search/worker_network.py`。不会暗中继承 HTTP_PROXY 等进程代理变量；必须显式引用所需环境变量。这里没有隐式多级代理串联；若出口需要代理链，应提供已配置的链式出口。
 
 凭据使用 `Secret("ENV_NAME")`，普通 `SearchConfig.snapshot()` 只有变量名。凭据通过私有管道传给工作进程，不进入命令行、临时配置文件或普通回执；上游任意日志不直接转发，错误仅返回分类和异常类型。请求缓存身份使用持久私有盐的 HMAC 区分不同凭据。不要自行转储执行中对象的私有属性。SQLite 回执文件权限为 0600。
 
 JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSession(search=mapping)`。例如 `{"engines":["wikisearch"],"proxy":{"secret_env":"SEARCH_PROXY"}}`。精确的 `secret_env` 映射会递归恢复为 Secret；声明和快照不读取环境变量，执行时才解析。语言必须是有效 locale；业务可在配置声明一次，然后写入每条请求。
 
-来源自身的网络别名会解析必要的来源配置依赖，例如 Google Images 复用 Google 的网络声明；不会因此额外选择 Google 执行搜索。SQL、Mongo、Valkey 和 command 等非 HTTP 来源使用自己的协议配置，受来源并发、工作进程和总超时约束；HTTP 代理及 HTTP host 限流不作用于这些协议。
+每个来源有自己的网络选项，生效的选项见“兼容性声明”。来源的 `network` 有两种写法：
+
+- **映射**：用映射里的选项建这个来源自己的网络。
+- **名字**：改走那个网络，这个来源自己写的网络选项（`proxies`、`verify` 等）不再参与。名字按下面的顺序解析，都找不到时该来源报 `configuration_error`：
+  1. 本次声明的来源：两者共用同一个网络（选项、代理与本地地址的轮换、连接）；
+  2. 目录里没有声明的来源，以及目录网络 `brave`、`qwant`：按其默认设置建网络，不会因此被选中执行搜索；
+  3. `ipv4`、`ipv6`：会话级选项加上绑定对应地址族；
+  4. 会话级出口配置里 `networks` 键下的具名网络。
+
+目录里有三个来源默认写了网络名：yandex images 走 yandex 的网络，brave.images、qwant images 走 `brave`、`qwant` 网络。所以同时声明 yandex 和 yandex images 时，给 yandex 配的代理对 yandex images 同样生效；要让图片来源单独走别的出口，给它写 `network` 映射，只写 `proxies` 等单个选项不起作用。这些都与此前相同。
+
+只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`，并且能作为子查询执行（`EXPLAIN` 这类只能单独执行的语句不是来源的查询）；末尾自带分页、注释或分号的写法照旧可用；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。它有两种互相独立的限制。
+
+- **查询返回的数据受会话预算约束。** 行逐条交给 worker：
+  - **行数**：一页比 `max_results` 大时，读到上限再多一行就停下；`limit` 为负数时 SQLite 当作不限页长，同样受这个上限约束。
+  - **字节**：每一行在离开 SQLite 之前，先由 SQLite 把这一行的文本和二进制字节加起来。会使累计字节超过一次回复可以有的字节数（`max_bytes` 的 8 倍，适配器里是 `adapter.output_limit()`）的那一行不会交出来，不管它有多少列。worker 另按编码后的字节数计数，规则相同。
+  - 两种情况都以 `response_too_large` 结束。
+  - 这个计数有多准取决于数据库的编码。UTF-8 编码的数据库（默认）里是准确的：读进 Python 的文本和二进制字节不超过一次回复的字节数。UTF-16 编码的数据库里，文本按存储字节数的一半计（不会多于它的 UTF-8 字节数），较长的二进制值也按一半计：那里最多可能有上限 3 倍的文本或 2 倍的二进制值先读进 Python，再由 worker 的计数拒绝。
+- **查询执行过程中读到的数据不受回复预算约束。** 排序键、只用来量长度或过滤的值、数据库的 schema，都可以比一次回复大。
+  - 这部分另有一个执行限制：SQLite 处理的单个值或单条记录不超过 32 MiB（一次回复可以更大时，取回复的字节数）。查询需要更大的值时，SQLite 在把它读入内存之前就拒绝，以 `resource_limit` 结束，回执的 `reason` 是 `ValueTooLarge`。
+  - 在这个限制以内，SQLite 自己持有正在计算的那一行，量某个值的大小时再多一份该值的副本。它计算一行所用的内存可以达到“执行限制 × 查询的列数”，与回复的大小无关；排序可能用到 SQLite 的临时文件。
 
 ## 返回值、缓存与资源归属
 
@@ -178,11 +299,11 @@ JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSes
 | 来源执行 | SearchConfig.workers 固定上限；`source_concurrency` 默认 1，`source_interval_s` 控制每来源发起间隔。 |
 | 实际 HTTP | SearchConfig.request_concurrency；每 host 的并发与间隔逐 HTTP hop 生效，初始化请求和重定向也计数。 |
 | 连接 | 同一工作进程的 curl 会话复用；网络/语言隔离上下文变更会重建工作进程。 |
-| 超时/取消 | timeout_s 约束被接纳的适配器操作，包含操作内限流等待；来源配置 timeout 取更小值。排队和冷启动分别受背压及 startup_timeout_s 管理。取消/超时终止并回收所属工作进程组、连接和私有派生索引目录。 |
+| 超时/取消 | timeout_s 约束被接纳的适配器操作，包含操作内限流等待；来源配置 timeout 取更小值。排队和冷启动分别受背压及 startup_timeout_s 管理。取消/超时终止并回收所属工作进程组和连接。 |
 | 重试 | demiflow 统一控制，默认 0；仅网络/超时及 HTTP 5xx 使用明确额度。验证码、认证及限流不自动重试。移除了上游“零重试仍断连补发”。 |
 | 故障暂停 | 每 session、network、来源隔离；验证码/认证/限流立即暂停，连续其他失败达到 failure_limit 暂停。尊重更长的 Retry-After。 |
 | 响应缓存 | SQLite 持久化每来源结果及失败；文件锁防止跨 session/进程重复占用同一请求；相同请求的并发等待者共享一次执行。 |
-| 适配器令牌与静态查找表 | 令牌为工作进程私有、过期且有容量上限的内存缓存；货币等查找表保持完整 SQLite ABI，派生索引放在父进程管理的私有临时目录。 |
+| 适配器辅助缓存 | 只在工作进程内存中，进程结束即释放，不写磁盘。DuckDuckGo vqd 令牌按查询和 User-Agent 缓存 1 小时，至多 256 条、每条至多 256 字符；百度预热 Cookie 缓存 1 小时；Pexels secret-key（至多 256 字符）、公共领域图片档案的代理地址（至多 2048 字符，遇 403 清除）、Qwant datadome Cookie（随响应更新）各保留一份。 |
 
 缓存身份包括源码/运行时与依赖版本、全部来源配置、自定义源码与 revision、凭据身份、语言、页数、安全搜索、时间、分页状态、网络和执行预算。回放时 attempts 保留原请求历史，当前新增请求数看 metrics.native_search.http_requests，不能把历史 attempts 再计为新增调用。原生 session 的顶层 search_requests 统计来源尝试，search_queries 统计查询，search_http_requests 统计实际 HTTP 请求。重跑同一身份复用成功和失败；修改配置会形成新身份。取消或崩溃留下 `interrupted`，不会擅自重试可能已经计费的请求。只有尚未发出请求的 `suspended` 回执允许在暂停期满后执行。要明确授权重试已耗尽/不确定的请求，使用新的缓存命名空间并保留旧库。
 
@@ -192,11 +313,37 @@ JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSes
 
 最后一个等待者取消时才中止共享请求；另一个等待者仍在使用时继续执行。进程硬杀意味着自定义适配器的 finally 不保证运行，因此外部有副作用的连接器必须自行提供幂等性；平台保留不确定回执而不自动重发。
 
-max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_results 限制每来源结果数，管道输出有字节限制。它们不是整个 Python 进程 RSS 的硬上限；原始结果总内存仍随所选来源和接受的结果量变化。
+max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_results 限制每来源结果数（可以是任意正整数），一次搜索回复的编码字节不得超过 max_bytes 的 8 倍：结果逐条取、逐条计数和计字节，在越过上限的那一条处停止，不会先收齐再检查。它们不是整个 Python 进程 RSS 的硬上限；原始结果总内存仍随所选来源和接受的结果量变化。
 
 ## 自定义来源
 
-提供随应用安装的 Python 模块，声明兼容的 request/response 或 offline search、可选 setup/init，以及上游能力字段。setup 应只做配置检查；网络初始化放入 init，受同一请求配额、代理和总超时控制。模块依赖和辅助模块也应随其包安装，包的 `__init__` 不应提前导入私有 `searx`。
+自定义来源是随应用安装的 Python 模块，以 `module=` 声明，形式与内置适配器相同：
+
+- **在线来源**：提供 `request(query, params)` 和 `response(resp)`。
+- **离线来源**：设 `engine_type = 'offline'`，提供 `search(query, params)`。它可以返回列表，也可以逐条产出结果（generator）：worker 逐条取、逐条计数和计字节，越过 `max_results` 或回复字节上限（`output_limit()`）的那一条处停止，以 `response_too_large` 结束。不管怎样结束，worker 都会关闭 `search` 返回的东西：返回的对象有 `close()` 就调用一次；由它得到的迭代器（例如 generator）是另一个对象并且也有 `close()` 时，同样调用一次。从存储里读数据的来源应逐条产出，并在把一条结果读进 Python 之前用 `output_limit()` 判断它放不放得下，放不下时抛出 `ResponseTooLarge`（只读 SQLite 来源让 SQLite 先算出每一行的字节数）。
+- **可选**：`setup(settings)` 做配置检查：不返回值或返回真值表示接受，返回其他假值或抛出异常表示拒绝；`init(settings)` 在首次搜索前运行，返回 `False` 表示拒绝。
+- **模块属性**：`categories`、`paging`、`max_page`、`time_range_support`、`safesearch`、`language_support`、`about` 等声明能力。来源配置字典中的同名字段会覆盖它们。值为 `None` 的公开属性表示必填选项。
+
+`params` 的内容：
+
+- `query`、`pageno`、`safesearch`、`time_range`、`locale`（请求语言）、`language`、`category`、`engine_data`；
+- 适配器要设置的 `url`，以及可选的 `method`（`GET`；其他值一律按 `POST` 发送）、`headers`、`data`、`json`、`content`（POST 的原始请求体）、`cookies`、`auth`、`allow_redirects`、`max_redirects`、`raise_for_httperror`；
+- 选择 HTTP 客户端的 `impersonate`（浏览器指纹名，默认 `chrome`，`'none'` 关闭指纹）、`curl_options`、`verify`。
+
+`url` 为空表示拒绝本次请求。`response(resp)` 返回结果字典列表。`resp` 提供 `status_code`、`headers`、`text`、`content`、`json()`、`url`（文本，另有 `url.host`、`url.path`）、`cookies` 和 `search_params`。
+
+HTTP 客户端不保存 Cookie：服务器设置的 Cookie 只出现在那一次响应的 `resp.cookies` 里，需要带到后续请求的由适配器自己保存并写进 `params['cookies']`。
+
+`demiflow.collect.native_search.adapter` 提供适配器可用的全部辅助：
+
+- HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。重定向到另一个源（协议、主机、端口任一不同）时，认证信息、Cookie 和调用时给的 `params` 都不带过去。
+- 异常：`SourceError`、`SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`ResponseTooLarge`（来源的数据超出会话预算，回执为 `response_too_large`）。
+- 预算：`output_limit()`（一次搜索的回复最多有这么多编码字节）。
+- 文本：`html_to_text`、`extract_text`、`ecma_unescape`、`size_text`。
+- User-Agent：`user_agent`（DemiFlow 标识）、`browser_user_agent`（随机的当前桌面浏览器）。
+- 结果：`main_result`、`image_result`、`key_value`、`legacy_record`。
+
+XPath 直接用 lxml。令牌一类的缓存放在模块内，并自行设置条数和大小上限。
 
 ```python
 # my_sources/catalog.py
@@ -209,7 +356,7 @@ api_url = "https://catalog.example/search"
 
 def request(query, params):
     params["url"] = api_url + "?" + urlencode({
-        "q": query, "page": params["pageno"], "language": params["searxng_locale"],
+        "q": query, "page": params["pageno"], "language": params["locale"],
     })
 
 def response(resp):
@@ -223,19 +370,33 @@ SearchConfig(engines=({
 },), language="en")
 ```
 
-`revision` 必须覆盖辅助代码、依赖及接口契约变化，平台同时记录入口文件摘要。来源代码是受信任的应用扩展，不是执行任意不可信代码的安全沙箱。适配器 HTTP 必须经过 `searx.network` ABI，才具有平台的逐请求限速、代理和回执保证。
+`revision` 必须覆盖辅助代码、依赖及接口契约的变化，平台另外记录入口文件摘要。来源代码是受信任的应用扩展，不是执行不可信代码的沙箱。
+
+适配器内的其他 HTTP 请求必须用 `demiflow.collect.native_search.adapter` 的 `get`、`post`、`request`、`multi_requests`，才享有逐请求准入、代理、字节上限、重定向规则和回执。该模块还提供：
+
+- `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError`；
+- `html_to_text`、`extract_text`、`ecma_unescape`、`size_text`；
+- `main_result`、`image_result`：带完整字段的类型化结果，按不含协议的 URL 判重；
+- `key_value`：键值表结果，不与其他结果合并。
 
 ## 来源清单与维护
 
-- `search_source_inventory()`：随安装包交付的机器可读能力/验证清单。
-- `native-search-sources.csv`：344 个原始命名来源及新增 wikisearch 的逐项状态。
-- `native-search-inventory.json`：全部 257 个原始适配器模块、导入依赖、配置项、加载检查和分别记录的固定响应/真实验证状态。
-- `native-search-validation.md`：本次验收及限制。
-- `_vendor/searxng/BASELINE.json`、`baseline.tar.gz`、`LOCAL_CHANGES.md`、LICENSE/AUTHORS：精确导入基线与修改记录。
+- `search_source_inventory()`：随安装包交付的机器可读清单。内容是内置来源与平台图片适配器的设置、能力和离线加载状态。
+- `native-search-inventory.json`、`native-search-sources.csv`：同一清单的文档副本和逐项表格。
+- `native-search-validation.md`：历次验收与限制。其中 2026-11 以前的记录描述的是内置 SearXNG 的实现。
 
-本地供给的 SearXNG 树带已有修改且没有独立 Git 元数据；不能虚构上游 commit。当前版本由完整文件摘要标识。升级时取得明确上游 revision，审查与原始快照的差异，重放有限集成修改，更新清单，运行所有五类处理器、固定响应、并发/取消/代理/缓存及安装包验收，再做预算明确的小批真实验证。不要把“文件已复制”或“可以 import”写成在线可用。
+维护命令：
 
-维护命令按顺序为 `tools/build_native_search_inventory.py`（静态扫描并清空验证声明）、`tools/audit_native_search.py`（无网络加载）、`tools/finalize_native_search_inventory.py`（生成随包清单/CSV）。最后一步可显式指定 `--live-report path/to/report.json`，要求报告的 baseline_id 匹配；未提供报告就不会标记任何来源在线通过。配置清单中的 required_configuration 是空值字段和 setup/init 索引参数的静态线索，可能包含可选字段；动态必需项仍以适配器 setup/init 文档为准。类型检查专用导入单独登记，不作为运行依赖。
+- `tools/build_native_search_inventory.py`：离线重建清单，`--check` 只比较不写入。
+- `tools/verify_native_search_install.py <wheel> --receipt <path>`：在检出目录之外安装 wheel，确认不含内置副本，并经 Dataset API 跑一次离线来源。
+- `tools/validate_native_search_live.py`：预算明确的小批真实请求。
+
+新增或修改内置来源时，要做三件事：
+- 在 `catalog.py` 登记；
+- 用固定响应写解析测试；
+- 记录预算明确的真实验证。
+
+不要把“可以 import”写成“在线可用”。
 
 ## 按 Dataset API 的改动表
 
@@ -243,7 +404,7 @@ SearchConfig(engines=({
 | --- | --- | --- | --- |
 | `search_web(requests=..., output=..., session=...)` | data/dataset.py、collect/operators.py、session.py、native_search/* | 调用 WebSession 的统一语言 HTTP 搜索；外部源码/解释器由托管服务提供。 | 默认无 URL 时走随包原生来源；逐请求参数、完整结果、逐来源回执；保持一行输入对应一行输出和不透明 bindings。 |
 | `search_web` 的查询展开 | collect/session.py::bounded | 为每个查询创建 task，再用 semaphore 控制执行。 | 固定数量消费者，任务数 O(concurrency)，结果仍保持请求次序。 |
-| `search_web` 的旧显式 HTTP 路径 | collect/web.py、services/searxng.py | 现有托管/外部服务。 | 显式 search_url/service 仍可运行，增加逐请求标准参数；不自动启动新旧双路径，不隐式切换现役业务。旧服务类保留用于协调退役。 |
+| `search_web` 的旧显式 HTTP 路径 | collect/web.py、services/searxng.py | 现有托管/外部服务。 | 显式 search_url/service 仍可运行，增加逐请求标准参数；不自动启动新旧双路径，不隐式切换现役业务。旧服务类保留用于运行自行安装的 SearXNG（2026-11-24 起不再注入 wikisearch）。 |
 | `fetch` | raw_contract.py、raw_transport.py、execution/raw_* | 旧组合获取与解析入口已退役。 | 每行一个 HTTP/COS 原始对象，独立于搜索资源；解析与读取分离，见 [获取契约](dataset-fetch.md)。 |
 | `read_documents` | reading.py、documents.py | 文档校验/选择/配额。 | 无实现改动；回归验证保持。 |
 | `run_stream` / `save_lance` | 现有资源管理、collect/contracts.py | 执行结束关闭 session，保存旧回执结构。 | 继续由执行器管理资源；更新 SEARCH_RESULT 后可保留新回执及 response_json。未修改公共业务表或新增隐藏 pipeline。 |
@@ -265,6 +426,8 @@ python tools/check_native_search_cutover.py /path/to/current/demiflow
 此命令只读比较原开发基线、交付副本和指定工作区，不执行切换；已合入的工作区应结合接入记录识别后续改动，不能用旧基线覆盖新工作。
 
 ### 2026-10-05 专业图片适配器与尺寸元数据
+
+（历史记录。2026-11-24 起工作进程不再内置 SearXNG，下文模块的 `searx.*` 导入已换成 `demiflow.collect.native_search.adapter`，见“兼容性声明”。）
 
 `searxng-results-4` 对图片/缩略图的协议相对地址按来源页面补协议，并保留合法的`resolution`声明及其`declared_width/declared_height`。不会从未知路径推导高清地址，也不把缩略图尺寸当原图尺寸。非法scheme、带凭据地址仍排除；图片地址和页面地址共同参与候选去重。该规范化文件现在参与native runtime指纹，避免结果投影改变后复用旧身份。
 

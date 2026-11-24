@@ -1,6 +1,6 @@
 """Getty Museum public collection frontend and IIIF (not Getty Images stock)."""
 from urllib.parse import urlencode, urlsplit
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import bounded, image_row, result_list, iiif3_variant
 
 about = {'website': 'https://www.getty.edu/art/collection/', 'use_official_api': False,

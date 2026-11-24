@@ -1,6 +1,6 @@
 """Public-domain AIC images using the documented larger IIIF rendition."""
 from urllib.parse import urlencode, quote
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import bounded, image_row, http_url, positive, result_list
 
 about = {'website': 'https://www.artic.edu/', 'use_official_api': True,

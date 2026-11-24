@@ -8,8 +8,8 @@ import json
 import re
 from urllib.parse import urlencode, urljoin, urlsplit
 from lxml import html
-from searx.network import get
-from searx.utils import ecma_unescape, html_to_text
+from demiflow.collect.native_search.adapter import get
+from demiflow.collect.native_search.adapter import ecma_unescape, html_to_text
 
 about = {'website': 'https://www.flickr.com/', 'use_official_api': False,
          'require_api_key': False, 'results': 'HTML'}

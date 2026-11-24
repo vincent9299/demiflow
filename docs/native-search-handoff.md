@@ -1,3 +1,5 @@
+> 历史记录：本文记载 2026-11-24 之前内置 SearXNG 的实现与验收。现行实现与兼容性声明见 [native-search.md](native-search.md)。
+
 # 交接与切换单
 
 原会话：`01a0ee22-9984-7502-9b1f-cf7c3293b135`（remote-ssh-discovered:devbox-codex）。本次已读取会话并核对实际代码。原窗口仍负责 demiwtg/preparation/concepts，本交付没有修改业务提示词、审定政策、结果或运行目录。

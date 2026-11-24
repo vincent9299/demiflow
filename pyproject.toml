@@ -33,15 +33,8 @@ wikitext = ["mwparserfromhell==0.7.2"]
 pdf = ["pypdf==6.19.0"]
 # 聚合 extras：一键装齐采集栈（net/fetch 零三方依赖，crawl 与 images 惰性）
 collect = ["crawl4ai>=0.9", "pillow>=10", "httpx>=0.27"]
-# Vendored SearXNG adapters and their shared runtime; no SearXNG deployment.
-search = ["httpx>=0.27", "babel==2.18.0", "flask-babel==4.0.0", "flask==3.1.3",
-          "lxml>=6.1.2,<7", "pygments==2.21.0", "python-dateutil==2.9.0.post0",
-          "curl_cffi==0.16.1", "valkey==6.1.1", "markdown-it-py==4.2.0",
-          "msgspec==0.21.1", "typer>=0.27.1,<0.28", "isodate==0.7.2", "typing-extensions>=4.15"]
-search-mysql = ["mysql-connector-python>=9"]
-search-mariadb = ["mariadb>=1.1"]
-search-postgresql = ["psycopg2-binary>=2.9"]
-search-mongodb = ["pymongo>=4"]
+# Native search worker: HTTP transport, HTML parsing and locale data for the built-in source adapters.
+search = ["httpx>=0.27", "babel==2.18.0", "lxml>=6.1.2,<7", "curl_cffi==0.16.1"]
 search-browser = ["playwright==1.63.0"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 analysis = ["jupyter_client==8.10.0", "ipykernel==7.3.0", "nbformat==5.11.1",
@@ -50,14 +43,12 @@ notebook = ["notebook==7.5.7", "jupyterlab==4.5.11", "ipykernel==7.3.0", "pandas
 
 [tool.setuptools.packages.find]
 include = ["demiflow*"]
-exclude = ["demiflow._vendor.searxng*"]
 
 [tool.setuptools.package-data]
 "demiflow.collect.native_search" = ["inventory.json"]
 "demiflow.forge" = ["standards/*.json", "standards/pipeline-authoring.md", "standards/pipeline-review.md", "skills/demiforge/SKILL.md"]
 "demiflow.workbench" = ["notebooks/skills/dataskill/SKILL.md", "analysis/*.json", "web/*.html", "web/*.js", "web/*.css", "web/*.txt", "web/*.json"]
 "demiflow.workbench.conversations" = ["*.cjs"]
-"demiflow._vendor" = ["searxng/**/*", "searxng/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

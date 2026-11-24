@@ -1,6 +1,6 @@
 """Wellcome image catalogue and bounded IIIF v2 original JPEG metadata."""
 from urllib.parse import urlencode
-from searx.network import get
+from demiflow.collect.native_search.adapter import get
 from demiflow.services.engines.image_source_utils import bounded, image_row, http_url, result_list
 
 about = {'website': 'https://wellcomecollection.org/', 'use_official_api': True,

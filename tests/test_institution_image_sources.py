@@ -145,6 +145,6 @@ def test_fws_original_links_and_ars_caption_links_do_not_rewrite_thumbnails():
     assert result['fws'][0]['resolution'] == '3000 x 2000'
     assert result['ars']['img_src'] == 'https://www.ars.usda.gov/full.jpg'
     assert 'resolution' not in result['ars']
-    assert result['failure'] == 'SearxEngineAccessDeniedException'
+    assert result['failure'] == 'SourceAccessDenied'
     assert result['upscaled']['img_src'].endswith('/original.jpg')
     assert result['upscaled']['resolution'] == '800 x 800'

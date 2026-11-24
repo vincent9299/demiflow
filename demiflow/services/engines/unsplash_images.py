@@ -1,6 +1,6 @@
 """Unsplash public search; use its explicit full-size URL and matching metadata."""
 from urllib.parse import urlencode
-from searx.utils import searxng_useragent
+from demiflow.collect.native_search.adapter import user_agent
 from demiflow.services.engines.image_source_utils import result_list
 
 about = {'website': 'https://unsplash.com/', 'use_official_api': False,
@@ -13,7 +13,7 @@ page_size = 20
 def request(query, params):
     params['url'] = 'https://unsplash.com/napi/search/photos?' + urlencode(
         {'query': query, 'page': params['pageno'], 'per_page': page_size})
-    params['headers']['User-Agent'] = searxng_useragent()
+    params['headers']['User-Agent'] = user_agent()
     return params
 
 

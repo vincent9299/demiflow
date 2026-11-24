@@ -1,27 +1,24 @@
-"""Private pipe worker. Never imports SearXNG into the pipeline interpreter."""
+"""Private pipe worker that runs search source adapters for one native session."""
 from __future__ import annotations
 
-import asyncio
 import datetime
-import hashlib
-import hmac
-import importlib
 import json
 import logging
-import os
 from pathlib import Path
 import sys
-import time
-import types
 import warnings
-
-from .config import VENDOR
 
 # stdout is protocol only, including while untrusted third-party code prints.
 WIRE = sys.stdout
 sys.stdout = sys.stderr
 logging.disable(logging.CRITICAL)
 warnings.filterwarnings('ignore')
+
+ONLINE_DEFAULTS = {'method': 'GET', 'headers': {}, 'data': {}, 'json': {}, 'content': b'', 'url': '',
+                   'cookies': {}, 'allow_redirects': False, 'max_redirects': 0, 'soft_max_redirects': 0,
+                   'auth': None, 'verify': None, 'raise_for_httperror': True}
+# Older receipts carry result classes of the previously vendored search engine.
+LEGACY_RESULT_MODULES = ('searx.result_types',)
 
 
 def send(value):
@@ -36,37 +33,13 @@ def receive():
     return json.loads(line)
 
 
-def plain(value):
-    if hasattr(value, '__struct_fields__'):
-        return {k: plain(getattr(value, k)) for k in value.__struct_fields__}
-    if isinstance(value, dict):
-        return {str(k): plain(v) for k, v in value.items()}
-    if hasattr(value, 'as_dict'):
-        return plain(value.as_dict())
-    if isinstance(value, (list, tuple)):
-        return [plain(v) for v in value]
-    if isinstance(value, set):
-        return sorted((plain(v) for v in value), key=str)
-    if isinstance(value, (datetime.date, datetime.datetime, datetime.time)):
-        return value.isoformat()
-    if isinstance(value, datetime.timedelta):
-        return value.total_seconds()
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
-
-
 def encode(value):
-    # Preserve dates, sets and typed/nested result structs across private IPC.
-    import msgspec
-    if isinstance(value, msgspec.Struct):
-        return {'__native_type__': type(value).__module__ + ':' + type(value).__qualname__,
-                'value': {f: encode(getattr(value, f)) for f in value.__struct_fields__}}
+    # Preserve dates, sets and nested mappings across private IPC.
     if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
         return {'__native_type__': 'datetime:' + type(value).__name__, 'value': value.isoformat()}
     if isinstance(value, datetime.timedelta):
         return {'__native_type__': 'datetime:timedelta', 'value': value.total_seconds()}
-    if isinstance(value, set):
+    if isinstance(value, (set, frozenset)):
         return {'__native_type__': 'set', 'value': [encode(v) for v in value]}
     if isinstance(value, dict):
         return {'__native_type__': 'mapping', 'value': [[encode(k), encode(v)] for k, v in value.items()]}
@@ -91,17 +64,16 @@ def decode(value):
         return datetime.timedelta(seconds=body)
     if name in ('datetime:date', 'datetime:datetime', 'datetime:time'):
         return getattr(datetime, name.split(':')[1]).fromisoformat(body)
-    mod, cls = name.split(':', 1)
-    if not mod.startswith('searx.result_types'):
+    module, _, cls = name.partition(':')
+    if not module.startswith(LEGACY_RESULT_MODULES) or not cls or cls.startswith('_'):
         raise ValueError('Unsupported result class')
-    obj = importlib.import_module(mod)
-    for part in cls.split('.'):
-        if part.startswith('_'):
-            raise ValueError('Private result class')
-        obj = getattr(obj, part)
     fields = decode(body)
+    if not isinstance(fields, dict):
+        raise ValueError('Invalid result record')
     fields.pop('parsed_url', None)
-    return obj(**fields)
+    from .results import TYPED
+    fields[TYPED] = cls
+    return fields
 
 
 def pack(result):
@@ -115,205 +87,223 @@ def unpack(result):
     return decoded
 
 
-class MemoryEngineCache:
-    """Worker-private expiring adapter tokens; query receipts live in the parent."""
-    def __init__(self, cfg):
-        self.cfg = cfg
-        self.values = {}
-        self.salt = os.urandom(32)
-
-    def get(self, key, default=None, ctx=''):
-        until, value = self.values.get((ctx, key), (0, default))
-        return value if until > time.monotonic() else default
-
-    def set(self, key, value, expire=None, ctx=''):
-        import pickle
-        if len(pickle.dumps(value)) > 256 * 1024:
-            return False
-        self.values[(ctx, key)] = (time.monotonic() + (expire or self.cfg.MAXHOLD_TIME), value)
-        if len(self.values) > 256:
-            now = time.monotonic()
-            self.values = {k: v for k, v in self.values.items() if v[0] > now}
-            while len(self.values) > 256:
-                self.values.pop(next(iter(self.values)))
-        return True
-
-    def secret_hash(self, name):
-        return hmac.new(self.salt, name.encode() if isinstance(name, str) else name, hashlib.sha256).hexdigest()
-
-
 def bootstrap(config):
-    # All absolute imports in the vendored source resolve only inside this child.
-    sys.path.insert(0, str(VENDOR))
-    os.environ.pop('SEARXNG_SETTINGS_PATH', None)
-    os.environ.pop('SEARXNG_DEBUG', None)
-    import yaml
-    import searx
-    from searx.settings_defaults import SCHEMA, apply_schema
-    settings = yaml.safe_load((VENDOR / 'searx/settings.yml').read_text())
-    # Some sources share a named network with another catalog source (e.g.
-    # google images -> google). Load that source's transport declaration without
-    # selecting it for search or running its initialization.
-    defaults = {s['name'].lower(): s for s in settings['engines']}
-    source_settings = [{**s, 'name': s['name'].lower()} for s in config['sources']]
-    names = {s['name'] for s in source_settings}
-    for source in source_settings:
-        reference = source.get('network')
-        if isinstance(reference, str) and reference not in names and reference in defaults:
-            source_settings.append({**defaults[reference], 'name': reference.lower()})
-            names.add(reference)
-    settings['engines'] = source_settings
-    settings['server']['secret_key'] = os.urandom(32).hex()
-    settings['outgoing'].update(config['outgoing'])
-    settings['outgoing'].update(retries=0, retry_on_http_error=False,
-                                request_timeout=config['timeout_s'], pool_connections=1)
-    apply_schema(settings, SCHEMA, [])
-    searx.settings.update(settings)
-    # Adapter caches must not open /etc, ~/.cache or a cross-pipeline token DB.
-    import searx.cache
-    original_cache = searx.cache.ExpireCacheSQLite.build_cache
-    def private_cache(cfg):
-        if cfg.name == 'ENGINES_CACHE':
-            return MemoryEngineCache(cfg)
-        # Shared lookup helpers (e.g. currencies) need the full SQL cache ABI.
-        # Their derived indices are worker-private and parent-cleaned on kill.
-        directory = config.get('worker_directory')
-        if not directory:
-            import tempfile
-            directory = tempfile.mkdtemp(prefix='demiflow-search-probe-')
-            import atexit, shutil
-            atexit.register(shutil.rmtree, directory, ignore_errors=True)
-        cfg.db_url = str(Path(directory) / (searx.cache.ExpireCache.normalize_name(cfg.name) + '.sqlite'))
-        return original_cache(cfg)
-    searx.cache.ExpireCacheSQLite.build_cache = staticmethod(private_cache)
-    from .worker_network import install
-    install(config, send, receive)
-    import searx.engines
-    errors = {}
-    for source in source_settings:
+    """Load every source and its network; a source that cannot be used gets a receipt status in ``errors``."""
+    from . import worker_network
+    from .sources import SourceLoadError, load
+    loaded, errors = {}, {}
+    for settings in config['sources']:
+        name = settings['name'].lower()
         try:
-            obj = searx.engines.load_engine(dict(source))
-            if obj is None:
-                errors[source['name']] = 'configuration_error'
-            else:
-                searx.engines.engines[source['name']] = obj
-        except (Exception, SystemExit) as exc:
-            errors[source['name']] = 'dependency_error' if isinstance(exc, (ImportError, SystemExit)) else 'configuration_error'
-    import searx.network
-    valid_networks = {'ipv4', 'ipv6'} | set(settings['outgoing']['networks']) | set(searx.engines.engines)
-    for name, obj in list(searx.engines.engines.items()):
-        reference = getattr(obj, 'network', None)
-        if isinstance(reference, str) and reference not in valid_networks:
+            # Sources with an explicit backend search through google_search, with their adapter's network.
+            loaded[name] = load(settings, config['timeout_s'])
+        except SourceLoadError as exc:
+            errors[name] = exc.status
+        except (ImportError, SystemExit):
+            errors[name] = 'dependency_error'
+        except Exception:
             errors[name] = 'configuration_error'
-            del searx.engines.engines[name]
-    searx.network.initialize()
-    from searx.metrics import initialize
-    initialize(enabled=False)
-    # Numeric formatting has a useful locale without a Flask application.
-    import flask_babel
-    from babel.numbers import format_decimal
-    flask_babel.format_decimal = lambda n, **kw: format_decimal(n, locale='en', **kw)
-    from searx.search.processors import ProcessorMap
-    processors = {}
-    for name, engine in searx.engines.engines.items():
-        cls = ProcessorMap.processor_types.get(engine.engine_type)
-        if cls is None:
-            errors[name] = 'unsupported_processor'
-        else:
-            processors[name] = cls(engine)
-    return processors, errors
+    worker_network.install(config, send, receive, source_networks(config, loaded, errors))
+    return loaded, errors
 
 
-def classify(exc):
-    from searx.exceptions import (SearxEngineCaptchaException, SearxEngineTooManyRequestsException,
-                                 SearxEngineAccessDeniedException)
-    from curl_cffi.requests.exceptions import Timeout, RequestException, HTTPError
-    if isinstance(exc, SearxEngineCaptchaException):
-        return 'captcha'
-    if isinstance(exc, SearxEngineTooManyRequestsException):
-        return 'rate_limited'
-    if isinstance(exc, SearxEngineAccessDeniedException):
-        return 'access_denied'
-    if isinstance(exc, (Timeout, TimeoutError)):
-        return 'timeout'
-    if isinstance(exc, HTTPError):
-        code = getattr(getattr(exc, 'response', None), 'status_code', None)
-        return 'authentication_error' if code == 401 else 'http_error'
-    if isinstance(exc, RequestException):
-        return 'network_error'
-    if isinstance(exc, ImportError):
-        return 'dependency_error'
-    if type(exc).__name__ == 'ResponseTooLarge':
-        return 'response_too_large'
-    return 'parse_error'
+def source_networks(config, loaded, errors):
+    """The network of every loaded source; a source whose network cannot be built gets a status in ``errors``.
+
+    A source has a network of its own, built from its ``network`` mapping or else from its transport
+    options. When ``network`` is a name, the source sends through that network instead and its own transport
+    options are not consulted. A name is, in this order: a declared source (both then share options, rotation
+    and clients); a catalog source or catalog network that is not declared (its default settings apply, it is
+    not selected for search); ``ipv4`` or ``ipv6`` (bound to that address family); a session-wide network
+    from ``outgoing['networks']``.
+    """
+    from . import worker_network
+    from .catalog import NETWORKS, entries
+    from .sources import transport_defaults
+    outgoing = config['outgoing']
+    declared = {settings['name'].lower() for settings in config['sources']}
+    defaults = {**NETWORKS, **entries()}
+    session = {'ipv4': {'local_addresses': '0.0.0.0'}, 'ipv6': {'local_addresses': '::'}}
+    if isinstance(outgoing.get('networks'), dict):
+        session.update(outgoing['networks'])
+    named = {}
+
+    def build(options, attributes=None):
+        return worker_network.Network(worker_network.network_options(outgoing, options, attributes))
+
+    def of(attributes, path):
+        options = attributes.get('network')
+        return by_name(options, path) if isinstance(options, str) else build(options, attributes)
+
+    def by_name(name, path):
+        if name in path:
+            raise ValueError('Search networks name each other: ' + name)
+        if name not in named:
+            if name in declared:
+                named[name] = of(vars(loaded[name]), path + (name,))  # a source that failed to load has none
+            elif name in defaults:
+                named[name] = of(transport_defaults({**defaults[name], 'name': name}), path + (name,))
+            elif name in session:
+                named[name] = build(session[name])
+            else:
+                raise ValueError('Unknown search network: ' + name)
+        return named[name]
+
+    networks = {}
+    for name in list(loaded):
+        try:
+            networks[name] = by_name(name, ())
+        except (Exception, SystemExit):
+            errors[name] = 'configuration_error'
+            del loaded[name]
+    return networks
 
 
-class ResponseTooLarge(Exception):
-    pass
+def accept_language(locale):
+    if locale and locale != 'all':
+        try:
+            import babel
+            parsed = babel.Locale.parse(locale, sep='-')
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            territory = parsed.territory or parsed.language
+            return f'{parsed.language},{parsed.language}-{territory};q=0.7,en;q=0.3'
+    return 'en-US,en;q=0.9'
 
 
-def run_search(message, processors, errors, initialized, config):
+def request_params(engine, query, spec):
+    """Search parameters for one source, or None when it cannot serve this request."""
+    pageno, time_range = spec['pageno'], spec['time_range']
+    if pageno > 1 and not engine.paging:
+        return None
+    if engine.max_page and engine.max_page < pageno:
+        return None
+    if time_range and not engine.time_range_support:
+        return None
+    return {'query': query, 'category': engine.categories[0] if engine.categories else '',
+            'pageno': pageno, 'safesearch': spec['safesearch'], 'time_range': time_range,
+            'engine_data': (spec.get('engine_data') or {}).get(engine.name, {}),
+            'locale': spec['language'], 'language': engine.language or spec['language']}
+
+
+def online_params(engine, query, params):
+    """HTTP request parameters after the adapter's ``request``; ``url`` is empty when it declined."""
+    params = {**{k: (v.copy() if isinstance(v, dict) else v) for k, v in ONLINE_DEFAULTS.items()}, **params}
+    if engine.send_accept_language_header:
+        params['headers']['Accept-Language'] = accept_language(params['locale'])
+    engine.request(query, params)
+    return params
+
+
+def online_search(engine, query, params):
+    from . import worker_network
+    params = online_params(engine, query, params)
+    if not params['url']:
+        return None
+    options = {'headers': params['headers'], 'cookies': params['cookies'], 'auth': params['auth'],
+               'allow_redirects': params['allow_redirects'], 'raise_for_httperror': params['raise_for_httperror']}
+    for key in ('curl_options', 'impersonate'):
+        if params.get(key):
+            options[key] = params[key]
+    if params.get('verify') is not None:
+        options['verify'] = params['verify']
+    if params.get('max_redirects'):
+        options['max_redirects'] = params['max_redirects']
+    # A request is a GET or, for any other declared method, a POST with its body.
+    method = 'GET' if params['method'] == 'GET' else 'POST'
+    if method == 'POST':
+        for key in ('data', 'json', 'content'):
+            if params.get(key):
+                options[key] = params[key]
+    response = worker_network.request(method, params['url'], **options)
+    response.search_params = params
+    return engine.response(response)
+
+
+def within_budget(results, limit):
+    """The results as a list of packed records, read only as far as the session allows.
+
+    Records are taken one at a time and counted: the first one past ``limit`` records, or past the bytes
+    one reply may have (``worker_network.output_limit``, counted on the packed and encoded records), ends
+    the search as response_too_large. A source that produces its results one by one (the SQLite source
+    reading rows) is asked for nothing beyond that.
+
+    However this ends, what the adapter returned is closed, once: the object itself when it has ``close``, and
+    the iterator made from it when that is another object with a ``close`` (first the iterator).
+    """
+    from . import worker_network
+    limit = min(limit, sys.maxsize)  # a count no list could reach is no limit
+    room, packed, records = worker_network.output_limit(), [], None
+    try:
+        records = iter(results)
+        for record in records:
+            if len(packed) >= limit:
+                raise worker_network.ResponseTooLarge()
+            item = pack(record)
+            room -= len(json.dumps(item, ensure_ascii=False).encode())
+            if room < 0:
+                raise worker_network.ResponseTooLarge()
+            packed.append(item)
+    finally:
+        try:
+            close = None if records is results else getattr(records, 'close', None)
+            if close is not None:
+                close()
+        finally:
+            close = getattr(results, 'close', None)
+            if close is not None:
+                close()
+    return packed
+
+
+def run_search(message, loaded, errors, initialized, config):
+    from . import results as merging, worker_network
+    from .errors import classify
+    from .sources import capabilities
     name = message['engine']
     if name in errors:
         return {'status': errors[name], 'reason': errors[name], 'results': []}
-    proc = processors[name]
-    engine = proc.engine
-    params_spec = message['parameters']
-    from searx.search.models import SearchQuery, EngineRef
-    from searx.network import set_timeout_for_thread, set_context_network_name, reset_time_for_thread
-    from . import worker_network
-    worker_network.http_receipts.clear()
-    started = time.monotonic()
-    set_timeout_for_thread(config['timeout_s'], start_time=started)
-    set_context_network_name(name)
-    reset_time_for_thread()
+    spec = message['parameters']
+    worker_network.begin(name, config['timeout_s'])
+    source = next(c for c in config['sources'] if c['name'].lower() == name)
     stage = 'initialize'
     try:
-        source = next(c for c in config['sources'] if c['name'].lower() == name)
         if source.get('backend') in ('http', 'browser'):
             from .google_search import run
-            value = run(message['query'], params_spec, source, config, send, receive)
+            value = run(message['query'], spec, source, config, send, receive)
             value['results'] = [pack(r) for r in value['results']]
             return value
+        engine = loaded[name]
         if name not in initialized:
             init = getattr(engine, 'init', None)
-            if init and init(next(c for c in config['sources'] if c['name'].lower() == name)) is False:
+            if init and init(source) is False:
                 raise ValueError('Engine initialization declined')
             initialized.add(name)
         stage = 'search'
-        sq = SearchQuery(message['query'], [EngineRef(name, engine.categories[0])],
-                         lang=params_spec['language'], pageno=params_spec['pageno'],
-                         safesearch=params_spec['safesearch'], time_range=params_spec['time_range'],
-                         engine_data=params_spec.get('engine_data', {}))
-        params = proc.get_params(sq, engine.categories[0])
-        capability = {k: plain(getattr(engine, k, None)) for k in
-                      ('paging', 'max_page', 'time_range_support', 'safesearch', 'language_support', 'language', 'engine_type')}
+        capability = merging.plain(capabilities(engine))
+        params = request_params(engine, message['query'], spec)
         if params is None:
             return {'status': 'unsupported_parameters', 'reason': 'Source does not support this query/page/time range',
                     'capabilities': capability, 'results': [], 'http': list(worker_network.http_receipts)}
-        if Path(getattr(engine, '__file__', '')).stem == 'wikisearch' and params_spec['language'] == 'all':
-            return {'status': 'unsupported_parameters', 'reason': 'wikisearch requires an explicit language', 'results': []}
+        if getattr(engine, 'requires_language', False) and spec['language'] == 'all':
+            adapter = Path(getattr(engine, '__file__', None) or name).stem
+            return {'status': 'unsupported_parameters', 'reason': adapter + ' requires an explicit language', 'results': []}
         if engine.engine_type == 'offline':
             results = engine.search(message['query'], params)
         else:
-            results = proc._search_basic(params['query'], params)
+            results = online_search(engine, message['query'], params)
         if results is None:
             return {'status': 'unsupported_parameters', 'reason': 'Adapter declined the request', 'results': []}
-        results = list(results)
-        if len(results) > config['max_results']:
-            raise ResponseTooLarge()
-        # Validate using the real result types before persisting a success.
-        from searx.results import ResultContainer
-        check = ResultContainer()
-        encoded = [pack(r) for r in results]
-        check.extend(name, [unpack(r) for r in encoded])
-        check.get_ordered_results()
+        encoded = within_budget(results, config['max_results'])
+        # Validate with the merge rules before persisting a success.
+        merging.validate(name, [unpack(r) for r in encoded])
         ignored = []
-        if params_spec['safesearch'] and not engine.safesearch:
+        if spec['safesearch'] and not engine.safesearch:
             ignored.append('safesearch')
-        if params_spec['language'] != 'all' and not engine.language_support:
+        if spec['language'] != 'all' and not engine.language_support:
             ignored.append('language')
-        return {'status': 'ok' if results else 'no_results', 'reason': '', 'results': encoded,
+        return {'status': 'ok' if encoded else 'no_results', 'reason': '', 'results': encoded,
                 'ignored_parameters': ignored,
                 'capabilities': capability, 'http': list(worker_network.http_receipts)}
     except Exception as exc:
@@ -321,52 +311,41 @@ def run_search(message, processors, errors, initialized, config):
         if stage == 'initialize' and status == 'parse_error':
             status = 'initialization_error'
         return {'status': status, 'reason': type(exc).__name__, 'results': [],
-                **({'backend':source['backend']} if source.get('backend') else {}),
+                **({'backend': source['backend']} if source.get('backend') else {}),
                 'http': list(worker_network.http_receipts)}
 
 
 def merge(message):
-    from searx.results import ResultContainer
-    import searx.engines
-    rc = ResultContainer()
-    for source in message['sources']:
-        # Result scoring needs metadata, not network initialization or live engines.
-        name = source['name']
-        searx.engines.engines[name] = types.SimpleNamespace(name=name, weight=source.get('weight', 1.0),
-            categories=source.get('categories', ['general']), paging=source.get('paging', False))
-    for group in message['groups']:
-        rc.extend(group['engine'], [unpack(r) for r in group['results']])
-    return {'results': plain(rc.get_ordered_results()), 'infoboxes': plain(rc.infoboxes),
-            'answers': plain(list(rc.answers)), 'suggestions': sorted(rc.suggestions),
-            'corrections': sorted(rc.corrections), 'engine_data': plain(rc.engine_data), 'paging': rc.paging}
+    from . import results as merging
+    groups = [{'engine': g['engine'], 'results': [unpack(r) for r in g['results']]} for g in message['groups']]
+    return merging.merge(message['sources'], groups)
+
+
+def inspect(loaded, errors):
+    from . import results as merging
+    keys = ('engine_type', 'paging', 'max_page', 'safesearch', 'language_support', 'time_range_support', 'about')
+    return {'sources': {n: {k: merging.plain(getattr(e, k, None)) for k in keys} for n, e in loaded.items()},
+            'errors': errors}
 
 
 def main():
+    from . import worker_network
     config = receive()
-    processors, errors = bootstrap(config)
+    loaded, errors = bootstrap(config)
     initialized = set()
     send({'event': 'ready'})
     while True:
         message = receive()
         if message['op'] == 'search':
-            result = run_search(message, processors, errors, initialized, config)
+            result = run_search(message, loaded, errors, initialized, config)
         elif message['op'] == 'merge':
-            # Restore metadata after merge, since the worker is reusable for search.
-            import searx.engines
-            original = dict(searx.engines.engines)
-            try:
-                result = merge(message)
-            finally:
-                searx.engines.engines.clear()
-                searx.engines.engines.update(original)
+            result = merge(message)
         elif message['op'] == 'inspect':
-            result = {'sources': {n: {k: plain(getattr(p.engine, k, None)) for k in
-                       ('engine_type', 'paging', 'max_page', 'safesearch', 'language_support', 'time_range_support', 'about')}
-                       for n, p in processors.items()}, 'errors': errors}
+            result = inspect(loaded, errors)
         else:
             raise ValueError('Unknown worker operation')
         encoded = json.dumps(result, ensure_ascii=False)
-        if len(encoded.encode()) > config['max_bytes'] * 8:
+        if len(encoded.encode()) > worker_network.output_limit():
             result = {'status': 'response_too_large', 'reason': 'Worker output limit', 'results': []}
         send({'event': 'result', 'value': result})
 

@@ -1,8 +1,8 @@
 """ARS gallery's official Search.gov form, then bounded caption-page originals."""
 from urllib.parse import urlencode, urljoin, urlsplit
 from lxml import html
-from searx.network import get
-from searx.exceptions import SearxEngineAccessDeniedException
+from demiflow.collect.native_search.adapter import get
+from demiflow.collect.native_search.adapter import SourceAccessDenied
 from demiflow.services.engines.image_source_utils import bounded, image_row
 
 about = {'website': 'https://www.ars.usda.gov/oc/images/image-gallery/',
@@ -33,7 +33,7 @@ def caption_image(text, page):
 
 def response(resp):
     if resp.status_code != 200 or not resp.text.strip():
-        raise SearxEngineAccessDeniedException()
+        raise SourceAccessDenied()
     doc = html.fromstring(resp.text)
     pages = []
     for href in doc.xpath('//a[@href]/@href'):

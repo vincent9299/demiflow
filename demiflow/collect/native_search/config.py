@@ -12,7 +12,8 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit, parse_qsl
 
-VENDOR = Path(__file__).resolve().parents[2] / '_vendor' / 'searxng'
+ENGINES = Path(__file__).with_name('engines')
+# Format version of native search results; implementation changes show in runtime_id().
 RUNTIME_VERSION = 'native-search-1'
 
 
@@ -50,33 +51,28 @@ def validate_secrets(value, key=''):
                 raise ValueError('Authenticated search URLs must use Secret(env=...)')
 
 
-@lru_cache(maxsize=1)
 def catalog():
-    import yaml
-    return yaml.safe_load((VENDOR / 'searx/settings.yml').read_text())
-
-
-@lru_cache(maxsize=1)
-def baseline_id():
-    return json.loads((VENDOR / 'BASELINE.json').read_text())['baseline_id']
+    """Named sources and their default settings (see ``catalog.SOURCES``)."""
+    from .catalog import entries
+    return {'engines': list(entries().values())}
 
 
 @lru_cache(maxsize=1)
 def runtime_id():
-    files = list(Path(__file__).parent.glob('*.py'))
-    files.append(Path(__file__).resolve().parents[1] / 'proxy.py')
-    files.append(Path(__file__).resolve().parents[1] / 'searxng.py')
-    files.append(Path(__file__).resolve().parents[2] / 'services/engines/wikisearch.py')
+    here = Path(__file__).parent
+    files = [*here.glob('*.py'), *ENGINES.glob('*.py')]
+    files.append(here.parent / 'proxy.py')
+    files.append(here.parent / 'searxng.py')
     from importlib.metadata import version, PackageNotFoundError
     dependencies = {}
-    for name in ('curl_cffi', 'babel', 'flask-babel', 'lxml', 'msgspec', 'python-dateutil', 'isodate',
-                 'mysql-connector-python', 'mariadb', 'psycopg2-binary', 'pymongo', 'playwright'):
+    for name in ('curl_cffi', 'babel', 'lxml', 'playwright'):
         try:
             dependencies[name] = version(name)
         except PackageNotFoundError:
             dependencies[name] = None
-    return digest([RUNTIME_VERSION, baseline_id(), dependencies,
-                   [(p.name, hashlib.sha256(p.read_bytes()).hexdigest()) for p in sorted(files)]])
+    return digest([RUNTIME_VERSION, dependencies,
+                   [(str(p.relative_to(here.parent)), hashlib.sha256(p.read_bytes()).hexdigest())
+                    for p in sorted(files)]])
 
 
 def digest(value):
@@ -86,7 +82,7 @@ def digest(value):
 
 @dataclass(frozen=True)
 class SearchConfig:
-    """Native retrieval policy; source overrides follow bundled SearXNG settings.
+    """Native retrieval policy; source overrides follow the bundled source catalog.
 
     ``engines`` is an ordered list of catalog names or source dictionaries. A
     custom dictionary may use ``module='installed.package.adapter'``. Secrets
@@ -167,8 +163,8 @@ class SearchConfig:
 
     def source_configs(self):
         import copy
+        from .catalog import WITHDRAWN_OPTIONS
         defaults = {c['name'].lower(): c for c in catalog()['engines']}
-        defaults['wikisearch'] = {'name': 'wikisearch', 'engine': 'wikisearch', 'categories': ['general']}
         result = []
         names = set()
         for entry in self.engines:
@@ -207,12 +203,14 @@ class SearchConfig:
                 config['engine'] = spec.origin[:-3]
                 config['_demiflow_module'] = module
                 config['_demiflow_module_sha256'] = hashlib.sha256(Path(spec.origin).read_bytes()).hexdigest()
-            elif config.get('engine') == 'wikisearch':
-                config['engine'] = str(Path(__file__).resolve().parents[2] / 'services/engines/wikisearch')
             else:
                 engine = config.get('engine', '')
-                if not re.fullmatch(r'[a-zA-Z0-9_-]+', engine) or not (VENDOR / 'searx/engines' / (engine + '.py')).is_file():
+                if not re.fullmatch(r'[a-zA-Z0-9_-]+', engine) or not (ENGINES / (engine + '.py')).is_file():
                     raise ValueError('Unknown bundled search adapter; use module for installed custom sources')
+                withdrawn = sorted(set(config).intersection(WITHDRAWN_OPTIONS.get(engine, ())))
+                if withdrawn:
+                    raise ValueError(f'Search source {name} sets options the {engine} adapter no longer has: '
+                                     + ', '.join(withdrawn))
             result.append(config)
         return result
 

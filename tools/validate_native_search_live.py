@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from demiflow import data
 from demiflow.collect import SearchConfig, Secret
 from demiflow.collect.session import WebSession
-from demiflow.collect.native_search.config import baseline_id, runtime_id
+from demiflow.collect.native_search.config import runtime_id
 
 
 def main():
@@ -31,7 +31,7 @@ def main():
         max_candidates=8,request_concurrency=1,concurrency=2,queue_depth=2)
         .map(lambda row: rows.append(row) or row).run_stream())
     report={'date_utc':datetime.now(timezone.utc).isoformat(),'elapsed_s':time.monotonic()-started,
-            'baseline_id':baseline_id(),'runtime_id':runtime_id(),
+            'runtime_id':runtime_id(),
             'validation_scope':'Three explicit-language queries, 12 source attempts maximum before adapter-internal HTTP requests; retries=0; not a sustained load test.',
             'configuration':config.snapshot(),'rows':rows,'metrics':stats.metrics}
     (output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,default=str)+'\n')
