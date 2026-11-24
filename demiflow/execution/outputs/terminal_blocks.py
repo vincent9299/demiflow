@@ -1,6 +1,7 @@
 """Terminal blocks implementation."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict
 from demiflow.execution.contracts.dataflow import BlockPartition, stage_resident_bytes
 from demiflow.execution.contracts.dataflow_errors import DataflowError
