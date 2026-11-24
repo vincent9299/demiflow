@@ -1,4 +1,4 @@
-"""Bundled, isolated SearXNG source execution for Dataset.search_web."""
+"""Native search for Dataset.search_web: isolated workers run the built-in and custom source adapters."""
 from .config import SearchConfig, Secret, search_source_inventory
 from .runtime import NativeSearchSession
 

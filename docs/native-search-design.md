@@ -1,3 +1,5 @@
+> 2026-11-24：内置 SearXNG 已删除，worker 中的适配器加载、HTTP、合并改由 DemiFlow 实现；本文的父进程准入、回执与身份设计不变，SearXNG 相关的描述为历史记录。现行说明见 [native-search.md](native-search.md) 的“兼容性声明”。
+
 # Native search integration — implementation baseline
 
 The supplied working snapshot contains 257 engine modules and 344 named engine

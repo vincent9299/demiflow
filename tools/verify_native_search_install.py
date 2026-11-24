@@ -19,10 +19,9 @@ def main():
     wheel=Path(args.wheel).resolve()
     with zipfile.ZipFile(wheel) as z:
         names=z.namelist()
-        adapters=[n for n in names if '/searx/engines/' in n and n.endswith('.py') and not n.endswith('/__init__.py')]
-        assert len(adapters)==257, len(adapters)
-        for name in ('LICENSE','AUTHORS.rst','BASELINE.json','baseline.tar.gz','LOCAL_CHANGES.md'):
-            assert 'demiflow/_vendor/searxng/'+name in names
+        assert not [n for n in names if '/_vendor/' in n], 'vendored code must not ship'
+        engines=[n for n in names if '/native_search/engines/' in n and n.endswith('.py') and not n.endswith('/__init__.py')]
+        assert engines, 'built-in source adapters are missing'
     with tempfile.TemporaryDirectory(prefix='demiflow-native-install-') as tmp:
         root=Path(tmp); target=root/'installed'
         subprocess.run([sys.executable,'-m','pip','install','--no-deps','--no-compile','--target',str(target),str(wheel)],
@@ -34,11 +33,16 @@ sys.path.insert(0,sys.argv[1])
 from demiflow import data
 from demiflow.collect import SearchConfig,Secret,search_source_inventory
 from demiflow.collect.session import WebSession
-from demiflow.collect.native_search.config import baseline_id, runtime_id
+from demiflow.collect.native_search.config import runtime_id
+import sqlite3
 import demiflow
 assert Path(demiflow.__file__).is_relative_to(Path(sys.argv[1]))
+with sqlite3.connect('source.sqlite') as db:
+ db.execute('create table documents (title text, url text, content text)')
+ db.execute("insert into documents values ('native wheel', 'https://example.org/wheel', 'installed')")
 web=WebSession(cache_path='cache.sqlite',object_directory='objects',search=SearchConfig(
- engines=({'name':'demo','engine':'demo_offline'},),language='en',workers=1))
+ engines=({'name':'demo','engine':'sqlite','database':'source.sqlite',
+  'query_str':'select title,url,content from documents where title like :wildcard'},),language='en',workers=1))
 rows=[]
 stats=(data.from_items([{'requests':[{'request_id':'installed','query':'native wheel','bindings':[]}]}])
  .search_web(requests='requests',output='found',session=web)
@@ -52,8 +56,7 @@ inv=search_source_inventory()
 metrics=stats.metrics['resources']['WebSession:0']['native_search']
 assert metrics['http_requests']==0
 assert metrics['worker_starts']==1
-receipt={'status':'passed','baseline_adapters':len(inv['modules'])-1,
- 'baseline_id':baseline_id(),'runtime_id':runtime_id(),
+receipt={'status':'passed','runtime_id':runtime_id(),
  'named_sources':len(inv['sources']),'platform_sources':len(inv['platform_sources']),
  'metrics':metrics,'candidate_count':len(rows[0]['found'][0]['candidates']),
  'imports_from_installed_wheel':True,'vendor_absent_in_pipeline_interpreter':True}

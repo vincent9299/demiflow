@@ -1,4 +1,3 @@
-include THIRD_PARTY_NOTICES.md
 include BASELINE.json
 recursive-include docs *.md *.json *.csv
 recursive-include tests *.py *.json
@@ -12,6 +11,5 @@ include demiflow/forge/skills/demiforge/SKILL.md
 recursive-include demiflow/workbench/web *.html *.js *.css *.txt *.json
 recursive-include demiflow/workbench/analysis *.json
 recursive-include demiflow/workbench/conversations *.cjs
-recursive-include demiflow/_vendor/searxng *
 global-exclude *.pyc
 global-exclude __pycache__
