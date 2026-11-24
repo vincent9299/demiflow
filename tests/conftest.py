@@ -7,6 +7,8 @@ files keep collecting unchanged.
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from typing import Iterator
 
 import pytest
@@ -17,6 +19,27 @@ from runtime_v3_support import (
     assert_tree_binding,
     make_scope,
 )
+
+
+def pytest_configure(config):
+    """An ordinary session admits against its own capacity domain, never the host's ledger.
+
+    An explicit DEMIFLOW_RESOURCE_ROOT is respected together with its device inventory.
+    Without one the session, its xdist workers and their child processes share one private
+    root. A deployment device inventory is dropped with it: a private device ledger must
+    not advertise the host's real devices a second time. Device tests bring a test inventory.
+    """
+    if 'DEMIFLOW_RESOURCE_ROOT' in os.environ:
+        return
+    config._demiflow_private_domain = tempfile.mkdtemp(prefix='demiflow-test-domain-')
+    os.environ['DEMIFLOW_RESOURCE_ROOT'] = config._demiflow_private_domain
+    os.environ.pop('DEMIFLOW_DEVICE_INVENTORY', None)
+
+
+def pytest_unconfigure(config):
+    directory = getattr(config, '_demiflow_private_domain', None)
+    if directory is not None:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 @pytest.fixture
