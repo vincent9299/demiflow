@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from test_runtime_v3_b import worker_env, _cut, _events
 
 

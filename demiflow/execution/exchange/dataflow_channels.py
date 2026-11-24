@@ -26,7 +26,7 @@ from demiflow.execution.contracts.dataflow import (
     ProducerCompletion, Record, RecoveryImage, RoutedRecord,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from demiflow.execution.contracts.record_codec import RECORD_ENCODING, SEAL_MEDIA_TYPE, SEGMENT_MEDIA_TYPE, STATE_MEDIA_TYPE, _codec_dumps, _decode_payload, _decode_record_document, _encode_payload, _encode_record_document, _encode_value, _ref_document, _validate_artifact_ref, _validate_record, _validate_tree
 from demiflow.execution.exchange.dataflow_bridge import artifact_to_data_ref, record_to_envelope, to_channel_plan_v1
 from demiflow.execution.exchange.dataflow_state import ChannelSetState, RoutingCounters

@@ -5,7 +5,7 @@ here. These facts are views of RunJournal's child scopes and CommitCoordinator
 receipts, suitable for the checked-product adapter and historical result reads.
 """
 import json
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.storage.reading import read_plan_artifact
 
 SCHEMA = 'demiflow.native_stage_commit.v3'

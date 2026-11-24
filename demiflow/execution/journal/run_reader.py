@@ -32,8 +32,8 @@ import sqlite3
 import stat
 import time
 
-from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
-from demiflow.execution.recovery_contract import document as _checked_document
+from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import document as _checked_document
 from demiflow.execution.run_journal import OBSERVATION_COUNT, _node_document, _node_key
 
 __all__ = ['JOURNAL_BYTES', 'RunReadError', 'RunReader', 'open_journal', 'read_run',
@@ -142,7 +142,7 @@ def read_run(directory, *, timeout=1.0, deadline=None, transaction=True):
 
 
 def fit_table_prefix(attempt, action_id):
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     return 'fit-table-' + identity([attempt, action_id]) + '-'
 
 
@@ -215,7 +215,7 @@ class RunReader:
         _check_attempt(attempt)
         if not self.has_table('runtime_sources'):
             return None
-        from demiflow.execution.recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         identifier(action_id)
         identifier(occurrence)
         def source(key):
@@ -1232,7 +1232,7 @@ def read_maintenance_snapshot(journal, expected_attempt, expected_revision, *, t
     """Read one original maintenance snapshot without claiming or proving a stop."""
     import json
     from demiflow.errors import ExecutionConflict
-    from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES
+    from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES
     from demiflow.execution.outputs.lance_sink import create_target_absent_binding
     with read_run(journal.directory, deadline=journal._maintenance_deadline) as reader:
         state = reader.document('execution_state', 65536)

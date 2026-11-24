@@ -14,7 +14,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.record_codec import admit_workspace, metadata_bytes, decode_metadata, decode_frame, decode_document, frame_parts, read_chunk_bytes, line_limit, _typed_shape, _json_shape
 from demiflow.execution.storage.streams import read_document, frame_stream
 from demiflow.execution.storage.segments import SegmentForest, RECORDS_MEDIA, SEGMENTS_MEDIA, range_segments, block_totals
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 SCHEMA = 'demiflow.literal-source.v1'
 MEDIA = 'application/vnd.demiflow.source-manifest.v3'

@@ -187,7 +187,7 @@ def _invoke_scoped(instance, value, records, spec):
 
 def _business_miss(exc, cfg):
     from demiflow.data.runtime_contract import RuntimeContractError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.services.request_limits import ServiceStopped
     from demiflow.operator_llm.journal import UncertainPromptCall
     # Only the callback deadline class certifies that cancellation drained;
@@ -266,7 +266,7 @@ def invoke_unary(
                 observe(time.perf_counter_ns() - started)
         if not isinstance(result, Mapping):
             if position.get('queue_delivery_ref'):
-                from demiflow.execution.recovery_contract import RecoveryContractError
+                from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Task map must preserve exactly one row')
             raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
         yield output_record(record.record_id, position, result, sequence, services)
@@ -320,7 +320,7 @@ def invoke_unary(
                 observe(time.perf_counter_ns() - started, miss)
         if (position.get('queue_delivery_ref') and position.get('queue_delivery_kind') != 'producer'
                 and not isinstance(result, Mapping)):
-            from demiflow.execution.recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Task map must preserve exactly one row')
         if result is None:
             return

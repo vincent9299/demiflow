@@ -7,7 +7,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import Bounds, ExchangeSpec
 from demiflow.execution.exchange.dataflow_state import ChannelSetState
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 
 

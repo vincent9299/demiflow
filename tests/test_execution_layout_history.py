@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.seal.program_identity import describe
 from demiflow.execution.seal.program_pickle import load_payload, load_private_payload
 
 REPO = Path(__file__).resolve().parents[1]
@@ -34,6 +34,9 @@ CARRIERS = {
     'lance_predicate': ['scalar_equal'],
     'stream_checkpoint': ['StreamCheckpoint'],
     'file_ref': ['JsonArtifactRef', 'save_json_artifact'],
+    'recovery_contract': ['RecoveryContractError', 'UnresolvedCommit', 'RunRef',
+                          'CommitContext', 'SourcePosition', 'identifier', 'document',
+                          'identity', 'validate_receipt'],
     'plan_facts': ['source_facts', 'operation_facts', 'operation_capability', '_catch_facts',
                    '_native_operation_facts', '_thaw_json', '_model_map_options',
                    '_deduplicate_arguments', '_specialization_domain'],
@@ -522,7 +525,7 @@ def test_changed_unlink_cannot_impersonate_original_run_journal(original_carrier
         unlink_unprotected_artifact.__code__.replace(
             co_consts=(*unlink_unprotected_artifact.__code__.co_consts, 'changed-unlink')))
     from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.recovery_sdk_v3 import authentic_source_global
+    from demiflow.execution.seal.recovery_sdk_v3 import authentic_source_global
     assert not authentic_source_global(RunJournal, 'demiflow.execution.run_journal')
     assert describe(RunJournal) != original_carriers['RunJournal'][1]
 
@@ -547,7 +550,7 @@ def test_old_prompt_binding_requires_bound_response_projection(original_carriers
 def test_original_worker_authority_requires_actual_context_owner(original_carriers, monkeypatch, name):
     from demiflow.execution.pipeline import run_context
     from demiflow.execution.worker.authority import WorkerAuthority
-    from demiflow.execution.recovery_sdk_v3 import authentic_source_global
+    from demiflow.execution.seal.recovery_sdk_v3 import authentic_source_global
     fn = getattr(run_context, name)
     body = getattr(fn, '__wrapped__', fn)
     monkeypatch.setattr(body, '__code__', body.__code__.replace(co_consts=(*body.__code__.co_consts, 'changed')))
@@ -572,7 +575,7 @@ def test_original_checked_class_rejects_observation_slot_substitution(original_c
     from types import FunctionType
     from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.execution.journal import dataflow_operator_observations as observations
-    from demiflow.execution.recovery_sdk_v3 import authentic_source_global
+    from demiflow.execution.seal.recovery_sdk_v3 import authentic_source_global
     fn = observations.progress
     if mutation == 'slot':
         monkeypatch.setattr(CheckedExecution, 'progress', lambda *args: None)
@@ -600,7 +603,7 @@ def test_original_checked_class_rejects_observation_slot_substitution(original_c
 def test_relocated_keyword_default_authenticates_its_actual_owner(monkeypatch, changed):
     from types import FunctionType
     from demiflow.execution.sources import queue_history
-    from demiflow.execution.recovery_sdk_v3 import _layout_source_type
+    from demiflow.execution.seal.recovery_sdk_v3 import _layout_source_type
     parent = queue_history.inspect_result
     original = parent.__kwdefaults__['check_stop']
     assert _layout_source_type(original) is not None

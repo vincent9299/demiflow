@@ -15,7 +15,7 @@ from demiflow import data
 from demiflow.data import plan as ops
 from demiflow.data.plan import CallableSpec
 from demiflow.execution.seal.plan_facts import operation_capability, operation_facts
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.planning.dag import _operation_semantics, compile_logical_dag
 

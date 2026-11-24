@@ -70,7 +70,7 @@ def _journal(directory):
 
 def _scope(directory):
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RunRef
+    from demiflow.execution.contracts.recovery_contract import RunRef
     prior = _journal(directory).recovery_identity() if directory.exists() else None
     if prior:
         return RunContext.resume(RunRef(str(directory), prior['run_id']))

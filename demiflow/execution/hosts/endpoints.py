@@ -233,7 +233,7 @@ class _EndpointBase:
 
     def send_business(self, command):
         from demiflow.execution.worker.bootstrap import _send_encoded_messages, _MAX_CONTROL_BYTES, _CONTROL_BATCH_EVENTS
-        from demiflow.execution.recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         command = self._activity_command(command)
         raw = document({"type": "dataflow_command", "command": command})
         if getattr(self, '_business_batch', None) is None:
@@ -265,7 +265,7 @@ class _EndpointBase:
 
     def _accept_final_observations(self, result):
         raw = result.get('final_progress', [])
-        from demiflow.execution.recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         document(raw, self._services.bounds.max_control_bytes)
         if type(raw) is not list:
             raise DataflowError('INVALID_CONTRACT', 'final observations must be a bounded list')

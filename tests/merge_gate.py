@@ -46,12 +46,12 @@ GUARDS = (
 
 # The seven files no change may touch without an explicit decision.
 FROZEN = {
-    'demiflow/execution/raw_fetch.py': '643eda211357068415954e4b856096d018c7883d9331bed2b7fb4e124ef245f2',
-    'demiflow/execution/queue_execution.py': '9831442e3605f337a2913df4fd586bf90f7079019572d4535e5750f8cb638d3f',
-    'demiflow/execution/queue_sinks.py': 'b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074',
-    'demiflow/execution/queue_source.py': '637da9b68276d02a3a4836ef0002fbe8f853ab3584894e7edbece1169bcf9a35',
-    'demiflow/execution/contracts/exchange.py': 'dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2',
-    'demiflow/planning/dag.py': 'df6390bb1235e5e493bfcbd8c664628f673c3dd2f3fb3be693ce7e6ba38003f5',
+    'demiflow/execution/raw_fetch.py': '2626cf3cb04024c1609b018f1fbbe2fb4c8edeba1f7ad02ba25707756ec73b3b',
+    'demiflow/execution/queue_execution.py': '39557d55eb963be0a03be1bc5bb150bedb9449ca3c1e7b63cc98f0479b237f0c',
+    'demiflow/execution/queue_sinks.py': '443fe4603cd77cb7978d47ba9a03d8ee5779e42ec77426c05bd9c8dd1f280d6d',
+    'demiflow/execution/queue_source.py': '77951567918906b057c24f6dc908cdf919c640f7a4601ca07e84661866898aa9',
+    'demiflow/execution/contracts/exchange.py': 'ef3eebd8df881b09f62e86002924fde991e276f499cd27e9b6bcf359ec0f84ce',
+    'demiflow/planning/dag.py': 'be22c2dc4914e24731cc68690949ddc07481f53112b500562c8946bb7ed65728',
     'demiflow/resources/contracts.py': '61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff',
 }
 

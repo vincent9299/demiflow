@@ -88,7 +88,7 @@ with scope as run,data.local_execution():
 
 def test_prepend_cancel_after_prefix_reaches_downstream(tmp_path):
     import threading
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     ready=tmp_path/'seen'
     def endless():
         n=3

@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Protocol
 import re
 
-from ..recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 
 def _text(value, label):

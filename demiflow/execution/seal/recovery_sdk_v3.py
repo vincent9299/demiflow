@@ -14,7 +14,7 @@ import sys
 from types import CodeType, FunctionType
 
 from demiflow.execution.contracts.recovery_sdk_v3 import code_record, LAYOUT_RELOCATIONS
-from .recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 # Current source SHA-256, v3 pre-move source SHA-256.
@@ -24,21 +24,21 @@ _REVISIONS = {'demiflow.collect.net': ('486592d6e616d61145b22a9f4169812ed5f3d4a5
                           '0acad54f342ecf3269418d44d0f9e978ebcfa92bcdbe4b47e92d112c87b5ccd0'),
  'demiflow.execution.request_limits': ('431b27e1065e3fdc02cfd708d60c20b924a1489c78ff2bd6afd36546cf56e134',
                                        '54bc1fa489826c74c7d67432fdeaba9fb9e54131d681936b5c2ea18180c117e9'),
- 'demiflow.data.dataset': ('8af95006842edfce80fce04ced8e80ce321a8d7450d33c3b09b8f91c61d32ec7',
+ 'demiflow.data.dataset': ('3a5eef124cf8eb85e280f24be742f9ccf239920646c80f58aa48537a2ecaec35',
                            '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'),
  'demiflow.data.sources': ('4c349450034860cbaaa81d7b88e39b5caeea6c9ea56849e031804007cd226e79',
                            '3033f1f14141c9759d29679ee5275492bfbc83bcd41b51c7bf9962afd115387f'),
  'demiflow.execution.local_kernel': ('5fac23cf24cf8e2b27e79b36f9faf28ab2a0104517a13d1c02a249a94a74cb24',
                                      'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'),
- 'demiflow.planning.dataflow_graph_adapter': ('1c38779585642c638837951296a61ac58cf3f47298fcab83ed1153f69e14e1d0',
+ 'demiflow.planning.dataflow_graph_adapter': ('fe4b4be2f8a9dc80a2d0ad28a9a21475641eea6141f9e7f56c1dfc12ee5cf006',
                                               '0ab9e3db6f4dffe74c2f614ac887ce0a69749910b083db63eaa95c819652cbcf'),
- 'demiflow.data.result_cache': ('e3020b591ab8dec8be60f70b63a02e9413a2cfef38afb6b7d6bb21917b59c0f2',
+ 'demiflow.data.result_cache': ('28962de9fd0c6a5296ce522761c06cbe4ae2c25c476ae6523f5f26f95322521d',
                                 'dc6858f90a4ea48fb5c950027e405084d9f820ba26b3159592b38a9f42d46788')}
 _REVISIONS.update({'demiflow.data.read_api': ('f3237c8a7de9cf5b7c1d920e7cabd19d4445b05c1e6230c92d1f1f2bfb78914e',
                             '1ff5e8431b684f758d2bc2bbe4818783c58ef4fb604e1ad564c4bc9c61f650f1'),
  'demiflow.data.guards': ('77fca99debe0b691ef1a64a75de9fae0f8bb1f2921c5ecd20b0b3e6cfed77c7c',
                           'ce6022c75921d310d962578306c85ed71bd4fa76e88164efcd8834c848c17cec'),
- 'demiflow.lance.registered_write': ('9beb14d68e46415907775375b19e98114dd03173260dfa9e521ab638c4629079',
+ 'demiflow.lance.registered_write': ('9f515121aca863e91938b410e8cad85204cdabe741ad825bbded3ed36fe467a5',
                                      '6f04e5f92a72de79c08a8a9d73eaff71f984bb69cc59faf17852e799889456ec')})
 
 # Measured import operands only; executable bodies are authenticated below.
@@ -80,7 +80,7 @@ _DATASET_METHODS = {'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc237532
                               '578db7fdd0c271d21c4721151756b3852d4dd62dd19786b64070da4c53a7967c'),
  'Dataset.checkpoint_lance_async': ('20e3b3b1f431809fb13139714d8b757757e46dc5fe449a7ec1e1b9f45f82d0a2',
                                     'a9bd4397a371cad04a16dd30e1ee65efe0f40490344506b4981d1cfc7389deaf'),
- 'Dataset.run_stream': ('f59366662a305d24c341cd26728a07e7d9c5b150486d62e50e03714303c9f2a5',
+ 'Dataset.run_stream': ('655d02cdc0def6e81a841d1d56a305d7bd86e578acb75a520af8d2be9196540d',
                         '21fc84b10feaeaeb469142f7273a161e1edd8e31e87d047575008676a8ed90fc'),
  'Dataset.group_batches': ('187d93ef1dbba44417fcbc2f5b9efc373a7a3a642dd2fa38ea788209d981a984',
                            'f7718d0b3fd97703efd2b984cea446579798f3dee36d637022745c91e9805125'),
@@ -88,8 +88,10 @@ _DATASET_METHODS = {'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc237532
                         '8e513b315f586801b301bf457f5d6d7bddb04571dcbaef25441578eaeb3eaf4b'),
  'Dataset.lookup_lance': ('8423dcd182b1c0af44540a50665065874e089a44b802406f22c201a014f63452',
                           'a19a4c9ce708e85aa09f1060b82a5ead02693c1339c3cdea55d556bdb14e7790'),
- 'Dataset.deduplicate': ('13d86a4d6a81e243aaff3d4ffc0ea7689b0892d64f847fd03c05b6f967d9a591',
-                         'dd486724d1ccd3946d68b998f82d819a2c1eac105662adbe9b46b67fd21db58e')}
+ 'Dataset.deduplicate': ('de420504149d1d6e56e8d651d431015492aa2f254adb2a98b3a0cc477859e324',
+                         'dd486724d1ccd3946d68b998f82d819a2c1eac105662adbe9b46b67fd21db58e'),
+ 'Dataset.write_datasink': ('68a90808d036f8ab4e6db9925ba22c1ac9b2530d7195781dbfde17ffe32c766e',
+                            'fde84c1d9bd72baea6cd92bdc3efb61b8865b53be5532861eefaef2106479009')}
 
 
 # Published captures contain public client getters and the bounded row queue's
@@ -184,7 +186,7 @@ def _restored_source(fn, module, source):
     if module is None:
         # A cold worker can unpickle a closed SDK lambda without importing
         # its parent module. Resolve only the already allowlisted SDK source.
-        installed = Path(__file__).parents[1].joinpath(*fn.__module__.split('.')[1:]).with_suffix('.py')
+        installed = Path(__file__).parents[2].joinpath(*fn.__module__.split('.')[1:]).with_suffix('.py')
     else:
         installed = module.__file__
     if _same_module_file(filename, str(installed)):
@@ -357,7 +359,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                 '0a882b37d1543344a1ffe8736a25e9b1aee2bba4de166349940d38fb95231878']},
  'demiflow.execution.sources.legacy_queue.LegacyQueueHistoryDatasource': {'old_module': 'demiflow.execution.legacy_queue',
                                                                           'old_source': '5fe509ab9503850c6979648145056e3399a2d0ee823754e1d627b013edf52070',
-                                                                          'source': '9a753ea8508d8958bc369e83c67704b55cb9a19fbb7985864059080fbfb1e272',
+                                                                          'source': '727a2fafc81433e11bf32f7d1731a94c3699c435f227f0ff871bbc89d96b131c',
                                                                           'methods': {'__init__': ['4ae277bea5c1e24191add012bffe7ffe2d2e05960f9dfcc0905021ab8870208c',
                                                                                                    '4ae277bea5c1e24191add012bffe7ffe2d2e05960f9dfcc0905021ab8870208c'],
                                                                                       'snapshot_identity': ['c04d235814cd2f9ad1678b90055882cb4dbf86ba637e9eb4945502b63d6be577',
@@ -409,7 +411,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                                       '5b3db5429597954b884f7638f667564e387bc7144d2c04812dd03cf4c2ed14fb']}},
  'demiflow.execution.native_queue.dataflow_acquisition_call.QueueSourceDeclaration': {'old_module': 'demiflow.execution.dataflow_acquisition_call',
                                                                                       'old_source': '597a8f30caa94c77fcb6b25b68e6793d45d2f3608ffd5b8e7a8ec4dd39bda40a',
-                                                                                      'source': '070de260aea76f9cd54a982d8ae4b477d26f0425fbf60e252e3155d81b7fdaa9',
+                                                                                      'source': '363465db148c43004e97af506c76bcdb1068292803748a255bd15cc6ebced63a',
                                                                                       'methods': {'snapshot_identity': ['69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7',
                                                                                                                         '69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7'],
                                                                                                   'recovery_identity': ['69bfa6567d9c3e07eb4254ae209103c4bb2e78dc98982b4ccfb16f12b70fe4f7',
@@ -460,7 +462,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                                    '__hash__': {'8a3d4fecaa32782bdeb9d03af0ff10207692c481e2973776c104406fbbb2a00e': '8a3d4fecaa32782bdeb9d03af0ff10207692c481e2973776c104406fbbb2a00e'}}},
  'demiflow.execution.native_queue.dataflow_acquisition_call.AcquisitionCall': {'old_module': 'demiflow.execution.dataflow_acquisition_call',
                                                                                'old_source': '597a8f30caa94c77fcb6b25b68e6793d45d2f3608ffd5b8e7a8ec4dd39bda40a',
-                                                                               'source': '070de260aea76f9cd54a982d8ae4b477d26f0425fbf60e252e3155d81b7fdaa9',
+                                                                               'source': '363465db148c43004e97af506c76bcdb1068292803748a255bd15cc6ebced63a',
                                                                                'methods': {'__init__': ['6ed653d87436ea1a16c4fdd5d83027371db16c1e2e86e0f09eabd3659fe20583',
                                                                                                         '6ed653d87436ea1a16c4fdd5d83027371db16c1e2e86e0f09eabd3659fe20583'],
                                                                                            'bind': ['1047150a7ea9a0a43c69c427276a1ae0700d5c00d00ee439c54147b62fa6a5dc',
@@ -493,7 +495,7 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                             '__call__': {'02292d155e58ccde35f0e75eed45eae60fce79de267ba402bd1d56a23a0a3aa6': '15864c89112752aeb587ddb71aedf94e871c79cfdc49d23ba56d55a7e10060e2'}}},
  'demiflow.execution.sources.literal_source.LiteralSourceReference': {'old_module': 'demiflow.execution.literal_source',
                                                                       'old_source': '8348d18a5138ba595f97c105efdd67c8a8c34f64c2336ea1edb56efb4c1f9ee3',
-                                                                      'source': '2ab78c36e7b1c667941b74a03ea3fb84bd93cf189a56db5fcb014fa6e6c93751',
+                                                                      'source': 'a95189eb2df6f70a749fa7c1a6460d938389aee0bb341f296ef09bfaa8533584',
                                                                       'methods': {'__init__': ['15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82',
                                                                                                '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'],
                                                                                   '__repr__': ['67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc',
@@ -505,7 +507,31 @@ _LAYOUT_SOURCE_TYPES = {'demiflow.execution.pipeline.package_loader.pipeline_bun
                                                                                   '__delattr__': ['35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb',
                                                                                                   '35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb'],
                                                                                   '__hash__': ['634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1',
-                                                                                               '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1']}},
+                                                                                               '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1']},
+                                                                      'optimization_variants': {'0': {'__init__': {'15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82': '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'},
+                                                                                                      '__repr__': {'67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc': '67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc'},
+                                                                                                      '__eq__': {'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82': 'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82'},
+                                                                                                      '__setattr__': {'9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a': '9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a'},
+                                                                                                      '__delattr__': {'35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb': '35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb'},
+                                                                                                      '__hash__': {'634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1': '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1'}},
+                                                                                                '1': {'__init__': {'15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82': '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'},
+                                                                                                      '__repr__': {'67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc': '67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc'},
+                                                                                                      '__eq__': {'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82': 'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82'},
+                                                                                                      '__setattr__': {'9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a': '9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a'},
+                                                                                                      '__delattr__': {'35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb': '35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb'},
+                                                                                                      '__hash__': {'634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1': '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1'}},
+                                                                                                '2': {'__init__': {'15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82': '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'},
+                                                                                                      '__repr__': {'67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc': '67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc'},
+                                                                                                      '__eq__': {'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82': 'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82'},
+                                                                                                      '__setattr__': {'9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a': '9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a'},
+                                                                                                      '__delattr__': {'35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb': '35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb'},
+                                                                                                      '__hash__': {'634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1': '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1'}}},
+                                                                      'variants': {'__init__': {'15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82': '15d22ac1354664b437c9f6bcd1491af3f8a745abb1b561d9eaf10bf3aa3afb82'},
+                                                                                   '__repr__': {'67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc': '67deaf69a2f6a014e3d72d57980f0891fb4525004ae6aee457d30e6039a467fc'},
+                                                                                   '__eq__': {'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82': 'e85bcbefb6644f0266cc463d5986622fc303fce6d67beed2f0340e2410c6fe82'},
+                                                                                   '__setattr__': {'9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a': '9825bf8c29053108b8283c775dda062f6d284636155117372d087fba07e40d6a'},
+                                                                                   '__delattr__': {'35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb': '35a7690238d62bdabf270d743dbbdbcfd815bbe8a685dca4e78cddfe870f6bdb'},
+                                                                                   '__hash__': {'634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1': '634bb8370d1a15ed62178d2c0275a60966a64a945d5dccd2592da68e09990be1'}}},
  'demiflow.execution.pipeline.package_loader.PipelineBundleRef': {'old_module': 'demiflow.execution.contracts.pipeline',
                                                                   'old_source': '98b4717cfa7c3989411c3021a9254e69756b405ecb75ee134220aa0667d27f9a',
                                                                   'source': '3958b7f612a3ee4e994cd599d6072967e9311696ec15d68bb42908795f924212',
@@ -958,7 +984,7 @@ def native_pickle_function(code, globals, name, argdefs, closure):
     """
     import pickle
     from importlib import import_module
-    from .recovery_contract import document, RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
 
     if type(code) is not CodeType or type(globals) is not dict:
         return None

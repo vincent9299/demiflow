@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 
 import json
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import compute_participant_id
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.scheduler.residency import partition_phases
 
 FINITE_SCHEMA = 'demiflow.finite_residency.v1'

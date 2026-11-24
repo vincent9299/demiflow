@@ -16,7 +16,7 @@ def test_source_open_pull_close_has_only_original_run_view(tmp_path, mode, failu
 
     def factory():
         from demiflow.execution.pipeline.run_context import current_run, current_action
-        from demiflow.execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
         def record(phase):
             run = current_run()

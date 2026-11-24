@@ -30,7 +30,7 @@ from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.contracts.checkpoint import validate_checkpoint_manifest
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.ray import RayDatasetExecutor
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 

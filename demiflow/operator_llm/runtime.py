@@ -48,7 +48,7 @@ class InProcessOperatorLLMCoordinator:
         self._execution_binding = None
 
     def bind_execution(self, context, node_id):
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         binding = (context, 'requests-' + identity(node_id))
         if self._execution_binding is not None and self._execution_binding != binding:
             raise RuntimeError('A request coordinator cannot be shared across execution nodes')

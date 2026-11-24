@@ -8,7 +8,7 @@ from __future__ import annotations
 import inspect
 import json
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 import asyncio
 from contextlib import ExitStack, suppress, asynccontextmanager
 import fcntl

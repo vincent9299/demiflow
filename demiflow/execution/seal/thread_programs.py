@@ -27,7 +27,7 @@ _KEYS = {}
 
 
 def marker(occurrence_id, code_identity):
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     return {'schema': 'demiflow.thread_attempt.v1', 'capability': 'attempt_only',
             'program_key': identity(['thread-program-v3', occurrence_id, code_identity])}
 

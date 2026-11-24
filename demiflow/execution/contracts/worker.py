@@ -5,7 +5,7 @@ owned by resource protocol v1 (module A); messages here reference their field
 names and semantics without redefining them. The worker state machine names
 are inherited verbatim; no parallel state machine is introduced.
 """
-from ..recovery_contract import document, identifier
+from demiflow.execution.contracts.recovery_contract import document, identifier
 from .envelope import (
     WORKER_PROTOCOL_VERSION, OperationReceipts, check_boot, check_controller_epoch,
     check_grant, validate_envelope,

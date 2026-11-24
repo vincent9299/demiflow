@@ -418,7 +418,7 @@ from demiflow.execution.operator_bindings import dataflow_models as models
 from demiflow.planning import dataflow_models as model_plan
 from demiflow.execution.kernels import model_state
 from demiflow.execution.operator_bindings import dataflow_model_journal as journal
-from demiflow.execution.recovery_contract import identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import identity, RecoveryContractError
 from demiflow.operator_llm.journal import RequestRecord, request_key, canonical
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION, native_request_budget
 from demiflow.execution.operator_bindings.dataflow_model_journal import NativePromptRecovery, _BorrowedJournal

@@ -14,7 +14,7 @@ import pytest
 from demiflow.execution.worker import mailbox as mailbox_module
 from demiflow.execution.contracts.dataflow import ExchangeSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_h import BIG, mk_event
 

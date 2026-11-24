@@ -33,7 +33,7 @@ from demiflow.execution.contracts.dataflow import (
     WorkerJournalPort,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.operator_llm.journal import RequestRecord, canonical, request_key
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
 

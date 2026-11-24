@@ -2,10 +2,7 @@
 from dataclasses import asdict
 
 from ..data.datasink import WriteContext, Datasink
-from .recovery_contract import (
-    CommitContext, SourcePosition, RecoveryContractError, MAX_SINKS, MAX_STATES,
-    identifier, validate_receipt, identity,
-)
+from demiflow.execution.contracts.recovery_contract import CommitContext, SourcePosition, RecoveryContractError, MAX_SINKS, MAX_STATES, identifier, validate_receipt, identity
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 
@@ -50,7 +47,7 @@ class CommitCoordinator:
             for method in ("prepare", "commit", "inspect", "abort"):
                 if not callable(getattr(sink, method, None)) or getattr(type(sink), method, None) is getattr(Datasink, method):
                     raise RecoveryContractError("Sink lacks native durable " + method)
-        from .recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         state_bytes = sum(len(document(value, self.run.limits['max_state_bytes'])) for value in states.values())
         if state_bytes > self.run.limits['max_state_bytes']:
             raise RecoveryContractError('Aggregate actor state exceeds byte budget')
@@ -181,7 +178,7 @@ class CommitCoordinator:
                         fault_point("after_sink_commit_before_receipt", context.commit_id)
                         verified = sink.inspect(prepared['sinks'][sink_id], context)
                         if verified is None or verified != receipt:
-                            from .recovery_contract import UnresolvedCommit
+                            from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
                             raise UnresolvedCommit('Sink publication returned without matching inspect evidence')
                     receipt = validate_receipt(receipt, context, sink_id)
                     if publication_db is None:

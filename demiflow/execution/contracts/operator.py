@@ -7,7 +7,7 @@ paths and CallableSpec.create/instantiate semantics are untouched.
 import inspect
 import re
 
-from ..recovery_contract import document, identifier, identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity, RecoveryContractError
 from .errors import ProtocolError
 
 SPEC_SCHEMA = "demiflow.operator_spec.v1"

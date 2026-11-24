@@ -13,7 +13,7 @@ import threading
 from demiflow.data.datasink import Datasink
 from demiflow.objects import LocalObjectStore
 from demiflow.execution.outputs.block_sink import BlockSink
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 from demiflow.execution.storage.object_resources import object_name, stage_object, verify_object
 from demiflow.execution.contracts.dataflow_codec import image_request_budget

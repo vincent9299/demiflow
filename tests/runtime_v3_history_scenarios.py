@@ -33,8 +33,8 @@ def _digest(path):
 def prompt_identities():
     from demiflow import data
     from demiflow.operator_llm.parser import parse_prompt_pack
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.recovery_identity import plan_identity
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import plan_identity
     from demiflow.execution.seal.plan_facts import operation_facts
     from demiflow.execution.seal.business_sources import plan_code_pin
 
@@ -136,8 +136,8 @@ def original_native_history(root):
     import lance
     from demiflow.execution.run_journal import RunJournal
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RunRef
-    from demiflow.execution.recovery_identity import platform_identity
+    from demiflow.execution.contracts.recovery_contract import RunRef
+    from demiflow.execution.seal.program_identity import platform_identity
     from demiflow.execution.journal.dataflow_history import load_execution_version
     from demiflow.execution.checkpoint.history import validate_resume_compatibility
     from demiflow.workbench.runs.facts import read_sealed_plan

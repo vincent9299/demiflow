@@ -3,7 +3,7 @@ import json
 
 from ..contracts.dataflow import Record
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 _POSITION_FIELDS = ('fragment_id', 'row_offset', 'row_id')
 

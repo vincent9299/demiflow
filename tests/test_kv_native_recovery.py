@@ -12,7 +12,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext, current_run
 from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 from demiflow.kv import KVDatasink, SQLiteKV
 
 WORKTREE = Path(__file__).resolve().parents[1]

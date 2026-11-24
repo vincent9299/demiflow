@@ -12,7 +12,7 @@ from .queue_contract import (QueueConfig, QueueLimits, ProducerSourceSpec, Produ
     QueueSnapshot, HistoryReadLimits, QueueIncomplete, QueueIdleTimeout,
     StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit, queue_config, task_message)
 from demiflow.execution.native_queue.queue_sql import QueueDatabase
-from .recovery_contract import RecoveryContractError, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
 
 
 @dataclass(frozen=True)

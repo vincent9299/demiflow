@@ -143,7 +143,7 @@ def test_missing_setter_cannot_deliver_unverified_owner(original_callbacks,name)
 
 def test_business_closure_and_current_sql_column_identity_are_unchanged(original_callbacks):
     from demiflow.operators.relational_sql import Column
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     fn,values=load_payload([(original_callbacks/'business.pickle').read_bytes()])
     assert fn(4)==11 and values=={'unchanged':[1,2]}
     assert describe(Column)['module']=='demiflow.operators.relational_sql'

@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 
 from demiflow.execution.contracts.dataflow import QueueBinding, QueueCommand, ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.worker.row_scope import current_row_scope
 
 

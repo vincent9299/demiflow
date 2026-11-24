@@ -7,7 +7,7 @@ from demiflow import data
 from demiflow.errors import ExecutionConflict
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.storage.objects import _pin_identity
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def test_materialized_release_after_scope_preserves_other_owner_and_history(tmp_path):

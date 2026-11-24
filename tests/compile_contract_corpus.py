@@ -626,7 +626,7 @@ CAPTURED = {
 
 # -- compiling and projecting -----------------------------------------------------
 def _describe(value):
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     try:
         return describe(value)
     except Exception as exc:

@@ -13,7 +13,7 @@ from demiflow.execution.storage.staging import DriverArtifactPort
 from demiflow.execution.journal.dataflow_authority import DriverJournalService
 from demiflow.execution.contracts.dataflow_codec import encode_artifact_reference as _ref_to_json
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
 from demiflow.operator_llm.journal import RequestRecord, UncertainPromptCall
 

@@ -8,7 +8,7 @@ from ..data.plan import (AsyncMapOp,MapOp,BoundMapOp,SelectColumnsOp,
 from ..data.sources import DatasourceSource
 from .queue_source import QueueDatasource
 from .queue_sinks import QueueResultSink
-from .recovery_contract import RecoveryContractError,SourcePosition,identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.worker.row_scope import current_row_scope
 
 
@@ -25,7 +25,7 @@ def stateless_map_identity(spec):
     no method reads/captures its receiver. Mutable/configured/resource actors
     require a native adapter; snapshot_state alone cannot make a task stateless.
     """
-    from .recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     target=spec.target
     if inspect.isfunction(target):return describe(spec)
     if inspect.ismethod(target):
@@ -63,7 +63,7 @@ def stateless_map_identity(spec):
 
 def validate_topology(source,plan,sink,*,mode='sink',action=None):
     from .raw_fetch import RawFetch
-    from .recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     if type(sink) is not QueueResultSink or source.settlement!=mode:
         raise RecoveryContractError('Automatic queue settlement requires exactly QueueResultSink and matching settlement mode')
     if source.config.declaration()!=sink.config.declaration() or source.pool!=sink.pool:

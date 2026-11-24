@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from demiflow import data
 from demiflow.queue import QueueChannel,QueueConfig,ProducerSourceSpec,QueueResultSink
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.queue_contract import HistoryReadLimits,HistoryReadLimit
 
 

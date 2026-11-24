@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from demiflow.data.plan import CallableSpec, LogicalPlan
     from demiflow.data.sources import SourcePlan
     from demiflow.execution.executors.base import DatasetExecutor
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.resources.contracts import WorkerLaunchSpec
     from demiflow.resources.manager import ResourceManager

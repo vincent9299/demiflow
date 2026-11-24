@@ -935,7 +935,7 @@ class Dataset:
         typed = DeduplicateOp(**{**vars(operation), 'label': 'deduplicate_'+output},
                               on=fields, key=key, output=output)
         from demiflow.execution.seal.plan_facts import _deduplicate_arguments
-        from ..execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         actor = operation.callable.target.__self__
         actor._deduplicate_declaration = identity(_deduplicate_arguments(actor))
         from ..planning.dataflow_declaration import validate_native_operation
@@ -1055,7 +1055,7 @@ class Dataset:
         写放最前（await 段在中断路径可能被取消截断，契约见 stream.py）。
         """
         if checkpoint is not None:
-            from ..execution.recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Explicit checkpoint mode is retired; use RunContext recovery')
         if queue_factory is not None:
             from ..errors import UnsupportedExecutionOptionError
@@ -2081,7 +2081,7 @@ class Dataset:
         self, datasink: Datasink, *, backend_options=None,
     ) -> None:
         """Execute the lazy plan through a formal Datasink."""
-        from ..execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         if not callable(getattr(datasink, 'recovery_identity', None)):
             raise RecoveryContractError('A durable Datasink needs its immutable recovery_identity')
         native = parse_native_options(backend_options, family='sink')

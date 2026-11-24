@@ -175,7 +175,7 @@ class CacheCall:
         await self._hook('aclose')
 
     def validate_runtime_state(self, concurrency=1):
-        from ..execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         from demiflow.execution.compiler_support.operator_policy import _resident_slots
         restriction = None
         functions, mutable = set(), set()
@@ -240,7 +240,7 @@ class CacheCall:
         return result
 
     async def restore_state(self, state):
-        from ..execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         from ..execution.contracts.dataflow_errors import DataflowError
         if set(state) - {'cache_frontier'} != {'fn', 'when', 'cache_when'}:
             raise RecoveryContractError('Cached callable state ownership differs')

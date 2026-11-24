@@ -8,7 +8,7 @@ import stat
 import sys
 
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 
 SOURCE_MEDIA = 'text/x-python'
 MAX_SOURCES = 64
@@ -857,7 +857,7 @@ def plan_code_pin(plan, *, source=None):
     callable dependencies (reducer/factory) to the same manifest; omitting it
     keeps the historical bytes exactly.
     """
-    from ..recovery_identity import operation_identity
+    from demiflow.execution.seal.program_identity import operation_identity
     operations = [operation_identity(operation) for operation in plan.operations]
     return {"operations": stable_code_identity(operations),
             "dependencies": _business_dependency_manifest(plan, source=source)}

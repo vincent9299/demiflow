@@ -96,7 +96,7 @@ def test_admitted_cut_publication_and_terminal_stop_keep_original_deadline(monke
 
 
 def test_finite_business_never_extends_original_run_deadline(monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     driver, clock = _driver(monkeypatch)
     run = object.__new__(RunContext)
     run.active, run.started, run.deadline = True, 0.0, float('inf')

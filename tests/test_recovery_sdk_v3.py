@@ -1,4 +1,5 @@
 """Content-bound SDK identity compatibility for runs sealed before D1/D2."""
+from test_execution_layout_history import original_carriers  # original writer fixture
 from hashlib import sha256
 import inspect
 from pathlib import Path
@@ -7,23 +8,24 @@ from types import FunctionType
 from demiflow import data
 from demiflow.data.sources import frozen_options
 from demiflow.execution.contracts.recovery_sdk_v3 import code_record
-from demiflow.execution.recovery_contract import identity
-from demiflow.execution.recovery_identity import describe
-from demiflow.execution.recovery_sdk_v3 import function_pin
+from demiflow.execution.contracts.recovery_contract import identity
+from demiflow.execution.seal.program_identity import describe
+from demiflow.execution.seal.recovery_sdk_v3 import function_pin
 
 
 def _source(fn):
     return Path(inspect.getsourcefile(fn)).read_bytes()
 
 
-def test_relational_sdk_v3_encodes_the_original_import_operand():
+def test_relational_sdk_v3_encodes_the_original_import_operand(original_carriers):
     dataset_pins = describe(data.Dataset)['methods']
     for name in ('join', 'reduce_by_key', 'group_batches', 'exclude_keys', 'union'):
         method = getattr(data.Dataset, name)
         names = method.__code__.co_names
         assert names.count('data.sources') == 1
-        old_names = tuple('execution.local_kernel' if n == 'data.sources' else n for n in names)
-        wire_code = identity(code_record(method.__code__.replace(co_names=old_names)))
+        # ④ also relocates other imports; compare the real published carrier,
+        # rather than reconstructing history from just one present-day operand.
+        wire_code = original_carriers['public.Dataset'][1]['methods'][name]
         captured = describe(method)
         assert captured['source_hash'] == '1ba0e80f1ed0853948a97792dc65125fdaec17504bc3396b5f53ffb593da7e88'
         assert captured['code'] == dataset_pins[name] == wire_code
@@ -35,15 +37,14 @@ def test_unchanged_helpers_retain_their_v3_file_identities():
     assert frozen['code'] == identity(code_record(frozen_options.__code__))
 
 
-def test_local_execution_keeps_post_retirement_source_and_code():
+def test_local_execution_keeps_post_retirement_source_and_code(original_carriers):
     # Retiring the old execution selectors changed this public context's
     # signature and body. It must not impersonate the pre-retirement helper.
-    original = data.local_execution.__wrapped__
     binding = describe(data.local_execution)['closure'][0]
     # ④ changed import coordinates around the unchanged post-③ definition.
     assert binding['source_hash'] == 'cdb771da09e31f50a03e32459fc643b60b333e97cf1c0fbbf09d2e4ff6e70792'
     assert binding['source_hash'] != 'e67e3703f03ea14f8bcefb803bafc3251072e78bc17a5c1f2df60fad2ca2f83f'
-    assert binding['code'] == identity(code_record(original.__code__))
+    assert binding == original_carriers['public.local_execution'][1]['closure'][0]
 
 
 def test_unrecognised_source_or_function_keeps_actual_evidence():
@@ -96,8 +97,8 @@ def test_dataset_class_v3_qualified_import_in_optimized_python():
 import json
 from demiflow import data
 from demiflow.execution.contracts.recovery_sdk_v3 import code_record
-from demiflow.execution.recovery_contract import identity
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.contracts.recovery_contract import identity
+from demiflow.execution.seal.program_identity import describe
 fn = data.Dataset.join
 old = tuple("execution.local_kernel" if name == "data.sources" else name for name in fn.__code__.co_names)
 print(json.dumps([describe(data.Dataset)["methods"]["join"], identity(code_record(fn.__code__.replace(co_names=old)))]))

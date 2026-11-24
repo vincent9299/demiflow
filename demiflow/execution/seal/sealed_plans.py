@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from demiflow.execution.recovery_contract import RecoveryContractError, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier, identity
 from demiflow.execution.contracts.errors import require_plan_contract as _require
 from demiflow.execution.storage.reading import read_plan_artifact
 from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, _validate_bindings, _validate_manifest_ref

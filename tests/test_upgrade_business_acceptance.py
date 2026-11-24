@@ -59,9 +59,7 @@ from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSp
 from demiflow.execution.queue_commit import producer_action
 from demiflow.execution.queue_contract import HistoryReadLimit, HistoryReadLimits
 from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink
-from demiflow.execution.recovery_contract import (
-    RecoveryContractError, RunRef, SourcePosition, identity,
-)
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall

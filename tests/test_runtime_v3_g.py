@@ -33,7 +33,7 @@ from demiflow.data.plan import CallableSpec, LogicalOp, LogicalPlan  # noqa: E40
 from demiflow.data.sources import ItemsSource, RangeSource  # noqa: E402
 from demiflow.data.sources import KeyedSource, PlanInput, UnionSource  # noqa: E402
 from demiflow.execution.seal.plan_facts import execution_instances, operation_capability, operation_facts
-from demiflow.execution.recovery_contract import RuntimeContractError  # noqa: E402
+from demiflow.execution.contracts.recovery_contract import RuntimeContractError  # noqa: E402
 from demiflow.planning.dataflow_compile import (  # noqa: E402
     _LiteralEmptySource,
     _operation_semantic_facts,

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import uuid
 
-from demiflow.execution.recovery_contract import RecoveryContractError, document
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 FORMAT = 'paged-artifacts-v1'

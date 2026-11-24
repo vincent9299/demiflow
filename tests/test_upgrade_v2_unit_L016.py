@@ -15,7 +15,7 @@ import pytest
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.manager import ResourceManager
 

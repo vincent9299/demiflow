@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from demiflow.execution.journal import publication_facts as facts
 from demiflow.execution.storage.object_resources import object_namespace
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def test_observation_context_is_the_shape_every_copy_built(tmp_path):

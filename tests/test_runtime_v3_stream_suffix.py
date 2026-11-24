@@ -155,7 +155,7 @@ def test_shared_prepend_has_four_real_workers_one_source_and_original_ports(tmp_
 
 
 def test_completed_live_result_still_rejects_actual_code_drift(tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     _, allocations = _capture(monkeypatch)
     def callback(row): return row

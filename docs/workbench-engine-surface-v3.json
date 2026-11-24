@@ -138,7 +138,7 @@
         "execution_instances"
       ],
       "identity": [
-        "demiflow.execution.recovery_contract",
+        "demiflow.execution.contracts.recovery_contract",
         "identity"
       ],
       "latest": [

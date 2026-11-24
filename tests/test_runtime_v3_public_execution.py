@@ -409,7 +409,7 @@ def test_private_actor_state_resumes_at_committed_prefix(tmp_path, monkeypatch):
 
 def test_resource_actor_partial_resume_rejects_before_any_new_call(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     log = str(tmp_path / 'calls')
     class ResourceActor:
         def __init__(self):

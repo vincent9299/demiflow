@@ -163,7 +163,7 @@ def test_fixed_binding_snapshots_reference_once_before_selection_and_registers_s
     expected = DataAPI(port).read_lance(opened[0]['uri'], version=1, columns=['id'],
                                      batch_readahead=1, fragment_readahead=1)._source
     from demiflow.execution.seal.plan_facts import source_facts
-    from demiflow.execution.recovery_identity import source_identity
+    from demiflow.execution.seal.program_identity import source_identity
     assert result._source.query.to_dict() == expected.query.to_dict()
     assert result._source.native_options == expected.native_options
     assert source_facts(result._source) == source_facts(expected)
@@ -226,7 +226,7 @@ def test_managed_checkpoint_facts_stay_with_original_checked_owner(tmp_path, mon
 
 
 def test_real_capability_gate_still_rejects_checkpoint_before_host_selection(tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     import demiflow.data.api as api
     events = []
     checkpoint = _checkpoint(tmp_path, events)
@@ -243,7 +243,7 @@ def test_real_capability_gate_still_rejects_checkpoint_before_host_selection(tmp
 def test_public_and_shared_lance_scan_have_identical_declaration_and_facts(tmp_path, projection, native):
     from demiflow.data.native_options import parse_native_options
     from demiflow.execution.seal.plan_facts import source_facts
-    from demiflow.execution.recovery_identity import source_identity
+    from demiflow.execution.seal.program_identity import source_identity
     from demiflow.lance.model import LanceScanSpec
     options = dict(uri=str(tmp_path / 'input.lance'), version=4, filter='id >= 0', limit=9,
                    batch_size=2, batch_readahead=3, fragment_readahead=4,

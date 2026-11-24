@@ -114,7 +114,7 @@ def arrow_batches(batches, limits):
     """
     import pyarrow as pa
 
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     for value in batches:
         if not isinstance(value, (pa.RecordBatch, pa.Table)):
             raise RecoveryContractError('Lance staging requires native Arrow batches')

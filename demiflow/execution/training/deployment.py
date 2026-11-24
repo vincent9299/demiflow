@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 from ..contracts.training import FitBinding, FitJobProvider
-from ..recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from demiflow.execution.journal.training_index import TrainingIndex
 
 

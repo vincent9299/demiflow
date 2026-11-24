@@ -10,7 +10,7 @@ import math
 from collections.abc import Mapping
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 
 _COUNTS = {'call_records', 'reused', 'input_tokens', 'output_tokens', 'records_without_usage', 'errors'}
 _TIMINGS = {'first_byte_s', 'first_event_s', 'first_content_s', 'max_body_gap_s'}

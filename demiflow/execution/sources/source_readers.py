@@ -25,7 +25,7 @@ from demiflow.execution.contracts.dataflow import ArtifactRef, QueueBinding, Que
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.sources.snapshots import spool_record
 from demiflow.execution.contracts.dataflow import thaw_record_value
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 
@@ -1553,7 +1553,7 @@ class PinnedKeyScan:
     def matched_records(self, fragment, offset, projection, matches):
         """Restore original row, ID, schema and sequence only for probe positives."""
         from demiflow.execution.contracts.dataflow import Record
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         from demiflow.execution.sources.arrow_payload import fallback_row
         import pyarrow.compute as pc
         reader = self.reader

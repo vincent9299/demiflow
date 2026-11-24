@@ -21,7 +21,7 @@ import re
 from collections.abc import Mapping
 from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition, Record, _FrozenRowList, _FrozenRowSet, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, document, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier
 
 
 ARROW_BATCH_MEDIA = 'application/vnd.demiflow.arrow-batch.v1'
@@ -982,7 +982,7 @@ class _RecordFrameParts:
 def frame_parts(record, bounds, *, resident_bytes=None, target=None, raw=None, retained=0, newline=True):
     """Return exact size and a one-use bounded stream of the OLD JSONL bytes."""
     if raw is None: raw = encode_document(record, bounds, resident_bytes=resident_bytes, retained=retained)
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     metadata = {'record_id':record.record_id, 'sequence':record.sequence}
     if target is not None: metadata['target'] = target
     meta_size, meta_memory = _json_shape(metadata, bounds.max_control_bytes)
@@ -1274,7 +1274,7 @@ def mapped_row_bytes(batch, index, maximum):
 
 def mapped_member(record_id, position):
     from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     return identity([record_id, thaw_control_json(position)])
 
 def _uncompressed_ipc(buffer, bounds):
@@ -1844,7 +1844,7 @@ def cast_allocation(table, schema):
     This is payload admission, not an RSS bound on Arrow's implementation.
     """
     import pyarrow as pa
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     def aligned(size):
         return ((size + 63) // 64) * 64
     def bound(array, target, depth=0):

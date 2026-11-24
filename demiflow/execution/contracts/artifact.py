@@ -14,7 +14,7 @@ import hashlib
 import re
 from pathlib import Path
 
-from demiflow.execution.recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from demiflow.execution.contracts.envelope import protocol_version
 from demiflow.execution.contracts.errors import ProtocolError
 

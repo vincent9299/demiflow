@@ -4,7 +4,7 @@ import time
 from ..contracts.dataflow import thaw_record_value
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.training import FitRequest
-from ..recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from ..seal.plan import load_sealed_dataflow
 from ..training.deployment import bind_action_deployment, resolve_training_deployment
 from ..training.inputs import fix_input

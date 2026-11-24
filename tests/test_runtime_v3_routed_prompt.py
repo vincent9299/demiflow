@@ -193,7 +193,7 @@ class _StatefulPredicate:
 def test_routed_mutable_predicate_cannot_claim_http_only_recovery(tmp_path, routed_server, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     class Interrupted(Exception):
         pass
     def pipeline():

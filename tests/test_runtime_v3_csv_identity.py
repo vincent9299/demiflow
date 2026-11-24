@@ -8,8 +8,8 @@ import pyarrow as pa
 import pyarrow.csv as pacsv
 import pytest
 
-from demiflow.execution.recovery_contract import document, identity, RecoveryContractError
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.contracts.recovery_contract import document, identity, RecoveryContractError
+from demiflow.execution.seal.program_identity import describe
 
 
 @pytest.mark.parametrize('factory,field,value', [

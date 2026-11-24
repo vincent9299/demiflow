@@ -4,7 +4,7 @@ from functools import partial
 import json
 
 from demiflow.execution.contracts.dataflow import ProgramDeclaration
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.seal.plan import _stage_one_program, verify_dataflow_program
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.storage.staging import DriverArtifactPort

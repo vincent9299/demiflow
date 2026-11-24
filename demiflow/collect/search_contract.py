@@ -1,6 +1,6 @@
 """Native search declarations and bounded response facts; no search scheduling."""
 from ..data.datasink import Datasink
-from ..execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 from ..secrets import public
 from pathlib import Path
 from dataclasses import asdict

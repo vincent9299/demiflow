@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..collect.raw_contract import integer
 from ..secrets import Secret, public
-from .recovery_contract import RecoveryContractError, document, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier
 
 
 class QueueIncomplete(RecoveryContractError):
@@ -209,7 +209,7 @@ def _legacy_contract(declaration, action):
 
 
 def resolve_producer_contract(channel, producer, declaration, action):
-    from .recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     document(declaration, 65536)
     channel._attach()
     if channel.database.queue_uuid != producer.queue_uuid:
@@ -231,7 +231,7 @@ def resolve_producer_contract(channel, producer, declaration, action):
 
 
 def resolve_consumer_contract(source, declaration, *, action=None):
-    from .recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     document(declaration, 65536)
     if action is None:
         return declaration  # Passive topology inspection has no queue/run authority.

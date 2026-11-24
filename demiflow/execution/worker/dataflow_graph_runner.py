@@ -23,7 +23,7 @@ from demiflow.execution.contracts.record_codec import _encode_record_document, _
 from demiflow.execution.exchange.dataflow_channels import reserve_credit, _route_record_document, snapshot_channels
 from demiflow.execution.exchange.dataflow_transport import PeerBuffers, read_peer, read_peer_many, MAX_PEER_BATCH, peer_batch_limit
 from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json, sink_non_mapping_values as _manifest_non_mapping_values, RECORDS_MEDIA, MANIFEST_MEDIA
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 from demiflow.execution.contracts.record_codec import encode_document, decode_document, document_limit, frame_parts, decode_frame, line_limit, read_chunk_bytes
 from demiflow.execution.contracts.record_codec import admit_receive
 from demiflow.execution.storage.streams import frame_stream, read_document
@@ -392,7 +392,7 @@ class WorkerGraphRunner:
             if schema is not None:
                 self._terminal_schema_ref = RecordSchemas(self.services).put(schema)
                 self._set_terminal_columns(schema, sort=True, schema=True)
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         frontier_ref = self.e._restored_states.get(identity(['worker-frontier', self.partition]))
         if self.e._restore_image is not None:
             if frontier_ref is None:
@@ -506,7 +506,7 @@ class WorkerGraphRunner:
 
     def _send_cut(self, request):
         from demiflow.execution.contracts.dataflow_codec import encode_wire
-        from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES
+        from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES
         raw = encode_wire(self.snapshot(request), type_name='CutContribution', bounds=self.bounds)
         # A cut contribution contains bounded control metadata and references.
         # Its durable owner is the coordinator. Leave ample room for escaping
@@ -1140,7 +1140,7 @@ class WorkerGraphRunner:
             count += 1
             size += record.encoded_bytes
             if count > 1024 or size > 16 * 1024 ** 2:
-                from demiflow.execution.recovery_contract import RecoveryContractError
+                from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Producer input expansion exceeds 1024 records or 16 MiB at a stage')
             self._producer_expansion[occurrence] = (unit, count, size)
         self._metrics[occurrence]['rows_output'] += 1
@@ -1164,7 +1164,7 @@ class WorkerGraphRunner:
             routes, raw = self._frame_call(_route_record_document, routed_input, spec=spec,
                 state=self.e._channels.routing, bounds=self.bounds)
             for routed in routes:
-                from demiflow.execution.recovery_contract import identity
+                from demiflow.execution.contracts.recovery_contract import identity
                 self._publish(routed.record, edge=edge, spec=spec, target=routed.reader_id,
                               delivery=identity(["producer-delivery-v3", self.partition, routed.delivery_id]),
                               route_sequence=route_sequence, validated_raw=raw)
@@ -1718,7 +1718,7 @@ class WorkerGraphRunner:
             reader.acknowledge_output()
         from demiflow.execution.kernels.image_pack import snapshot_kernel_images
         states = snapshot_kernel_images(self.e._kernels, store=self.services.store, bounds=self.bounds)
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         for spec in self.e._output_specs:
             if spec.mode == 'finite_sealed':
                 ref, count = self._seal_finite_producer(spec)

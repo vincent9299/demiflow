@@ -9,7 +9,7 @@ import socket
 import subprocess
 from pathlib import Path
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 def deployment_inventory():

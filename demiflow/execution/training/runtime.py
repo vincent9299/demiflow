@@ -7,7 +7,7 @@ import time
 
 from ..commit import CommitCoordinator
 from ..contracts.training import FitBinding, FitRequest, FitResult, FitSubmissionRejected, InputCopyReceipt, JobLookup, JobRef, ProjectObject, TrainingSnapshotRef
-from ..recovery_contract import RecoveryContractError, SourcePosition, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunAction
 from demiflow.execution.journal.run_reader import read_run
 from demiflow.execution.journal.training_index import FitConflict, TrainingIndex

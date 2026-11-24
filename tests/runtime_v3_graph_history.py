@@ -75,7 +75,7 @@ def acknowledged_ancestor_rows(run, action_id, facts):
     from demiflow.execution.contracts.checkpoint import artifact_from_json as _artifact_from_json
     from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     sealed = load_sealed_plan(run.directory, action_id, version='v3')
     physical = sealed['physical']
     result_nodes = [node for node in sealed['graph'].nodes

@@ -116,7 +116,7 @@ def test_native_factory_keeps_actual_checked_vector_contract(tmp_path,catalog,mo
 def test_runtime_type_contract_does_not_change_original_native_semantic_identity():
     from dataclasses import replace
     from demiflow.embeddings import EmbeddingModel
-    from demiflow.execution.recovery_identity import operation_identity
+    from demiflow.execution.seal.program_identity import operation_identity
     from demiflow.planning.dataflow_compile import _operation_semantic_facts
     op=data.from_items([{'text':'a'}]).map_embeddings(model=EmbeddingModel('fixture','v1',3,'http://127.0.0.1:1/v1'),
         inputs={'text':'text'},max_requests=1)._plan.operations[-1]

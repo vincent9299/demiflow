@@ -13,7 +13,7 @@ import stat
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 

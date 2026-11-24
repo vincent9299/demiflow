@@ -13,7 +13,7 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_codec import _thaw_json
 from demiflow.execution.journal.dataflow_embedding_journal import bind_private_embedding_contracts
 from demiflow.execution.operator_bindings.dataflow_model_journal import _rpc_operation_id
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.operator_llm.errors import PromptBudgetExceededError
@@ -146,7 +146,7 @@ def private_event(run, store, seed='a', *, scope='first', part=0, operation='res
     from demiflow.execution.contracts.dataflow import NativeJournalCommand
     from demiflow.execution.contracts.dataflow_codec import encode_artifact_reference as _ref_to_json, decode_artifact_reference as _ref_from_json
     from demiflow.execution.contracts.dataflow_codec import private_embedding_rpc_id as _private_embedding_rpc_id
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     original = event(run, store, seed)
     payload = _thaw_json(original.payload)
     payload.update(reservation=None, operation=operation,

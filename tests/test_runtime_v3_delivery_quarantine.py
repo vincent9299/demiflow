@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 

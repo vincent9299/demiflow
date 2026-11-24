@@ -12,7 +12,7 @@ from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.record_codec import _encode_payload
 from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity, document
+from demiflow.execution.contracts.recovery_contract import identity, document
 from demiflow.execution.contracts import record_codec as frames
 from test_runtime_v3_c import bounds
 

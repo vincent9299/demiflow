@@ -7,7 +7,7 @@ from dataclasses import replace
 from demiflow.execution.contracts.dataflow import ArtifactRef, Bounds, InputPort, KernelSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import _json_config
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.data.plan import AgentMapOp, EmbeddingMapOp, LogicalOp, OperatorLLMMapOp, ReadDocumentsOp, RegisterDocumentsBatchOp, RegisterDocumentsOp, SearchWebOp, VectorSearchOp
 from demiflow.planning.dataflow_budget import _model_profile
 
@@ -142,7 +142,7 @@ def service_kernel(model, settings):
         raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed HTTP service requires a native Prompt node')
     from demiflow.execution.contracts.dataflow_codec import _json_config
     import hashlib
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     # Execution programs retain the passive declaration. Public plan facts do
     # not duplicate service environment values or arbitrary command arguments.
     digest = hashlib.sha256(document(declaration, 65536)).hexdigest()

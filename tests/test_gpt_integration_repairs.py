@@ -8,8 +8,8 @@ import lance
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.recovery_identity import plan_identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.seal.program_identity import plan_identity
 from demiflow.execution.seal.business_sources import plan_code_pin
 from demiflow.execution.seal.plan_facts import operation_facts
 from test_embeddings import server as embedding_server

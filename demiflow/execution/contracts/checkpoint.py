@@ -11,9 +11,7 @@ from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 import re
 
-from ..recovery_contract import (
-    MAX_STATES, document, identifier, identity, RecoveryContractError,
-)
+from demiflow.execution.contracts.recovery_contract import MAX_STATES, document, identifier, identity, RecoveryContractError
 from .errors import ProtocolError
 
 CHECKPOINT_SCHEMA = "demiflow.checkpoint_manifest.v1"

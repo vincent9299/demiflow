@@ -14,7 +14,7 @@ import threading
 
 from .contracts.dataflow import ArtifactCommand, ArtifactRef, NativeJournalCommand, NativeJournalReply
 from .contracts.dataflow_errors import DataflowError
-from .recovery_contract import identity, document, SourcePosition, UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import identity, document, SourcePosition, UnresolvedCommit
 from demiflow.execution.native_queue.stream_lance import StreamLanceWriter, _canonical
 from demiflow.execution.outputs.lance_sink import LanceSink
 from .commit import CommitCoordinator
@@ -413,7 +413,7 @@ class NativeStreamLanceService:
                 table,fresh=writer.prepare_rows(rows,selected)
                 publish=bool(table.num_rows or request['finish'] and writer.version is None)
                 from ..lance.model import LanceWriteSpec
-                from .recovery_identity import describe
+                from demiflow.execution.seal.program_identity import describe
                 from ..lance.schema import schema_identity
                 if publish:
                     mode=('create' if writer.version is None and writer.permission_mode=='create' else

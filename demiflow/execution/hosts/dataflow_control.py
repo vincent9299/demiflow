@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from demiflow.execution.contracts.dataflow_codec import decode_wire, encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identifier
+from demiflow.execution.contracts.recovery_contract import identifier
 
 if TYPE_CHECKING:
     from demiflow.execution.contracts.dataflow import Bounds, ControlReply, SocketConnection, WorkerControlMailbox, WorkerEvent, WorkerLease

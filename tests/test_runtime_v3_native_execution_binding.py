@@ -114,7 +114,7 @@ def test_published_cast_function_keeps_its_actual_identity_and_allocation(tmp_pa
 
     import cloudpickle
 
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     from demiflow.resources.capacity import allocation_envelope
     from runtime_v3_history_scenarios import _extract_original
 

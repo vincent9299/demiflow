@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow import Record, thaw_record_value
 from demiflow.execution.outputs.terminals import TerminalSubscription
 from demiflow.execution.contracts.record_codec import _encode_record_document
 from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from test_runtime_v3_ready_peer_reads import peer_store
 
 

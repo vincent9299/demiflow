@@ -12,7 +12,7 @@ from demiflow.execution.executors.dataflow_api import make_action_request, run_d
 from demiflow.execution.pipeline.checked import action
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, RunRef
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef
 from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_history_scenarios import _extract_original
 from test_runtime_v3_native_execution_binding import source

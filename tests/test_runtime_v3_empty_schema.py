@@ -131,7 +131,7 @@ def test_combined_schema_conflict_rejected_and_legacy_missing_field_preserved():
     from demiflow.execution.storage.record_schema import RecordSchemas
     from demiflow.execution.outputs.sinks import combine_prepared_sinks
     from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json, RECORDS_MEDIA, MANIFEST_MEDIA
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     svc = services()
     schemas = RecordSchemas(svc)

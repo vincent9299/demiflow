@@ -127,7 +127,7 @@ def test_native_query_factory_is_passive_binds_policy_and_rejects_live_handles(t
 def test_unregistered_actor_cache_is_still_rejected_by_data_only_identity():
     from collections import OrderedDict
     from demiflow.data.plan import CallableSpec
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.planning.dataflow_compile import _callable_code_identity
     class UserActor:
         def __init__(self):

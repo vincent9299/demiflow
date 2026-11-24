@@ -1,6 +1,6 @@
 """Coexisting legacy and unified artifacts use one original journal total."""
 import pytest
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 
 

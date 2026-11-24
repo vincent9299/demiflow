@@ -10,7 +10,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from demiflow.execution.hosts.endpoints import _EndpointBase, LocalHostEndpoint
-from demiflow.execution.recovery_contract import document, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
 from demiflow.execution.worker.bootstrap import (
     ControlFrameReader, send_messages, _MAX_CONTROL_BYTES,
 )

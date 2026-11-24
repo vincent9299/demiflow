@@ -44,7 +44,7 @@ def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
                     # the original loader's code recomputation can reject it.
                     import json
                     from dataclasses import replace
-                    from demiflow.execution.recovery_contract import document
+                    from demiflow.execution.contracts.recovery_contract import document
                     node=next(n for n in graph.nodes if n.kind=='transform')
                     manifest=json.loads(b''.join(services.store.read(node.program_ref,max_bytes=bounds.max_control_bytes)))
                     manifest['code_identity']={**manifest['code_identity'],'wrong_program_pin':True}

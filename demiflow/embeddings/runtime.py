@@ -191,7 +191,7 @@ class EmbeddingActor:
                             # vocabulary. Native Embedding historically raises
                             # an execution budget failure; preserve that API
                             # without changing the atomic reservation itself.
-                            from demiflow.execution.recovery_contract import RecoveryContractError
+                            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                             raise RecoveryContractError('Execution budget exhausted: embedding requests') from error
                         if not reserved:
                             record = await io(journal.lookup, request)

@@ -4,7 +4,7 @@ import json
 import pytest
 
 from demiflow.execution.storage.artifact_manifest import ArtifactManifest, manifest_pages
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 
 
@@ -37,7 +37,7 @@ def test_authenticated_pages_reject_damage(tmp_path, damage):
 
 
 def test_partial_reference_binding_is_unprotected_and_cleanup_reclaims_it(tmp_path):
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     with pytest.raises(RecoveryContractError, match='unconfirmed actions'), RunContext.start(tmp_path/'run') as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'partial-page'}}) as action:
             fact = run.journal.begin_commit(run.fence, action.action_id, 1,
@@ -71,7 +71,7 @@ def test_lazy_materialized_history_verifies_earlier_object_bytes(tmp_path):
     from demiflow.execution.commit import CommitCoordinator
     from demiflow.execution.executors.local import _CheckpointBlocks
     from demiflow.execution.outputs.object_sink import ObjectRowsSink
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     with RunContext.start(tmp_path/'run') as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'object-history'}}) as action:
             sink = ObjectRowsSink(action, max_object_bytes=64)

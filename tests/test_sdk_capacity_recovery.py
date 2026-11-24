@@ -14,7 +14,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.execution.run_journal import RunJournal
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.contracts import RESOURCE_PROTOCOL_VERSION, MutationContext, ResourceError, ResourceScope

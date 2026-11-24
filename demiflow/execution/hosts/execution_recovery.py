@@ -130,7 +130,7 @@ class _OriginalLocalExit:
         if row['effective'].get('accelerators'):
             from demiflow.execution.hosts.devices import device_configuration
             devices, _ = device_configuration('local')
-            from demiflow.execution.recovery_contract import identity
+            from demiflow.execution.contracts.recovery_contract import identity
             if devices is not None and self.binding.get('device_authority') != identity(devices.authority()):
                 raise ResourceError('ARTIFACT_MISMATCH', 'original training device authority changed')
             if devices is None or devices.reservation_view(allocation) is None:
@@ -214,7 +214,7 @@ def recover_execution_resources(journal, configuration, fence, *, preserve_jobs=
                 key = job['request_key']
                 unit = job.get('inspection_key', key)
                 if unit != key:
-                    from demiflow.execution.recovery_contract import identity
+                    from demiflow.execution.contracts.recovery_contract import identity
                     if unit != identity(['fit.snapshot_inspection.v1', key]):
                         raise ResourceError('ARTIFACT_MISMATCH', 'inspection does not name its original fit')
                 if (scope['scope_id'] != 'fit-' + unit or original['authority_ref'] != scope['scope_id']

@@ -387,7 +387,7 @@ def test_prepend_rejects_configured_maps_but_accepts_plain_map(data):
 def test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls(data, kind, tmp_path):
     from _worker_event_fixtures import emit, events
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     import lance
     path = str(tmp_path / 'calls.jsonl')
     def transform(row):
@@ -429,7 +429,7 @@ def test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls(dat
 def test_stream_native_recovery_preserves_sealed_policy_and_new_run_can_append(data, tmp_path):
     from demiflow.execution.executors.stream_checkpoint import StreamCheckpoint
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from _worker_event_fixtures import emit, events
     import lance
     with pytest.raises(RecoveryContractError, match='retired'):
@@ -673,7 +673,7 @@ def test_callback_cancellation_never_returns_partial_success(data, execution, co
 
 @pytest.mark.parametrize('failure', ['schema', 'writer'])
 def test_native_lance_writer_failure_joins_stream_and_closes_workers(data, tmp_path, monkeypatch, failure):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.outputs.lance_sink import LanceSink
     from demiflow.execution.pipeline.run_context import RunContext
     from _worker_event_fixtures import emit, events

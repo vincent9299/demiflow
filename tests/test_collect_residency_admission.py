@@ -43,7 +43,7 @@ def test_actual_concurrency_counts_fixed_workspace_once(declared, actual):
 
 
 def test_concurrent_images_cannot_fit_by_shrinking_payload_defaults():
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError, match='Stream fixed residency exceeds'):
         default_profile(image_operation(2), bounds=bounds(512*MIB))
 

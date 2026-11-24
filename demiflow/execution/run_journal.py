@@ -15,7 +15,7 @@ from contextlib import contextmanager, ExitStack
 from demiflow.execution.storage.artifacts import run_lock
 from demiflow.execution.contracts.artifact import encoded
 from ..errors import ExecutionConflict
-from .recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 class ExecutionBudgetExceeded(RecoveryContractError):
@@ -790,7 +790,7 @@ class RunJournal:
         self._check_maintenance_deadline()
 
     def _claim_execution(self, configuration, fence):
-        from .recovery_contract import document, identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, identifier, RecoveryContractError
         raw = document(configuration).decode()
         identifier(fence)
         with self._transaction() as db:
@@ -814,7 +814,7 @@ class RunJournal:
         transaction across publication prevents a replacement owner from being
         admitted between the ownership check and the external write.
         """
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         from .storage.lease import exclusive_here
         self._reconcile_published_gc(fence)
         with self._transaction() as db:
@@ -825,7 +825,7 @@ class RunJournal:
             yield db
 
     def _check_execution_owner(self, db, fence):
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         row = db.execute('SELECT attempt,fence FROM runtime_owner').fetchone()
         state = json.loads(db.execute('SELECT document FROM execution_state').fetchone()[0])
         if row is None or row != (state['attempt'], fence):
@@ -856,7 +856,7 @@ class RunJournal:
 
     @staticmethod
     def _artifact_ref_key(ref):
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         try:
             return identifier(ref.digest), identifier(ref.store_id), identifier(ref.key)
         except (AttributeError, RecoveryContractError):
@@ -864,7 +864,7 @@ class RunJournal:
 
     def bind_artifact_owner(self, fence, ref, *, owner, operation_id):
         """Idempotent owner pin in the original journal; fence and quota checked."""
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         digest, store_id, key = self._artifact_ref_key(ref)
         identifier(owner)
         identifier(operation_id)
@@ -883,7 +883,7 @@ class RunJournal:
 
     def release_artifact_owner(self, fence, ref, *, owner, operation_id):
         """Idempotent unpin of one owner; never a whole-object GC delete decision."""
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         digest, store_id, key = self._artifact_ref_key(ref)
         identifier(owner)
         identifier(operation_id)
@@ -902,7 +902,7 @@ class RunJournal:
         refund storage, delete objects or mutate another owner's/historical pin.
         Worker artifact commands continue to require the live execution fence.
         """
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         digest, store_id, key = self._artifact_ref_key(ref)
         identifier(owner)
         identifier(pin_operation_id)
@@ -918,7 +918,7 @@ class RunJournal:
 
     def artifact_owners(self, ref, *, limit, cursor=None):
         """Bounded keyset page of pins for one ref; a failed page raises, never empty."""
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         digest, store_id, key = self._artifact_ref_key(ref)
         if type(limit) is not int or not 1 <= limit <= 1024:
             raise RecoveryContractError('Artifact owner page limit is invalid')
@@ -937,7 +937,7 @@ class RunJournal:
 
     def bind_dataflow_gc_protocol(self, fence, inode, *, fresh):
         """Only a namespace born under the physical lease protocol is eligible."""
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         from .storage.lease import NAME, validate_identity, journal_identity
         inode = validate_identity(inode)
         with self.execution_guard(fence) as db:
@@ -994,7 +994,7 @@ class RunJournal:
         return [dict(zip(names, row)) for row in rows]
 
     def prepare_dataflow_gc(self, fence, *, store_id, digest, size, charge_id, inode):
-        from .recovery_contract import identity, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identity, RecoveryContractError
         from .storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store'):
             raise RecoveryContractError('GC requires the original exclusive physical lease')
@@ -1017,7 +1017,7 @@ class RunJournal:
 
     def finish_dataflow_gc(self, fence, gc_id):
         """Debit exactly the original allocation once; old RPC receipts stay immutable."""
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         from .storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store'):
             raise RecoveryContractError('GC refund requires exclusive physical reconciliation')
@@ -1043,7 +1043,7 @@ class RunJournal:
             return size
 
     def bind_execution_action(self, fence, action_id, declaration):
-        from .recovery_contract import document, identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, identifier, RecoveryContractError
         identifier(action_id)
         raw = document(declaration).decode()
         with self.execution_guard(fence) as db:
@@ -1065,7 +1065,7 @@ class RunJournal:
                             (json.loads(v) if v is not None else None for v in row)))
 
     def set_action_snapshot(self, fence, action_id, snapshot):
-        from .recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         raw = document(snapshot).decode()
         with self.execution_guard(fence) as db:
             row = db.execute('SELECT snapshot FROM runtime_actions WHERE action_id=?', (action_id,)).fetchone()
@@ -1079,7 +1079,7 @@ class RunJournal:
             return json.loads(row[0]) if row else None
 
     def bind_source(self, fence, action_id, binding):
-        from .recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         raw = document(binding).decode()
         with self.execution_guard(fence) as db:
             old = db.execute('SELECT document FROM runtime_sources WHERE action_id=?', (action_id,)).fetchone()
@@ -1088,7 +1088,7 @@ class RunJournal:
             db.execute('INSERT OR IGNORE INTO runtime_sources VALUES (?,?)', (action_id, raw))
 
     def complete_execution_action(self, fence, action_id, result):
-        from .recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         raw = document(result).decode()
         with self.execution_guard(fence) as db:
             if db.execute("SELECT 1 FROM runtime_commits WHERE action_id=? AND status!='acked'", (action_id,)).fetchone():
@@ -1100,7 +1100,7 @@ class RunJournal:
 
     def bind_commit_scope(self, fence, scope_id, parent_action_id, declaration):
         """Bounded child commit identity; it is not a nested Dataset action."""
-        from .recovery_contract import document, identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, identifier, RecoveryContractError
         identifier(scope_id)
         raw = document(declaration, 65536).decode()
         with self.execution_guard(fence) as db:
@@ -1118,7 +1118,7 @@ class RunJournal:
             db.execute('INSERT INTO runtime_commit_scopes VALUES (?,?,?)',(scope_id,parent_action_id,raw))
 
     def begin_commit(self, fence, action_id, sequence, intent):
-        from .recovery_contract import document, identity, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, identity, RecoveryContractError
         if type(sequence) is not int or not 1 <= sequence <= 16384:
             raise RecoveryContractError('Invalid commit sequence')
         raw = document(intent).decode()
@@ -1202,7 +1202,7 @@ class RunJournal:
         Only the final prepared transition protects these references. A failed
         traversal therefore leaves its unpublished files eligible for cleanup.
         """
-        from .recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         from itertools import islice
         raw = document(prepared).decode()
         limits = self.recovery_identity()['limits']
@@ -1272,7 +1272,7 @@ class RunJournal:
             db.execute("UPDATE runtime_commits SET status='prepared',prepared=? WHERE commit_id=?", (raw, commit_id))
 
     def confirm_commit(self, fence, commit_id, *, expected, status):
-        from .recovery_contract import COMMIT_STATES, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import COMMIT_STATES, RecoveryContractError
         if status not in COMMIT_STATES or expected not in COMMIT_STATES or COMMIT_STATES.index(status) != COMMIT_STATES.index(expected) + 1:
             raise RecoveryContractError('Invalid commit state transition')
         with self.execution_guard(fence) as db:
@@ -1292,7 +1292,7 @@ class RunJournal:
 
     def publish_receipt(self, db, commit_id, sink_id, receipt):
         """Called inside execution_guard, including the external publication."""
-        from .recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         raw = document(receipt).decode()
         old = db.execute('SELECT document FROM runtime_receipts WHERE commit_id=? AND sink_id=?', (commit_id, sink_id)).fetchone()
         if old is not None and old[0] != raw:
@@ -1301,7 +1301,7 @@ class RunJournal:
 
     def begin_dataflow_staging(self, fence, reservation_id, store_id, inode, size, *, ceiling):
         """Atomically bind byte admission to an already locked physical owner."""
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         identifier(reservation_id)
         identifier(store_id)
         if (type(inode) is not tuple or len(inode) != 2
@@ -1324,7 +1324,7 @@ class RunJournal:
     def prepare_dataflow_staging(self, fence, reservation_id, ref):
         """Record the exact future object before the worker may publish it."""
         from dataclasses import asdict
-        from .recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         raw = document(asdict(ref)).decode()
         with self.execution_guard(fence) as db:
             row = db.execute('SELECT store_id,publication FROM runtime_dataflow_staging WHERE reservation_id=?', (reservation_id,)).fetchone()
@@ -1338,7 +1338,7 @@ class RunJournal:
             db.execute('UPDATE runtime_dataflow_staging SET publication=? WHERE reservation_id=?', (raw, reservation_id))
 
     def dataflow_staging_owner(self, fence, reservation_id):
-        from .recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         identifier(reservation_id)
         with self.execution_guard(fence) as db:
             row = db.execute('SELECT s.store_id,s.device,s.inode,s.publication,d.reservation_id IS NOT NULL FROM runtime_dataflow_staging s LEFT JOIN runtime_dataflow_settlements d ON d.reservation_id=s.reservation_id WHERE s.reservation_id=?', (reservation_id,)).fetchone()
@@ -1348,7 +1348,7 @@ class RunJournal:
         # Bounded recovery rotates through unknown/live owners instead of forever
         # starving later reservations behind the first page. This is scan progress,
         # never ownership or completion evidence.
-        from .recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         if value:
             identifier(value)
         with self.execution_guard(fence) as db:
@@ -1359,7 +1359,7 @@ class RunJournal:
             return row[0] if row else ''
 
     def pending_dataflow_staging(self, fence, *, after='', limit=128):
-        from .recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         if after:
             identifier(after)
         if type(limit) is not int or not 1 <= limit <= 128:
@@ -1374,7 +1374,7 @@ class RunJournal:
         Retransmission and stale smaller requests do not charge twice. A settled
         reservation cannot be reopened, including after an unknown RPC reply.
         """
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         identifier(reservation_id)
         if any(type(v) is not int or not 0 < v < 2**63 for v in (size, ceiling)):
             raise RecoveryContractError('Invalid staging growth')
@@ -1403,7 +1403,7 @@ class RunJournal:
         their temporary file, or settle a verified immutable object. Repeat RPCs
         bind the same settlement and cannot refund twice.
         """
-        from .recovery_contract import identifier, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError
         identifier(reservation_id)
         store_id, digest, size = (ref.store_id, ref.digest, ref.size_bytes) if ref is not None else (None, None, 0)
         with self.execution_guard(fence) as db:
@@ -1442,7 +1442,7 @@ class RunJournal:
         another send. Lost replies may repeat the same transition idempotently.
         """
         from .contracts.dataflow_errors import DataflowError
-        from .recovery_contract import document, identifier, identity
+        from demiflow.execution.contracts.recovery_contract import document, identifier, identity
         from dataclasses import asdict
         for value in (action_id, command.effect_id, command.actor_id, command.request_digest):
             identifier(value)
@@ -1492,7 +1492,7 @@ class RunJournal:
 
     @contextmanager
     def fit_guard(self, fence, action_id, occurrence, *, admitting=False):
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         with self.execution_guard(fence) as db:
             row = db.execute('SELECT document FROM runtime_sources WHERE action_id=?',
                              (action_id + '-dataflow-sealed',)).fetchone()
@@ -1515,7 +1515,7 @@ class RunJournal:
         Only this fenced driver path may reconcile sent/unknown. The reservation
         is per launch, across driver attempts; grant is returned once per send.
         """
-        from .recovery_contract import document, identifier, identity, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, identifier, identity, RecoveryContractError
         for item in (action_id, occurrence, instance, request_key, digest):
             identifier(item)
         kind = 'training_input_copy' if input_copy else 'training_submission'
@@ -1598,7 +1598,7 @@ class RunJournal:
 
     @staticmethod
     def reserve_budgets_in_transaction(db, reservation_id, charges):
-        from .recovery_contract import identifier, RecoveryContractError, identity
+        from demiflow.execution.contracts.recovery_contract import identifier, RecoveryContractError, identity
         identifier(reservation_id)
         if type(charges) is not dict or not 1 <= len(charges) <= 4:
             raise RecoveryContractError('Invalid bounded budget component set')
@@ -1639,7 +1639,7 @@ class RunJournal:
 
     def allocate_artifact(self, fence, path, *, commit_id=None, size=0, atomic=True):
         """Record ownership before allocation, including the atomic staging file."""
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         relative = Path(path)
         if (relative.is_absolute() or '..' in relative.parts or not relative.parts
                 or relative.parts[0] not in {'state', 'materializations', 'scratch'}):
@@ -1667,7 +1667,7 @@ class RunJournal:
 
     def resize_artifact(self, fence, path, size, *, atomic=False):
         """Reserve a known file's next size before writing, then settle actual bytes."""
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         if type(size) is not int or size < 0:
             raise RecoveryContractError('Invalid artifact byte reservation')
         with self.execution_guard(fence) as db:
@@ -1679,7 +1679,7 @@ class RunJournal:
 
     @staticmethod
     def _storage_usage(db):
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         total, objects = db.execute('SELECT bytes,object_bytes FROM runtime_storage WHERE singleton=1').fetchone()
         admission = db.execute("SELECT consumed FROM runtime_budgets WHERE name='image_scratch_admission_bytes'").fetchone()
         total = max(total, total - objects + (admission[0] if admission else 0))
@@ -1707,7 +1707,7 @@ class RunJournal:
         This never deletes files or scans unrelated storage. Durable artifact
         registrations and any prepared reference remain owned by the journal.
         """
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         if type(names) not in (list, tuple) or len(names) > 128:
             raise RecoveryContractError('Temporary release batch exceeds budget')
         with self.execution_guard(fence) as db:
@@ -1737,7 +1737,7 @@ class RunJournal:
             if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_object_roots'").fetchone():
                 return []
             rows = db.execute('SELECT root_id,logical_root,physical_root,run_id FROM runtime_object_roots LIMIT 65').fetchall()
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         if len(rows)>64:
             raise RecoveryContractError('Object resource count exceeds ceiling')
         return [dict(zip(('root_id','logical_root','physical_root','run_id'), row)) for row in rows]
@@ -1749,10 +1749,10 @@ class RunJournal:
             return row[0] if row else 0
 
     def register_object_root(self, fence, record):
-        from .recovery_contract import RecoveryContractError, document
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
         document(record,8192)
         with self.execution_guard(fence) as db:
-            from .recovery_contract import identity
+            from demiflow.execution.contracts.recovery_contract import identity
             binding=json.loads(db.execute('SELECT document FROM runtime_identity').fetchone()[0])
             if (set(record)!={'root_id','logical_root','physical_root','run_id'}
                     or record['run_id']!=binding['run_id']
@@ -1775,7 +1775,7 @@ class RunJournal:
             return True
 
     def artifact_name(self, path):
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         path=Path(path).absolute()
         matches=[r for r in self.object_roots() if path.is_relative_to(Path(r['physical_root']))]
         if len(matches)>1:
@@ -1789,7 +1789,7 @@ class RunJournal:
             raise RecoveryContractError('Artifact has no registered owner') from exc
 
     def _artifact_path(self, db, name):
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         relative=Path(name)
         if relative.is_absolute() or '..' in relative.parts:
             raise RecoveryContractError('Artifact path escapes its owner')
@@ -1810,7 +1810,7 @@ class RunJournal:
         references. Cleanup consults those indexed facts, never every old state
         document. The publication lease prevents an owner switch during unlink.
         """
-        from .recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         after, removed = '', 0
         while True:
             self._check_maintenance_deadline()

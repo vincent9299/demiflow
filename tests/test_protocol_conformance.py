@@ -17,7 +17,7 @@ from demiflow.execution.contracts import (
     artifact, checkpoint, envelope, exchange, operator, worker,
 )
 from demiflow.execution.contracts.errors import ProtocolError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.planning.dag import (
     compile_declared_dag, compile_logical_dag, compile_physical_execution_plan,
     select_exchange,

@@ -320,7 +320,7 @@ class DataflowExecution:
         self._native_guard.check()
         if (self._terminal_stop_deadline is not None and self._terminal_result is None
                 and time.monotonic() >= self._terminal_stop_deadline):
-            from ..recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Delivery exceeded cancel grace; unfinished writer is isolated while draining')
         self._check_checkpoint_deadline()
         if time.monotonic() - self._began_at >= self._bounds.timeout_ms / 1000:
@@ -753,7 +753,7 @@ class DataflowExecution:
             from demiflow.execution.contracts import state_codec
             from demiflow.execution.storage.streams import read_kernel_image
             from ..contracts.dataflow_codec import compute_participant_id
-            from ..recovery_contract import identity
+            from demiflow.execution.contracts.recovery_contract import identity
             partitions = {compute_participant_id(stage.stage_id, partition): partition
                           for stage in self._physical.stages for partition in stage.partitions}
             transforms = {n.occurrence_id for n in self._graph.nodes if n.kind == "transform"}
@@ -1388,7 +1388,7 @@ class DataflowExecution:
             else:
                 if set(event.payload) != {'contribution'} or type(event.payload['contribution']) is not str:
                     raise DataflowError('INVALID_CONTRACT', 'cut event needs its original encoded contribution')
-                from ..recovery_contract import MAX_DOCUMENT_BYTES
+                from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES
                 limit = min(self._bounds.max_control_bytes, MAX_DOCUMENT_BYTES)
                 if len(encode_wire(event, type_name='WorkerEvent', bounds=self._bounds)) > limit:
                     raise DataflowError('BUDGET_EXCEEDED', 'cut event exceeds the control envelope')
@@ -1686,7 +1686,7 @@ class DataflowExecution:
             # entire admitted row window. Its sealed prefix cannot release any
             # credit until the real receipt; an early resume can only go idle.
             return
-        from ..recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         commit_id = identity([self._run_id(), self._action.action_id, self._cut.sequence])
         fact = self._action.context.journal.execution_commit(commit_id)
         if fact is not None and fact['prepared'] is not None:
@@ -1849,7 +1849,7 @@ class DataflowExecution:
                 else:
                     cleanup_error.add_note("Physical cleanup also failed: " + str(exc))
         if not physical_closed and self._defer_live_thread_cleanup():
-            from ..recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             isolated = RecoveryContractError('Native writer is isolated while draining; run lease is retained')
             if cleanup_error is not None:
                 isolated.add_note('Original cleanup: ' + str(cleanup_error))

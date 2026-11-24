@@ -40,7 +40,7 @@ from types import SimpleNamespace
 import pytest
 
 import demiflow.data as data
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
 
 from test_stage2_unified_plan import (

@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from ..data.runtime_contract import RuntimeContractError
-from ..execution.recovery_contract import document, identifier, identity
-from ..execution.recovery_identity import describe, source_identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
+from demiflow.execution.seal.program_identity import describe, source_identity
 from .traits import (
     unified_operation_traits, unified_source_traits, unified_terminal_traits,
 )

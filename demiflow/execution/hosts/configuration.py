@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from demiflow.execution.contracts.dataflow import DataLocation, DomainProof
 from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _ref_dict
-from demiflow.execution.recovery_contract import identifier
+from demiflow.execution.contracts.recovery_contract import identifier
 if TYPE_CHECKING:
     from demiflow.execution.contracts.dataflow import ArtifactRef, ArtifactStore
 
@@ -16,7 +16,7 @@ import time
 from demiflow.execution.contracts.dataflow import Bounds, HostDescriptor, RuntimePolicy
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 _RAY_AVAILABLE = importlib.util.find_spec('ray') is not None
 
 

@@ -46,7 +46,7 @@ __all__=["LANCE_STORAGE_CREDENTIAL_ENV_NAMES","missing_required_environment_name
 def allocation_environment(assignment, *, store, bounds):
     from demiflow.execution.operator_bindings.dataflow_model_factory import native_environment_names
     from demiflow.execution.seal.plan import load_sealed_dataflow, verify_dataflow_program
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     graph, physical, pin = load_sealed_dataflow(assignment.sealed,
         action_id=assignment.action_id, store=store, bounds=bounds)
     if physical.plan_id != assignment.plan_id or physical.plan_revision != assignment.plan_revision:

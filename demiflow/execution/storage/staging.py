@@ -12,7 +12,7 @@ from demiflow.execution.contracts.dataflow import ArtifactReply
 
 from demiflow.execution.contracts.dataflow import ArtifactCommand
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.run_journal import ExecutionBudgetExceeded
 
 import fcntl
@@ -21,7 +21,7 @@ import stat
 from pathlib import Path
 
 
-from demiflow.execution.recovery_contract import identifier
+from demiflow.execution.contracts.recovery_contract import identifier
 
 
 def staging_paths(root, store_id, reservation_id):

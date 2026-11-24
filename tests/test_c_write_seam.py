@@ -17,7 +17,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from demiflow.workbench.runs.facts import read_sealed_plan
@@ -177,7 +177,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
     import cloudpickle
     import json
     from demiflow.execution.seal import plan as sealing
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     original = sealing._stage_one_program
     altered = []
 
@@ -374,7 +374,7 @@ def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monke
     """The actual sealed pin carrier binds loaded-code identities independently
     of pickle payload digests and survives run-exit orphan collection.
     """
-    from demiflow.execution.recovery_contract import document, identity
+    from demiflow.execution.contracts.recovery_contract import document, identity
     run_dir = tmp_path / "run"
     with RunContext.start(run_dir) as run:
         relational_dataset().write_lance(str(tmp_path / "out.lance"), mode="create", return_receipt=True)
@@ -517,7 +517,7 @@ def test_catch_nonempty_canonical_strict_json():
     """A non-empty exception whitelist serializes to sorted qualified names so the
     sealed plan identity is strict-JSON (the seam compiles every write_lance plan)."""
     from demiflow.execution.seal.plan_facts import operation_facts
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
 
     async def callback(row):
         return row
@@ -533,7 +533,7 @@ def test_catch_canonical_preserves_empty_identity():
     neither catch copy site (stream_options fields nor the async/batch/save names
     loop) can drift a sealed identity."""
     from demiflow.execution.seal.plan_facts import _catch_facts
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
 
     for raw in ((), None, []):
         assert identity({"catch": _catch_facts(raw)}) == identity({"catch": raw})

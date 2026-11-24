@@ -4,7 +4,7 @@ import pytest
 from demiflow import data
 from demiflow.collect import SearchConfig
 from demiflow.collect.session import WebSession
-from demiflow.execution.recovery_contract import UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 from demiflow.execution.pipeline.run_context import RunContext
 from test_native_search_runtime import engines, server
 
@@ -119,7 +119,7 @@ def test_standalone_search_run_stream_retains_native_metrics(tmp_path, engines, 
 @pytest.mark.asyncio
 async def test_stream_actor_late_binding_reuses_original_row_fact(tmp_path, engines, server):
     from demiflow.collect.operators import SearchWeb
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.execution.worker.row_scope import RowScope, set_row_scope
     from demiflow.execution.worker.stream_resources import StreamResources
 

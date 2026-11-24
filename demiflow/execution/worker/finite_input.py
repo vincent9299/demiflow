@@ -23,7 +23,7 @@ import time
 
 
 from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 
 
 def _metadata_ceiling(states, entries):

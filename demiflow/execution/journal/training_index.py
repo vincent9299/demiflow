@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 
 from demiflow.execution.contracts.training import FitBinding, FitRequest
-from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document, identity
+from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document, identity
 
 
 class FitConflict(RecoveryContractError):

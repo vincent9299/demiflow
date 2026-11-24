@@ -105,7 +105,7 @@ def test_only_durably_confirmed_unsent_request_can_be_reserved_again(tmp_path, c
 
 
 def test_control_capacity_rejection_precedes_provider_dispatch(tmp_path, fixture_http, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     monkeypatch.setenv('SYNTHETIC_JSON_KEY', 'fixture-only')
     config = parse_prompt_pack(json.dumps(json_definition(fixture_http['base'])))
     with pytest.raises(RecoveryContractError, match='before dispatch'):

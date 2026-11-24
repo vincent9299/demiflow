@@ -516,7 +516,7 @@ def artifact_settings(tmp_path, **kw):
 
 def test_native_artifacts_survive_cleanup_and_replay(app_server, resource, tmp_path, monkeypatch):
     from demiflow.objects import ObjectRef
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'artifact')
     settings = artifact_settings(tmp_path)
     ds = stream(app_server, resource, tmp_path, settings=settings)
@@ -682,7 +682,7 @@ def test_cancel_during_export_drains_io_before_cleanup(app_server, tmp_path, mon
 
 
 def test_disabled_image_defaults_preserve_text_session_cache_identity(app_server, resource, tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     monkeypatch.setenv('DF_TEST_CODEX_MODE', 'direct')
     ds = stream(app_server, resource, tmp_path)
     rows, ref = collect_before_commit(ds, tmp_path / 'run', monkeypatch)

@@ -25,7 +25,7 @@ from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.compiler_support.operator_policy import classify_operator_state
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.resources.capacity import LocalCapacityPool

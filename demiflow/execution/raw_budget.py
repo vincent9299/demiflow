@@ -5,7 +5,7 @@ Unknown grants survive crashes; only a live, drained attempt can return slack.
 """
 import time
 import json
-from .recovery_contract import RecoveryContractError, document, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identity
 
 
 def schema(db):

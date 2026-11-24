@@ -203,7 +203,7 @@ def restore_node_metrics(execution, image):
     """
     import json
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     participants = {compute_participant_id(stage.stage_id, partition): (stage, partition)
                     for stage in execution._physical.stages for partition in stage.partitions}
     frontiers = {}
@@ -271,7 +271,7 @@ class _ObservedTiming:
 
 
 def stream_observations(execution, stats):
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     nodes = {node.occurrence_id: node for node in execution._graph.nodes}
     labels = getattr(execution, '_observation_labels', None)
     if labels is None:

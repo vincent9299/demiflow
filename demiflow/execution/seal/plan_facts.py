@@ -151,7 +151,7 @@ def _thaw_json(value):
 def _native_operation_facts(operation):
     """Lazy v3 native declaration projection; never instantiates the factory."""
     from demiflow.planning.dataflow_registry import operator_registry
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     definition = operator_registry().get(operation.kind)
     if definition is None:
         raise RuntimeContractError("Unknown native operation kind: " + operation.kind)
@@ -335,7 +335,7 @@ def _specialization_domain(operation):
         return group_batches_facts(operation)
     if type(operation) is ops.DeduplicateOp:
         from demiflow.operators.admission import StreamAdmission
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         target = operation.callable.target
         actor = getattr(target, '__self__', None)
         if type(actor) is not StreamAdmission or getattr(target, '__func__', None) is not StreamAdmission.__call__:
@@ -350,7 +350,7 @@ def _specialization_domain(operation):
         from demiflow.embeddings.flow_contract import embedding_facts
         return embedding_facts(operation)
     if type(operation) is ops.StreamPrependOp:
-        from demiflow.execution.recovery_identity import plan_identity
+        from demiflow.execution.seal.program_identity import plan_identity
         other = operation.source_dataset
         return {'contract': 'demiflow.stream_prepend',
                 'arguments': dict(max_rows=operation.max_rows, max_row_bytes=operation.max_row_bytes,
@@ -359,7 +359,7 @@ def _specialization_domain(operation):
 
 
 def _deduplicate_arguments(actor):
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
     from demiflow.operators.admission import validate_deduplicate_policy
     validate_deduplicate_policy(actor)
     return dict(on=list(actor.unique_on), key=actor.key, output=actor.output,

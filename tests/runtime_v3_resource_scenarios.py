@@ -192,7 +192,7 @@ def equal_width_cast_residency(directory, *, rejected):
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.commit import CommitCoordinator
     from demiflow.execution.outputs.lance_sink import LanceSink
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.lance.model import LanceWriteSpec
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     count = 4300 if rejected else 3000

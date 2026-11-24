@@ -109,7 +109,7 @@ class ArrowBatchCache:
                     or type(pos.get('row_offset')) is not int):
                 _arrow_error('Arrow record source position differs from batch binding')
             index = pos['row_offset'] - header['start']
-            from demiflow.execution.recovery_contract import identity
+            from demiflow.execution.contracts.recovery_contract import identity
             from demiflow.execution.contracts.dataflow_codec import _thaw_json as thaw_control_json
             if identity([header['source_id'], header['split_id'], thaw_control_json(pos)]) != record.record_id:
                 _arrow_error('Arrow record identity differs from its original source occurrence')

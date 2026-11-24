@@ -184,7 +184,7 @@ def test_metadata_callback_does_not_hold_a_read_transaction_or_write_lease(tmp_p
 def test_nonfinite_or_invalid_deadlines_are_rejected(tmp_path,deadline):
     from demiflow.execution.journal.run_reader import action_recovery_facts
     from demiflow.execution.journal.sealed_plan_facts import read_action_plan
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.journal.run_reader import observe_storage
     for read in (lambda:action_recovery_facts(tmp_path,'a',deadline=deadline),
                  lambda:read_action_plan(tmp_path,'a',max_bytes=1024,deadline=deadline),

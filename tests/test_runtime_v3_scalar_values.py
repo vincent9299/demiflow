@@ -172,8 +172,8 @@ def test_named_zone_offset_and_payload_depth_cannot_silently_change():
 
 
 def test_existing_primitive_payload_and_semantic_identity_bytes_stay_frozen():
-    from demiflow.execution.recovery_identity import describe
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.seal.program_identity import describe
+    from demiflow.execution.contracts.recovery_contract import document
     raw = _encode_payload({'legacy': [None, True, 1, -0.0, 'é'], 'tuple': (b'\x00', 2)}, max_bytes=4096)
     assert raw == ('{"t":"map","v":[["legacy",{"t":"list","v":[{"t":"null"},'
         '{"t":"bool","v":true},{"t":"int","v":1},{"t":"float","v":-0.0},'

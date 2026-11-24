@@ -4,7 +4,7 @@ import time
 from ...resources.contracts import (RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan,
                                    ResourceScope, WorkerRequest)
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 class JobAllocation:

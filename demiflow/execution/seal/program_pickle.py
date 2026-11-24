@@ -69,7 +69,7 @@ class ProgramUnpickler(pickle.Unpickler):
             self._native_states.clear()
 
     def _make_function(self, code, globals, name, argdefs, closure):
-        from demiflow.execution.recovery_sdk_v3 import native_pickle_function
+        from demiflow.execution.seal.recovery_sdk_v3 import native_pickle_function
         from cloudpickle.cloudpickle import _make_function
         native = native_pickle_function(code, globals, name, argdefs, closure)
         if native is None:
@@ -80,7 +80,7 @@ class ProgramUnpickler(pickle.Unpickler):
 
     def _function_setstate(self, value, state):
         from cloudpickle.cloudpickle import _function_setstate
-        from demiflow.execution.recovery_contract import document, RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
         if value not in self._native_states:
             from types import FunctionType
             from demiflow.execution.contracts.recovery_sdk_v3 import LAYOUT_RELOCATIONS
@@ -113,7 +113,7 @@ class ProgramUnpickler(pickle.Unpickler):
                 return self._make_function
             if name == '_function_setstate':
                 return self._function_setstate
-        from demiflow.execution.recovery_sdk_v3 import source_pickle_global, authentic_source_global
+        from demiflow.execution.seal.recovery_sdk_v3 import source_pickle_global, authentic_source_global
         target = source_pickle_global(module, name)
         if target is None:
             return super().find_class(module, name)

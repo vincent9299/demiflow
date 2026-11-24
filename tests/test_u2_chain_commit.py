@@ -11,7 +11,7 @@ from demiflow.execution.contracts.checkpoint import (
     legacy_checkpoint_fragment, replayable_effects, validate_checkpoint_manifest,
 )
 from demiflow.execution.contracts.errors import ProtocolError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.run_journal import RunJournal
 
 

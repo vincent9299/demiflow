@@ -22,5 +22,5 @@ def require_action(kind, arguments=None):
     """Apply the same capability gate to native entry points before any work."""
     capability = check_action(kind, arguments)
     if not capability['supported']:
-        from demiflow.execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         raise RecoveryContractError(capability['reason'])

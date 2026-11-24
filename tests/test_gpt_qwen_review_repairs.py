@@ -8,8 +8,8 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.recovery_identity import describe, operation_identity, plan_identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.seal.program_identity import describe, operation_identity, plan_identity
 from demiflow.execution.pipeline.run_context import RunContext
 
 

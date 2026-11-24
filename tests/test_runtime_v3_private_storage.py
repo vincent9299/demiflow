@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.journal.dataflow_authority import bind_private_storage, private_storage
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
 from demiflow.execution.run_journal import ExecutionBudgetExceeded
 from demiflow.execution.contracts.dataflow_errors import DataflowError

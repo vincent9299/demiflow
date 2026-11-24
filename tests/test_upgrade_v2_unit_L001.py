@@ -12,7 +12,7 @@ import pytest
 
 from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA_V2, interpret_physical_plan
 from demiflow.execution.contracts.errors import PlanContractError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.planning.dag import compile_physical_execution_plan
 from test_execution_layout import PROFILE_REF, RECOVERY, bundle_for, chain_fixture, stage_id
 import _v2_native_fixtures as fx

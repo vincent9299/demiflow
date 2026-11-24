@@ -12,7 +12,7 @@ import time
 import threading
 import uuid
 from demiflow.execution.queue_contract import queue_config
-from demiflow.execution.recovery_contract import RecoveryContractError, document
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
 
 
 SCHEMA = (

@@ -541,7 +541,7 @@ class CheckedExecution:
             if spec.schema is not None:
                 _equal(schema_identity(spec.schema), schema_identity(expected.schema), identity + '.write.schema')
             from demiflow.execution.pipeline.run_context import current_run
-            from demiflow.execution.recovery_contract import identity as commit_identity
+            from demiflow.execution.contracts.recovery_contract import identity as commit_identity
             intent.update(dependencies=self.dependency_identity(identity),
                           spec=spec.to_dict(), request_hash=spec.content_hash,
                           operation_id=commit_identity([current_run().ref.run_id, identity, 1]))
@@ -648,7 +648,7 @@ def _validate_action_source(kind, value):
         from demiflow.execution.native_queue.queue_producer import producer_actor, validate_source
         producer = producer_actor(value.plan)
         if producer is not None:
-            from demiflow.execution.recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             if kind != 'run_stream':
                 raise RecoveryContractError('Incremental enqueue requires run_stream; source capture and other terminals cannot publish tasks')
             validate_source(value.source, producer[1].producer.source)
@@ -658,11 +658,11 @@ def _validate_action_source(kind, value):
 def action(kind, source, plan, spec=None, *, arguments=None):
     from contextlib import nullcontext
     from demiflow.execution.pipeline.run_context import execution_scope
-    from demiflow.execution.recovery_identity import plan_identity
+    from demiflow.execution.seal.program_identity import plan_identity
     from demiflow.execution.compiler_support.capabilities import check_action
     capability = check_action(kind, arguments)
     if not capability['supported']:
-        from demiflow.execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         raise RecoveryContractError(capability['reason'])
     from demiflow.execution.executors.plan_capture import current_capture
     capture = current_capture()

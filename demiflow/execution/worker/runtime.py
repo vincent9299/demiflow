@@ -12,7 +12,7 @@ import json
 import threading
 from typing import Mapping
 from demiflow.execution.contracts.dataflow import WorkerEvent, EffectCommand, EffectReply, ArtifactCommand, ArtifactReply, QueueCommand, QueueReply, NativeJournalCommand, NativeJournalReply
-from demiflow.execution.recovery_contract import identifier, identity
+from demiflow.execution.contracts.recovery_contract import identifier, identity
 from demiflow.execution.contracts.dataflow_codec import decode_artifact_reference as _ref_from_json, encode_artifact_reference as _ref_to_json
 
 from demiflow.execution.contracts.dataflow import RuntimeServices, WorkerAssignment
@@ -32,7 +32,7 @@ from ..contracts.envelope import (
 )
 from ..contracts.errors import ProtocolError
 from ..contracts.worker import apply_assignment, next_worker_state, validate_message
-from ..recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 class _ReadContext:

@@ -167,7 +167,7 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
     assert len(server['bodies']) == 2
     assert not RunJournal(tmp_path/'run').execution_commits('action-1')
     stop.unlink()
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError, match='P3 native sink adapter'):
         with RunContext.resume(reference):
             flow().run_stream(stop_file=stop)

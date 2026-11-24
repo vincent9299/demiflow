@@ -31,7 +31,7 @@ def test_checkpoint_cached_map_failure_resume(tmp_path):
     from functools import partial
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from _native_relational_history_fixtures import cached_transform
     from _worker_event_fixtures import events
     log, failure = tmp_path / 'calls.jsonl', tmp_path / 'failed-once'
@@ -144,7 +144,7 @@ def test_checkpoint_async_in_running_loop_resume_and_version(tmp_path):
     from functools import partial
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext, current_run
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from _native_relational_history_fixtures import cached_transform
     from _worker_event_fixtures import events
     log, failure = tmp_path / 'calls.jsonl', tmp_path / 'failed-once'

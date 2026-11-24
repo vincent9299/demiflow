@@ -9,7 +9,7 @@ import uuid
 
 from demiflow.data.datasink import Datasink
 from demiflow.data.runtime_contract import check_size
-from demiflow.execution.recovery_contract import document, RecoveryContractError, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError, identifier, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 BLOCK_BYTES = 4 * 1024**2

@@ -156,7 +156,7 @@ def test_segment_index_authentication_shares_the_same_live_grant(tmp_path, monke
     from demiflow.execution.contracts.dataflow import ProducerCompletion
     from demiflow.execution.storage.segments import SEGMENTS_MEDIA, SCHEMA
     from demiflow.execution.exchange.dataflow_channels import seal_scope
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     with store_fixture(tmp_path) as (_, store, _):
         services, spec = limited_fixture(store)
         _, leaves, _ = make_seal(services, spec)
@@ -296,7 +296,7 @@ def test_index_growth_is_readmitted_before_extending_the_record_buffer(tmp_path)
     from demiflow.execution.storage.streams import frame_stream
     from demiflow.execution.contracts.record_codec import read_chunk_bytes, admit_workspace
     from demiflow.execution.contracts.record_codec import _encode_record_document
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     with store_fixture(tmp_path) as (_, store, _):
         services, spec = limited_fixture(store)
         rows = (record({'v': 1}, 0), record({'v': 'x' * 8192}, 1))

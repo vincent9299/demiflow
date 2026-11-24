@@ -71,7 +71,7 @@ def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_an
             'seal_ref':seal,'manifest_ref':manifest}}]}},'batch':[record]},max_bytes=65536),
             'application/x-demiflow-kernel-image-v3')
         from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.recovery_contract import SourcePosition
+        from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.execution.outputs.sinks import _DataflowArtifactSink
         sink=_DataflowArtifactSink(sink_id='test',store=store,action=port._action,
                                    bounds=port._bounds,configuration={})
@@ -357,7 +357,7 @@ def test_optional_gc_near_original_deadline_preserves_successful_run(tmp_path,mo
 def test_optional_gc_skip_does_not_bypass_original_timeout(tmp_path):
     import time
     from demiflow.execution.storage.gc import defer_run_gc
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     with pytest.raises(RecoveryContractError,match='time budget exhausted'):
         with RunContext.start(tmp_path/'expired') as run:

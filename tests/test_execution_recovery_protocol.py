@@ -10,9 +10,7 @@ import pytest
 
 from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.recovery_contract import (
-    RecoveryContractError, RunRef, SourcePosition, UnresolvedCommit,
-)
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, UnresolvedCommit
 from demiflow.execution.pipeline.run_context import RunContext, current_run
 from demiflow.execution.run_journal import RunJournal
 from demiflow.errors import ExecutionConflict
@@ -331,7 +329,7 @@ def test_explicit_checkpoint_is_not_an_alternate_execution_mode(tmp_path):
 
 
 def test_source_code_change_and_late_timeout_cannot_be_marked_success(tmp_path, monkeypatch):
-    import demiflow.execution.recovery_identity as identities
+    import demiflow.execution.seal.program_identity as identities
     import time
     with pytest.raises(RuntimeError):
         with RunContext.start(tmp_path / 'run') as run:

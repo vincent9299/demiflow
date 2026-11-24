@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 
-from demiflow.execution.recovery_contract import RecoveryContractError, document, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 
 IDENTITY_BRIDGE_SCHEMA = "demiflow.identity_bridge.v1"

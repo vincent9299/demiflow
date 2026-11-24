@@ -34,7 +34,7 @@ import weakref
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, CutRequest, PhysicalDataflow, RecoveryImage, SourceCursor
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document, identifier, identity
 from demiflow.execution.pipeline.run_context import RunAction
 from demiflow.execution.run_journal import ExecutionBudgetExceeded
 from demiflow.execution.storage.state_artifacts import StateArtifacts
@@ -313,7 +313,7 @@ class DataflowCheckpointCoordinator:
                 raise DataflowError('CORRUPT_ARTIFACT', 'Row-only cut has unexpected model bindings')
             return
         from demiflow.execution.contracts.dataflow_codec import compute_participant_id
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         consumers = {e.consumer for e in self._physical.value_edges if e.input_port == 'model'}
         observed = {c.participant_id for c in contributions}
         required = {o for s in self._physical.stages if s.stage_id in consumers and

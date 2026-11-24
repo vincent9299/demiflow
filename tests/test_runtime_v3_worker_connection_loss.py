@@ -11,7 +11,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.hosts.endpoints import LocalHostEndpoint
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.worker.bootstrap import ControlFrameReader, recv_message, _MAX_CONTROL_BYTES
 
 

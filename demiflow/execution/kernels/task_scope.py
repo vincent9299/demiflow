@@ -65,7 +65,7 @@ def measurable_task_fields(target, args, kwargs, occurrence):
         fields, _, reason = _resident_slots(target, call_args=args, call_kwargs=kwargs)
     else:
         fields = vars(target)
-        from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES
+        from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES
         _, reason = _json_fields(fields, MAX_DOCUMENT_BYTES)
     if reason is not None:
         raise DataflowError('RESOURCE_INFEASIBLE',

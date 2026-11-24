@@ -6,7 +6,7 @@ import json
 from demiflow.execution.contracts.dataflow import ArtifactRef, CapabilityReport, CutContribution, CutRequest, HistoricalBinding, RecoveryImage, SourceCursor
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 _err = DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_codec import history_carrier_reference as _carrier_ref
 from demiflow.execution.storage.reading import read_history_carrier as _read_carrier, read_json_artifact as _store_read_json
 from demiflow.execution.seal.plan import SEAL_SCHEMA as DATAFLOW_SEALED_SCHEMA, TRAINING_SEAL_SCHEMA

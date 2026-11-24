@@ -385,7 +385,7 @@ def test_actual_forge_node_request_cap_preserves_declared_error_rows(image_works
 def test_native_run_request_ceiling_fails_before_second_http_and_cannot_reset(tmp_path,joint_http):
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.parser import parse_prompt_pack
     pack=definition(joint_http['base'],template='{{ instruction }}')
     pack['prompts']['generate']['model']['timeout_s']=5
@@ -412,7 +412,7 @@ def test_native_run_request_ceiling_fails_before_second_http_and_cannot_reset(tm
 def test_native_image_delivery_remains_explicitly_nonresumable(tmp_path,joint_http):
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.parser import parse_prompt_pack
     pack = definition(joint_http['base'],template='{{ instruction }}')
     pack['prompts']['generate']['model']['timeout_s']=2

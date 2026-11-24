@@ -7,7 +7,7 @@ from _native_receipt_fixtures import committed_rows
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_codec import compute_participant_id
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 

@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow import ArtifactCommand
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.staging import StagingLease, staging_paths
 from demiflow.execution.storage.objects import _sync_directory
-from demiflow.execution.recovery_contract import identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import identity, RecoveryContractError
 
 
 class KernelScratch:

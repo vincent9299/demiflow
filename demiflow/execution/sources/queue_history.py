@@ -9,7 +9,7 @@ from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata
 from demiflow.execution.queue import QueueChannel
 from demiflow.execution.queue_contract import queue_config, QueueSnapshot, HistoryReadLimits, HistoryReadLimit
 from demiflow.execution.queue_commit import QueueCommitStore
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
 
 
 class ReadOnlyQueueStore:

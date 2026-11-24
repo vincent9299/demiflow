@@ -105,7 +105,7 @@ def observed_fsync(fd):
     return original_fsync(fd)
 os.fsync = observed_fsync
 import demiflow.execution.commit as protocol
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 WRITER_METRICS = []
 ATTEMPTS = []
 INITIAL_USAGE = resource.getrusage(resource.RUSAGE_SELF)

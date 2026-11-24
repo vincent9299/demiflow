@@ -21,7 +21,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError as _err
 _JSON_MEDIA = "application/json"
 RUN_STORE_ID = "run"
 
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 import math
 from dataclasses import fields, is_dataclass

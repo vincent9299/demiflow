@@ -15,7 +15,7 @@ from dataclasses import dataclass, fields, is_dataclass
 import re
 from types import MappingProxyType
 
-from demiflow.execution.recovery_contract import RecoveryContractError, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
 from demiflow.execution.contracts.errors import ProtocolError, PlanContractError, require_plan_contract as _require
 from demiflow.execution.contracts.artifact import validate_plan_artifact_ref as _validate_artifact_ref
 from demiflow.execution.contracts.worker import validate_assignment

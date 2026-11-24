@@ -38,7 +38,7 @@ def make_worker_control_assignment(assignment: "WorkerAssignment", *, grant: dic
     stages = [stage.stage_id for stage in assignment.stages]
     # K3 identifiers exclude ':'; keep the physical v3 IDs in the sealed
     # assignment and use a deterministic transport-only projection here.
-    from ..recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     partitions = [identity(["dataflow-k3-partition-v3", value]) for value in lease.partition_ids]
     inputs = [{"channel_id": exchange.channel_id} for exchange in assignment.inputs]
     outputs = [exchange.channel_id for exchange in assignment.outputs]
@@ -263,7 +263,7 @@ class HostedDataflowWorker:
     def receive_many(self, commands):
         """One transport RPC; every original command retains its own receive."""
         from .bootstrap import _CONTROL_BATCH_EVENTS, _MAX_CONTROL_BYTES
-        from ..recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         if type(commands) not in (tuple, list) or not 1 <= len(commands) <= min(
                 _CONTROL_BATCH_EVENTS, self._mailbox._bounds.max_pending_events):
             raise DataflowError('BUDGET_EXCEEDED', 'control batch exceeds event budget')

@@ -9,7 +9,7 @@ is delegated to the original storage port.
 from __future__ import annotations
 
 from demiflow.execution.contracts.dataflow_codec import image_request_budget
-from demiflow.execution.recovery_contract import UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 
 from demiflow.execution.storage.artifacts import resolve_local_artifact
 from demiflow.execution.storage.private_journals import inspect_private_journal as _existing_size, inspect_private_lease_history as _lease_history
@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Mapping
 
 from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactReply, CompletedControl, ControlReply, EffectCommand, EffectReply, NativeJournalCommand, NativeJournalReply, QueueCommand, QueueReply, WorkerEvent
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
 
 if TYPE_CHECKING:
     from demiflow.execution.contracts.dataflow import ArtifactRef, ArtifactStore, Bounds, WorkerLease
@@ -635,7 +635,7 @@ class DriverJournalService:
         if policy is None:
             raise DataflowError('INVALID_CONTRACT', 'sealed recovery policy is not bound')
         if policy.required_recovery != 'attempt_only':
-            from demiflow.execution.recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Actor needs snapshot_state/restore_state: '
                 'required_recovery=' + policy.required_recovery + ' forbids attempt_only state')
         # The worker can only tighten the bound action's recovery guarantee.

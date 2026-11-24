@@ -10,7 +10,7 @@ from typing import Mapping
 
 from demiflow.execution.contracts.dataflow import Bounds, CallableInstance, EffectCommand, EffectReply, KernelSpec, NativeEffectTransport, RuntimeServices, WorkerJournalPort
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 # Pure batch packing/concurrency knobs never change a per-record model result

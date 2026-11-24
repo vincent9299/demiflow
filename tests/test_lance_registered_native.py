@@ -105,7 +105,7 @@ def test_active_run_is_reused_and_remains_open(tmp_path):
 @pytest.mark.parametrize('changed', [False, True])
 def test_unfinished_registration_uses_original_recovery_and_code_pin(tmp_path, monkeypatch, changed):
     import demiflow.execution.commit as protocol
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     def stop(name, commit_id):
         if name == 'after_prepared':
@@ -132,7 +132,7 @@ def test_unfinished_registration_uses_original_recovery_and_code_pin(tmp_path, m
 
 
 def test_same_schema_count_version_foreign_table_cannot_replace_original_publication(tmp_path):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     ref, rows, replayed = registered(tmp_path)
     pointer, journal = original_journal(tmp_path)
     before = journal.execution_commits(pointer['action_id'])

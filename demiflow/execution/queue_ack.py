@@ -1,6 +1,6 @@
 """Explicit graph-tail adapter to the same native final task commit."""
 from .queue_contract import queue_config
-from .recovery_contract import RecoveryContractError,identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 from demiflow.execution.worker.row_scope import current_row_scope
 
 

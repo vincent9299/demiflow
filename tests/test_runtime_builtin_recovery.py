@@ -14,7 +14,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, RecoveryContractError
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.execution.run_journal import RunJournal
 from test_collect_flow_contract import document, picture
 

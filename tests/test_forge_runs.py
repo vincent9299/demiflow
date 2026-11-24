@@ -229,7 +229,7 @@ def test_create_reconciliation_uses_marker_and_preserves_fixed_version(root, mon
     from demiflow.execution import RunContext, SourcePosition
     from demiflow.execution.commit import CommitCoordinator
     from demiflow.execution.outputs.lance_sink import LanceSink
-    from demiflow.execution.recovery_identity import plan_identity
+    from demiflow.execution.seal.program_identity import plan_identity
     import demiflow.execution.commit as protocol
     def fail(name, commit_id):
         if name == 'after_sink_commit_before_receipt':
@@ -239,7 +239,7 @@ def test_create_reconciliation_uses_marker_and_preserves_fixed_version(root, mon
         with RunContext.attach(run) as context:
             declaration = plan_identity('write_table', None, None, spec)
             with context.action(declaration, action_id=output['action_id']) as action:
-                from demiflow.execution.recovery_contract import identity
+                from demiflow.execution.contracts.recovery_contract import identity
                 operation_id = identity([context.ref.run_id, action.action_id, 1])
                 run.action_event(output['action_id'], 'intent', {'kind': 'write_table',
                     'spec': spec.to_dict(), 'request_hash': spec.content_hash, 'operation_id': operation_id})

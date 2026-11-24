@@ -20,7 +20,7 @@ from ...errors import ExecutionConflict
 from ..contracts.envelope import validate_grant
 from demiflow.execution.pipeline.run_context import current_run, run_scope, action_scope, persisting_effect_scope, is_persisting_effect
 from ..run_journal import RunJournal
-from ..recovery_contract import RunRef, RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RunRef, RecoveryContractError, identity
 from demiflow.execution.pipeline.run_context import active_limits
 
 

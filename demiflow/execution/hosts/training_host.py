@@ -11,7 +11,7 @@ from demiflow.execution.contracts.dataflow_codec import encode_wire
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.training import FitRequest, FitResult, JobLookup, JobRef, TrainingSnapshotRef
 from demiflow.execution.scheduler.native_limits import admission_timeout_ms
-from demiflow.execution.recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from demiflow.execution.scheduler.job import JobAllocation
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 from demiflow.execution.training.managed_bootstrap import read_metadata

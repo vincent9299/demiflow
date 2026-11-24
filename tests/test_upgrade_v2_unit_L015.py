@@ -11,7 +11,7 @@ import pytest
 
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.seal.plan import load_dataflow
-from demiflow.execution.recovery_identity import plan_identity
+from demiflow.execution.seal.program_identity import plan_identity
 from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_chain_compatibility import _entry
 

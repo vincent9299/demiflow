@@ -22,7 +22,7 @@ from demiflow.execution.exchange.dataflow_channels import route_record, seal_sco
 from demiflow.execution.exchange.dataflow_state import RoutingCounters
 from demiflow.execution.kernels.operator import _SpoolPort
 from demiflow.execution.contracts import state_codec
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_c import make, bounds

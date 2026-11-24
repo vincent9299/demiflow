@@ -18,7 +18,7 @@ import pytest
 
 from demiflow.execution.seal.plan_interpreter import CheckpointPolicy, ExecutionLayout, WorkerPlacement, interpret_physical_plan, to_wire, validate_worker_assignment
 from demiflow.execution.contracts.errors import PlanContractError
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from demiflow.execution.storage.reading import read_plan_artifact
 from demiflow.resources.contracts import ResourceProfile

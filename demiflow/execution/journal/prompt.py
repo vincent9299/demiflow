@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.errors import _CapacityPending
 
 

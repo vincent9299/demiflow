@@ -50,7 +50,7 @@ def run_boundaries(root, base, calls):
     from demiflow.operator_llm.parser import parse_prompt_pack
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.queue_sinks import QueueResultSink
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from runtime_v3_queue_business_scenarios import _messages, PACK
     report = {}

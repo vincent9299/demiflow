@@ -1,7 +1,7 @@
 """Native stream occurrence/ownership sidecar, never a business-row field."""
 from contextvars import ContextVar
 from dataclasses import dataclass
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 _CURRENT = ContextVar('demiflow_native_row_scope', default=None)
 

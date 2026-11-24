@@ -6,7 +6,7 @@ import stat
 import threading
 import time
 
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 class ArtifactProofs:

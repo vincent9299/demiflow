@@ -8,7 +8,7 @@ from demiflow.execution.contracts.dataflow import BlockPartition
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.scratch import ScratchStream
 from demiflow.execution.storage.segments import SegmentForest, block_chunks, RECORDS_MEDIA
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 def declared_blocks(graph, terminal, bounds):
@@ -133,7 +133,7 @@ class TerminalBlocks:
         self.columns = columns
 
     def manifest_chunks(self, manifest):
-        from demiflow.execution.recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         if self._workspace_limit is None:
             raw = document(manifest, self.bounds.max_control_bytes)
             return len(raw), iter((raw,))
@@ -149,7 +149,7 @@ class TerminalBlocks:
             if type(value) is float:
                 import math
                 if not math.isfinite(value):
-                    from demiflow.execution.recovery_contract import RecoveryContractError
+                    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                     raise RecoveryContractError('Nonfinite execution metadata')
             return _json_shape(value, self.bounds.max_control_bytes)[0]
         # No complete output string/list of chunks is constructed. Charge the

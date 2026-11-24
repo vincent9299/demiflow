@@ -13,7 +13,7 @@ from ...resources.process_observation import inherited_unit
 from ..contracts.dataflow import Bounds
 from ..contracts.dataflow_codec import decode_wire_document
 from ..contracts.training import FitBinding, FitRequest, FitResult, TrainingSnapshotRef
-from ..recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 from ..seal.plan import load_sealed_dataflow, verify_dataflow_program
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 from ..storage.objects import RunArtifactStore

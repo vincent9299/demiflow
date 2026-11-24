@@ -90,7 +90,7 @@ def test_file_resume_refuses_changed_published_bytes(tmp_path):
 
 
 def test_old_file_action_without_native_binding_still_rejects_replay(tmp_path):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError,match='unconfirmed'):
         with RunContext.start(tmp_path/'run') as run:
             with run.action({'kind':'write_file','source':None,'operations':[]}):

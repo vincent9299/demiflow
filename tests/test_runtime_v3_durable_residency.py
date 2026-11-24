@@ -249,7 +249,7 @@ def test_durable_write_lance_recovers_without_empty_early_publication(tmp_path, 
 def test_park_metadata_rechecks_bound_after_actual_cut_proofs_grow(schema):
     from types import SimpleNamespace
     from demiflow.execution.action_driver.durable_residency import DurableResidency
-    from demiflow.execution.recovery_contract import RecoveryContractError, document
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
     controller = object.__new__(DurableResidency)
     from demiflow.execution.exchange.deliveries import DeliveryExchange
     controller._bounds = SimpleNamespace(max_state_bytes=65536)

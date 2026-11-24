@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from demiflow.execution.recovery_contract import document, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
 from demiflow.data.runtime_contract import check_size, RuntimeContractError
 from demiflow.execution.compiler_support.operator_policy import AUTO_STATE_SCHEMA, _auto_json_eligible, _json_fields
 

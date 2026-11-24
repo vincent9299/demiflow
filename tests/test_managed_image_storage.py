@@ -5,7 +5,7 @@ import os
 import pytest
 from demiflow.execution.outputs.block_sink import storage_usage
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def test_completed_decoder_file_disappears_before_storage_stat(tmp_path,monkeypatch):

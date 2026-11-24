@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from demiflow.data.plan import CallableSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
 
 

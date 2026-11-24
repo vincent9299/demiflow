@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Iterator
 
 from ..contracts.dataflow import ArtifactRef, ArtifactCommand
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import identifier, identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import identifier, identity, RecoveryContractError
 
 if TYPE_CHECKING:
     from ..contracts.dataflow import ArtifactAuthorityPort, Bounds
@@ -586,7 +586,7 @@ def _release_files(state, count, limit, *, final=True):
 
 
 def _pin_identity(ref: ArtifactRef, owner: str) -> str:
-    from ..recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     return identity({"digest": ref.digest, "store_id": ref.store_id, "key": ref.key, "owner": owner})
 
 

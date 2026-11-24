@@ -84,7 +84,7 @@ def _artifact_attacks(execution, root):
     from demiflow.execution.seal.plan import (verify_dataflow_program, load_dataflow,
                                                 _artifact_from_json)
     from demiflow.execution.seal.business_sources import mount_sources
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     store, bounds, sealed = execution._store, execution._bounds, execution._sealed
     node = next(n for n in execution._graph.nodes if n.kind == 'transform')
     pin = json.loads(_read(store, sealed.code_pin_ref, bounds))
@@ -163,7 +163,7 @@ def _assignment_attacks(execution, assignment, root):
     from demiflow.execution.worker.runtime import make_runtime_services
     from demiflow.execution.contracts.dataflow import WorkerEvent
     from demiflow.execution.contracts.dataflow_codec import encode_wire, runtime_scope_id
-    from demiflow.execution.recovery_contract import document, identity
+    from demiflow.execution.contracts.recovery_contract import document, identity
     store, bounds = execution._store, execution._bounds
     # This is the actual allocator-issued lease, not a synthetic worker ID.
     transport = _NativeTransport(execution._services)
@@ -249,7 +249,7 @@ def artifact_security(fx, fault=None):
     from demiflow.execution.hosts.endpoints import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
     from demiflow.execution.contracts.dataflow_codec import encode_wire
     from demiflow.execution.worker.runtime import _decode_v3_assignment
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     from runtime_v3_residency_scenarios import _provider
     from runtime_v3_support import assert_tree_binding
     import builtins

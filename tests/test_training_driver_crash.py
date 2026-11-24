@@ -11,7 +11,7 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow import data
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.training.deployment import TrainingDeployment

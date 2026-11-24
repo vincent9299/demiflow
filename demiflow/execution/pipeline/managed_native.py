@@ -14,7 +14,7 @@ from pathlib import Path
 
 from demiflow.execution.pipeline.checked import CheckedExecution, CheckedAction, _equal
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 from demiflow.execution.contracts.pipeline import NATIVE_SUBMISSION_FORMAT as FORMAT
 

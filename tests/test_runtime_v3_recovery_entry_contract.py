@@ -8,7 +8,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal, ExecutionBudgetExceeded
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit
 from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowUnresolvedCommit
 from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from test_execution_recovery_entrypoints import FormalSink
@@ -171,7 +171,7 @@ def test_native_coordinator_budget_rejection_is_not_mislabeled_unknown(tmp_path,
 
 @pytest.mark.parametrize('budget', ['image-requests-' + 'a'*64, 'requests-' + 'b'*64, '0-leading'])
 def test_original_journal_budget_identifiers_survive_both_rpc_hops(budget):
-    from demiflow.execution.recovery_contract import identifier
+    from demiflow.execution.contracts.recovery_contract import identifier
     identifier(budget)
     original = ExecutionBudgetExceeded(budget)
     error = original

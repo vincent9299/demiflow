@@ -300,7 +300,7 @@ def test_budget_and_blocking_io_stay_bounded(server, tmp_path, monkeypatch):
 
 
 def test_budget_without_journal_is_atomic_across_workers(server):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     ds = data.from_items([{'text': str(i)} for i in range(10)]).map_embeddings(
         model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=4, max_requests=1)
     with pytest.raises(RecoveryContractError, match='Execution budget exhausted'): ds.materialize()

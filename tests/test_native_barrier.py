@@ -162,7 +162,7 @@ def test_shared_actor_uses_one_snapshot_at_last_owner(tmp_path, monkeypatch):
 
 def test_one_input_1201_objects_crosses_bounded_manifest_pages(tmp_path):
     from demiflow.execution.outputs.object_sink import ObjectRowsSink
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.execution.storage.artifact_manifest import manifest_pages, entries
     from demiflow.objects import ObjectRef
     with RunContext.start(tmp_path/'run') as run:
@@ -188,7 +188,7 @@ def test_one_input_1201_objects_crosses_bounded_manifest_pages(tmp_path):
 
 def test_block_pages_preserve_output_order_and_recovery(tmp_path):
     from demiflow.execution.outputs.block_sink import BlockSink
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     with RunContext.start(tmp_path/'run', limits={'max_row_bytes': 1024, 'max_batch_bytes': 1024}) as run:
         with run.action({'kind': 'materialize', 'source': {'fixture': 'blocks'}}) as action:
             sink = BlockSink(action)
@@ -204,7 +204,7 @@ def test_block_pages_preserve_output_order_and_recovery(tmp_path):
 
 
 def test_private_temporary_registration_is_released_but_references_are_kept(tmp_path):
-    from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition
     from demiflow.execution.outputs.block_sink import BlockSink
     with RunContext.start(tmp_path/'run') as run:
         path = run.directory/'scratch'/'private'
@@ -301,7 +301,7 @@ def test_direct_lance_prepares_before_source_finishes_and_publishes_once(tmp_pat
 
 
 def test_temporary_release_rejects_live_files_and_stale_fence(tmp_path):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.execution.run_journal import ExecutionConflict
     with RunContext.start(tmp_path/'run') as run:
         path = run.directory/'scratch'/'live'
@@ -663,7 +663,7 @@ def test_aggregate_state_admission_applies_across_alignment_groups(tmp_path):
 def test_checksum_proof_detects_replacement_and_same_size_corruption(tmp_path):
     import hashlib
     from demiflow.execution.storage.artifact_proof import ArtifactProofs
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     path = tmp_path/'blob'
     path.write_bytes(b'valid bytes')
     proof = ArtifactProofs(capacity=2)
@@ -684,7 +684,7 @@ def test_checksum_proof_detects_replacement_and_same_size_corruption(tmp_path):
 
 
 def test_late_writer_keeps_run_lease_and_handles_until_it_exits(tmp_path):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     release, entered, saw_stop = threading.Event(), threading.Event(), threading.Event()
     run = RunContext.start(tmp_path/'run')
     def writer():

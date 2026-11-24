@@ -206,7 +206,7 @@ class LocalObjectStore:
     changing bytes beneath references. No table or registry is required to read.
     """
     def __init__(self, directory, *, read_domain='host', domain_id=None, store_id='raw'):
-        from .execution.recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         if read_domain not in {'host', 'shared'}:
             raise ValueError('read_domain must be host or shared')
         if read_domain == 'shared':

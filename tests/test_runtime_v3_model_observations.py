@@ -6,7 +6,7 @@ import pytest
 from demiflow import data
 from demiflow.embeddings.runtime import EmbeddingMetrics
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.journal.dataflow_model_observations import validate_summaries, observe_models
 from test_embeddings import server
 from test_map_prompt_async import server as prompt_server, prompt

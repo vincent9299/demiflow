@@ -7,7 +7,7 @@ from pathlib import Path
 from demiflow.execution.contracts.dataflow import ArtifactRef, HistoricalBinding, SealedExecution
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 _err = DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 from demiflow.execution.contracts.dataflow_codec import history_carrier_reference as _carrier_ref, decode_history_reference as _ref_from_json, history_reference_list as _ref_list
 from demiflow.execution.storage.reading import read_history_carrier as _read_carrier
 from demiflow.execution.seal.plan import _validate_seal_marker, verify_fit_membership
@@ -84,7 +84,7 @@ def load_v3_binding(run_id, directory, action_id, marker):
                 or any(type(value) is not str or not value for value in labels.values())
                 or len(set(labels.values())) != len(labels)):
             raise _err("INVALID_CONTRACT", "v3 observation labels must uniquely name original occurrences")
-        from demiflow.execution.recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         try:
             document(labels, bounds.max_control_bytes)
         except RecoveryContractError as exc:

@@ -164,7 +164,7 @@ class DataflowError(Exception):
             (self.code, self._message, self.retryable, _thaw(self.context)),
         )
 
-from ..recovery_contract import RecoveryContractError, UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit
 
 
 class DataflowRecoveryError(DataflowError, RecoveryContractError):

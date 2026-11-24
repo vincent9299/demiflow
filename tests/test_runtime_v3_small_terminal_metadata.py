@@ -11,7 +11,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.scheduler.dataflow_publication_budget import TERMINAL_WORKSPACE
 from demiflow.execution.contracts.record_codec import frame_parts
 from demiflow.execution.contracts.dataflow_codec import MANIFEST_MEDIA
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from demiflow.execution.worker.terminal_blocks import TerminalBlocks
 from test_runtime_v3_artifact_accounting import store_fixture
@@ -171,7 +171,7 @@ def test_index_decode_keeps_the_unfinished_outer_manifest_and_live_control_body(
 
 def test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_before_encoder(tmp_path, monkeypatch):
     import json
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with store_fixture(tmp_path) as (_, store, _):
         ref, _ = unfinished(store, columns=2)
         runner = owner(store, ref)

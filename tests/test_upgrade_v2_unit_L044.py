@@ -2,7 +2,7 @@
 import hashlib
 import json
 
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.run_journal import RunJournal
 from test_u2_chain_commit import original_chain
 

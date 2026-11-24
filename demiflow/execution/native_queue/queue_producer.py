@@ -12,8 +12,8 @@ from demiflow.execution.queue import QueueChannel
 from demiflow.execution.queue_contract import ProducerRef, ProducerWindowLimit, queue_config
 from demiflow.execution.queue_commit import producer_action
 from demiflow.execution.queue_sinks import QueuePublishSink
-from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, document, identity, identifier
-from demiflow.execution.recovery_identity import describe, source_identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, document, identity, identifier
+from demiflow.execution.seal.program_identity import describe, source_identity
 from demiflow.execution.worker.row_scope import RowScope, ScopedRow, current_row_scope
 
 

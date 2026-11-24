@@ -62,7 +62,7 @@ def test_native_save_prepare_execute_and_fixed_result(root):
     versions=lance.dataset(stage['uri']).versions()
     assert len(versions)==3
     from demiflow.execution.host.inspection import verify_published_output
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     def verify_recorded():
         return verify_published_output(journal.directory, stage['action_id'],
             expected_uri=stage['uri'], expected_schema_identity=stage['schema_identity'],
@@ -334,7 +334,7 @@ else:
     assert stage['result'] is None and lance.dataset(stage['uri']).version==1
     if not foreign:
         from demiflow.execution.outputs.lance_sink import _BatchSink
-        from demiflow.execution.recovery_contract import UnresolvedCommit
+        from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
         def unknown_inspection(*args, **kwargs):
             raise UnresolvedCommit('native inspection is indeterminate')
         # Real prepared scope, fixed table, bridge and managed control path;

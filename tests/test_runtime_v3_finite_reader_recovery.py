@@ -14,7 +14,7 @@ from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.storage.segments import tree_refs
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_recovery_scenarios import _provider
 from runtime_v3_regression_inventory import assert_private

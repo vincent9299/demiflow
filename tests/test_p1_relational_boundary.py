@@ -32,7 +32,7 @@ def test_keyed_source_retains_exact_plan_inputs_without_sort_or_normalizing_rows
 
 @pytest.mark.parametrize('kind', [PlanInput, KeyedSource, UnionSource])
 def test_relational_declarations_keep_historical_pickle_names_and_code_pins(kind):
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
 
     old_module = 'demiflow.execution.local_kernel'
     # Protocol 0 GLOBAL is the exact historic module/name lookup, independent
@@ -54,7 +54,7 @@ def test_relational_declarations_keep_historical_pickle_names_and_code_pins(kind
 
 
 def test_relational_instance_seal_retains_tags_and_fields():
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.seal.program_identity import describe
 
     item = _input()
     keyed = KeyedSource('groups', item, ('key',))

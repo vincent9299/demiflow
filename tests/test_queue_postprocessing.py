@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.queue_sinks import QueueResultSink
 from test_queue_v2_protocol import channel
 from test_queue_v2_boundaries import seed, worker

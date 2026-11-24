@@ -5,7 +5,7 @@ import json
 import os
 import uuid
 
-from demiflow.execution.recovery_contract import document, RecoveryContractError, identifier
+from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError, identifier
 
 
 def atomic_bytes(path, raw):

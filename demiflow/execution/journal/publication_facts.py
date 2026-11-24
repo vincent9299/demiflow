@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.errors import PublicationMismatch, PreparedPublicationUnresolved
 from demiflow.execution.commit import commit_write_context
 from demiflow.execution.journal.run_reader import _check_deadline, _publication_snapshot, _latest_stream_lance_scope
@@ -169,7 +169,7 @@ def _recheck(directory, action_id, attempt, deadline, before):
     _check_deadline(deadline)
 
 def _recording(action_id, attempt, kind, value):
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     if kind not in ('recovered', 'stage_recovered'):
         raise PublicationMismatch('Unsupported native recording')
     document(value, 256 * 1024)

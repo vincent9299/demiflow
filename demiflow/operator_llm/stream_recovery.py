@@ -4,7 +4,7 @@ import contextlib
 import uuid
 from contextvars import ContextVar
 
-from ..execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 
 
 CALL_RESERVATION = ContextVar('native_prompt_budget_reservation', default=None)

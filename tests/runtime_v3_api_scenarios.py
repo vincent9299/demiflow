@@ -127,7 +127,7 @@ def _fixtures(root):
 def _cases(source):
     from demiflow import data
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     import pyarrow as pa
     import numpy as np
     import pandas as pd
@@ -642,7 +642,7 @@ def _object(root,family):
 def _integration_cases(source):
     from demiflow import data
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.parser import parse_prompt_pack
     from test_prompt_packing_contract import definition,arguments
     cases=[]

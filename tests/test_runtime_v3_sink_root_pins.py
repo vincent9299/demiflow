@@ -10,7 +10,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.gc import collect_published_orphans
 from demiflow.execution.storage.segments import SegmentForest, RECORDS_MEDIA, block_chunks, tree_refs
 from demiflow.execution.outputs.sinks import _DataflowArtifactSink
-from demiflow.execution.recovery_contract import SourcePosition
+from demiflow.execution.contracts.recovery_contract import SourcePosition
 from test_runtime_v3_artifact_accounting import store_fixture
 
 

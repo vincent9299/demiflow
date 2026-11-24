@@ -6,7 +6,7 @@ from .contracts.dataflow import QueueBinding, QueueReply
 from .contracts.dataflow_errors import DataflowError
 from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
 from demiflow.execution.operator_bindings.dataflow_search_runtime import SearchEffects, SearchRuntime
-from .recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 class NativeSearchCall(AcquisitionCall):

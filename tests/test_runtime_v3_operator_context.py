@@ -12,7 +12,7 @@ from demiflow.execution.run_journal import RunJournal
 
 def _record(path, phase):
     from demiflow.execution.pipeline.run_context import current_action
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     run = current_run()
     assert run is not None and current_action() is None
     assert not hasattr(run, 'journal') and not hasattr(run, 'reserve')

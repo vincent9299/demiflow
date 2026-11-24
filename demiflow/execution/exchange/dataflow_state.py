@@ -14,7 +14,7 @@ from collections import deque
 from demiflow.execution.contracts.dataflow import Bounds, CreditLease, ExchangeSpec
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.exchange import ChannelSequence
-from demiflow.execution.recovery_contract import RecoveryContractError, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 
 _MODES = frozenset({"memory_incremental", "durable_incremental", "finite_sealed"})
 _ROUTINGS = frozenset({"forward", "hash", "rebalance", "broadcast", "target"})

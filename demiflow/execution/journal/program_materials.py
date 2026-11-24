@@ -423,7 +423,7 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
 
 def project_training_ports(graph, dag):
     """Append sealed jobs and typed dependencies to a logical or historical view."""
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     by_id = {n.occurrence_id: n.semantic_id for n in (*graph.nodes, *graph.jobs)}
     inputs, outputs = {}, {}
     for edge in graph.value_edges:

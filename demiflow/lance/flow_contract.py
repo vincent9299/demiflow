@@ -127,7 +127,7 @@ def vector_search_declaration(actor):
 
 def vector_search_facts(operation):
     from demiflow.data.runtime_contract import RuntimeContractError
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.lance.search import VectorSearch
     target = operation.callable.target
     actor = getattr(target, '__self__', None)

@@ -16,7 +16,7 @@ import struct
 import time
 import uuid
 
-from .execution.recovery_contract import RecoveryContractError, UnresolvedCommit, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, identifier, identity
 
 _MAGIC = b'DFKV\x00\x01\x00\x00'
 _HEADER = struct.Struct('!II')

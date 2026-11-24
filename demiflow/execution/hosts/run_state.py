@@ -13,7 +13,7 @@ import time
 
 from demiflow.errors import ExecutionConflict
 from demiflow.resources.contracts import ACCELERATOR_BUDGET_PREFIX, MAX_DOCUMENT_BYTES, ResourceError, ResourceScope, TERMINAL_HOST_PHASES, accelerator_budget_key, document, identifier, spec_hash, validate_observation
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 _CLEANUP_RANK = {"NONE": 0, "REQUESTED": 1, "UNCONFIRMED": 2, "CONFIRMED": 3}
 _OBSERVATION_KEYS = (

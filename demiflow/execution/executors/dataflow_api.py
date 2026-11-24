@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from demiflow.execution.contracts.dataflow import ActionProgram, ActionRequest, ArtifactRef, Bounds, CapabilityReport, NativeOperation, RuntimePolicy
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import execute_action
-from demiflow.execution.recovery_identity import describe, operation_identity, plan_identity, source_identity
+from demiflow.execution.seal.program_identity import describe, operation_identity, plan_identity, source_identity
 from demiflow.execution.pipeline.run_context import RunAction, current_action, current_run
 from demiflow.data.plan import CallableSpec, LogicalOp, LogicalPlan
 from demiflow.data.sources import SourcePlan
@@ -43,7 +43,7 @@ def _native_operation_factory(*args: object, **kwargs: object) -> object:
 
 def _native_operation_identity(operation: NativeOperation) -> dict:
     target = operation.factory.target
-    from demiflow.execution.recovery_sdk_v3 import persistent_source_module
+    from demiflow.execution.seal.recovery_sdk_v3 import persistent_source_module
     name = persistent_source_module(target) + "." + getattr(
         target, "__qualname__", type(target).__name__)
     return {"native": {

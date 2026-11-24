@@ -4,7 +4,7 @@ import os
 import time
 
 from demiflow.execution.contracts.training import FitRequest
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.pipeline.run_context import RunAction, stopped_publication_context
 from demiflow.execution.journal.run_reader import read_run
 from demiflow.execution.journal.training_index import FitConflict, TrainingIndex

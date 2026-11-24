@@ -21,7 +21,7 @@ import types
 from dataclasses import dataclass
 from typing import Literal
 
-from demiflow.execution.recovery_contract import RecoveryContractError, MAX_DOCUMENT_BYTES
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, MAX_DOCUMENT_BYTES
 
 
 AUTO_STATE_SCHEMA = "demiflow.auto_state.v1"

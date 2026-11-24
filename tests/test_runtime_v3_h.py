@@ -1288,7 +1288,7 @@ def test_h044():
                                              ready_deadline_ms=60000)
     assert ctrl['schema_version'] == 'demiflow.worker_assignment.v1'
     assert ctrl['stages'] == ['stage-a', 'stage-b']
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     assert ctrl['partitions'] == [identity(['dataflow-k3-partition-v3', p]) for p in ('p0', 'p1')]
     assert mkassignment().lease.partition_ids == ('p0', 'p1')
     assert ctrl['channels'] == {'inputs': [{'channel_id': 'in-0'}], 'outputs': ['out-0', 'out-1']}

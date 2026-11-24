@@ -7,8 +7,8 @@ import sqlite3
 from collections.abc import Mapping
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowRecoveryError, DataflowUnresolvedCommit, DATAFLOW_ERROR_CODES
-from demiflow.execution.recovery_contract import UnresolvedCommit
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.run_journal import ExecutionBudgetExceeded
 
 _BUILTINS = {name: getattr(builtins, name) for name in (
@@ -34,8 +34,8 @@ _KNOWN[asyncio.CancelledError.__module__ + '.' + asyncio.CancelledError.__qualna
 _RECOVERY_TYPE = DataflowRecoveryError.__module__ + '.' + DataflowRecoveryError.__qualname__
 _UNRESOLVED_TYPE = DataflowUnresolvedCommit.__module__ + '.' + DataflowUnresolvedCommit.__qualname__
 _BUDGET_TYPE = ExecutionBudgetExceeded.__module__ + '.' + ExecutionBudgetExceeded.__qualname__
-_KNOWN[RecoveryContractError.__module__ + '.' + RecoveryContractError.__qualname__] = RecoveryContractError
-_KNOWN[UnresolvedCommit.__module__ + '.' + UnresolvedCommit.__qualname__] = UnresolvedCommit
+_KNOWN['demiflow.execution.recovery_contract.RecoveryContractError'] = RecoveryContractError
+_KNOWN['demiflow.execution.recovery_contract.UnresolvedCommit'] = UnresolvedCommit
 from demiflow.data.runtime_contract import RuntimeContractError
 _KNOWN[RuntimeContractError.__module__ + "." + RuntimeContractError.__qualname__] = RuntimeContractError
 from demiflow.operator_llm.errors import PromptBudgetExceededError, PromptReplayMissError
@@ -172,7 +172,7 @@ def failure_payload(exc, *, _depth=0, _budget=None):
         if len(children) != len(exc.exceptions):
             payload['message'] += ' [additional cleanup errors truncated by control budget]'
     if type(exc) is HistoryReadLimit:
-        from demiflow.execution.recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         import json
         payload['error_type'] = 'demiflow.execution.queue_contract.HistoryReadLimit'
         payload['next_cursor'] = json.loads(document(exc.next_cursor, 4096))
@@ -180,7 +180,7 @@ def failure_payload(exc, *, _depth=0, _budget=None):
 
 
 def _budget_name(value):
-    from demiflow.execution.recovery_contract import identifier
+    from demiflow.execution.contracts.recovery_contract import identifier
     try:
         identifier(value)  # The original journal admits per-node names with '-'.
     except RecoveryContractError as exc:
@@ -202,7 +202,7 @@ def restore_failure(payload, *, _depth=0, _budget=None):
             raise DataflowError('INVALID_CONTRACT', 'invalid failure group depth/membership')
         error = BaseExceptionGroup(message, [restore_failure(child, _depth=_depth + 1, _budget=_budget) for child in children])
     elif payload.get('error_type') == 'demiflow.execution.queue_contract.HistoryReadLimit':
-        from demiflow.execution.recovery_contract import document
+        from demiflow.execution.contracts.recovery_contract import document
         import json
         error = HistoryReadLimit(message, json.loads(document(payload['next_cursor'], 4096)))
     elif payload.get('error_type') == _RECOVERY_TYPE:

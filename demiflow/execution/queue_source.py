@@ -7,7 +7,7 @@ from ..data.datasource import Datasource
 from demiflow.services.blocking_io import BlockingIOPool
 from .queue import QueueChannel
 from .queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
-from .recovery_contract import RecoveryContractError, identity, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, identifier
 from demiflow.execution.worker.row_scope import RowScope, ScopedRow
 
 

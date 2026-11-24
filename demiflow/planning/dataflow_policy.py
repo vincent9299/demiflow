@@ -63,7 +63,7 @@ RECOVERY_LIMITS = dict(max_state_bytes=16 * 1024**2, max_control_bytes=64 * 1024
 
 def declared_limit_keys(values, explicit):
     """A full admitted envelope may carry a smaller set of caller declarations."""
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     if values is not None and type(values) is not dict:
         raise RecoveryContractError('Unknown execution budget')
     keys = frozenset(values or ())
@@ -76,7 +76,7 @@ def declared_limit_keys(values, explicit):
 
 
 def execution_limits(values=None):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     result = {**DEFAULT_LIMITS, **RECOVERY_LIMITS}
     if values is not None:
         if type(values) is not dict or values.keys() - result.keys():

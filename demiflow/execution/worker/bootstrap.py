@@ -21,7 +21,7 @@ from pathlib import Path
 
 from demiflow.execution.storage.artifacts import read
 from ..contracts.errors import ProtocolError
-from ..recovery_contract import RecoveryContractError, document
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document
 from .runtime import validate_worker_launch
 
 LAUNCH_ENV = "DEMIFLOW_WORKER_LAUNCH"

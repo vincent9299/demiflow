@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 SCHEMA = 'demiflow.native_queue_cut.v1'
 

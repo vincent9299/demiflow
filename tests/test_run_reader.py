@@ -30,7 +30,7 @@ def _row(target, sql, *parameters):
 
 @pytest.mark.parametrize('extra', [0, 1])
 def test_training_provenance_combined_byte_limit(tmp_path, extra):
-    from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, document
+    from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, document
 
     table = dict(attempt=1, action_id='scores', occurrence='predict', provenance_id='owner',
                  instance='model', manifest_digest='manifest')
@@ -135,7 +135,7 @@ def test_open_refuses_symlinks_missing_oversized_and_irregular_journals(tmp_path
 
 
 def test_storage_snapshot_refuses_a_journal_replaced_during_open(tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     target, _ = run_fixture(tmp_path)
     original, changed = sqlite3.connect, []
 
@@ -153,7 +153,7 @@ def test_storage_snapshot_refuses_a_journal_replaced_during_open(tmp_path, monke
 
 
 def test_storage_snapshot_rejects_an_oversized_journal_before_any_sql(tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     target, _ = run_fixture(tmp_path)
     os.truncate(target / 'run.sqlite', run_reader.JOURNAL_BYTES + 1)
     monkeypatch.setattr(sqlite3, 'connect', lambda *args, **kwargs: pytest.fail('SQLite was reached'))

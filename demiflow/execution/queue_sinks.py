@@ -5,14 +5,14 @@ from ..data.datasink import Datasink
 from ..data.runtime_contract import check_size
 from .queue_contract import queue_config
 from .queue import QueueChannel
-from .recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 
 
 class QueueResultSink(Datasink):
     sink_id='result'
 
     def __init__(self,config,*,pool='default',result='result'):
-        from .recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         self.config=queue_config(config)
         self.pool,self.result=identifier(pool),identifier(result)
         self.action=None

@@ -30,7 +30,7 @@ if str(TREE) not in sys.path:
     sys.path.insert(0, str(TREE))
 
 import demiflow  # noqa: E402
-from demiflow.execution.recovery_contract import document, identity  # noqa: E402
+from demiflow.execution.contracts.recovery_contract import document, identity  # noqa: E402
 
 assert Path(demiflow.__file__).resolve().is_relative_to(TREE), demiflow.__file__
 

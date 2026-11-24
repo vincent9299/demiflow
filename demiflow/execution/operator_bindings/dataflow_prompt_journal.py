@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from demiflow.execution.contracts.dataflow import thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from dataclasses import replace
 from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal, make_native_action_view, _rebuild_request_gate
 from demiflow.operator_llm.flow_contract import private_prompt_declaration

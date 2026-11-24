@@ -54,7 +54,7 @@ def publish_batch(batch, *, reader, fragment_id, start):
     # 64-hex shape; maximum offset/sequence/bytes conservatively bound this batch.
     from demiflow.execution.contracts.dataflow import ArtifactRef, Record
     from demiflow.execution.contracts.record_codec import _encode_record_document
-    from demiflow.execution.recovery_contract import document, RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import document, RecoveryContractError
     position = dict(version=reader._version, fragment_id=fragment_id,
                     row_offset=start + batch.num_rows - 1)
     probe = Record('0'*64, position,
@@ -77,7 +77,7 @@ def publish_batch(batch, *, reader, fragment_id, start):
 def publish_source_rows(batch, *, reader, position_at, retained_bytes):
     """Share fixed-source columns under the original per-record identities and cursors."""
     from types import SimpleNamespace
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     offset = 0
     while offset < batch.num_rows:
         reader._services.check_stop()

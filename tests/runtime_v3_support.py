@@ -118,7 +118,7 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "two_hosts": (('demiflow.execution.hosts.endpoints', "H"), ("demiflow.execution.storage.objects", "H")),
     "node_loss": (('demiflow.execution.hosts.endpoints', "H"), ("demiflow.execution.checkpoint.coordinator", "D")),
     "driver_restart": (('demiflow.execution.journal.dataflow_authority', "H"), ("demiflow.execution.action_driver.dataflow", "E")),
-    "history_identity": (("demiflow.execution.journal.dataflow_history", "W"), ("demiflow.execution.recovery_identity", "W")),
+    "history_identity": (("demiflow.execution.journal.dataflow_history", "W"), ('demiflow.execution.seal.program_identity', "W")),
     "workbench_real_plan": (("demiflow.workbench.runs.facts", "W"), ("demiflow.workbench.graph.model", "W")),
     "product_regression": (("demiflow.workbench.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
     "bounded_terminal": (('demiflow.execution.outputs.terminals', "T"), ("demiflow.execution.action_driver.dataflow", "E")),

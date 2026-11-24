@@ -42,7 +42,7 @@
     ],
     [
       "Dataset.deduplicate",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "identity"
     ],
     [
@@ -77,7 +77,7 @@
     ],
     [
       "Dataset.run_stream",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ],
     [
@@ -87,7 +87,7 @@
     ],
     [
       "Dataset.write_datasink",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ]
   ],
@@ -109,7 +109,7 @@
     ],
     [
       "CacheCall.restore_state",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ],
     [
@@ -124,7 +124,7 @@
     ],
     [
       "CacheCall.validate_runtime_state",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ],
     [

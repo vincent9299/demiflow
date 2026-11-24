@@ -25,7 +25,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import runtime_scope_id, encode_wire
 from demiflow.execution.worker.mailbox import ControlMailbox
 from demiflow.execution.worker.runtime import make_runtime_services
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
 from demiflow.execution.worker.runtime import WorkerRuntime
 from test_runtime_v3_real_seams import prepared

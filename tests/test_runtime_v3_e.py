@@ -21,7 +21,7 @@ from demiflow.execution.scheduler import placement as S
 from demiflow.execution.contracts import dataflow as dto
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.services import make_driver_services
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from demiflow.resources.contracts import ResourceProfile

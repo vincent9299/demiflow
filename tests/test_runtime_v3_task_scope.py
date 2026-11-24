@@ -290,7 +290,7 @@ def test_private_task_rejects_oversize_mutable_checkpoint(form, measured):
             self.value = 'x' * row['n']
             return row
 
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     target = grow if form == "function" else Grow
     svc = services(programs={'fn': program(CallableSpec.create(target))})
     svc.bounds = replace(svc.bounds, max_state_bytes=4096)

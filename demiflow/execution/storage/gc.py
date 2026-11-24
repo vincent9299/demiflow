@@ -26,7 +26,7 @@ def _fault(point):
 
 
 def gc_paths(journal, item):
-    from ..recovery_contract import identifier
+    from demiflow.execution.contracts.recovery_contract import identifier
     for name in ('store_id', 'digest', 'gc_id'):
         identifier(item[name])
     root = journal.directory / '.dataflow-store' / item['store_id']
@@ -438,7 +438,7 @@ def _collect(journal, fence, *, bounds, max_objects=64, deadline=None):
                     after = (store_id,digest)
                     if after in protected or charge_id is None:
                         continue
-                    from ..recovery_contract import identifier
+                    from demiflow.execution.contracts.recovery_contract import identifier
                     identifier(store_id)
                     if len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
                         raise UnprovenGC('GC object registry has an invalid digest')
@@ -517,7 +517,7 @@ def finish_run_gc(run):
 
 def unlink_unprotected_artifact(path):
     """Unlink a path already selected by the journal, inside its publication guard."""
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     if any(p.is_symlink() for p in (path, *path.parents)):
         raise RecoveryContractError('Orphan path contains a symlink')
     if path.exists():

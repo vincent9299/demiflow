@@ -19,7 +19,7 @@ import stat
 
 from demiflow.data.datasink import Datasink
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, identity
 
 
 def _info(path):

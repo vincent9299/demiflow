@@ -47,8 +47,8 @@ from ..execution.contracts.dataflow import (
 from ..execution.contracts.dataflow_codec import compute_graph_digest
 from ..execution.contracts.dataflow_errors import DataflowError
 from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, traits_of
-from ..execution.recovery_contract import identity
-from ..execution.recovery_identity import describe
+from demiflow.execution.contracts.recovery_contract import identity
+from demiflow.execution.seal.program_identity import describe
 from .dataflow_budget import (
     codec_window, default_profile, declare_codec_windows, relational_profile, terminal_budget,
 )
@@ -129,7 +129,7 @@ def _operation_semantic_facts(operation: LogicalOp) -> Mapping[str, Any]:
         }
     if is_dataclass(operation):
         from demiflow.execution.seal.plan_facts import operation_facts
-        from ..execution.recovery_identity import operation_identity
+        from demiflow.execution.seal.program_identity import operation_identity
         try:
             fact = operation_facts(operation)
         except (RuntimeError, ValueError, TypeError):

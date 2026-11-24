@@ -86,8 +86,8 @@ PLANNING_MAY_IMPORT = {
     'demiflow.execution.contracts.record_schema',
     'demiflow.execution.compiler_support.operator_policy',
     'demiflow.execution.seal.plan_facts',
-    'demiflow.execution.recovery_contract',
-    'demiflow.execution.recovery_identity',
+    'demiflow.execution.contracts.recovery_contract',
+    'demiflow.execution.seal.program_identity',
 }
 
 

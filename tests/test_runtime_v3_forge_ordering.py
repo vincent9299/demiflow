@@ -89,7 +89,7 @@ def test_async_join_sort_is_one_checked_pipeline(tmp_path,catalog,monkeypatch):
 
 
 def test_ordering_fact_registration_does_not_rewrite_historical_identity():
-    from demiflow.execution.recovery_identity import describe, operation_identity
+    from demiflow.execution.seal.program_identity import describe, operation_identity
     from demiflow.planning.dataflow_compile import _operation_semantic_facts
     for expression,_ in OPERATIONS:
         # Invoke the public builders only: their normalized plan is the same

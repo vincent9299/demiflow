@@ -71,7 +71,7 @@ class _CheckpointBlocks:
             receipt = self.sink.inspect(fact['prepared']['sinks']['output'],
                                         self.coordinator._context(fact['commit_id']))
             if receipt != fact['receipts']['output']:
-                from ..recovery_contract import RecoveryContractError
+                from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Completed receipt differs from artifact evidence')
             value = receipt['data']
             if self.has_objects:

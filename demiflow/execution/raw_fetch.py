@@ -11,7 +11,7 @@ from demiflow.services.blocking_io import BlockingIOPool
 from .commit import CommitCoordinator
 from .raw_budget import RawBudget
 from .raw_objects import RawNamespace, RawObjectSink, _directory
-from .recovery_contract import RecoveryContractError, SourcePosition, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, document, identifier, identity
 from demiflow.execution.worker.row_scope import current_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, current_action
 

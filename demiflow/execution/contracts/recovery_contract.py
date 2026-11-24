@@ -9,7 +9,7 @@ import json
 import math
 import re
 
-from ..data.runtime_contract import RuntimeContractError
+from demiflow.data.runtime_contract import RuntimeContractError
 
 PROTOCOL_VERSION = 1
 MAX_DOCUMENT_BYTES = 1024 * 1024

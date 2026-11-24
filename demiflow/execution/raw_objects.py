@@ -14,7 +14,7 @@ import stat
 import uuid
 
 from ..data.datasink import Datasink
-from .recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
 
 
 class ConcurrentRawPublication(UnresolvedCommit):

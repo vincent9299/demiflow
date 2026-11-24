@@ -306,7 +306,7 @@ def _unknown_search(root, base, calls):
     from demiflow.execution.queue import QueueConfig, QueueChannel, ProducerSourceSpec
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.collect.search_contract import NativeSearchResultSink
-    from demiflow.execution.recovery_contract import UnresolvedCommit
+    from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
     root.mkdir(parents=True)
     channel = QueueChannel(QueueConfig(backend='sqlite', queue_id='unknown', path=str(root/'queue.sqlite')))
     producer = channel.open('p', producer_id='search', source=ProducerSourceSpec(

@@ -12,7 +12,7 @@ import stat
 
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 _MAX_HISTORICAL_LEASES = 100000

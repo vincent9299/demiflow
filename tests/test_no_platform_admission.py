@@ -7,7 +7,7 @@ import pytest
 
 from demiflow.execution.queue import QueueChannel, QueueConfig
 from demiflow.execution.queue_contract import resolve_consumer_contract, resolve_producer_contract
-from demiflow.execution.recovery_contract import RecoveryContractError, identity, document
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, document
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from test_queue_v2_protocol import source, native_parent, publish, domain, task_message
@@ -30,7 +30,7 @@ def consumer():
 
 
 def test_resume_uses_original_configuration_without_current_source_scan(tmp_path, monkeypatch):
-    from demiflow.execution import recovery_identity
+    from demiflow.execution.seal import program_identity as recovery_identity
     with pytest.raises(RuntimeError,match='interrupt'):
         with RunContext.start(tmp_path/'run',entry_identity='business') as run:
             original=run.journal.recovery_identity()
@@ -130,7 +130,7 @@ def test_old_scope_read_is_bounded_and_text_only(queue,tmp_path,payload):
 
 @pytest.mark.parametrize('changes',[{'format':99},{'format':True},{'stream_protocol':'unknown'}])
 def test_resume_rejects_unknown_durable_protocol_before_attempt(tmp_path,changes):
-    from demiflow.execution.recovery_contract import RunRef
+    from demiflow.execution.contracts.recovery_contract import RunRef
     target=tmp_path/'run';target.mkdir();journal=RunJournal(target)
     configuration=dict(format=1,stream_protocol='aligned-barrier-v2',run_id='r'+'1'*24,
         platform_revision='unrelated',limits=dict(max_control_bytes=8*1024**2,max_commits=1024,admission_timeout_s=30))

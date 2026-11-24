@@ -4,7 +4,7 @@ Pure functions and bounded ledgers only; no transport, no scheduling. Receipt,
 revision and fence semantics are inherited from resource protocol v1 §03; the
 resource-side apply/close implementation remains owned by module A.
 """
-from ..recovery_contract import document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from .errors import ProtocolError
 
 WORKER_PROTOCOL_VERSION = {"major": 1, "minor": 0}

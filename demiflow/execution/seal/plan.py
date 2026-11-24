@@ -41,8 +41,8 @@ from ..contracts.dataflow_codec import (
 )
 from ..contracts.dataflow_errors import DataflowError
 from demiflow.execution.seal.identity_bridge import build_identity_bridge
-from ..recovery_contract import RecoveryContractError, document, identifier, identity
-from ..recovery_identity import describe
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
+from demiflow.execution.seal.program_identity import describe
 from demiflow.execution.pipeline.run_context import RunAction
 from ..run_journal import RunJournal
 
@@ -226,7 +226,7 @@ def _matches_original_program(kind, value, expected):
         return False
     # This is a fresh plan_code_pin for one MapOp. Business arguments, the
     # entire code record and every dependency remain in the digest comparison.
-    from ..recovery_sdk_v3 import routing_source_revisions
+    from demiflow.execution.seal.recovery_sdk_v3 import routing_source_revisions
     revisions = routing_source_revisions(value.target)
     if revisions is None:
         return False

@@ -11,7 +11,7 @@ from demiflow.execution.storage.artifact_manifest import entries
 from ..contracts.exchange import (
     build_data_ref, check_read_domain, validate_data_ref,
 )
-from ..recovery_contract import RecoveryContractError, identifier
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 
 
 def read_domain(run_directory, host_id):

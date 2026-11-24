@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.objects import ObjectRef
 from demiflow.operator_llm.parser import parse_prompt_pack

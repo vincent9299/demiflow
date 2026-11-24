@@ -7,6 +7,8 @@ sources keep a stable seek cursor. Identity formulas follow IDENTITY.md §7.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+
 import hashlib
 import json
 import pickle
@@ -19,7 +21,7 @@ from demiflow.lance.model import LanceScanSpec
 from demiflow.execution.contracts.dataflow import ArtifactRef, Bounds, Record, RuntimeServices, SourceCursor, SourceReader, SourceSnapshot, SourceSplit
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow import thaw_record_value
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 _RECORD_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 _MANIFEST_MEDIA_TYPE = "application/vnd.demiflow.source-manifest.v3"
@@ -54,7 +56,7 @@ def _options_digest(options: Mapping[str, Any]) -> str:
         # Reuse their complete semantic projection; stdlib pickle cannot carry
         # a local/partial callback's module captures. Old JSON/SQL option bytes
         # continue through the original branch below without any migration.
-        from demiflow.execution.recovery_identity import describe
+        from demiflow.execution.seal.program_identity import describe
         return _json_digest(describe(dict(options)))
     return _content_digest(dict(options))
 
@@ -498,3 +500,17 @@ __all__ = [
     "snapshot_source", "plan_source_splits", "open_source_reader",
     "verify_source_snapshot", "spool_record",
 ]
+
+
+def file_source_contents(source):
+    files = []
+    for raw in source.paths:
+        path = Path(raw)
+        if not path.is_file() or path.is_symlink():
+            raise RecoveryContractError("File source needs a fixed native file manifest")
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        files.append({"path": str(path.absolute()), "sha256": digest.hexdigest()})
+    return files

@@ -14,7 +14,7 @@ import time
 from urllib.parse import urlsplit, unquote
 
 from ..contracts.training import FitResult, ProjectObject
-from ..recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document
+from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document
 from demiflow.execution.journal.training_index import FitConflict
 
 

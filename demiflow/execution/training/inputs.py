@@ -7,7 +7,7 @@ from ..contracts.dataflow import thaw_record_value
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.training import FixedDatasetRef
 from demiflow.execution.outputs.sinks import publication_blocks
-from ..recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from ...lance.storage import open_lance_dataset
 
 
@@ -124,7 +124,7 @@ def fix_input(occurrence, columns, *, graph, physical, action, image, services, 
     root.mkdir(parents=True, exist_ok=True)
     destination = root / occurrence
     from ..commit import CommitCoordinator
-    from ..recovery_contract import SourcePosition
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.execution.outputs.lance_sink import LanceSink
     from ...lance.model import LanceWriteSpec

@@ -46,7 +46,7 @@ def _install_fakes():
     if _real_module_available("demiflow.execution.contracts.dataflow"):
         return
     import demiflow.execution.contracts as contracts_pkg
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
 
     dto = types.ModuleType("demiflow.execution.contracts.dataflow")
 
@@ -556,9 +556,7 @@ from demiflow.execution.checkpoint import coordinator as ckpt  # noqa: E402
 from demiflow.execution.outputs import sinks  # noqa: E402
 from demiflow.execution.seal import plan as seal  # noqa: E402
 from demiflow.execution import commit as commit_module  # noqa: E402
-from demiflow.execution.recovery_contract import (  # noqa: E402
-    RunRef, SourcePosition, document, identifier, identity,
-)
+from demiflow.execution.contracts.recovery_contract import RunRef, SourcePosition, document, identifier, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext  # noqa: E402
 from demiflow.execution.run_journal import RunJournal  # noqa: E402
 from demiflow.data.datasink import Datasink, WriteContext  # noqa: E402

@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from demiflow.data.datasink import Datasink, WriteContext
 from demiflow.execution.contracts.dataflow import FIXED_SCAN_BATCHES, ArtifactRef, DriverServices, KernelSpec, Record, RuntimeServices, stage_resident_bytes
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identifier, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 from demiflow.execution.contracts.record_codec import encode_record as _encode_record
 from demiflow.execution.storage.reading import read_sink_json as _read_json
@@ -690,7 +690,7 @@ def make_native_terminal_sink(spec, *, request, services, publication_reserved_b
                     view = action.context.journal.execution_view(detail='summary', action_ids=[action.action_id])
                     intent = next((e['value'] for e in view['events'] if e['kind'] == 'intent'), None)
                     if intent is None and action.record['declaration']['kind'] == 'write_table':
-                        from demiflow.execution.recovery_contract import identity
+                        from demiflow.execution.contracts.recovery_contract import identity
                         intent = {'kind': 'write_table', 'spec': declaration.to_dict(),
                                   'request_hash': declaration.content_hash,
                                   'operation_id': identity([action.context.ref.run_id, action.action_id, 1])}

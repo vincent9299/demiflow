@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 
-from demiflow.execution.recovery_contract import RunRef, RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RunRef, RecoveryContractError, identity
 from demiflow.planning.dataflow_policy import execution_limits, declared_limit_keys
 from demiflow.execution.run_journal import RunJournal
 
@@ -180,7 +180,7 @@ def clean_stopped_execution(journal, *, expected_attempt, confirm_stopped, deadl
 def admit_absent_create(journal, *, action_id, expected_attempt, expected_revision,
                         expected_uri, confirm_stopped, deadline):
     """Record current absence against the selected attempt's original write identity."""
-    from demiflow.execution.recovery_contract import identifier
+    from demiflow.execution.contracts.recovery_contract import identifier
     from demiflow.errors import LanceResourceNotFound, ExecutionConflict
     from demiflow.execution.outputs.lance_sink import spec_from_identity
     from demiflow.lance.reconcile import reconcile_lance_create
@@ -352,7 +352,7 @@ class RunContext:
                     raise RecoveryContractError('Run limits semantics changed on resume')
                 configuration = old
             else:
-                from demiflow.execution.recovery_identity import platform_identity
+                from demiflow.execution.seal.program_identity import platform_identity
                 revision = platform_identity()  # Birth provenance only; never a resume gate.
                 configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id=uuid.uuid4().hex,
                     entry_identity=self.entry_identity, limits=execution_limits(self.requested_limits),
@@ -612,7 +612,7 @@ class RunContext:
         Both consume the same output_bytes ceiling; retries reuse only the
         identical artifact reservation, never a saved model request/result.
         """
-        from demiflow.execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         self.check_stop()
         if component not in {'row_bytes', 'object_bytes'}:
             raise RecoveryContractError('Unknown native output component')
@@ -745,7 +745,7 @@ def payload_scope(run, plan, *, owner_limits=None, arguments=None, source=None, 
         from demiflow.data.plan import is_stream_operation
         if any(is_stream_operation(op) for op in plan.operations):
             from demiflow.execution.seal.plan_facts import operation_facts
-            from demiflow.execution.recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             try:
                 limits = stream_limits([operation_facts(op) for op in plan.operations], limits,
                                        (arguments or {}).get('source_batch_size') or 1,

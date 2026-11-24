@@ -13,7 +13,7 @@ from demiflow.data.datasink import Datasink
 from demiflow.errors import LanceResourceNotFound, LanceWriteConflict, LanceWriteError
 from demiflow.lance.model import LanceWriteReceipt
 from demiflow.lance.storage import inspect_lance, open_lance_dataset, schema_hash
-from demiflow.execution.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 from demiflow.execution.storage.state_artifacts import atomic_bytes
 from demiflow.execution.run_journal import ExecutionBudgetExceeded
 

@@ -12,7 +12,7 @@ from demiflow.execution.contracts.training import (
     FitBinding, FitRequest, FitResult, FixedDatasetRef, InputCopyReceipt, JobLookup, JobRef,
     ProjectObject, TrainingSnapshotRef,
 )
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.training.deployment import TrainingDeployment, bind_action_deployment
 from demiflow.execution.journal.training_index import FitConflict, TrainingIndex
@@ -131,7 +131,7 @@ def test_original_receipt_cross_action_and_parent(tmp_path):
         first.hold_active()
         from demiflow.execution.commit import CommitCoordinator
         from demiflow.execution.outputs.lance_sink import LanceSink
-        from demiflow.execution.recovery_contract import SourcePosition
+        from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.lance.model import LanceWriteSpec
         from demiflow.execution.training.runtime import confirm_table_consumption
         from demiflow.execution.journal.run_reader import read_run
@@ -757,7 +757,7 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
         import pyarrow as pa
         from demiflow.execution.commit import CommitCoordinator
         from demiflow.execution.outputs.lance_sink import LanceSink
-        from demiflow.execution.recovery_contract import SourcePosition
+        from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.execution.training.runtime import confirm_table_consumption
         from demiflow.lance.model import LanceWriteSpec
         uri = str(tmp_path/'scores.lance')
@@ -788,7 +788,7 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
 
 def _quota_lance_action(root, resume):
     from demiflow import data
-    from demiflow.execution.recovery_contract import RunRef
+    from demiflow.execution.contracts.recovery_contract import RunRef
     from demiflow.execution.run_journal import RunJournal
     from test_training_dataset_action import recipe
     from training_action_programs import waiting_trainer

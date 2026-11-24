@@ -50,7 +50,7 @@ from demiflow.execution import commit as commit_module
 from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.outputs.lance_sink import LanceSink
-from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
 from demiflow.execution.run_journal import RunJournal
 from demiflow.lance.model import LanceWriteSpec

@@ -154,8 +154,8 @@ def test_expired_cleanup_does_not_start_and_expiry_after_claim_retains_owner(tmp
 
 def create_action(journal, uri):
     from demiflow.lance.model import LanceWriteSpec
-    from demiflow.execution.recovery_identity import plan_identity
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import plan_identity
+    from demiflow.execution.contracts.recovery_contract import identity
     spec = LanceWriteSpec(str(uri), mode='create')
     configuration = journal.recovery_identity()
     journal.claim_execution(configuration, 'setup')

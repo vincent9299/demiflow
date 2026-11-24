@@ -13,7 +13,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.queue import QueueChannel,QueueConfig,ProducerSourceSpec,task_message
 from demiflow.execution.queue_commit import producer_action,task_action
 from demiflow.execution.queue_sinks import QueuePublishSink,QueueResultSink
-from demiflow.execution.recovery_contract import SourcePosition,RecoveryContractError,identity
+from demiflow.execution.contracts.recovery_contract import SourcePosition, RecoveryContractError, identity
 from demiflow.execution.queue_contract import StaleQueueOwner
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.secrets import Secret

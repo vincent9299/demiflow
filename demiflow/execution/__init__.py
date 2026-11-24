@@ -15,7 +15,7 @@ _EXPORTS = {
         "BundlePackages", "RUNTIME_PACKAGE_PATH", "load_bundle_packages",
     )},
     **{name: ('demiflow.execution.pipeline.run_context', name) for name in ("RunContext", "current_run")},
-    **{name: (".recovery_contract", name) for name in (
+    **{name: ('demiflow.execution.contracts.recovery_contract', name) for name in (
         "RunRef", "SourcePosition", "RecoveryContractError", "UnresolvedCommit",
     )},
 }

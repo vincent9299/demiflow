@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from demiflow.execution.contracts.dataflow import NativeJournalReply, thaw_record_value
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 import threading
 
 from dataclasses import replace

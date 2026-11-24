@@ -501,7 +501,7 @@ def observe_graph_progress(observations, graph, bounds, payload):
 def committed_graph_metrics(graph, physical, image, store, *, max_state_bytes):
     """Read counters from authenticated final contributions, including resume."""
     import json
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
     if image is None or not image.cut.final:
         raise DataflowError('INVALID_CONTRACT', 'graph result has no original final cut')

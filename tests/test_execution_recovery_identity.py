@@ -10,14 +10,14 @@ import demiflow
 
 from demiflow import data
 from demiflow.execution import RunContext, RecoveryContractError
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.seal.program_identity import describe
 
 
 def test_unordered_collection_identity_is_stable_across_process_seeds():
     root = Path(demiflow.__file__).resolve().parents[1]
     script = '''import json,os,demiflow
 from pathlib import Path
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.seal.program_identity import describe
 assert Path(demiflow.__file__).resolve().is_relative_to(Path(os.environ['DF_INTEGRATION_ROOT']))
 print(json.dumps(describe({'alpha','beta',('nested',frozenset({'x','y'}))}),sort_keys=True))
 '''

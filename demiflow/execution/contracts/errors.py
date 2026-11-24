@@ -12,7 +12,7 @@ _REASONS = frozenset({
     "corrupt_artifact", "identity_mismatch", "invalid_contract",
     "unsupported_layout", "invalid_assignment",
 })
-from ..recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 ENGINE_ERROR_CODES = frozenset({
     "PROTOCOL_VERSION_UNSUPPORTED",

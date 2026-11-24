@@ -16,7 +16,7 @@ from demiflow.execution.seal.plan import (_stage_one_program, _code_identity_fro
     verify_dataflow_program)
 from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits, open_source_reader
 from demiflow.execution.sources.literal_source import items_fingerprint, literal_reference, LiteralSourceReference
-from demiflow.execution.recovery_contract import identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import identity, RecoveryContractError
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_artifact_accounting import store_fixture
 

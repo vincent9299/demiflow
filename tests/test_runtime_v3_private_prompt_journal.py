@@ -10,7 +10,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.operator_llm.journal import UncertainPromptCall
 from test_runtime_v3_native_execution import PACK, native_server
@@ -256,7 +256,7 @@ def _private_event(run, store, seed='a', *, scope='first', operation='reserve', 
     from demiflow.execution.contracts.dataflow_codec import _thaw_json
     from demiflow.execution.contracts.dataflow_codec import encode_artifact_reference as _ref_to_json, decode_artifact_reference as _ref_from_json
     from demiflow.execution.contracts.dataflow_codec import private_prompt_rpc_id as _rpc_id
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from test_runtime_v3_native_rpc_replay import event
     original = event(run, store, seed)
     payload = _thaw_json(original.payload)

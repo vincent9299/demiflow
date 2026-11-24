@@ -5,7 +5,7 @@ from dataclasses import asdict
 from .contracts.dataflow import QueueBinding
 from .contracts.dataflow_errors import DataflowError
 from .raw_fetch import RawFetch
-from .recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 
 def fetch_declaration_key(actor):

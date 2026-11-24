@@ -18,7 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from demiflow.execution.recovery_contract import RecoveryContractError, RunRef
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef
 from demiflow.execution.pipeline.run_context import source_run_scope
 
 import hashlib

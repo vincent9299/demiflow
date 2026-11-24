@@ -26,7 +26,7 @@ from demiflow.execution.seal.plan import verify_dataflow_program
 from demiflow.execution.action_driver.services import make_driver_services
 from demiflow.execution.sources.snapshots import spool_record
 from demiflow.execution.sources.snapshots import open_source_reader
-from demiflow.execution.recovery_identity import source_identity
+from demiflow.execution.seal.program_identity import source_identity
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -100,8 +100,8 @@ def test_literal_input_identity_preserves_historical_projection():
     assert source_identity(source) == source_identity(other)
     assert source_identity(source) != source_identity(changed)
     assert source.handle.row_count == 1
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.recovery_identity import describe
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import describe
     assert source_identity(source) == {
         "literal_materialization": identity(describe((({"x": 1},),))), "rows": 1}
     assert not hasattr(source.handle, "recovery_reference")
@@ -290,8 +290,8 @@ def test_native_operation_has_one_type_authority():
 @pytest.mark.parametrize("override", [None, 0, -1, 1, 2, 4, 12])
 def test_input_block_boundaries_and_history_match_pre_v3(override):
     from demiflow.execution.sources.materialized_input import build_input_handle
-    from demiflow.execution.recovery_identity import describe
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import describe
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.data.sources import MaterializedSource
     rows = [{"x": i} for i in range(5)]
     count = max(1, int(override or 1))
@@ -357,7 +357,7 @@ def test_real_local_host_verifies_loads_and_activates_map_program(tmp_path):
 def test_driver_control_repeated_reads_and_unread_reply_backpressure(tmp_path):
     from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.contracts.dataflow import WorkerEvent
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     with prepared(tmp_path, data.from_items([])) as (ex, services):
         service = DriverJournalService(ex._action, store=services.store,
@@ -466,7 +466,7 @@ def test_real_sort_spill_preserves_typed_records_and_provenance(tmp_path):
 def test_resume_validation_reads_wire_plan_and_checks_platform_pin(tmp_path):
     from demiflow.execution.journal.dataflow_history import load_execution_version
     from demiflow.execution.checkpoint.history import validate_resume_compatibility
-    from demiflow.execution.recovery_identity import platform_identity
+    from demiflow.execution.seal.program_identity import platform_identity
     with prepared(tmp_path, data.from_items([{"x": 1}])) as (ex, services):
         binding = load_execution_version(services.action.context.directory,
                          services.action.action_id, max_bytes=services.bounds.max_control_bytes)

@@ -8,7 +8,7 @@ import pytest
 
 from demiflow.execution.journal import run_reader
 from demiflow.execution.storage.object_resources import object_namespace
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def fixture(tmp_path, count=1):

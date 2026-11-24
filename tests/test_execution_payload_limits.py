@@ -15,7 +15,7 @@ from demiflow.lance.arrow_batches import arrow_batches
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.recovery_contract import SourcePosition
+from demiflow.execution.contracts.recovery_contract import SourcePosition
 from demiflow.lance.model import LanceWriteSpec
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK, server

@@ -9,7 +9,7 @@ from demiflow.execution.contracts.exchange import (
     DATA_ENVELOPE_SCHEMA, build_data_ref, check_read_domain, validate_barrier,
     validate_data_envelope,
 )
-from demiflow.execution.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
 
 
 _MODES = frozenset({"memory_incremental", "durable_incremental", "finite_sealed"})

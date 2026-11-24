@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.recovery_contract import document, identifier
+from demiflow.execution.contracts.recovery_contract import document, identifier
 from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _ref_dict
 if TYPE_CHECKING:
     from demiflow.execution.contracts.dataflow import ArtifactRef, ArtifactStore, Bounds, SealedExecution

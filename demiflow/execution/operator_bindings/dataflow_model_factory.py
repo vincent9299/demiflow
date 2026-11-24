@@ -18,7 +18,7 @@ class PromptFactory:
                             InProcessOperatorLLMCoordinator(operation.max_requests), operation.options, service=service)
         if service is not None:
             import hashlib
-            from demiflow.execution.recovery_contract import document
+            from demiflow.execution.contracts.recovery_contract import document
             actor._sealed_service_declaration = hashlib.sha256(document(settings['service'], 65536)).hexdigest()
         for name in ('when', 'call_output', 'error_output', 'environment'):
             setattr(actor, name, settings.get(name))
@@ -112,7 +112,7 @@ def native_model_declaration(operation):
     from demiflow.collect.search_contract import is_native_search_actor, search_facts
     if is_native_search_actor(actor):
         from demiflow.execution.dataflow_search import NativeSearchCall
-        from demiflow.execution.recovery_contract import identity
+        from demiflow.execution.contracts.recovery_contract import identity
         search_facts(actor)
         if actor.started:
             raise ValueError('Native search requires an unstarted actor declaration')

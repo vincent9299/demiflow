@@ -197,7 +197,7 @@ def _real_module_available(name):
 def _install_fakes():
     if _real_module_available("demiflow.execution.contracts.dataflow"):
         return
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
 
     dataflow = types.ModuleType("demiflow.execution.contracts.dataflow")
     for name in ("ArtifactRef", "Bounds", "ActionProgram", "ActionRequest", "InputPort",

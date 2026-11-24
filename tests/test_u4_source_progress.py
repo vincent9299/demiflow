@@ -4,7 +4,7 @@ import pytest
 from demiflow.execution.contracts.checkpoint import (
     validate_checkpoint_manifest,
 )
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 

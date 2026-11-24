@@ -5,7 +5,7 @@ import copy
 from dataclasses import asdict
 
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import document, identity
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 
 class DeliveryExchange:

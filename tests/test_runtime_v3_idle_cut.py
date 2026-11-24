@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow import thaw_record_value
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 import test_runtime_v3_b as harness
 from test_runtime_v3_real_seams import prepared
 
