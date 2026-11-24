@@ -280,8 +280,8 @@ class OperatorLLMRuntime:
 def validate_prompt_binding(operation, config):
     prompt = resolve_prompt(config, operation.prompt_name)
     required_inputs = set(prompt.arguments)
-    if prompt.input_mode == 'messages' and any(k in (operation.options or {}) for k in ('codex_exec', 'codex_agent')):
-        raise PromptResponseContractError('messages mode requires HTTP or offline transport; Codex does not preserve chat roles')
+    if prompt.input_mode == 'messages' and any(k in (operation.options or {}) for k in ('codex_exec', 'codex_agent', 'cli')):
+        raise PromptResponseContractError('messages mode requires HTTP or offline transport; CLI transport does not preserve chat roles')
     if set(operation.inputs) != required_inputs:
         raise PromptResponseContractError('inputs must exactly cover prompt placeholders')
     if operation.output is not None:
@@ -522,7 +522,7 @@ class PromptActor(BoundOperatorLLMMap):
         if model.deployment is not None:
             if service is not None:
                 raise ValueError('model.deployment cannot be combined with service=')
-            if any(key in (options or {}) for key in ('offline_dir','offline_store','codex_exec','codex_agent')):
+            if any(key in (options or {}) for key in ('offline_dir','offline_store','codex_exec','codex_agent','cli')):
                 raise ValueError('Managed deployment requires online HTTP prompt execution')
         if service is not None:
             # Validate endpoint/transport when declaring, without starting it.

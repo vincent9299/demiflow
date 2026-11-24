@@ -1106,6 +1106,7 @@ class Dataset:
         output: Optional[str] = None,
         outputs: Optional[Mapping[str, str]] = None,
         options: Mapping[str, Any] | None = None,
+        temperature: float | None = None,
         max_requests: int | None = None,
         backend_options=None,
     ) -> "Dataset":
@@ -1187,6 +1188,8 @@ class Dataset:
             raise ValueError("max_requests must be a nonnegative integer or None")
         if options is not None and not isinstance(options, Mapping):
             raise TypeError("options must be a mapping or None")
+        from ..operator_llm.http_options import merge_temperature_option, validate_prompt_options
+        merged_options = merge_temperature_option(options, temperature)
         if isinstance(config, PromptPack):
             pack = config
         elif isinstance(config, (str, Path)) and str(config).strip():
@@ -1207,11 +1210,10 @@ class Dataset:
             normalized_output,
             normalize_outputs(outputs),
             parse_native_options(backend_options, family="row_transform"),
-            options=deepcopy(dict(options)) if options is not None else None,
+            options=deepcopy(dict(merged_options)) if merged_options is not None else None,
             max_requests=max_requests,
         )
-        from ..operator_llm.http_options import validate_prompt_options
-        validate_prompt_options(options)
+        validate_prompt_options(merged_options)
         from ..operator_llm.runtime import validate_prompt_binding
         validate_prompt_binding(operation, pack)
         from ..planning.dataflow_declaration import validate_native_operation
@@ -1400,7 +1402,8 @@ class Dataset:
         concurrency: int = 1, queue_depth: Optional[int] = None,
         catch: tuple = (), label: Optional[str] = None,
         when=None, call_output: Optional[str] = None, error_output: Optional[str] = None,
-        options: Mapping[str, Any] | None = None, max_requests: int | None = None,
+        options: Mapping[str, Any] | None = None, temperature: float | None = None,
+        max_requests: int | None = None,
         service=None, request_gate=None, request_policy=None, token_budget=None,
         routes=None, route=None, isolate_route_failures=False,
     ) -> "Dataset":
@@ -1507,7 +1510,7 @@ class Dataset:
             if type(isolate_route_failures) is not bool:
                 raise ValueError('isolate_route_failures must be boolean')
             actors, limits = {}, {}
-            allowed = {'config', 'options', 'concurrency', 'max_requests', 'service',
+            allowed = {'config', 'options', 'temperature', 'concurrency', 'max_requests', 'service',
                        'request_gate', 'request_policy', 'token_budget'}
             for name, spec in routes.items():
                 if not isinstance(name, str) or not name or not isinstance(spec, dict) or set(spec)-allowed:
@@ -1515,7 +1518,7 @@ class Dataset:
                 capacity = spec.get('concurrency', concurrency)
                 if type(capacity) is not int or not 1 <= capacity <= 256:
                     raise ValueError('Prompt route concurrency must be 1..256')
-                params = dict(config=config, options=options, concurrency=concurrency,
+                params = dict(config=config, options=options, temperature=temperature, concurrency=concurrency,
                     max_requests=max_requests, service=service, request_gate=request_gate,
                     request_policy=request_policy, token_budget=token_budget)
                 params.update(spec)
@@ -1550,10 +1553,12 @@ class Dataset:
         if service is not None:
             from ..services.contracts import validate_service
             validate_service(service)
-            if any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
+            if any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent', 'cli')):
                 raise ValueError('Managed service requires online HTTP prompt execution')
+        from ..operator_llm.http_options import merge_temperature_option
+        merged_options = merge_temperature_option(options, temperature)
         declared = self.map_prompt(prompt, config=config, inputs=inputs,
-                                   output=output, outputs=outputs, options=options,
+                                   output=output, outputs=outputs, options=merged_options,
                                    max_requests=max_requests)
         from ..planning.dataflow_declaration import validate_native_operation
         # This is a passive declaration on either host. The unified compiler
@@ -1573,10 +1578,10 @@ class Dataset:
         if service is not None:
             from demiflow.services.http import managed_http_digest
             actor._sealed_service_declaration = managed_http_digest(service)
-        if not any(key in (options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
+        if not any(key in (merged_options or {}) for key in ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent', 'cli')):
             from ..operator_llm.http_options import validate_http_options
-            validate_http_options({**(options or {}),
-                'max_connections': (options or {}).get('max_connections', concurrency)})
+            validate_http_options({**(merged_options or {}),
+                'max_connections': (merged_options or {}).get('max_connections', concurrency)})
         actor._runtime.request_gate = request_gate
         if declared_request_policy is not None:
             # Immutable declaration, independent of the adaptive gate's mutable
