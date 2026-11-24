@@ -5,7 +5,7 @@ import pytest
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
-from demiflow.operator_llm.errors import PromptBudgetExceededError
+from demiflow.operator_llm.errors import PromptBudgetExceededError, PromptResponseContractError
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK, server
 
@@ -56,7 +56,6 @@ def test_final_prompt_usage_does_not_depend_on_progress_delivery(server, monkeyp
 @pytest.mark.parametrize('request_failed', [False, True])
 @pytest.mark.parametrize('metadata_failed', [False, True])
 def test_final_prompt_usage_survives_client_close_failure(server, monkeypatch, method, request_failed, metadata_failed):
-    from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.journal import run_telemetry as dataflow_api
     from demiflow.operator_llm.client import AsyncOperatorLLMClient
 
@@ -89,7 +88,7 @@ def test_final_prompt_usage_survives_client_close_failure(server, monkeypatch, m
     if request_failed:
         # Cleanup must not replace the original provider error or turn its
         # attempted request into a completed request.
-        with pytest.raises(DataflowError, match='HTTP 503; full response saved') as failed:
+        with pytest.raises(PromptResponseContractError, match='HTTP 503; full response saved') as failed:
             ds.materialize()
     else:
         with pytest.raises(ExceptionGroup, match='worker cleanup failed') as failed:

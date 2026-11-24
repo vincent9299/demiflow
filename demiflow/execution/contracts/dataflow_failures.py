@@ -39,9 +39,14 @@ _KNOWN['demiflow.execution.recovery_contract.RecoveryContractError'] = RecoveryC
 _KNOWN['demiflow.execution.recovery_contract.UnresolvedCommit'] = UnresolvedCommit
 from demiflow.data.runtime_contract import RuntimeContractError
 _KNOWN[RuntimeContractError.__module__ + "." + RuntimeContractError.__qualname__] = RuntimeContractError
-from demiflow.operator_llm.errors import PromptBudgetExceededError, PromptReplayMissError
-_KNOWN[PromptBudgetExceededError.__module__ + '.' + PromptBudgetExceededError.__qualname__] = PromptBudgetExceededError
-_KNOWN[PromptReplayMissError.__module__ + '.' + PromptReplayMissError.__qualname__] = PromptReplayMissError
+from demiflow.operator_llm.errors import (
+    PromptBudgetExceededError, PromptReplayMissError, PromptProviderUnavailableError,
+    PromptProviderCapabilityError, PromptResponseParseError, PromptResponseContractError, PromptStreamError)
+# A prompt node reports provider and response failures with these types; the
+# caller of the action sees the same type the node raised.
+_KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
+    PromptBudgetExceededError, PromptReplayMissError, PromptProviderUnavailableError,
+    PromptProviderCapabilityError, PromptResponseParseError, PromptResponseContractError, PromptStreamError)})
 from demiflow.execution.contracts.errors import _CapacityPending
 # Preserve the original non-admission signal so the existing async client
 # releases its journal slot and retries; never block the driver response lane.

@@ -95,6 +95,59 @@
 - `hosts/environment.py:9` 经公开门面 `demiflow.operator_llm` 导入 `load_referenced_prompt_packs`。
 - `operator_llm/parser.py:210` 经公开门面 `demiflow.pipeline` 导入 `discover_pipeline_definition`。`tests/test_map_prompt_async.py:270` 在门面上替换这个函数，改成直接导入定义文件会让替换失效，要连同测试的替换目标一起改。
 
+## 测试
+
+2026-11-24 对全量日跑（提交 `9887311d`）里未通过的 333 条失败记录（332 个测试）做了一次核对，并在低并发下把失败的文件重跑了一遍：重跑的 287 个里 285 个再次失败、2 个通过，不是并发负载造成的。原始清单、两次运行的对比和逐条摘要在 `_demiflow/shared-review/CLAUDE-test-audit-20261124/`。去向：
+
+| 数量 | 去向 |
+|---|---|
+| 26 | 确认过时，已删除（见 T-015） |
+| 45 | 需要 Ray 的测试被排进了没有 Ray 的标准线，在 Ray 线里另有结果；不是产品失败（见 T-016） |
+| 1 | prompt 节点预算的口径，待裁定（T-013） |
+| 13 | `request_gate` 参数被引擎拒绝（T-014） |
+| 140 | 引擎测试，未判定（T-017） |
+| 108 | 界面测试，未判定（T-018） |
+
+### T-013 prompt 节点的 `max_requests` 按每次运行重新计
+
+- **现象。** 同一个节点对象第二次执行 action 时预算重新计，会再次发请求；旧行为是同一个节点对象累计。一次运行内超限仍被挡住（3 行、预算 1，只发 1 次即报 `PromptBudgetExceededError`）。
+- **依据。** 2026-11-24 实测；`tests/test_map_prompt_async.py::test_sync_and_async_nodes_have_independent_budgets` 因此失败，保留未删。
+- **建议。** 定口径：若按每次运行计是有意的，删掉该测试并在 `docs/prompt_http.md` 写明"跨运行的累计上限用 `sqlite_journal.max_requests`"；若应累计，按缺陷修。
+
+### T-014 `map_prompt_async(request_gate=...)` 有文档但不可用
+
+- **现象。** 传入一个现成的 `RequestGate` / `AdaptiveRequestGate` 对象时，封存阶段报 `ValueError: Native prompt lowering/configuration copies differ`（`operator_llm/flow_contract.py:277`，只接受由 `request_policy` 重建的门）。`request_policy` 正常。`map_prompt` 不接受这个参数。
+- **依据。** 2026-11-24 实测。`data/dataset.py` 的 docstring 和 `docs/prompt_http.md:184` 仍把 `request_gate` 写成可用接口。受影响的测试 13 个：`tests/test_prompt_http_retry.py` 11 个、`tests/test_prompt_http_stream.py` 2 个，保留未删。
+- **建议。** 现成的门对象跨不了进程，多半应当退役：在声明处给出明确的拒绝信息，从签名和文档里去掉，再删这 13 个测试；它们测的重试次数、缓存错误、双预算等行为要确认 `tests/test_runtime_v3_m.py` 的 `http_error_retry` 用例是否已覆盖。
+
+### T-015 已删除的过时测试里，仍然有效但现在没有测试的保证
+
+26 个测试已删除：调用引擎明确拒绝的已退役用法（显式 checkpoint、节点上的 journal 选项、搜索 checkpoint）18 个；在驱动进程里替换类或函数、而执行发生在 worker 进程 5 个；替换已不存在的内部函数 3 个（另 1 个把执行器换成空对象）。以下保证仍然有效，需要按 v3 的写法补测试：
+
+- prompt 节点：带编号的多张图片按顺序进入请求；`when` 跳过的行和出错的行保留原始数据；响应不符合 schema 时不发布结果。（原 `tests/test_map_prompt_async.py`）
+- prompt HTTP 重试：声明为非致命的内容错误保留在行内且不中断其他行；429/500/503 不重试、重放时不重复计数；未完成的流不重试。（原 `tests/test_prompt_http_retry.py`）
+- Dataset：已物化数据的 `count()` 只读元数据；`schema(fetch_if_missing=False)` 不触发读取；`take_all` 成功和超限时观察者的完成/失败各记一次。（原 `tests/test_upgrade_v2_unit_A004.py`、`A013.py`、`tests/test_dataset_api_contract.py`）
+
+### T-016 标准线里排进了需要 Ray 的测试
+
+- **现象。** 标准线（没有 Ray）每天有 45 个测试因 `No module named 'ray'` 或 `NOT_RUN` 记为失败，涉及 11 个 `test_runtime_v3_*` 文件；同样的文件在 Ray 线里有真实结果。
+- **建议。** 随 T-006 的驱动脚本进仓库时，把这些文件从标准线的执行清单里去掉，让标准线的失败数只反映真实失败。
+
+### T-017 引擎测试里 140 个未判定的失败
+
+逐个看过报错，没有一个能仅凭报错判成"过时"，都需要对着当前设计逐条判断是测试的场景失效还是引擎行为变了。按报错形态分组：
+
+- **内存额度与放置。** `RESOURCE_INFEASIBLE`（`test_local_kernel.py` 10 个、`test_local_union_plan.py` 3 个、`test_prompt_stream_recovery.py` 3 个等）；断言里写死的额度数字对不上（`test_runtime_v3_stream_suffix.py` 5 个、`test_upgrade_business_acceptance.py` 2 个）。
+- **崩溃与恢复。** 预期在某一步被杀掉的子进程没有被杀掉（`assert 0 == 37` 一类，`test_runtime_builtin_recovery.py`、`test_gpt_integration_repairs.py`、`test_native_batch_replay_order.py`）；预期被拒绝的恢复没有被拒绝（`DID NOT RAISE RecoveryContractError`）。这一组最需要先看，可能有真缺陷。
+- **向量检索。** `tests/test_vector_search_stream.py` 19 个：查询向量校验的错误以 `INTERNAL_PROTOCOL` 报出，以及结果为空。
+- **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）、`tests/test_prompt_stream_recovery.py::test_legacy_journal_option_is_not_a_model_execution_mode`（先报了"找不到 prompt pack"）。改测试即可。
+- **其余**见 `_demiflow/shared-review/CLAUDE-test-audit-20261124/engine-lines.txt`，每个测试一行。
+
+### T-018 界面测试里 108 个未判定的失败
+
+- **现象。** 涉及 40 个 `test_forge_*` / `test_workbench_*` 文件，低并发重跑后同样失败。大多数是等一个按钮或节点等到超时：`检查问题`、`业务参数`、`整图配置`、导航里的 `算子` 和 `运行`、`.wb-node`。这些文字和样式名在产品源码里大多还在，说明是入口位置或流程变了，而不是整块功能被删。
+- **建议。** 由熟悉当前界面的人逐个文件判断：界面有意改了就按新流程改测试或删掉；界面不该变就是缺陷。原因摘要在 `_demiflow/shared-review/CLAUDE-test-audit-20261124/ui-waits.txt`。
+
 ## 已完成
 
 （暂无）
