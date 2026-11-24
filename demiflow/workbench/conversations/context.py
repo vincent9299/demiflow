@@ -269,9 +269,18 @@ def _run_project_layout(project_root, arguments):
         dst_path = safe_path(root, dst_raw, missing=True)
         src_rel = src_path.relative_to(root).as_posix()
         dst_rel = dst_path.relative_to(root).as_posix()
+        src_parts = Path(src_rel).parts
         dst_parts = Path(dst_rel).parts
         if len(dst_parts) < 2 or dst_parts[0] not in _MOVE_DEST_DIRS or any(p.startswith('.') for p in dst_parts):
             reject(f'move_path destination must be inside a standard role directory: {dst_rel}', 'invalid_request')
+        # Protect read-only notebooks/ from move-out -> edit -> move-back bypasses.
+        if src_parts and src_parts[0] == 'notebooks':
+            reject(f'Files already inside notebooks/ cannot be moved out: {src_rel}', 'operation_rejected')
+        has_nb = src_path.suffix.lower() == '.ipynb' or (
+            src_path.is_dir() and any(p.suffix.lower() == '.ipynb' for p in src_path.rglob('*.ipynb'))
+        )
+        if has_nb and dst_parts[0] != 'notebooks':
+            reject(f'Notebook files may only be moved into notebooks/: {src_rel} -> {dst_rel}', 'operation_rejected')
         if dst_path.exists() or dst_path.is_symlink():
             reject(f'move_path destination already exists: {dst_rel}', 'conflict')
         if src_path == dst_path or src_path in dst_path.parents:
@@ -329,8 +338,48 @@ class BridgeServer:
         self.socket.listen(4); self.socket.settimeout(.2)
         self.stopping = threading.Event()
         self.count = 0
+        self.authorized_layout_paths: set[str] = set()
         self.thread = threading.Thread(target=self._run, name='development-control', daemon=True)
         self.thread.start()
+
+    def take_layout_paths(self) -> list[str]:
+        with self.lock:
+            paths = sorted(self.authorized_layout_paths)
+            self.authorized_layout_paths.clear()
+            return paths
+
+    def _record_layout_paths(self, action, answer):
+        if not isinstance(answer, dict):
+            return
+        recorded: set[str] = set()
+        if action == 'ensure_dirs':
+            for d in answer.get('created') or ():
+                if isinstance(d, str) and d:
+                    recorded.add(d)
+        elif action == 'move_path':
+            for key in ('src', 'dst'):
+                val = answer.get(key)
+                if isinstance(val, str) and val:
+                    recorded.add(val)
+        elif action == 'remove_path':
+            for p in answer.get('removed') or ():
+                if isinstance(p, str) and p:
+                    recorded.add(p)
+        elif action in ('register_flow', 'bind_params'):
+            recorded.add('workspace.json')
+            params = answer.get('params')
+            if isinstance(params, str) and params:
+                recorded.add(params)
+            elif isinstance(params, list):
+                recorded.update(p for p in params if isinstance(p, str) and p)
+        elif action == 'bind_table':
+            recorded.add('workspace.json')
+            alias = answer.get('alias')
+            if isinstance(alias, str) and alias:
+                recorded.add(f'tables/{alias}.json')
+        if recorded:
+            with self.lock:
+                self.authorized_layout_paths.update(recorded)
 
     def set_turn(self, input_access, *, delivery_review=None, project_root=None):
         with self.lock:
@@ -338,6 +387,8 @@ class BridgeServer:
             self.delivery_review = delivery_review
             self.project_root = Path(project_root).absolute() if project_root is not None else None
             self.count = 0
+            if input_access is not None:
+                self.authorized_layout_paths.clear()
             if input_access is not None and self.bound_identity is None:
                 self.bound_identity = (input_access.tid, input_access.epoch)
 
@@ -378,6 +429,7 @@ class BridgeServer:
             answer = active.invoke(params['arguments'])
         elif name == PROJECT_LAYOUT_TOOL['name']:
             answer = _run_project_layout(layout_root, params['arguments'])
+            self._record_layout_paths(params['arguments'].get('action') if isinstance(params.get('arguments'), dict) else None, answer)
         return dict(content=[dict(type='text', text=wire(answer, 60000).decode())], isError=False)
 
     def _run(self):

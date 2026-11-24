@@ -851,6 +851,32 @@ class Store:
             kept.append(ev); used += size
         kept.reverse()
         first_seq = kept[0]['sequence'] if kept else last_seq
+        # Always preserve the user prompt bubble (`message.user`) for turns shown in
+        # the latest tail window even when a long turn exceeds the 4096-event scan
+        # or `limit` cap, while keeping `first_seq` anchored to the contiguous tail
+        # so upward pagination ("加载更早的记录") never skips intermediate events.
+        if before_sequence is None and kept:
+            seen_user_turns = {ev.get('turn_id') for ev in kept if ev.get('type') == 'message.user'}
+            missing_tids = []
+            for ev in kept:
+                tid = ev.get('turn_id')
+                if tid and tid not in seen_user_turns and tid not in missing_tids:
+                    missing_tids.append(tid)
+            if missing_tids:
+                anchored = []
+                with self.connect() as db:
+                    for tid in missing_tids[:max_turns]:
+                        row = db.execute(
+                            """SELECT size, body FROM events
+                               WHERE session=? AND turn=? AND json_extract(body,'$.type')='message.user'
+                               ORDER BY sequence LIMIT 1""",
+                            (sid, tid),
+                        ).fetchone()
+                        if row is not None and used + row['size'] <= budget_bytes + 65536:
+                            anchored.append(json.loads(row['body']))
+                            used += row['size']
+                if anchored:
+                    kept = sorted(anchored + kept, key=lambda item: item['sequence'])
         has_earlier = bool(older_turns or truncated_scan or omitted or archive_seq > 0)
         return dict(events=kept, first_sequence=first_seq, next_sequence=last_seq,
                     last_sequence=last_seq, has_earlier=has_earlier)
