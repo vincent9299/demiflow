@@ -95,7 +95,6 @@ def take_one(*, source, target):
                 expect(page.locator('.wb-node').first).to_be_visible(timeout=65000)
             def submit():
                 page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).click()
-                page.get_by_role('button', name='确认运行', exact=True).click()
             def run(variant, paused=False):
                 select_entry('flows/questions.py:select_' + variant)
                 held = []

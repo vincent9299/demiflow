@@ -1145,10 +1145,7 @@
       const admission=await request('run-admission',{}, {entry:working.entry,params:working.params});
       if(!current(ticket))return;
       if(admission.status!=='requires_prepare'){message(admission.message||'当前流程尚未接入受管提交。');return;}
-      runUI.confirmation(runConfirmation,{title:'运行 '+runUI.flowName(ctx,working.entry),
-        description:admission.output_binding==='compiled_targets'?'编译并封存当前流程和业务参数，写入参数指定的目标。已有目标会拒绝写入；需要另一次运行时，请先指定新目标。':'检查并封存当前流程和唯一业务参数，再提交运行。创建模式的声明输出使用本次独立目标；覆盖模式仍需要固定版本校验。',
-        rows:[['流程',working.entry],['业务参数',working.params||'未绑定'],['累计时长上限',(getDraft().timeout??ctx.run_limits.timeout_s)+' 秒']],confirmLabel:'确认运行',
-        cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;runConfirmation.hidden=true;await submit();}});
+      await submit();
     }
     async function startPrepared(targetIntent,{navigate=true}={}){
       let started=null,startErr=null;
@@ -1499,7 +1496,8 @@
         inspectedPending.add(intent.request_id);
         commands.inspect(intent).then(value=>{
           if(disposed||!root.isConnected)return;
-          if(value?.run&&value.run.status!=='prepared')paintPending();
+          const settled=value?.run&&(value.run.status!=='prepared'||(value.run.state?.execution_stopped===true&&value.run.state?.cleanup==='complete'));
+          if(settled)paintPending();
         }).catch(()=>{/* Keep pending intent until reachable or user inspects. */});
       }
     }
@@ -1519,6 +1517,7 @@
         if(intent.run_id){
           button('立即启动',()=>startPrepared(intent,{navigate:true}),line,{disabled:!can('run_submit'),cls:'primary'});
           button('查看原运行',()=>openRun(intent.run_id,intent.attempt),line);
+          button('移除提示',()=>{commands.finish(intent);paintPending();},line);
         }
         button('核对原请求',async()=>{
           const ticket=state.capture(),value=await commands.inspect(intent);if(!current(ticket))return;

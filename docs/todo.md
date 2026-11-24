@@ -44,36 +44,43 @@
 - **现象。** `LocalCapacityPool._lock` 和 `DevicePool._lock` 在正常准入路径上是无期限的阻塞锁；持锁进程被挂起时，整台机器的准入都会等待，准入超时不生效。只有恢复路径带期限。
 - **建议。** 把准入截止时间传到取锁处，超时按"额度等待"返回。
 
+## 发版与验收
+
+### T-006 四条线的逐文件驱动脚本进仓库
+
+- **现象。** 发版规范第 5 节要求的四线运行，靠一份逐文件驱动脚本（每个测试文件一个私有资源域、一个期限、一份回执）。这份脚本目前只在仓库外的共享评审目录里，各次发版各自拷贝修改（`_demiflow/shared-review/` 下的 `run_lanes.py` 与 `harness/e1run.py`）。仓库里只有它调用的回执工具 `tests/runtime_v3_regression_inventory.py` 和比对工具 `tests/engine_known_state.py`。
+- **建议。** 把驱动脚本收进仓库并固定用法：输入是提交和合入的人定下的范围（哪些线、哪些测试文件），输出是各线回执和已知状态清单。每日全量和按范围验收用同一个入口。
+
 ## 引擎对架构规约的符合性
 
 来源：2026-11-24 的方案评审，完整内容和每项的代码位置见 `_demiflow/shared-review/CLAUDE-engine-design-FINAL-711f2573-20261124/FINAL.md`。判定以三条要求为准：模块遵循架构规约；模块以下保持整洁、无错误耦合、无垫片与脏代码、不多增实体；功能与性能不回退。环的规模只作诊断。以下各项不单独为它们发版，在因别的原因改到相关文件时顺带收敛。清单不是对全仓的系统排查。
 
-### T-006 `pipeline/run_context.py` 混了两层职责
+### T-007 `pipeline/run_context.py` 混了两层职责
 
 - **现象。** 同一个文件里有被 24 个文件使用、不向上依赖的环境访问（`current_run`、`current_action`、`active_limits` 等），也有向上依赖 06、12、14 的 `RunContext` 生命周期（388 行）。底层文件为读一个 ContextVar 导入它，它又导入这些文件的上层。`storage/location_index.py:243` 和 `native_queue/stream_lance.py` 的写入器为同样的原因分别导入 `executors/plan_capture.py` 和 `pipeline/checked.py`。
 - **建议。** 环境访问归到 `pipeline/scope.py`，`RunAction` 留在原位（它读写动作账本）。`RunContext` 内 8 处直接读写 ContextVar（388、406、458、475、493、497、547、551 行）改为调用 `scope.py` 的函数。测试、Forge、工作台里约 45 处导入要一并改；守卫测试 `tests/test_dataflow_compile_inputs.py` 直接读写 `checked._CURRENT`，要改它的准备代码。
 
-### T-007 运行模块为纯函数导入主编译器，声明层导入规划器
+### T-008 运行模块为纯函数导入主编译器，声明层导入规划器
 
 - **现象。** `seal/plan.py:305`、`seal/program_identity.py:64` 导入规划包的私有 `_plain`、`_hash`；`native_queue/dataflow_fetch.py:24`、`operator_bindings/dataflow_search.py:27`、`action_driver/services.py:83` 为一个纯声明遍历导入 `planning/dataflow_compile.py`；`seal/plan.py:906` 的 `validate_literal_schema_replay` 在 06 里调用 04；`data/native_options.py:35` 导入 `planning/dataflow_policy`；`data/flow_ordering.py:6` 导入 `data/dataset.py` 的私有函数。
 - **建议。** 只挪代码：两个纯函数下沉到 `contracts/dataflow_codec.py` 并改公开名；声明遍历归到 `planning/dataflow_declaration.py`；`validate_literal_schema_replay` 搬到唯一调用者 `action_driver/dataflow.py`；`resource_only_options` 搬到 `planning/dataflow_policy.py`；两个列工具下沉到 `data/flow_contract.py`。守卫测试 `tests/test_dataflow_configuration.py:15` 的导入要跟着改。
 
-### T-008 账本认领时直接调用主机的资源恢复
+### T-009 账本认领时直接调用主机的资源恢复
 
 - **现象。** `journal/run_journal.py:765–776` 的 `claim_execution` 认领后调用 08 的 `recover_execution_resources`，再对账已发布产物。
 - **建议。** 账本拆成认领与对账两个接口，由 `RunContext` 按原次序调用三步。两个入口都要改：正常启动（`pipeline/run_context.py:381`）和停机维护（`_maintenance_owner`）。后者的 `claimed` 标志必须仍在三步都成功后才置位；`publication_guard` 里的发布前对账不动。
 
-### T-009 请求仍携带整个 executor，使用方读它的私有属性
+### T-010 请求仍携带整个 executor，使用方读它的私有属性
 
 - **现象。** 2026-11-24 起每个 `ActionRequest` 携带自己的 executor，不再挂在共享的 `RunAction` 上。但 `action_driver/services.py`、`compiler_support/dataflow_compile_inputs.py` 仍读 executor 的 `_local_kernel`、`_workers`、`_block_size`，`journal/run_telemetry.py` 仍拿整个 executor 更新用量。
 - **建议。** 请求只携带各使用方需要的值；15 生成观测结果，由持有 executor 的 02 更新统计。
 
-### T-010 退役 Lance checkpoint 的旧实现仍在
+### T-011 退役 Lance checkpoint 的旧实现仍在
 
 - **现象。** `lance/checkpoint.py:72` 的 `checkpoint_lance` 第一步即拒绝，其后约 370 行写入路径不可达；`data/dataset.py:324–329` 同理。文件说明写明这段实现留待 P6 删除。
 - **建议。** 随 P6 删除，保留 `read_checkpoint_record`。
 
-### T-011 违反规约但修复有风险的位置
+### T-012 违反规约但修复有风险的位置
 
 每处修起来都要改行为、改封存身份的字节，或要动冻结文件，需单独评估。
 
