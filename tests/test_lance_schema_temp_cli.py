@@ -403,8 +403,8 @@ def test_cli_nonzero_exit_and_timeout_captured_in_error_output(tmp_path):
     assert rows_timeout[0]['err']['call']['execution_status'] == 'timed_out'
 
 
-def test_cli_adapters_dsh_codex_and_validation(tmp_path):
-    # 1) adapter='dsh' invokes [bin, '--profile', 'headless', *extra_args]
+def test_cli_command_dsh_legacy_codex_and_validation(tmp_path):
+    # 1) dsh-style CLI works directly through the generic command template
     fake_dsh = _write_script(
         tmp_path / 'fake_dsh.py',
         """import json, sys
@@ -419,39 +419,39 @@ print(json.dumps({'answer': 'from-dsh'}))
     rows = data.from_items([{'text': 'dsh-test'}]).map_prompt_async(
         'sum_prompt', config=str(cfg), inputs={'text': 'text'}, output='out',
         call_output='call', error_output='err',
-        options={'cli': {'adapter': 'dsh', 'bin': fake_dsh, 'extra_args': ['--extra']}, 'timeout_s': 15},
+        options={'cli': {'command': [fake_dsh, '--profile', 'headless', '--extra']}, 'timeout_s': 15},
         max_requests=2,
     ).take_all()
     assert rows[0].get('err') is None
     assert rows[0]['out'] == 'from-dsh'
-    assert rows[0]['call']['adapter'] == 'dsh'
+    assert rows[0]['call']['transport'] == 'cli'
 
-    # 2) adapter='codex' delegates cleanly to CodexExecPromptClient
+    # 2) Legacy codex_exec remains backward compatible
     fake_codex = _write_script(
         tmp_path / 'fake_codex.py',
         """import json, pathlib, sys
 assert '--custom-flag' in sys.argv
 out = sys.argv[sys.argv.index('--output-last-message') + 1]
-pathlib.Path(out).write_text(json.dumps({'answer': 'from-codex-adapter'}))
+pathlib.Path(out).write_text(json.dumps({'answer': 'from-codex-legacy'}))
 print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 3, 'output_tokens': 2}}))
 """,
     )
     rows_codex = data.from_items([{'text': 'codex-test'}]).map_prompt_async(
         'sum_prompt', config=str(cfg), inputs={'text': 'text'}, output='out',
         call_output='call', error_output='err',
-        options={'cli': {'adapter': 'codex', 'bin': fake_codex, 'extra_args': ['--custom-flag']}, 'timeout_s': 15},
+        options={'codex_exec': {'bin': fake_codex, 'extra_args': ['--custom-flag']}, 'timeout_s': 15},
         max_requests=2,
     ).take_all()
     assert rows_codex[0].get('err') is None
-    assert rows_codex[0]['out'] == 'from-codex-adapter'
+    assert rows_codex[0]['out'] == 'from-codex-legacy'
     assert rows_codex[0]['call']['transport'] == 'codex_exec'
 
-    # 3) Eager validation rejects malformed cli options
+    # 3) Eager validation rejects malformed or non-command cli options (no adapter presets)
     ds = data.from_items([{'text': 'x'}])
     for bad_opts in (
         {'cli': {}},
-        {'cli': {'adapter': 'dsh', 'command': ['dsh']}},
-        {'cli': {'adapter': 'unknown_cli'}},
+        {'cli': {'adapter': 'dsh'}},
+        {'cli': {'adapter': 'codex', 'command': ['codex']}},
         {'cli': {'command': []}},
         {'cli': {'command': [sys.executable, '{unknown_placeholder}']}},
         {'cli': {'command': [sys.executable, '{artifacts_dir}']}},
