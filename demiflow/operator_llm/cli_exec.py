@@ -1,8 +1,7 @@
 """Configurable local CLI transport for native prompt nodes.
 
-Supports both built-in CLI adapters (``codex``, ``dsh``) and arbitrary user-configured
-``command`` argv templates with bounded placeholder substitution, process-group
-reaping, durable journaling/replay, and optional artifact collection.
+Runs an explicit argv ``command`` template with bounded placeholder substitution,
+process-group reaping, durable journaling/replay, and optional artifact collection.
 """
 from __future__ import annotations
 
@@ -39,29 +38,15 @@ ALLOWED_PLACEHOLDERS = frozenset({
     'artifacts_dir',
 })
 
-_ADAPTER_KEYS = {
-    'codex': frozenset({
-        'adapter', 'bin', 'reasoning_effort', 'output_schema', 'web_search',
-        'image_generation', 'artifact_store', 'max_artifact_files', 'max_artifact_bytes',
-        'extra_args',
-    }),
-    'dsh': frozenset({
-        'adapter', 'bin', 'profile', 'extra_args', 'cwd', 'env_passthrough',
-        'artifact_store', 'max_artifact_files', 'max_artifact_bytes',
-    }),
-}
-
 _COMMAND_KEYS = frozenset({
     'command', 'input', 'output', 'cwd', 'env_passthrough',
     'artifact_store', 'max_artifact_files', 'max_artifact_bytes',
 })
 
 
-def _validate_extra_args(value, *, label='extra_args'):
-    if value is None:
-        return []
-    if not isinstance(value, (list, tuple)) or len(value) > 64:
-        raise ValueError(f'{label} must be a list of at most 64 strings')
+def _validate_argv(value, *, label='cli.command'):
+    if not isinstance(value, (list, tuple)) or not value or len(value) > 64:
+        raise ValueError(f'{label} must be a nonempty list of at most 64 strings')
     result = []
     for item in value:
         if type(item) is not str or not item or '\x00' in item:
@@ -110,36 +95,10 @@ def validate_cli_options(options):
     raw = options.get('cli')
     if not isinstance(raw, dict):
         raise ValueError('options.cli must be a mapping')
-    adapter = raw.get('adapter')
-    has_command = 'command' in raw
-    if adapter is not None and has_command:
-        raise ValueError('options.cli cannot specify both adapter and command')
-    if adapter is None and not has_command:
-        raise ValueError('options.cli requires either adapter or command')
-    if adapter is not None:
-        if type(adapter) is not str or adapter not in _ADAPTER_KEYS:
-            raise ValueError(f'Unsupported CLI adapter: {adapter!r}; supported: {sorted(_ADAPTER_KEYS)}')
-        unknown = set(raw) - _ADAPTER_KEYS[adapter]
-        if unknown:
-            raise ValueError(f'Unknown cli ({adapter}) settings: {sorted(unknown)}')
-        if 'extra_args' in raw:
-            _validate_extra_args(raw['extra_args'])
-        if 'env_passthrough' in raw:
-            _validate_env_passthrough(raw['env_passthrough'])
-        if adapter == 'dsh':
-            executable = raw.get('bin') or 'dsh'
-            if type(executable) is not str or not executable.strip() or '\x00' in executable:
-                raise ValueError('cli.bin must be a nonempty string')
-            profile = raw.get('profile', 'headless')
-            if type(profile) is not str or not profile.strip() or any(c.isspace() or c == '\x00' for c in profile):
-                raise ValueError('dsh cli.profile must be a nonempty token without whitespace')
-        return
     unknown = set(raw) - _COMMAND_KEYS
     if unknown:
         raise ValueError(f'Unknown cli settings: {sorted(unknown)}')
-    command = _validate_extra_args(raw.get('command'), label='cli.command')
-    if not command:
-        raise ValueError('cli.command must be a nonempty argv list')
+    command = _validate_argv(raw.get('command'))
     input_mode = raw.get('input', 'stdin')
     if input_mode not in {'stdin', 'file'}:
         raise ValueError("cli.input must be 'stdin' or 'file'")
@@ -164,64 +123,14 @@ def validate_cli_options(options):
 
 
 def create_cli_prompt_client(model, options, max_requests=None, *, native_journal=None):
-    if set(options) - {'cli', 'sqlite_journal', 'timeout_s'}:
-        raise ValueError('Unknown CLI execution options')
-    raw = options.get('cli')
-    if not isinstance(raw, dict):
-        raise ValueError('options.cli must be a mapping')
-    adapter = raw.get('adapter')
-    has_command = 'command' in raw
-    if adapter is not None and has_command:
-        raise ValueError('options.cli cannot specify both adapter and command')
-    if adapter is None and not has_command:
-        raise ValueError('options.cli requires either adapter or command')
-
-    if adapter is not None:
-        if type(adapter) is not str or adapter not in _ADAPTER_KEYS:
-            raise ValueError(f'Unsupported CLI adapter: {adapter!r}; supported: {sorted(_ADAPTER_KEYS)}')
-        unknown = set(raw) - _ADAPTER_KEYS[adapter]
-        if unknown:
-            raise ValueError(f'Unknown cli ({adapter}) settings: {sorted(unknown)}')
-        if adapter == 'codex':
-            from .codex_exec import CodexExecPromptClient
-            codex_settings = {k: v for k, v in raw.items() if k != 'adapter'}
-            translated = {k: v for k, v in options.items() if k != 'cli'}
-            translated['codex_exec'] = codex_settings
-            return CodexExecPromptClient(model, translated, max_requests, native_journal=native_journal)
-        if adapter == 'dsh':
-            executable = raw.get('bin') or 'dsh'
-            if type(executable) is not str or not executable.strip() or '\x00' in executable:
-                raise ValueError('cli.bin must be a nonempty string')
-            profile = raw.get('profile', 'headless')
-            if type(profile) is not str or not profile.strip() or any(c.isspace() or c == '\x00' for c in profile):
-                raise ValueError('dsh cli.profile must be a nonempty token without whitespace')
-            extra_args = _validate_extra_args(raw.get('extra_args'))
-            command = [executable, '--profile', profile, *extra_args]
-            normalized = {
-                'command': command,
-                'input': 'stdin',
-                'output': 'stdout',
-            }
-            for key in ('cwd', 'env_passthrough', 'artifact_store', 'max_artifact_files', 'max_artifact_bytes'):
-                if key in raw:
-                    normalized[key] = raw[key]
-            return CliExecPromptClient(
-                model, {**options, 'cli': normalized}, max_requests,
-                native_journal=native_journal, adapter='dsh',
-            )
-
-    unknown = set(raw) - _COMMAND_KEYS
-    if unknown:
-        raise ValueError(f'Unknown cli settings: {sorted(unknown)}')
     return CliExecPromptClient(model, options, max_requests, native_journal=native_journal)
 
 
 class CliExecPromptClient:
     """Generic non-interactive local CLI transport with argv template substitution."""
 
-    def __init__(self, model, options, max_requests=None, *, native_journal=None, adapter=None):
-        if set(options) - {'cli', 'sqlite_journal', 'timeout_s'}:
-            raise ValueError('Unknown CLI execution options')
+    def __init__(self, model, options, max_requests=None, *, native_journal=None):
+        validate_cli_options(options)
         if native_journal is not None:
             from demiflow.execution.contracts.dataflow import (
                 PrivatePromptJournalPort, PromptJournalPort, inherits_bound_port,
@@ -235,25 +144,15 @@ class CliExecPromptClient:
                 raise ValueError('Native remote journal cannot coexist with a private CLI journal')
         self.options = dict(options)
         self.settings = dict(options['cli'])
-        self.adapter = adapter
-        unknown = set(self.settings) - _COMMAND_KEYS
-        if unknown:
-            raise ValueError(f'Unknown cli settings: {sorted(unknown)}')
 
-        command = _validate_extra_args(self.settings.get('command'), label='cli.command')
-        if not command:
-            raise ValueError('cli.command must be a nonempty argv list')
+        command = _validate_argv(self.settings.get('command'))
         self.command_template = tuple(command)
         self.executable = shutil.which(command[0])
         if not self.executable:
             raise ValueError(f'CLI executable not found: {command[0]!r}')
 
         self.input_mode = self.settings.get('input', 'stdin')
-        if self.input_mode not in {'stdin', 'file'}:
-            raise ValueError("cli.input must be 'stdin' or 'file'")
         self.output_mode = self.settings.get('output', 'stdout')
-        if self.output_mode not in {'stdout', 'file'}:
-            raise ValueError("cli.output must be 'stdout' or 'file'")
 
         self.artifact_options = self.settings.get('artifact_store')
         self.artifact_store = None
@@ -273,20 +172,9 @@ class CliExecPromptClient:
         elif {'max_artifact_files', 'max_artifact_bytes'} & set(self.settings):
             raise ValueError('Artifact limits require artifact_store')
 
-        placeholders = set()
-        for arg in self.command_template[1:]:
-            for name in _PLACEHOLDER_RE.findall(arg):
-                if name not in ALLOWED_PLACEHOLDERS:
-                    raise ValueError(f'Unsupported CLI command placeholder: {{{name}}}')
-                placeholders.add(name)
-        if 'artifacts_dir' in placeholders and self.artifact_store is None:
-            raise ValueError('{artifacts_dir} placeholder requires artifact_store')
-        if self.output_mode == 'file' and 'output_file' not in placeholders:
-            raise ValueError("cli.output='file' requires {output_file} in cli.command")
-
         cwd = self.settings.get('cwd')
         if cwd is not None:
-            if type(cwd) is not str or not Path(cwd).is_absolute() or not Path(cwd).is_dir():
+            if not Path(cwd).is_dir():
                 raise ValueError('cli.cwd must be an existing absolute directory path')
             cwd = str(Path(cwd).resolve())
         self.cwd = cwd
@@ -294,16 +182,12 @@ class CliExecPromptClient:
 
         self.model = model
         self.timeout = options.get('timeout_s', 600)
-        if type(self.timeout) not in (int, float) or self.timeout <= 0:
-            raise ValueError('CLI timeout must be positive')
         self.journal = (SQLitePromptJournal(**options['sqlite_journal'], max_requests=max_requests)
                         if options.get('sqlite_journal') else native_journal)
         self.processes = set()
 
     def record(self, request):
         execution = {'input': self.input_mode, 'output': self.output_mode}
-        if self.adapter is not None:
-            execution['adapter'] = self.adapter
         if self.cwd is not None:
             execution['cwd'] = self.cwd
         if self.artifact_store:
@@ -334,7 +218,6 @@ class CliExecPromptClient:
     def decode(self, request, record, reused=False, refs=None):
         metadata = {
             'transport': 'cli',
-            'adapter': self.adapter,
             'model': request.model,
             'model_source': 'requested',
             'command': self.command_template[0],
