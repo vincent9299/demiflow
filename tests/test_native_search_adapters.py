@@ -347,6 +347,7 @@ def test_options_an_adapter_no_longer_has_are_rejected_when_declared():
     ('http://example.org/a', 'https://example.org/a', False),  # an upgrade to https is another origin
     ('http://example.org:8080/a', 'http://example.org:8081/a', False),
     ('http://example.org/a', 'http://example.org:8080/a', False),
+    ('http://example.org/a', 'http://example.org:0/a', False),  # port 0 is a port of its own, not the default
     ('http://example.org/a', 'http://other.example.org/a', False),
     ('http://example.org/a', 'http://example.org.evil.test/a', False),
     ('http://example.org/a', 'http://user:secret@example.org/a', False),  # credentials of its own

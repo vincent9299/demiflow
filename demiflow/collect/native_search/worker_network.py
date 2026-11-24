@@ -134,7 +134,7 @@ def _origin(parts):
         port = parts.port
     except ValueError:
         return None
-    return parts.scheme, parts.hostname, port or DEFAULT_PORTS.get(parts.scheme)
+    return parts.scheme, parts.hostname, DEFAULT_PORTS.get(parts.scheme) if port is None else port
 
 
 def same_origin(first, second):
