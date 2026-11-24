@@ -10,7 +10,7 @@ from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import AsyncMapOp, CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import IterableSource, RangeSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.contracts import ResourceProfile
 from _native_graph_fixtures import HISTORICAL_MEMORY, HISTORICAL_WORKERS
 from test_u3_graph_commit import _graph_spec, _stream_map
@@ -21,7 +21,7 @@ from test_u3_graph_commit import _graph_spec, _stream_map
     'partitions', 'host_small', 'host_cpu', 'fusion_off', 'no_hosts'])
 def test_literal_prefix_only_colocates_proven_safe_source_and_callbacks(tmp_path, variant):
     from demiflow.execution.executors.graph import graph_action_request
-    from demiflow.execution.dataflow_api import resolve_action_runtime
+    from demiflow.execution.action_driver.services import resolve_action_runtime
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_graph_adapter import specialize_graph_stages
@@ -107,8 +107,8 @@ def test_literal_prefix_only_colocates_proven_safe_source_and_callbacks(tmp_path
 
 def test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout(tmp_path, monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.sealed_plans import load_sealed_plan
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.action_driver import dataflow
     from _native_graph_fixtures import assert_native_graph
     spec, readers, count = _graph_spec(n=24, cut_rows=8, readers=('c0', 'c1'))
@@ -161,8 +161,8 @@ def test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout(tmp_p
 
 def test_range_prefix_uses_original_reader_and_exact_committed_rows(tmp_path):
     from _native_receipt_fixtures import committed_rows
-    from demiflow.execution.state_artifacts import StateArtifacts
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     spec, readers, count = _graph_spec(n=8, cut_rows=4, readers=('c0', 'c1'))
     spec['source'] = RangeSource(count)
     spec['ancestor']['plan'] = _stream_map(lambda row: {'x': row['id'] * 2})

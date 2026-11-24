@@ -10,10 +10,10 @@ import lance
 import pyarrow as pa
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.training.deployment import TrainingDeployment
+from demiflow.execution.contracts.recovery_contract import RunRef
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.pipeline.training_deployment import TrainingDeployment
 from test_training_dataset_action import recipe
 from test_training_domain import setup_request
 from training_action_programs import managed_trainer
@@ -63,9 +63,9 @@ class SeedScores:
 
 
 def _install_driver_crash(run, location):
-    from demiflow.execution import commit
-    from demiflow.execution.sealed_plans import load_sealed_plan
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.checkpoint import commit
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     # Drive the real public checkpoint control on the driver's own pump thread.
     # Preparation, barriers, evidence, publication and recovery execute unchanged.

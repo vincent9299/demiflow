@@ -96,7 +96,7 @@ def test_supervisor_lease_closes_even_if_initialization_or_finalization_raises(t
 
 @pytest.mark.parametrize('cleanup_failure', [False, True])
 def test_supervisor_publishes_one_final_state_after_cancel_race(tmp_path, monkeypatch, cleanup_failure):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.workbench.runs import worker, manager
     from demiflow.workbench.runs import storage
     from test_p4_attempt_reservations import managed

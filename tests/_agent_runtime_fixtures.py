@@ -4,12 +4,12 @@ import asyncio
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def collect_before_commit(dataset, directory, monkeypatch):
     """Run actual workers, observe their actual rows, interrupt before native commit."""
-    from demiflow.execution.dataflow_terminals import TerminalSubscription
+    from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import thaw_record_value
 
@@ -51,7 +51,7 @@ def resume_collect(dataset, reference):
 
 def call_metrics(row):
     """Aggregate returned worker trace, never the unexecuted driver declaration."""
-    from demiflow.execution.stream_resources import CallMetrics
+    from demiflow.execution.journal.run_telemetry import CallMetrics
     call = row.get('call') or row['error']['call']
     metrics = CallMetrics()
     turns = call.get('environment', {}).get('turns')
@@ -71,7 +71,7 @@ def collect_actor_component(declaration):
     separate native Dataset tests cover those boundaries.
     """
     from demiflow.data.sources import ItemsSource, MaterializedSource
-    from demiflow.execution.dataflow_inputs import InputMaterializedHandle
+    from demiflow.execution.sources.materialized_input import InputMaterializedHandle
     from demiflow.operator_llm.runtime import PromptActor
     source = declaration._source
     if isinstance(source, ItemsSource):

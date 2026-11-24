@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
 
 PACK = '''
@@ -117,7 +117,7 @@ def test_embedding_worker_native_journal(tmp_path, native_server):
 
 
 def test_prompt_run_budget_is_atomic_before_second_http(tmp_path, native_server):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.errors import PromptBudgetExceededError
     with pytest.raises(RecoveryContractError, match='unconfirmed'), \
             RunContext.start(tmp_path / 'run', limits={'max_requests': 1}) as run, data.local_execution():

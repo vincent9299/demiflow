@@ -1,17 +1,19 @@
 """Key-only anti join, scan-order reconstruction, then pinned payload hydration."""
 from dataclasses import replace
-from ..dataflow_records import clone_record
+from demiflow.execution.contracts.dataflow import clone_record
 
 from ..contracts.dataflow_errors import DataflowError
-from ..record_schema import RecordSchemas
-from .dataflow import _materialize_row, _output_record, _hash_id, _OutputBudget
+from demiflow.execution.storage.record_schema import RecordSchemas
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
+from demiflow.execution.kernels.dataflow import _output_record, _OutputBudget
+from demiflow.execution.contracts.record_codec import record_identity as _hash_id
 from .ordering import build_sort_runs, merge_sort_runs
 
 
 def _sql_survivors(left, right, keys, services):
     from ...operators.relational_sql import exclusion_query
     from ..contracts.relational_region import KEY_SQL_SUFFIX, SQL_CHILD_RSS, selection_wire_bytes
-    from .dataflow import _group_key
+    from demiflow.operators.relational import group_key as _group_key
 
     if not any(s.stage_id.endswith(KEY_SQL_SUFFIX) for s in services.assignment.stages):
         return None
@@ -33,7 +35,7 @@ def _sql_survivors(left, right, keys, services):
         try:
             for record in scan:
                 services.check_stop()
-                row = _materialize_row(record, services)
+                row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
                 key = None if any(row[f] is None for f in keys) else _group_key(row, keys)
                 retained += 5 + (len(key.encode('utf-8')) if key is not None else 0)
                 if not pending:
@@ -64,7 +66,7 @@ def _sql_survivors(left, right, keys, services):
 
 def exclude_keys(left, right, *, spec, services):
     from .join_spool import join_pairs
-    from ..lance_key_source import PinnedKeyPayload
+    from demiflow.execution.sources.source_readers import PinnedKeyPayload
     source = PinnedKeyPayload(spec, services)
     schema_ref = RecordSchemas(services).put(source.schema)
     keys = tuple(spec.configuration['on'])

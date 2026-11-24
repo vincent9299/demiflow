@@ -177,8 +177,9 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
     from demiflow.data.api import DataAPI
     from demiflow.operator_llm import journal as module
     from demiflow.operator_llm.client import AsyncOperatorLLMClient
-    from demiflow.execution import dataflow_api
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from contextvars import ContextVar
     path = tmp_path / 'calls.sqlite'
     encoded = 'data:image/png;base64,' + 'YWJj' * 400000
@@ -204,10 +205,10 @@ def test_http_image_identity_replay_and_no_binary_copy(server, tmp_path, monkeyp
             return authenticate(service, *args, **kwargs)
         finally:
             authenticating.reset(token)
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
     def thread_policy(options, limits, **kwargs):
         return resolve({**options, 'worker_mode': 'thread'}, limits, **kwargs)
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', thread_policy)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', thread_policy)
     monkeypatch.setattr(AsyncOperatorLLMClient, 'prepare', observed_prepare)
     monkeypatch.setattr(DriverJournalService, 'native_request', observed_authentication)
     def counted(value):

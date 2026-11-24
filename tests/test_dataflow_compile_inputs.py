@@ -5,11 +5,10 @@ and the report context. ``lower_action`` resolves it once at entry when the
 caller passes none, and uses exactly what it is given when the caller passes one.
 """
 from demiflow import data
-from demiflow.execution import checked
+from demiflow.execution.pipeline import checked
 from demiflow.execution.contracts.dataflow import ActionRequest
 from demiflow.execution.contracts.dataflow_codec import encode_wire
-from demiflow.execution.dataflow_compile_inputs import (
-    CompileDefaults, CompileInputs, ReportBindings, compile_inputs, executor_defaults)
+from demiflow.execution.compiler_support.dataflow_compile_inputs import CompileDefaults, CompileInputs, ReportBindings, compile_inputs, executor_defaults
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
@@ -63,6 +62,56 @@ def test_resolution_reads_the_action_executor_and_the_report_context():
     finally:
         checked._CURRENT.reset(token)
     assert compile_inputs(_request(dataset)).report is None
+
+
+def test_source_schema_is_lazy_and_shared_leaf_is_inspected_once(monkeypatch):
+    import pyarrow as pa
+    import demiflow.planning.dataflow_compile as compiler
+    from demiflow.execution.sources.materialized_input import literal_schema
+    source = data.from_arrow(pa.table({'x': [1, 2]}))
+    request = _request(source.union(source))
+    expected = _bytes(lower_action(request, bounds=BOUNDS))
+    assert CompileInputs().source_schema is literal_schema
+    assert compile_inputs(request).source_schema is literal_schema
+    events = []
+    semantic = compiler._source_semantic_facts
+    def facts(value):
+        events.append(('semantic', value))
+        return semantic(value)
+    def schema(value, *, bounds):
+        events.append(('schema', value))
+        return literal_schema(value, bounds=bounds)
+    def no_ambient_context():
+        raise AssertionError('explicit compile inputs must not read ambient context')
+    monkeypatch.setattr(compiler, '_source_semantic_facts', facts)
+    monkeypatch.setattr(checked, 'current', no_ambient_context)
+    inputs = CompileInputs(source_schema=schema)
+    assert events == []
+    compiled = lower_action(request, bounds=BOUNDS, inputs=inputs)
+    assert events == [('semantic', source._source), ('schema', source._source),
+                      ('semantic', request.source)]
+    assert _bytes(compiled) == expected
+
+
+def test_empty_take_and_invalid_terminal_never_inspect_original_source():
+    from dataclasses import replace
+    import pytest
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    from demiflow.execution.sources.materialized_input import literal_schema
+    source = data.from_items([{'x': 1}])
+    seen = []
+    def schema(value, *, bounds):
+        seen.append(value)
+        assert value is not source._source
+        return literal_schema(value, bounds=bounds)
+    inputs = CompileInputs(source_schema=schema)
+    request = _request(source, arguments={'limit': 0})
+    lower_action(request, bounds=BOUNDS, inputs=inputs)
+    assert len(seen) == 1
+    seen.clear()
+    with pytest.raises(DataflowError, match='registered sink declaration'):
+        lower_action(replace(request, kind='write_datasink'), bounds=BOUNDS, inputs=inputs)
+    assert seen == []
 
 
 def test_explicit_inputs_are_used_instead_of_the_surroundings():

@@ -1,7 +1,8 @@
 """Explicit same-instance ownership; no changes to historical unshared plans."""
 from dataclasses import replace
 from ..execution.contracts.dataflow_errors import DataflowError
-from ..execution.dataflow_shared import actor_owner, shared_binding
+from demiflow.data.plan import actor_owner
+from demiflow.execution.contracts.dataflow import shared_binding
 
 
 def bind_shared_actors(nodes, edges, declarations):

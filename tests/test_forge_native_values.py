@@ -10,7 +10,7 @@ import pytest
 from demiflow import data
 from demiflow.data.flow_contract import arrow_fields
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.checked import CheckedExecution
+from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS

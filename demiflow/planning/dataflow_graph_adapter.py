@@ -144,7 +144,7 @@ def decorate_graph_capture(capture, request, *, terminal):
     source = request.source
     if type(source) is not RoutedGraphSource:
         return terminal
-    from ..execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     from .dataflow_compile import _plain
     def node_index(op):
         return capture.alias_op[(id(source.shared_source), id(op))]
@@ -548,7 +548,7 @@ def pack_graph_residency(graph, stages, exchanges, residency, *, requested, host
     if not any('graph_route' in node.kernel.configuration for node in graph.nodes):
         return exchanges, residency
     from .dataflow_place import solve_residency
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     originals = {edge.edge_id: edge for edge in requested}
     selected = exchanges
     attempts = 0

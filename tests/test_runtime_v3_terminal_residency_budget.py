@@ -3,7 +3,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_resource_scenarios import observe_execution
 from test_runtime_v3_durable_residency import LIMITS
 
@@ -39,8 +39,8 @@ def test_terminal_metadata_uses_only_room_after_control_and_payload(tmp_path):
 
 
 def test_terminal_accounts_live_index_and_payload_in_one_worker_grant(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_publication_budget import TERMINAL_WORKSPACE
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
 
     limits = {**LIMITS, 'memory_bytes': 30 * 1024}
     checked = []
@@ -97,7 +97,7 @@ def test_terminal_small_grant_rejects_real_codec_peak(tmp_path):
 
 def test_fixed_terminal_windows_cannot_borrow_from_each_other_or_control():
     from types import SimpleNamespace
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
 
     available = 30 * 1024 - 3840
     bounds = SimpleNamespace(max_resident_bytes=available, max_batch_bytes=16 * 1024,

@@ -1,5 +1,7 @@
 """Exhaustive operator trait derivation without backend concepts."""
 from __future__ import annotations
+
+from demiflow.execution.compiler_support.capabilities import VERSION
 from dataclasses import replace
 from ..data import plan as ops
 from ..data import sources
@@ -73,7 +75,7 @@ def unified_operation_traits(op):
         # keeps that adapter instead of dropping it for not being a class. A
         # plain-data instance has the same shared owner as its auto_json adapter;
         # precheck enforces concurrency 1 before any actor starts.
-        from ..execution.operator_policy import classify_operator_state
+        from demiflow.execution.compiler_support.operator_policy import classify_operator_state
         target = callable_spec.target
         if callable_spec.is_class:
             policy = classify_operator_state(target, phase="declaration")
@@ -95,3 +97,56 @@ def unified_source_traits(source):
 
 def unified_terminal_traits(category="action"):
     return terminal_traits(category)
+
+
+def check_call(fact, *, backend="local", driver="pull"):
+    """Project checked vocabulary onto the sole unified operator registry.
+
+    ``driver`` remains a historical report label, never a second executor gate.
+    Workspace effect permissions and actual native parameter checks stay with
+    their existing semantic/resource contracts.
+    """
+    from demiflow.planning.dataflow_registry import operator_registry
+    aliases = {
+        'map': 'MapOp', 'async_map': 'AsyncMapOp', 'batch_map': 'BatchMapOp',
+        'flat_map': 'FlatMapOp', 'filter': 'FilterOp', 'project': 'SelectColumnsOp',
+        'drop': 'DropColumnsOp', 'rename': 'RenameColumnsOp', 'limit': 'LimitOp',
+        'map_batches': 'MapBatchesOp', 'predict': 'PredictOp', 'add_column': 'AddColumnOp',
+        'sample': 'RandomSampleOp', 'model_map': 'OperatorLLMMapOp',
+        'sort': 'SortOp', 'repartition': 'RepartitionOp',
+        'shuffle': 'RandomShuffleOp', 'block_order': 'RandomizeBlockOrderOp',
+    }
+    kind = fact['kind']
+    registry = operator_registry()
+    native_kind = aliases.get(kind, kind)
+    reason = None
+    if backend != 'local':
+        reason = 'Backend has no checked capability contract'
+    elif driver not in {'pull', 'stream'}:
+        reason = 'Unknown native driver'
+    elif native_kind not in registry:
+        reason = 'Operation has no unified compiler capability contract'
+    elif fact.get('native_options'):
+        from demiflow.data.native_options import resource_only_options
+        declaration = fact.get('resource_declaration')
+        try:
+            if declaration is None or resource_only_options(
+                    {'ray': {'worker_resources': declaration}}) != declaration:
+                raise ValueError('resource declaration is missing or not canonical')
+        except (ValueError, TypeError):
+            reason = 'Managed backend_options require an explicit resource declaration'
+    return {'version': VERSION, 'backend': backend, 'driver': driver,
+            'supported': reason is None, 'reason': reason}
+
+def check_composition(facts, *, backend="local", driver=None):
+    facts = list(facts)
+    if len(facts) > 1024:
+        return {"version": VERSION, "backend": backend, "driver": driver,
+                "supported": False, "reason": "Composition exceeds 1024 operations"}
+    driver = driver or ("stream" if any(f.get("driver") == "stream" for f in facts) else "pull")
+    for index, fact in enumerate(facts):
+        result = check_call(fact, backend=backend, driver=driver)
+        if not result["supported"]:
+            return {**result, "operation": index}
+    return {"version": VERSION, "backend": backend, "driver": driver,
+            "supported": True, "reason": None}

@@ -5,13 +5,13 @@ from dataclasses import replace
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def test_runs_share_one_capacity_domain(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_capacity import local_capacity
-    from demiflow.execution.dataflow_services import _driver_resources
+    from demiflow.execution.hosts.capacity import local_capacity
+    from demiflow.execution.hosts.configuration import driver_resources as _driver_resources
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.contracts import ResourceError
@@ -35,7 +35,7 @@ def test_runs_share_one_capacity_domain(tmp_path, monkeypatch):
 
 
 def test_pending_admission_retries_same_allocation_then_executes(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_capacity
+    from demiflow.execution.hosts import capacity as dataflow_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.local import LocalResourceProvider
     capacity = {'cpu_millis': 3000, 'memory_bytes': 8 * 1024 ** 3}
@@ -64,7 +64,7 @@ def test_pending_admission_retries_same_allocation_then_executes(tmp_path, monke
 
 
 def test_unavailable_capacity_times_out_without_business_effect(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_capacity
+    from demiflow.execution.hosts import capacity as dataflow_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     capacity = {'cpu_millis': 3000, 'memory_bytes': 8 * 1024 ** 3}
     domain = tmp_path / 'capacity-domain'
@@ -95,7 +95,7 @@ def test_unavailable_capacity_times_out_without_business_effect(tmp_path, monkey
 
 def test_long_call_renews_same_worker_and_commits(tmp_path, monkeypatch):
     from demiflow.execution.scheduler import placement as dataflow_scheduler
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     monkeypatch.setattr(dataflow_scheduler, 'lease_ttl_ms', lambda policy: 4000)
     original = DriverJournalService.renew_worker
     renewals = []
@@ -119,11 +119,14 @@ def test_renewal_cannot_change_owner_or_resurrect_expiry(tmp_path, monkeypatch):
     import json
     from types import SimpleNamespace
     from test_runtime_v3_real_seams import prepared
-    from demiflow.execution import dataflow_authority as authority
+    from demiflow.execution.journal import dataflow_authority as authority
+    from demiflow.execution.worker.runtime import WorkerJournalClient
+    from demiflow.execution.worker import runtime as worker
     from demiflow.execution.contracts.dataflow import WorkerLease
     with prepared(tmp_path, data.from_items([{'x': 1}])) as (execution, services):
         now = authority._now_ms()
         monkeypatch.setattr(authority, '_now_ms', lambda: now)
+        monkeypatch.setattr(worker.time, 'time', lambda: now / 1000)
         action = services.action
         stage = execution._physical.stages[0]
         doc = {'run_id': action.context.ref.run_id, 'attempt': action.context.attempt,
@@ -132,7 +135,7 @@ def test_renewal_cannot_change_owner_or_resurrect_expiry(tmp_path, monkeypatch):
         ref = services.store.put(iter([raw]), max_bytes=len(raw), media_type='application/json')
         lease = WorkerLease('allocation', 'boot', stage.stage_id, stage.partitions,
                             'local', 'endpoint', ref, now + 1000)
-        client = authority.WorkerJournalClient(transport=SimpleNamespace(store=services.store),
+        client = WorkerJournalClient(transport=SimpleNamespace(store=services.store),
                                                lease=lease, bounds=services.bounds)
         services.journal_service.register_worker(lease, stage.occurrences)
         command = dict(doc, kind='renew_lease', allocation_id='allocation', boot_id='boot',
@@ -144,6 +147,7 @@ def test_renewal_cannot_change_owner_or_resurrect_expiry(tmp_path, monkeypatch):
         client.renew_lease(command)
         services.journal_service.renew_worker(replace(lease, expires_at_ms=now + 2000))
         monkeypatch.setattr(authority, '_now_ms', lambda: now + 2001)
+        monkeypatch.setattr(worker.time, 'time', lambda: (now + 2001) / 1000)
         with pytest.raises(DataflowError, match='FENCED'):
             client.check_lease()
         with pytest.raises(DataflowError, match='FENCED'):

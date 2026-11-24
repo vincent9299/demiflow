@@ -5,10 +5,10 @@ from dataclasses import replace
 from pathlib import Path
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 
 
 class Interrupted(Exception):
@@ -96,15 +96,16 @@ def test_finite_join_output_checkpoint_restores_exact_prefix_and_multiplicity(tm
 def test_finite_join_memory_transport_does_not_accumulate_per_row_history(tmp_path, monkeypatch):
     # Tighten the actual sealed structural bound at its existing compiler seam.
     # RunContext does not expose a max_pending_events business-budget keyword.
-    from demiflow.execution import dataflow_api
-    original = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    original = action_limits.resolve_runtime_policy
     def bounded(*args,**kwargs):
         policy,bounds = original(*args,**kwargs)
         # Exercise a real cross-worker memory channel even when the compiler
         # can co-locate this finite result with its terminal. Keep the existing
         # channel bound and every original multiplicity/frontier assertion.
         return replace(policy,fusion=False),replace(bounds,max_pending_events=64)
-    monkeypatch.setattr(dataflow_api,'resolve_runtime_policy',bounded)
+    monkeypatch.setattr(action_limits,'resolve_runtime_policy',bounded)
     # Explicit small-row windows keep both real workers resident inside the
     # unchanged 256 MiB total. Disabling fusion alone permits a legal finite
     # fallback with the much larger implicit codec windows; that would never
@@ -129,14 +130,15 @@ def test_finite_join_memory_transport_does_not_accumulate_per_row_history(tmp_pa
 
 
 def test_duplicate_memory_delivery_is_rejected_before_second_business_call(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    resolve = action_limits.resolve_runtime_policy
     def unfused(*args, **kwargs):
         policy, bounds = resolve(*args, **kwargs)
         return replace(policy, fusion=False), bounds
     # This counterexample requires an actual inter-worker memory delivery;
     # legal synchronous fusion must not erase the injection point.
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', unfused)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', unfused)
     from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from _worker_event_fixtures import emit, events

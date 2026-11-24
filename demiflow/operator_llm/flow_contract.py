@@ -2,6 +2,11 @@
 
 No file, environment, network, service or candidate callback is read here.
 """
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.services.http import freeze_managed_http, managed_http_digest
+
+import math
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
 from enum import Enum
@@ -252,9 +257,9 @@ def analyze_prompt(arguments, *, inputs, callables, resources):
 def prompt_facts(actor):
     op, runtime = actor._operation, actor._runtime
     prompt = resolve_prompt(op.config, op.prompt_name)
-    from ..execution.dataflow_prompt_service import prompt_service_declaration
+
     prompt_service_declaration(actor)
-    from ..execution.adaptive_requests import AdaptiveRequestGate
+    from demiflow.services.adaptive_requests import AdaptiveRequestGate
     from ..inference import request_admission_config
     declaration = getattr(actor, '_request_policy', None)
     policy = request_admission_config(dict(declaration), concurrency=runtime.concurrency) if declaration is not None else None
@@ -290,3 +295,74 @@ def agent_facts(actor, environment):
     result = prompt_facts(projection)
     return {**result, 'contract': 'demiflow.agent.node.v3',
             'environment': _value(environment.identity())}
+
+
+def private_prompt_declaration(options):
+    value = (options or {}).get('sqlite_journal')
+    if value is None:
+        return None
+    if (type(value) is not dict or set(value) - {'path', 'max_requests', 'read_only', 'timeout_s'}
+            or type(value.get('path')) is not str or not value['path']):
+        raise ValueError('Private Prompt cache requires an explicit bounded SQLite declaration')
+    limit = value.get('max_requests')
+    if limit is not None and (type(limit) is not int or not 0 <= limit <= 2**40):
+        raise ValueError('Invalid private Prompt request ceiling')
+    if type(value.get('read_only', False)) is not bool:
+        raise ValueError('Private Prompt read_only must be boolean')
+    timeout = value.get('timeout_s', 30)
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
+        raise ValueError('Private Prompt lock deadline must be finite')
+    if any(key in options for key in ('journal_dir', 'offline_dir', 'offline_store', 'codex_exec', 'codex_agent')):
+        raise ValueError('Private Prompt cache requires a single explicit HTTP journal')
+    return dict(value)
+
+
+def prompt_service_declaration(actor):
+    service = actor._runtime._service
+    expected = getattr(actor, '_sealed_service_declaration', None)
+    if service is None:
+        if expected is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Managed Prompt service was removed after declaration')
+        return None
+    value = freeze_managed_http(service)
+    if expected is None or managed_http_digest(service) != expected:
+        raise DataflowError('INVALID_CONTRACT', 'Managed Prompt service differs from its sealed declaration')
+    return value
+
+
+def prompt_constructor_settings(actor, operation):
+    if actor.environment is not None:
+        agent_facts(actor, getattr(operation, 'environment', actor.environment))
+    else:
+        prompt_facts(actor)
+    settings = {name: getattr(actor, name) for name in ('when', 'call_output', 'error_output', 'environment')}
+    settings.update(concurrency=actor._runtime.concurrency,
+                    token_budget=actor._runtime.token_budget,
+                    request_policy=dict(actor._request_policy) if hasattr(actor, '_request_policy') else None)
+
+    service = prompt_service_declaration(actor)
+    if service is not None:
+        settings['service'] = service
+    return settings
+
+
+_MODEL_MAP_OPTION_KEYS = (
+    "model_revision", "verify_model", "require_finish_reason_stop",
+    "stream", "stream_include_usage", "gateway", "request_options",
+    "nonfatal_http_errors", "http_error_retry", "image_encoding",
+    "limits", "input_limits", "systemone_batch",
+    "max_request_bytes", "max_response_bytes", "max_event_bytes", "max_stream_events",
+)
+
+def model_map_options(options):
+    if options is None:
+        return None
+    projected = {}
+    for name in _MODEL_MAP_OPTION_KEYS:
+        if name not in options:
+            continue
+        value = options[name]
+        if name == "request_options":
+            value = {k: v for k, v in dict(value).items() if k not in {"api_key", "extra_headers"}}
+        projected[name] = value
+    return projected

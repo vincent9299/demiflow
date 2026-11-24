@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
 from demiflow.embeddings.payload import EmbeddingProtocolError
 from demiflow.operator_llm.journal import UncertainPromptCall
 
@@ -58,3 +58,13 @@ def test_uncertain_and_protocol_types_preserve_semantics_without_dynamic_import(
     unknown = restore_failure({'error_type': 'arbitrary_business.module.Class', 'message': 'unknown',
                                'code': 'UNKNOWN_EFFECT'})
     assert type(unknown) is DataflowError and unknown.code == 'UNKNOWN_EFFECT'
+
+
+def test_native_capacity_wire_name_survives_owner_move():
+    from demiflow.execution.contracts.errors import _CapacityPending
+    error = _CapacityPending('capacity unavailable')
+    payload = failure_payload(error)
+    assert payload['error_type'] == 'demiflow.operator_llm.stream_recovery._CapacityPending'
+    restored = restore_failure(payload)
+    assert type(restored) is _CapacityPending
+    assert str(restored) == str(error)

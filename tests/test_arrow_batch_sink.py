@@ -2,7 +2,7 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow import data
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 @pytest.mark.parametrize('mode', ['thread', 'process'])
@@ -46,7 +46,7 @@ def test_arrow_callback_failure_does_not_publish_or_retry(tmp_path):
             raise ValueError('deliberate callback failure')
         return batch
     from demiflow.execution import RecoveryContractError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     # Catching the callback locally must not turn its incomplete action into a
     # successful enclosing native run. Preserve both failure boundaries.
     with pytest.raises(RecoveryContractError, match='unconfirmed actions'):
@@ -77,7 +77,7 @@ def test_v3_public_arrow_batches_cross_fragments_without_row_conversions(tmp_pat
     from _arrow_payload_fixtures import install_arrow_probe
     from _worker_event_fixtures import events
     from demiflow.execution.kernels import dataflow as kernels
-    from demiflow.execution import arrow_payload as streams
+    from demiflow.execution.storage import streams
 
     source, target = str(tmp_path / 'source'), str(tmp_path / 'target')
     observed = install_arrow_probe(tmp_path, monkeypatch, forbid_rows=declared)
@@ -136,7 +136,7 @@ def test_v3_public_arrow_batches_cross_fragments_without_row_conversions(tmp_pat
 
 def test_mapped_arrow_refuses_oversized_output_without_lance_publication(tmp_path):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
 
     source, target = str(tmp_path / 'source'), str(tmp_path / 'target')
     table = pa.table({'id': [1, 2, 3]})
@@ -154,8 +154,8 @@ def test_mapped_arrow_refuses_oversized_output_without_lance_publication(tmp_pat
 
 
 def test_arrow_output_accounting_matches_typed_record_bytes():
-    from demiflow.execution.arrow_payload import mapped_row_bytes
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload as encode_payload
+    from demiflow.execution.contracts.record_codec import mapped_row_bytes
+    from demiflow.execution.contracts.record_codec import _encode_payload as encode_payload
 
     rows = [{'i': -728, 'binary': b'\x91' * 32, 'nested': [{'word': '汉"\t\x00', 'xs': [1.0, -0.0]}]},
             {'i': None, 'binary': b'', 'nested': []}, {'i': 91, 'binary': None, 'nested': None}]

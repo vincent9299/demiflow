@@ -6,7 +6,7 @@ import sqlite3
 import time
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.runs import domain as run_domain
 from test_forge_runtime_review_fixes import control_fixture
 
@@ -98,7 +98,7 @@ def test_native_crash_orphans_keep_slot_until_owned_cleanup(tmp_path, monkeypatc
 import os,sys
 from pathlib import Path
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 with RunContext.attach(RunJournal(Path(sys.argv[1]),attempt=1)) as native:
     namespace=native.object_namespace(sys.argv[2])
     orphan=namespace/'aa/orphan.bin'
@@ -124,7 +124,7 @@ with RunContext.attach(RunJournal(Path(sys.argv[1]),attempt=1)) as native:
     owner = json.loads((domain / "slot-0.json").read_text())
     assert not run_domain._owner_finished(owner)
     before = run_domain.history_admission(tmp_path / "project", reserve=0)
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.workbench.runs.manager import execution_stopped
     journal = RunJournal(target, attempt=1)
 
@@ -236,7 +236,7 @@ def test_object_owner_record_cannot_redirect_accounting(tmp_path, damage):
 def test_unprepared_native_write_still_refuses_ambiguous_replay(tmp_path):
     import pytest
     from demiflow.execution import RecoveryContractError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
 
     with pytest.raises(RuntimeError, match="owned interruption"):
         with RunContext.start(tmp_path / "native") as native:

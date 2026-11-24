@@ -9,9 +9,9 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload,_encode_record_document,_decode_record_document
+from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document, _decode_record_document
 from demiflow.execution.kernels import ordering
-from demiflow.execution.kernels.dataflow import _materialize_row
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
 from test_runtime_v3_real_seams import prepared,reader_services
 from test_runtime_v3_artifact_files import descriptors
 
@@ -49,10 +49,10 @@ def test_final_merge_immediately_publishes_each_typed_record_with_live_readers(t
                 ref=store.put(iter([raw]),max_bytes=len(raw),media_type='application/vnd.demiflow.record.v3')
                 saved=b''.join(store.read(ref,max_bytes=65536))
                 restored=_decode_record_document(saved,record_id=record.record_id,sequence=record.sequence,max_bytes=65536)
-                row=_materialize_row(restored,narrow)
+                row=_materialize_row(restored, store=narrow.store, bounds=narrow.bounds, assignment=getattr(narrow, 'assignment', None))
                 assert type(row['typed']) is tuple and row['typed'][1]==b'\xff'
                 assert math.copysign(1,row['typed'][0])==-1
-                assert row==_materialize_row(expected,narrow)
+                assert row==_materialize_row(expected, store=narrow.store, bounds=narrow.bounds, assignment=getattr(narrow, 'assignment', None))
                 seen.append(row['x'])
             assert seen==list(range(1,count+1))
         finally:
@@ -99,7 +99,7 @@ def test_final_sort_uses_effective_window_of_other_live_view(tmp_path):
                 assert ref.size_bytes==len(raw)
                 expected=records[-1-len(seen)]
                 assert record.record_id==expected.record_id and record.source_position==expected.source_position
-                assert _materialize_row(record,runtime)==_materialize_row(expected,runtime)
+                assert _materialize_row(record, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))==_materialize_row(expected, store=runtime.store, bounds=runtime.bounds, assignment=getattr(runtime, 'assignment', None))
                 seen.append(record)
             assert len(seen)==5
         finally:iterator.close();other.close()
@@ -146,7 +146,7 @@ def test_sort_accounts_for_initial_runs_and_body_during_intermediate_write(tmp_p
 
 @pytest.mark.parametrize('end', ['cancel', 'corrupt', 'close'])
 def test_wide_sort_releases_its_extent_and_readers_on_every_exit(tmp_path, monkeypatch, end):
-    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.storage.scratch import KernelScratch
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import make
     from test_runtime_v3_finite_borrow import fixture, record
@@ -196,7 +196,7 @@ def test_wide_sort_releases_its_extent_and_readers_on_every_exit(tmp_path, monke
 
 
 def test_sort_reuses_published_payload_reference_and_falls_back_with_narrow_file_window(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_scratch import KernelScratch
+    from demiflow.execution.storage.scratch import KernelScratch
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import make
     from test_runtime_v3_finite_borrow import fixture, record

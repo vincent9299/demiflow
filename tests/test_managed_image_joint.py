@@ -281,7 +281,7 @@ def test_actual_forge_multibatch_cancel_resume_prefix(image_workspace_base,tmp_p
     commits = runs.journal(root,value['run_id']).execution_commits(ready['fact']['action_id'])
     outputs = [f for f in commits if f['intent']['sinks']==['materialize']]
     from types import SimpleNamespace
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     states = StateArtifacts(SimpleNamespace(directory=runs.directory(root, value['run_id']), limits=original_limits))
     cuts = [states.read(f['prepared']['state']['dataflow-cut-v3']) for f in outputs]
     assert [sum(source['next_sequence'] for source in cut['dataflow.sources.v3']) for cut in cuts] == [128,130]
@@ -384,8 +384,8 @@ def test_actual_forge_node_request_cap_preserves_declared_error_rows(image_works
 
 def test_native_run_request_ceiling_fails_before_second_http_and_cannot_reset(tmp_path,joint_http):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.parser import parse_prompt_pack
     pack=definition(joint_http['base'],template='{{ instruction }}')
     pack['prompts']['generate']['model']['timeout_s']=5
@@ -411,8 +411,8 @@ def test_native_run_request_ceiling_fails_before_second_http_and_cannot_reset(tm
 
 def test_native_image_delivery_remains_explicitly_nonresumable(tmp_path,joint_http):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.parser import parse_prompt_pack
     pack = definition(joint_http['base'],template='{{ instruction }}')
     pack['prompts']['generate']['model']['timeout_s']=2
@@ -429,7 +429,7 @@ def test_native_image_delivery_remains_explicitly_nonresumable(tmp_path,joint_ht
     assert len(joint_http['requests'])==1
     # Historical selector: unified Dataset take now seals a final ACK.
     # Reuse that exact committed result; no replay of the paid operation.
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(reference.directory)
     before = journal.execution_commits('action-1')
     assert before and all(fact['status'] == 'acked' for fact in before)

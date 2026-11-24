@@ -8,8 +8,8 @@ import tarfile
 
 import pytest
 
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -48,7 +48,10 @@ from demiflow.execution import commit
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.state_artifacts import StateArtifacts
+if (Path(demiflow.__file__).parent / 'execution/storage/state_artifacts.py').is_file():
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+else:
+    from demiflow.execution.state_artifacts import StateArtifacts
 
 checkout, root, fault, operation, family = sys.argv[1:]
 assert Path(demiflow.__file__).resolve().parent.parent == Path(checkout)
@@ -75,7 +78,10 @@ with scope as run:
         from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp
         from demiflow.data.sources import ItemsSource
         from demiflow.execution.action_driver.dataflow import DataflowExecution
-        from demiflow.execution.dataflow_terminals import materialized_handle
+        if (Path(demiflow.__file__).parent / 'execution/outputs/terminals.py').is_file():
+            from demiflow.execution.outputs.terminals import materialized_handle
+        else:
+            from demiflow.execution.dataflow_terminals import materialized_handle
         from demiflow.execution.executors.local import LocalDatasetExecutor
         from historical_business import score
         source = ItemsSource(tuple({'id': i, 'group': ('even', 'odd')[i % 2]} for i in range(24)))
@@ -115,7 +121,7 @@ with scope as run:
 
 
 @pytest.mark.parametrize(('cut', 'family'), [('nonfinal', 'dataset'), ('final', 'dataset'), ('nonfinal', 'routed')])
-def test_published_v3_engine_cold_resume_reads_original_cut(old_sdk, tmp_path, cut, family):
+def test_published_v3_engine_cut_reads_and_original_version_resumes(old_sdk, tmp_path, cut, family):
     if family == 'routed':
         (tmp_path / 'historical_business.py').write_text(
             'def score(row, *, offset):\n    return {**row, "score": row["id"] + offset}\n')
@@ -135,7 +141,9 @@ def test_published_v3_engine_cold_resume_reads_original_cut(old_sdk, tmp_path, c
     assert journal.execution_commit(interrupted['commit'])['status'] == 'checkpoint_committed'
     loaded = load_sealed_plan(directory, action, version='v3')
     assert loaded['graph'].dag_id == before['dag_id'] and loaded['physical'].plan_id == before['plan_id']
-    resumed = invoke(REPO, 'resume')
+    # The current reader still reads original facts. Cross-version program
+    # identity substitution is retired; the original runtime owns its resume.
+    resumed = invoke(old_sdk, 'resume')
     assert resumed.returncode == 0, resumed.stderr
     rows = json.loads((tmp_path / 'result.json').read_bytes())
     if family == 'routed':

@@ -45,7 +45,7 @@ def test_start_rechecks_scope_and_cancel_remains_available(root):
     before = control.execution_status()
     with pytest.raises(ForgeError, match='没有统一恢复契约'):
         runs.resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError, match='Unsupported or missing runtime identity format'):
         runs._resume(root, run['run_id'], expected=run['digest'], expected_attempt=1)
     assert control.execution_status() == before
@@ -53,7 +53,7 @@ def test_start_rechecks_scope_and_cancel_remains_available(root):
     # Supply a legitimate protocol for the scope-specific control fixture. This
     # claim/release constructs no native execution, artifact or successful run.
     import time
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     configuration = dict(format=1, stream_protocol='aligned-barrier-v2', run_id='4'*32,
                          entry_identity=None, started_at=time.time(), limits_explicit=[],
                          platform_revision='original-platform', limits=execution_limits(None))

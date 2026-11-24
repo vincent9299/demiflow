@@ -274,8 +274,8 @@ class AsyncOperatorLLMClient:
         if verification is not True and verification is not False and verification != 'listed':
             raise ValueError('verify_model must be true, false, or listed')
         self.request_options=request_options(self.options)
-        from demiflow.execution.dataflow_prompt_journal import RemotePrivatePromptJournal
-        private_remote = isinstance(native_journal, RemotePrivatePromptJournal)
+        from demiflow.execution.contracts.dataflow import PrivatePromptJournalPort, inherits_bound_port
+        private_remote = inherits_bound_port(native_journal, PrivatePromptJournalPort)
         if private_remote:
             if (self.options.get('sqlite_journal') != native_journal.declaration
                     or self.options.get('journal_dir')):
@@ -293,8 +293,8 @@ class AsyncOperatorLLMClient:
             # Capability-verified remote native journal is assembled before the
             # http_error_retry guard. A private write journal must not silently
             # dual-write with native recovery; it stays as read-only history.
-            from demiflow.execution.dataflow_model_journal import RemotePromptJournal
-            if not isinstance(native_journal, RemotePromptJournal):
+            from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
+            if not inherits_bound_port(native_journal, PromptJournalPort):
                 raise ValueError('native_journal must be a capability-verified RemotePromptJournal')
             if self.journal is not None:
                 raise ValueError('Native remote journal cannot coexist with a private prompt journal; '
@@ -307,8 +307,8 @@ class AsyncOperatorLLMClient:
             journal = self.journal
             verified = isinstance(journal, SQLitePromptJournal)
             if not verified and journal is not None:
-                from demiflow.execution.dataflow_model_journal import RemotePromptJournal
-                verified = isinstance(journal, RemotePromptJournal)
+                from demiflow.execution.contracts.dataflow import PromptJournalPort, inherits_bound_port
+                verified = inherits_bound_port(journal, PromptJournalPort)
             if (not verified or journal.read_only
                     or type(journal.limit) is not int or journal.limit < 0):
                 raise ValueError('HTTP error retry requires a writable SQLite journal with finite nonnegative max_requests')
@@ -335,7 +335,7 @@ class AsyncOperatorLLMClient:
         if model.provider:self._headers['Accept-Encoding']='identity'
         self._client = None
         self._capacity = 100  # direct-client compatibility; Dataset supplies node concurrency
-        from demiflow.execution.blocking_io import BlockingIOPool
+        from demiflow.services.blocking_io import BlockingIOPool
         self._journal_pool = BlockingIOPool(self.options['io_workers'], name='demiflow-prompt-journal')
         self._prepare_pool = BlockingIOPool(self.options['prepare_workers'], name='demiflow-prompt-prepare')
         self._response_pool = BlockingIOPool(self.options['response_workers'], name='demiflow-prompt-response')
@@ -533,11 +533,11 @@ class AsyncOperatorLLMClient:
         # must not discard a paid response already in flight. Keep the original
         # request deadline and persist its outcome; do not publish a row after
         # cancellation. Explicit caller cancellation still aborts promptly.
-        from demiflow.execution.request_limits import drain_on_service_stop
+        from demiflow.services.request_limits import drain_on_service_stop
         return await drain_on_service_stop(self._execute(request), enabled=bool(self.journal))
 
     async def execute_retry(self, retry):
-        from demiflow.execution.request_limits import drain_on_service_stop
+        from demiflow.services.request_limits import drain_on_service_stop
         return await drain_on_service_stop(self._execute(retry.request, retry=retry), enabled=True)
 
     async def _execute(self,request, *, retry=None):
@@ -847,13 +847,13 @@ def create_async_operator_llm_client(model: PromptModel, options=None, max_reque
         return CodexExecPromptClient(model, options, max_requests, native_journal=native_journal)
     if options and 'offline_store' in options:
         if native_journal is not None:
-            from ..execution.dataflow_offline import RemoteOfflinePromptClient
+            from demiflow.operator_llm.offline import RemoteOfflinePromptClient
             return RemoteOfflinePromptClient(model, options, native_journal)
         from .sqlite_offline import SQLiteOfflinePromptClient
         return SQLiteOfflinePromptClient(model, options)
     if options and 'offline_dir' in options:
         if native_journal is not None:
-            from ..execution.dataflow_offline import RemoteOfflinePromptClient
+            from demiflow.operator_llm.offline import RemoteOfflinePromptClient
             return RemoteOfflinePromptClient(model, options, native_journal)
         from .offline import OfflinePromptClient
         return OfflinePromptClient(model, options)

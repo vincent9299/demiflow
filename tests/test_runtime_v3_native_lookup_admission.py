@@ -6,7 +6,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def table(tmp_path):
@@ -81,11 +81,11 @@ def test_public_pinned_lance_operation_runs_and_replays_original_commit(tmp_path
 def test_native_query_factory_is_passive_binds_policy_and_rejects_live_handles(tmp_path, monkeypatch, kind):
     from dataclasses import replace
     import cloudpickle
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.execution.seal.plan import _base_code_identity_from_value
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.planning.dataflow_compile import _callable_code_identity
-    from demiflow.execution.stream_lookup import LanceLookup
+    from demiflow.operators.lookup import LanceLookup
     from demiflow.lance.search import VectorSearch
     if kind == 'lookup':
         ds = data.from_items([{'id': 'a'}]).lookup_lance({'uri': str(tmp_path / 'absent'), 'version': 1},
@@ -127,7 +127,7 @@ def test_native_query_factory_is_passive_binds_policy_and_rejects_live_handles(t
 def test_unregistered_actor_cache_is_still_rejected_by_data_only_identity():
     from collections import OrderedDict
     from demiflow.data.plan import CallableSpec
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.planning.dataflow_compile import _callable_code_identity
     class UserActor:
         def __init__(self):

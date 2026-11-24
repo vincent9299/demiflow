@@ -8,6 +8,7 @@ objects are given this tree-resident test file as their __file__ so the IL012
 in-process tree-binding assertion still holds for every loaded demiflow module.
 """
 from __future__ import annotations
+from demiflow.execution.outputs import terminal_scalar as terminal_output
 
 import hashlib
 import math
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from demiflow.operators import ordering as algorithm_ordering
 
 TREE = Path(__file__).resolve().parents[1]
 _THIS_FILE = str(Path(__file__).resolve())
@@ -373,7 +375,7 @@ def rid(label):
 
 
 def rec(row, record_id=None, sequence=0, position=None):
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     data = _encode_payload(dict(row), max_bytes=1 << 24)
     return Record(
         record_id=record_id or rid(repr((row, sequence))),
@@ -620,44 +622,49 @@ def test_k010():
 # K011 shuffle_key
 # ---------------------------------------------------------------------------
 def test_k011():
-    a = ko.shuffle_key("rec-1", seed=7, occurrence_id="occ")
-    b = ko.shuffle_key("rec-1", seed=7, occurrence_id="occ")
+    a = algorithm_ordering.shuffle_key("rec-1", seed=7, occurrence_id="occ")
+    b = algorithm_ordering.shuffle_key("rec-1", seed=7, occurrence_id="occ")
     assert a == b and isinstance(a, bytes) and len(a) == 32
-    assert ko.shuffle_key("rec-1", seed=8, occurrence_id="occ") != a
-    assert ko.shuffle_key("rec-1", seed=7, occurrence_id="other") != a
-    assert ko.shuffle_key("rec-2", seed=7, occurrence_id="occ") != a
+    assert algorithm_ordering.shuffle_key("rec-1", seed=8, occurrence_id="occ") != a
+    assert algorithm_ordering.shuffle_key("rec-1", seed=7, occurrence_id="other") != a
+    assert algorithm_ordering.shuffle_key("rec-2", seed=7, occurrence_id="occ") != a
     with pytest.raises(DataflowError):
-        ko.shuffle_key("", seed=7, occurrence_id="occ")
+        algorithm_ordering.shuffle_key("", seed=7, occurrence_id="occ")
 
 
 # ---------------------------------------------------------------------------
 # K012 repartition_records
 # ---------------------------------------------------------------------------
 def test_k012():
+    from demiflow.execution.exchange.dataflow_channels import repartition_records
+    from demiflow.execution.storage.streams import materialize_row as _materialize_row
+    from demiflow.execution.contracts.record_codec import input_row_bytes as _input_row_bytes
     svc = services()
+    binding = dict(bounds=svc.bounds, check_stop=svc.check_stop,
+        input_size=_input_row_bytes, read_row=lambda record: _materialize_row(record, store=svc.store, bounds=svc.bounds, assignment=getattr(svc, 'assignment', None)))
     records = [rec({"k": "a", "i": i}, record_id=rid(f"r{i}"), sequence=i) for i in range(6)]
 
     def exchange(routing, **kw):
         return ExchangeSpec("c", "e", ("p0",), ("c0", "c1", "c2"), routing=routing, **kw)
 
-    hashed = list(ko.repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), services=svc))
-    again = list(ko.repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), services=svc))
+    hashed = list(repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), **binding))
+    again = list(repartition_records(iter(records), exchange=exchange("hash", keys=("k",)), **binding))
     assert [r.reader_id for r in hashed] == [r.reader_id for r in again]  # stable hash
 
-    reb = ko.repartition_records(iter(records), exchange=exchange("rebalance"), services=svc)
+    reb = repartition_records(iter(records), exchange=exchange("rebalance"), **binding)
     first = list(reb)
     assert [r.reader_id for r in first] == ["c0", "c1", "c2", "c0", "c1", "c2"]
     assert reb.ordinal == 6
     reb.restore_ordinal(1)
-    nxt = next(ko.repartition_records(iter([rec({"k": "a"}, record_id=rid("x"))]), exchange=exchange("rebalance"), services=svc))
+    nxt = next(repartition_records(iter([rec({"k": "a"}, record_id=rid("x"))]), exchange=exchange("rebalance"), **binding))
     assert nxt.reader_id in ("c0", "c1", "c2")
 
-    bc = list(ko.repartition_records(iter(records[:1]), exchange=exchange("broadcast"), services=svc))
+    bc = list(repartition_records(iter(records[:1]), exchange=exchange("broadcast"), **binding))
     assert len(bc) == 3
     assert len({r.delivery_id for r in bc}) == 3  # per-reader delivery identity
 
-    tgt = list(ko.repartition_records(iter([rec({"t": "c1"}, record_id=rid("t0"))]),
-                                    exchange=exchange("target", keys=("t",)), services=svc))
+    tgt = list(repartition_records(iter([rec({"t": "c1"}, record_id=rid("t0"))]),
+                                    exchange=exchange("target", keys=("t",)), **binding))
     assert tgt[0].reader_id == "c1"
 
 
@@ -703,11 +710,11 @@ def test_k014():
     p2 = ka.accumulate_partial(iter(data[3:]), spec=s, services=svc)
     merged = ka.merge_partials(iter([p2, p1]), spec=s, services=svc)  # deterministic reorder
     assert merged.count == 6
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(merged, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(merged, spec=s)
     direct = ka.accumulate_partial(iter(data), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        direct_result = ka.finalize_aggregate(direct, spec=s)
+    with terminal_output.bind_finalize(svc):
+        direct_result = terminal_output.finalize_aggregate(direct, spec=s)
     assert result.scalar["mean(v)"] == pytest.approx(direct_result.scalar["mean(v)"])
     assert result.scalar["std(v)"] == pytest.approx(direct_result.scalar["std(v)"], rel=1e-9)
 
@@ -729,21 +736,21 @@ def test_k015():
 
     s = spec("aggregate", {"aggregates": [{"builtin": "sum", "on": "v"}, {"builtin": "mean", "on": "v"}]})
     empty = ka.accumulate_partial(iter([]), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(empty, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(empty, spec=s)
     assert result.scalar is None and result.rows == 0  # empty -> None, not fabricated zero
 
     allnull = ka.accumulate_partial(iter([rec({"v": None}), rec({"v": None})]), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(allnull, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(allnull, spec=s)
     assert result.scalar["sum(v)"] is None  # all-null not faked to zero
     assert result.scalar["mean(v)"] is None
 
     s = spec("aggregate", {"aggregates": [{"builtin": "sum", "on": "v"}, {"builtin": "min", "on": "v"},
                                           {"builtin": "max", "on": "v"}, {"builtin": "std", "on": "v"}]})
     state = ka.accumulate_partial(iter([rec({"v": v}) for v in [2, 4, 6]]), spec=s, services=svc)
-    with ka.bind_finalize(svc):
-        result = ka.finalize_aggregate(state, spec=s)
+    with terminal_output.bind_finalize(svc):
+        result = terminal_output.finalize_aggregate(state, spec=s)
     assert result.scalar["sum(v)"] == 12
     assert result.scalar["min(v)"] == 2
     assert result.scalar["max(v)"] == 6
@@ -855,7 +862,7 @@ def test_k020():
     list(kernel.push("input", rec({"v": 2})))  # partial batch (max_batch=4 not reached)
     ref = kernel.snapshot()
     assert ref is not None
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     image = state_codec.loads(b"".join(svc.store.read(ref, max_bytes=ref.size_bytes)), max_bytes=ref.size_bytes)
     assert len(image["batch"]) == 2  # crash must not lose the partial batch
     assert image["output_cursor"] == 0

@@ -1,10 +1,8 @@
-"""Generic kernel dispatch and the shared bounded record helpers (lane K).
+"""Worker kernel invocation, scoped effects and bounded record assembly.
 
-K001 ``make_kernel`` is the single factory; K002/K003 are the pure row/batch
-compute entry points; K004 forwards input EOI to the owning kernel. The private
-helpers below are the file-owner assembly shared by the other four kernel
-modules; they implement the versioned business record codec, the fidelity
-preserving key encoding and the pre-allocation budget checks required by C06.
+The worker owns invocation positions, cancellation, state/observation callbacks
+and output record admission. Pure key and batch computation lives in operators;
+the versioned record encoding and conversion budgets live in contracts.
 
 Resource accounting: ``encoded_bytes`` is the byte length of the versioned
 data-only row codec (``application/vnd.demiflow.record.v3``). It bounds wire/spool size,
@@ -13,9 +11,14 @@ separately where they coexist (see ``invoke_batch``).
 """
 from __future__ import annotations
 
-import hashlib
+from demiflow.execution.contracts.record_codec import dumps_row as _dumps_row, loads_row as _loads_row, row_bytes as _row_bytes, input_row_bytes as _input_row_bytes
+from demiflow.execution.storage.streams import materialize_row as _materialize_row
+from demiflow.operators.arrow_batches import batch_to_rows as _batch_to_rows, batch_values as _batch_values, rows_to_batch as _rows_to_batch, single_row_batch as _single_row_batch
+from demiflow.operators.ordering import shuffle_key_bytes as _shuffle_key_bytes
+from demiflow.execution.contracts.record_codec import record_identity as _hash_id
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
+
 import json
-import pickle
 from collections.abc import Iterator, Mapping
 from typing import Any
 
@@ -33,20 +36,10 @@ from demiflow.execution.contracts.dataflow_kinds import kinds_with
 
 ROW_MEDIA_TYPE = "application/vnd.demiflow.record.v3"
 RECORD_MEDIA_TYPE = "application/x-demiflow-record-v1"
-SHUFFLE_DOMAIN = "demiflow-shuffle-v3"
+
 RECORD_DOMAIN = "dataflow-record-v3"
 
 _MISSING = object()
-
-
-def _canonical(value: Any) -> str:
-    return json.dumps(
-        thaw_record_value(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
-    )
-
-
-def _hash_id(parts: Any) -> str:
-    return hashlib.sha256(_canonical(parts).encode("utf-8")).hexdigest()
 
 
 def _err(code: str, message: str, **context: Any) -> DataflowError:
@@ -83,119 +76,28 @@ def _seed(spec: KernelSpec, services: RuntimeServices) -> int:
     return value
 
 
-def _shuffle_key_bytes(record_id: str, *, seed: int, occurrence_id: str) -> bytes:
-    # Single versioned formula; ordering.shuffle_key is the public wrapper.
-    return hashlib.sha256(
-        _canonical([SHUFFLE_DOMAIN, seed, occurrence_id, record_id]).encode("utf-8")
-    ).digest()
 
 
-def _key_token(value: Any) -> Any:
-    """Type-tagged encoding keeping -0.0/bytes/tuple/IEEE distinct (C01/C06)."""
-    if value is None:
-        return ["n"]
-    if isinstance(value, bool):
-        return ["b", value]
-    if isinstance(value, int):
-        return ["i", value]
-    if isinstance(value, float):
-        return ["f", repr(value)]
-    if isinstance(value, str):
-        return ["s", value]
-    if isinstance(value, bytes):
-        return ["y", value.hex()]
-    if isinstance(value, tuple):
-        return ["t", [_key_token(item) for item in value]]
-    if isinstance(value, list):
-        return ["l", [_key_token(item) for item in value]]
-    if isinstance(value, Mapping):
-        items = sorted(value.items(), key=lambda kv: _canonical(_key_token(kv[0])))
-        return ["d", [[_key_token(k), _key_token(v)] for k, v in items]]
-    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
 
 
-def _group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
-    return _canonical([_key_token(row[field]) for field in fields])
 
 
-def group_key_values(raw):
-    """Recover the typed sort columns from a canonical finite join key."""
-    def value(token):
-        kind = token[0]
-        if kind == 'n':
-            return None
-        payload = token[1]
-        if kind in ('s', 'i', 'b'):
-            return payload
-        if kind == 'f':
-            return float(payload)
-        if kind == 'y':
-            return bytes.fromhex(payload)
-        if kind == 'l':
-            return [value(item) for item in payload]
-        if kind == 't':
-            return tuple(value(item) for item in payload)
-        if kind == 'd':
-            return {value(k): value(v) for k, v in payload}
-        raise DataflowError('CORRUPT_ARTIFACT', 'unknown tag in a finite join key')
-    return tuple(value(token) for token in json.loads(raw))
 
 
-def _dumps_row(row: object, *, max_bytes: int) -> bytes:
-    from ..exchange.dataflow_bridge import _encode_payload
-    return _encode_payload(row, max_bytes=max_bytes)
 
 
-def _loads_row(data: bytes) -> object:
-    from ..exchange.dataflow_bridge import _decode_payload
-    return _decode_payload(data, max_bytes=max(1, len(data)))
 
 
-def _row_bytes(row: object, *, max_bytes: int) -> int:
-    return len(_dumps_row(row, max_bytes=max_bytes))
 
-
-def _input_row_bytes(record: Record) -> int:
-    if record.inline is not None:
-        return record.encoded_bytes
-    if record.payload_ref is not None:
-        from ..arrow_payload import is_arrow_record
-        if is_arrow_record(record):
-            return record.encoded_bytes
-        return record.payload_ref.size_bytes
-    raise _err("INVALID_CONTRACT", "record carries neither inline nor payload_ref")
-
-
-def _materialize_row(record: Record, services: RuntimeServices, *, measured=False, retained=0) -> object:
-    if (record.inline is None) == (record.payload_ref is None):
-        raise _err("INVALID_CONTRACT", "record must carry exactly one of inline/payload_ref")
-    if record.inline is not None:
-        return thaw_record_value(record.inline)
-    from ..arrow_payload import is_arrow_record, materialize_arrow_row
-    if is_arrow_record(record):
-        return materialize_arrow_row(record, services)
-    ref = record.payload_ref
-    limit = services.bounds.max_row_bytes
-    if ref.size_bytes > limit:
-        raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=ref.size_bytes)
-    if measured:
-        from ..dataflow_record_frames import admit_receive, admit_workspace, raw_workspace
-        admit_receive(ref.size_bytes, services.bounds, services=services, retained=retained)
-    data = b"".join(services.store.read(ref, max_bytes=limit))
-    if measured:
-        admit_workspace(raw_workspace(data), services.bounds, services=services, retained=retained)
-    if len(data) > limit:
-        raise _err("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", size=len(data))
-    return _loads_row(data)
 
 
 def _measured_input(record, services, retained):
-    from ..dataflow_record_frames import admit_row_copies
+    from demiflow.execution.contracts.record_codec import admit_row_copies
     if record.inline is not None:
-        size = admit_row_copies(record.inline, services.bounds, services=services, retained=retained)
-        return _materialize_row(record, services), retained + 2 * size
-    value = _materialize_row(record, services, measured=True, retained=retained)
-    size = admit_row_copies(value, services.bounds, services=services, retained=retained)
+        size = admit_row_copies(record.inline, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
+        return _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)), retained + 2 * size
+    value = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None), measured=True, retained=retained)
+    size = admit_row_copies(value, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
     return value, retained + size
 
 
@@ -208,10 +110,10 @@ def _output_record(
     *, schema_ref=None, retained=None,
 ) -> Record:
     if retained is not None:
-        from ..dataflow_record_frames import admit_row_copies
-        admit_row_copies(row, services.bounds, services=services, retained=retained)
-    from ..exchange.dataflow_bridge import _encode_payload
-    from ..contracts.dataflow_codec import _thaw_json
+        from demiflow.execution.contracts.record_codec import admit_row_copies
+        admit_row_copies(row, services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=retained)
+    from demiflow.execution.contracts.record_codec import _encode_payload
+    from demiflow.execution.contracts.dataflow_codec import _thaw_json
     data = _encode_payload(row, max_bytes=services.bounds.max_row_bytes)
     if len(data) > services.bounds.max_row_bytes:
         raise _err("BUDGET_EXCEEDED", "output row exceeds max_row_bytes", size=len(data))
@@ -249,35 +151,10 @@ class _OutputBudget:
             raise _err("BUDGET_EXCEEDED", "output byte budget exceeded", bytes=admitted)
 
 
-def _single_row_batch(
-    row: Mapping[str, Any], batch_format: str, services: RuntimeServices
-) -> tuple[Any, int]:
-    from ..batch_conversion import admit_batch_conversion
-    admit_batch_conversion([row], 'pandas' if batch_format == 'default' else batch_format,
-        schema=None, bounds=services.bounds)
-    if batch_format in ("default", "pandas"):
-        import pandas as pd
-
-        frame = pd.DataFrame([dict(row)])
-        return frame, int(frame.memory_usage(deep=True).sum())
-    if batch_format == "pyarrow":
-        import pyarrow as pa
-
-        table = pa.Table.from_pylist([dict(row)])
-        return table, table.nbytes
-    raise _err("UNSUPPORTED_CAPABILITY", "unknown batch_format", format=batch_format)
-
-
-def _batch_values(result: Any) -> list[Any]:
-    if hasattr(result, "to_pylist"):
-        return list(result.to_pylist())
-    return list(result)
-
-
 def _invoke_scoped(instance, value, records, spec):
-    from ..row_scope import RowScope, current_row_scope, set_row_scope
+    from demiflow.execution.worker.row_scope import RowScope, current_row_scope, set_row_scope
     previous = current_row_scope()
-    from .concurrent_calls import INVOCATION_SCOPE
+    from demiflow.execution.kernels.concurrent_calls import INVOCATION_SCOPE
     explicit = INVOCATION_SCOPE.get()
     scope = getattr(instance, 'native_scope', None)
     if len(records) == 1 and records[0].source_position.get('queue_delivery_kind') == 'producer':
@@ -299,7 +176,7 @@ def _invoke_scoped(instance, value, records, spec):
     delivery = None
     if len(records) == 1 and records[0].source_position.get('queue_delivery_ref'):
         import json
-        from ..contracts.dataflow import ArtifactRef
+        from demiflow.execution.contracts.dataflow import ArtifactRef
         delivery = ArtifactRef(**json.loads(records[0].source_position['queue_delivery_ref']))
     set_row_scope(RowScope(occurrence, delivery))
     try:
@@ -309,13 +186,13 @@ def _invoke_scoped(instance, value, records, spec):
 
 
 def _business_miss(exc, cfg):
-    from ...data.runtime_contract import RuntimeContractError
-    from ..recovery_contract import RecoveryContractError
-    from ..request_limits import ServiceStopped
-    from ...operator_llm.journal import UncertainPromptCall
+    from demiflow.data.runtime_contract import RuntimeContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+    from demiflow.services.request_limits import ServiceStopped
+    from demiflow.operator_llm.journal import UncertainPromptCall
     # Only the callback deadline class certifies that cancellation drained;
     # ordinary control/budget/unknown-effect failures can never become a miss.
-    from . import async_instance
+    from demiflow.execution.kernels import async_instance
     callback_timeout = getattr(async_instance, 'CallbackDeadlineExceeded', None)
     if (callback_timeout is not None and isinstance(exc, callback_timeout)
             and cfg.get('hard_timeout') is not None):
@@ -347,15 +224,16 @@ def invoke_unary(
         yield record
         return
     if kind in ('SelectColumnsOp', 'DropColumnsOp', 'RenameColumnsOp') and record.payload_ref is not None:
-        from ..arrow_payload import ARROW_MEDIA_TYPES, batch_cache
-        from ...operators.relational import project_columns
+        from demiflow.execution.contracts.record_codec import ARROW_MEDIA_TYPES
+        from demiflow.execution.storage.arrow_payload import batch_cache
+        from demiflow.operators.relational import project_columns
         if record.payload_ref.media_type in ARROW_MEDIA_TYPES:
-            cache = batch_cache(services.store, services.bounds, services=services)
+            cache = batch_cache(services.store, services.bounds, assignment=getattr(services, 'assignment', None))
             batch, _ = cache.locate(record)
             projection = project_columns(batch.schema.names, kind, cfg)
             if projection is not None:
                 if schemas is None:
-                    from ..record_schema import RecordSchemas
+                    from demiflow.execution.storage.record_schema import RecordSchemas
                     schemas = RecordSchemas(services)
                 projected = cache.project(record, *projection, schemas)
                 if projected is not None:
@@ -371,11 +249,11 @@ def invoke_unary(
             current = state_bytes() if state_bytes else 0
             return _output_record(*args, **kwargs, retained=input_bytes + current)
     else:
-        row = _materialize_row(record, services)
+        row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
     position = record.source_position
     sequence = record.sequence
     if schemas is None:
-        from ..record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         schemas = RecordSchemas(services)
 
     if kind in ("MapOp", "BoundMapOp") and not cfg.get("streaming_map"):
@@ -388,36 +266,35 @@ def invoke_unary(
                 observe(time.perf_counter_ns() - started)
         if not isinstance(result, Mapping):
             if position.get('queue_delivery_ref'):
-                from ..recovery_contract import RecoveryContractError
+                from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Task map must preserve exactly one row')
-            raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
+        from demiflow.operators.arrow_batches import map_row
+        result = map_row(result)
         yield output_record(record.record_id, position, result, sequence, services)
     elif kind == "FilterOp":
         selected = instance(row)
         if state_bytes is not None:
-            from ..dataflow_record_frames import admit_workspace
-            admit_workspace(state_bytes(), services.bounds, services=services, retained=input_bytes)
+            from demiflow.execution.contracts.record_codec import admit_workspace
+            admit_workspace(state_bytes(), services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=input_bytes)
         if selected:
             yield record
     elif kind == "FlatMapOp":
         occurrence = _occurrence(spec)
         values = instance(row)
-        if isinstance(values, Mapping):
-            raise _err("INVALID_CONTRACT", "flat_map callable must return an iterable of rows")
-        iterator = iter(values)
+        from demiflow.operators.arrow_batches import flat_map_iterator, flat_map_row
+        iterator = flat_map_iterator(values)
         budget = _OutputBudget(spec, services)
         try:
             for index, item in enumerate(iterator):
                 _check_stop(services)
-                if not isinstance(item, Mapping):
-                    raise _err("INVALID_CONTRACT", "flat_map output rows must be mappings")
+                item = flat_map_row(item)
                 child_id = _hash_id([RECORD_DOMAIN, record.record_id, occurrence, index])
                 out = output_record(child_id, position, item, sequence, services)
                 budget.charge(out)
                 yield out
             if state_bytes is not None:
-                from ..dataflow_record_frames import admit_workspace
-                admit_workspace(state_bytes(), services.bounds, services=services, retained=input_bytes)
+                from demiflow.execution.contracts.record_codec import admit_workspace
+                admit_workspace(state_bytes(), services.bounds, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)), retained=input_bytes)
         finally:
             close = getattr(iterator, "close", None)
             if close is not None:
@@ -442,7 +319,7 @@ def invoke_unary(
                 observe(time.perf_counter_ns() - started, miss)
         if (position.get('queue_delivery_ref') and position.get('queue_delivery_kind') != 'producer'
                 and not isinstance(result, Mapping)):
-            from ..recovery_contract import RecoveryContractError
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
             raise RecoveryContractError('Task map must preserve exactly one row')
         if result is None:
             return
@@ -450,147 +327,57 @@ def invoke_unary(
         budget = _OutputBudget(spec, services)
         for index, out_row in enumerate(rows):
             _check_stop(services)
-            if not isinstance(out_row, Mapping):
-                raise _err("INVALID_CONTRACT", "async map must return row, rows or None")
+            from demiflow.operators.arrow_batches import async_map_row
+            out_row = async_map_row(out_row)
             child = record.record_id if index == 0 else _hash_id([RECORD_DOMAIN, record.record_id, _occurrence(spec), index])
             out = output_record(child, position, out_row, sequence, services)
             budget.charge(out)
             yield out
     elif kind == "SelectColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
-        projected = {column: row[column] for column in columns}
+        from demiflow.operators.relational import select_columns
+        projected = select_columns(row, columns)
         yield output_record(record.record_id, position, projected, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=columns))
     elif kind == "DropColumnsOp":
         columns = tuple(_cfg(spec, "columns"))
-        missing = [column for column in columns if column not in row]
-        if missing:
-            raise _err("INVALID_CONTRACT", "drop column missing", fields=missing)
-        kept = {key: value for key, value in row.items() if key not in columns}
+        from demiflow.operators.relational import drop_columns
+        kept = drop_columns(row, columns)
         yield output_record(record.record_id, position, kept, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, columns=tuple(kept)))
     elif kind == "RenameColumnsOp":
         names = _cfg(spec, "names")
-        if isinstance(names, Mapping):
-            targets = [names.get(key, key) for key in row]
-            if len(targets) != len(set(targets)):
-                raise _err("INVALID_CONTRACT", "rename produces duplicate column names")
-            renamed = {names.get(key, key): value for key, value in row.items()}
-        else:
-            targets = tuple(names)
-            if len(row) != len(targets):
-                raise _err("INVALID_CONTRACT", "rename list length must match schema")
-            renamed = dict(zip(targets, row.values()))
+        from demiflow.operators.relational import rename_columns
+        renamed = rename_columns(row, names)
         yield output_record(record.record_id, position, renamed, sequence, services,
                              schema_ref=schemas.project(record.schema_ref, names=tuple(renamed)))
     elif kind == "AddColumnOp":
         column = _cfg(spec, "column")
         batch_format = cfg.get("batch_format", "default")
-        batch, extra = _single_row_batch(row, batch_format, services)
+        batch, extra = _single_row_batch(row, batch_format, services.bounds)
         if _input_row_bytes(record) + extra > services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "add_column batch coexistence exceeds budget")
         values = _batch_values(instance(batch))
-        if len(values) != 1:
-            raise _err("INVALID_CONTRACT", "add_column result length must match batch")
-        yield output_record(
-            record.record_id, position, {**row, column: values[0]}, sequence, services
-        )
+        from demiflow.operators.relational import add_column_row
+        yield output_record(record.record_id, position, add_column_row(row, column, values), sequence, services)
     elif kind == "RandomSampleOp":
-        fraction = float(_cfg(spec, "fraction"))
-        if not 0.0 <= fraction <= 1.0:
-            raise _err("INVALID_CONTRACT", "sample fraction must be in [0, 1]")
+        from demiflow.operators.ordering import sample_fraction, sample_record
+        fraction = sample_fraction(_cfg(spec, "fraction"))
         seed = _seed(spec, services)
-        key = _shuffle_key_bytes(record.record_id, seed=seed, occurrence_id=_occurrence(spec))
-        if int.from_bytes(key[:8], "big") / float(1 << 64) < fraction:
+        if sample_record(record.record_id, fraction, seed=seed, occurrence_id=_occurrence(spec)):
             yield record
     else:
         raise _err("INVALID_CONTRACT", "kind is not a unary kernel", kind=kind)
 
 
-def _rows_to_batch(
-    rows: list[dict[str, Any]], batch_format: str, services: RuntimeServices, *, schema=None
-) -> tuple[Any, int]:
-    from ..batch_conversion import admit_batch_conversion
-    admit_batch_conversion(rows, batch_format, schema=schema, bounds=services.bounds)
-    if batch_format in ("default", "numpy"):
-        import numpy as np
-        columns = rows[0].keys() if rows else ()
-        batch = {name: np.asarray([row[name] for row in rows]) for name in columns}
-        return batch, sum(v.nbytes for v in batch.values())
-    if batch_format == "pandas":
-        import pandas as pd
-
-        if schema is None:
-            frame = pd.DataFrame(rows)
-        else:
-            import pyarrow as pa
-            frame = pa.Table.from_pylist(rows, schema=schema).to_pandas()
-        return frame, int(frame.memory_usage(deep=True).sum())
-    if batch_format == "pyarrow":
-        import pyarrow as pa
-
-        table = pa.Table.from_pylist(rows, schema=schema)
-        return table, table.nbytes
-    raise _err("UNSUPPORTED_CAPABILITY", "unknown batch_format", format=batch_format)
-
-
-def _batch_to_rows(result: Any, batch_format: str, *, on_schema=None) -> Iterator[dict[str, Any]]:
-    if isinstance(result, (list, tuple)):
-        if on_schema is not None:
-            on_schema(None)
-        # Public map_batches accepts row lists for every input batch format.
-        # Iterator outputs remain a lazy stream of batches below.
-        for row in result:
-            if not isinstance(row, Mapping):
-                raise _err('INVALID_CONTRACT', 'batch row lists must contain mappings')
-            yield dict(row)
-    elif isinstance(result, Mapping):
-        if on_schema is not None:
-            on_schema(None)
-        lengths = {len(column) for column in result.values()}
-        if len(lengths) > 1:
-            raise _err("INVALID_CONTRACT", "batch columns must have equal lengths")
-        import numpy as np
-        def value(item):
-            return item.item() if isinstance(item, np.generic) else item.tolist() if isinstance(item, np.ndarray) else item
-        for i in range(next(iter(lengths), 0)):
-            yield {name: value(column[i]) for name, column in result.items()}
-    elif hasattr(result, "to_pylist"):
-        if on_schema is not None:
-            on_schema(result.schema)
-        for batch in result.to_batches(max_chunksize=1) if hasattr(result, 'to_batches') else (result,):
-            for index in range(batch.num_rows):
-                yield batch.slice(index, 1).to_pylist()[0]
-    elif hasattr(result, "iloc"):
-        if on_schema is not None:
-            import pyarrow as pa
-            on_schema(pa.Schema.from_pandas(result, preserve_index=False))
-        for index in range(len(result)):
-            yield result.iloc[index:index + 1].to_dict(orient='records')[0]
-    else:
-        iterator = iter(result)
-        try:
-            for row in iterator:
-                if batch_format == 'rows':
-                    if on_schema is not None:
-                        on_schema(None)
-                    yield dict(row)
-                else:
-                    yield from _batch_to_rows(row, batch_format, on_schema=on_schema)
-        finally:
-            close = getattr(iterator, 'close', None)
-            if close is not None:
-                close()
-
-
 def _callback_table(records, services, *, zero_copy):
     """Reassemble the original business batch from validated, consecutive IPC slices."""
     import pyarrow as pa
-    from ..arrow_payload import _resident_budget
-    from ..arrow_payload import batch_cache
-    cache = batch_cache(services.store, services.bounds, services=services)
+    from demiflow.execution.contracts.record_codec import _resident_budget
+    from demiflow.execution.storage.arrow_payload import batch_cache
+    cache = batch_cache(services.store, services.bounds, assignment=getattr(services, 'assignment', None))
     limit = min(services.bounds.max_batch_bytes,
-                _resident_budget(services.bounds, services))
+                _resident_budget(services.bounds, getattr(services, 'assignment', None)))
     pieces = []
     retained = 0
     # Count each backing buffer once per contiguous artifact run. An
@@ -627,9 +414,9 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
     """Consume callback outputs once and leave each original occurrence with its ACK owner."""
     import pyarrow as pa
     from collections.abc import Iterator
-    from ..arrow_payload import _MAX_ROWS
-    from ..arrow_payload import _resident_budget
-    from ..arrow_payload import store_mapped_arrow
+    from demiflow.execution.contracts.record_codec import _MAX_ROWS
+    from demiflow.execution.contracts.record_codec import _resident_budget
+    from demiflow.execution.storage.streams import store_mapped_arrow
 
     outputs = result if isinstance(result, Iterator) else (result,)
     ordinal = 0
@@ -637,7 +424,7 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
         for output in outputs:
             if isinstance(output, (pa.RecordBatch, pa.Table)):
                 parent_bytes = output.get_total_buffer_size()
-                if retained_bytes + parent_bytes > _resident_budget(services.bounds, services):
+                if retained_bytes + parent_bytes > _resident_budget(services.bounds, getattr(services, 'assignment', None)):
                     raise _err('BUDGET_EXCEEDED', 'Arrow callback input and retained result exceed the worker grant')
                 # Each membership digest costs 67 bytes in the bounded IPC header.
                 max_rows = min(_MAX_ROWS, max(1, (min(8192, services.bounds.max_control_bytes) - 256) // 80))
@@ -650,7 +437,7 @@ def _mapped_arrow_output(result, *, binding, schemas, services, budget, retained
                             continue
                         schema_ref = schemas.put(chunk.schema)
                         members = [binding(ordinal + i) for i in range(chunk.num_rows)]
-                        carried = store_mapped_arrow(chunk, members, schema_ref, services,
+                        carried = store_mapped_arrow(chunk, members, schema_ref, store=services.store, bounds=services.bounds, assignment=getattr(services, "assignment", None),
                             retained_bytes=retained_bytes + parent_bytes)
                         if carried is None:
                             # Unsupported types retain their exact historical typed-row validation.
@@ -705,7 +492,7 @@ def invoke_batch(
     input_bytes = sum(_input_row_bytes(record) for record in records)
     budget = _OutputBudget(spec, services)
     if schemas is None:
-        from ..record_schema import RecordSchemas
+        from demiflow.execution.storage.record_schema import RecordSchemas
         schemas = RecordSchemas(services)
     schema = schemas.read(records[0].schema_ref) if records else None
     if any(record.schema_ref != records[0].schema_ref for record in records):
@@ -723,7 +510,7 @@ def invoke_batch(
 
     if (kind == 'MapBatchesOp' and cfg.get('batch_format') == 'pyarrow' and records
             and expected is None):
-        from ..arrow_payload import is_arrow_record
+        from demiflow.execution.contracts.record_codec import is_arrow_record
         if all(is_arrow_record(record) for record in records):
             table = _callback_table(records, services, zero_copy=cfg.get('zero_copy_batch', False))
             if table is not None:
@@ -737,19 +524,15 @@ def invoke_batch(
             value, retained = _measured_input(record, services, retained)
             rows.append(value)
     else:
-        rows = [_materialize_row(record, services) for record in records]
+        rows = [_materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)) for record in records]
     if expected is not None:
-        import pyarrow as pa
-        from ...data.training_schema import PREDICTION_ROW_ID, validate_columns
+        from demiflow.data.training_schema import PREDICTION_ROW_ID
+        from demiflow.operators.arrow_batches import (validate_prediction_input, correlate_prediction_input,
+            prediction_output_schema, validate_prediction_row, validate_prediction_row_schema,
+            validate_prediction_count)
         required = cfg['predict_input_schema']
-        if schema is not None:
-            validate_columns(schema, required)
-        else:
-            for row in rows:
-                validate_columns(pa.RecordBatch.from_pylist([row]).schema, required)
+        validate_prediction_input(rows, schema, required, keyed=keyed)
         if keyed:
-            if any(PREDICTION_ROW_ID in row for row in rows):
-                raise _err('INVALID_CONTRACT', 'Predictor input contains the reserved correlation column')
             input_bytes += sum(len(record.record_id) + len(PREDICTION_ROW_ID) + 64 for record in records)
             if input_bytes > services.bounds.max_batch_bytes:
                 raise _err('BUDGET_EXCEEDED', 'Prediction input identities exceed the batch budget')
@@ -757,22 +540,17 @@ def invoke_batch(
             # Include its position in this call so both results have to echo
             # their own occurrence even when their source identities match.
             prediction_ids = tuple(_hash_id([rec.record_id, i]) for i, rec in enumerate(records))
-            rows = [{**row, PREDICTION_ROW_ID: key} for row, key in zip(rows, prediction_ids)]
-            if schema is not None:
-                schema = schema.append(pa.field(PREDICTION_ROW_ID, pa.string()))
+            rows, schema = correlate_prediction_input(rows, schema, prediction_ids)
 
     def output_schema(value):
         if expected is not None and value is not None:
-            validate_columns(value, expected)
-            if keyed:
-                validate_columns(value, {PREDICTION_ROW_ID: 'string'})
-                value = value.remove(value.get_field_index(PREDICTION_ROW_ID))
+            value = prediction_output_schema(value, expected, keyed=keyed)
         output_ref[0] = schemas.put(value)
 
     if kind == "MapBatchesOp":
         batch_format = cfg.get("batch_format", "default")
         zero_copy = bool(cfg.get("zero_copy_batch", False))
-        batch, extra = _rows_to_batch(rows, batch_format, services, schema=schema)
+        batch, extra = _rows_to_batch(rows, batch_format, services.bounds, schema=schema)
         # Arrow/pandas cast keeps the source Python rows alive alongside the
         # converted buffers; admit both before invoking the callable (C06/V023).
         if input_bytes + extra > services.bounds.max_batch_bytes:
@@ -789,22 +567,16 @@ def invoke_batch(
             raise _err("BUDGET_EXCEEDED", "batch exceeds max_batch_bytes", bytes=input_bytes)
         if kind == "AddColumnOp":
             batch_format = cfg.get("batch_format", "default")
-            batch, extra = _rows_to_batch(rows, batch_format, services, schema=schema)
+            batch, extra = _rows_to_batch(rows, batch_format, services.bounds, schema=schema)
             if input_bytes + extra > services.bounds.max_batch_bytes:
                 raise _err("BUDGET_EXCEEDED", "add_column coexistence exceeds budget")
             values = _batch_values(instance(batch))
-            if len(values) != len(rows):
-                raise _err("INVALID_CONTRACT", "add_column result length must match batch")
+            from demiflow.operators.relational import add_column_rows
             column = _cfg(spec, "column")
-            if schema is not None:
-                import pyarrow as pa
-                fields = [field for field in schema if field.name != column]
-                fields.append(pa.field(column, pa.array(values).type))
-                output_schema(pa.schema(fields, metadata=schema.metadata))
-            out_rows = [{**row, column: value} for row, value in zip(rows, values)]
+            out_rows = add_column_rows(rows, column, values, schema=schema, on_schema=output_schema)
         else:
             if kind == "SaveLanceOp":
-                from ..dataflow_schema import stream_lance_output_schema
+                from demiflow.lance.flow_contract import stream_lance_output_schema
                 output_schema(stream_lance_output_schema(schema, cfg.get("output_ref")))
                 instance.bind_records(tuple(record.record_id for record in records), instance.native_call_ordinal)
             import time
@@ -836,20 +608,18 @@ def invoke_batch(
         for index, out_row in enumerate(out_rows):
             _check_stop(services)
             if expected is not None:
-                if index >= len(records):
-                    raise _err('INVALID_CONTRACT', 'Predictor returned more rows than its input batch')
-                if keyed and out_row.pop(PREDICTION_ROW_ID, None) != prediction_ids[index]:
-                    raise _err('INVALID_CONTRACT', 'Predictor changed the input occurrence order')
+                validate_prediction_row(out_row, index, len(records),
+                    identities=prediction_ids if keyed else None)
                 count += 1
             record_id, source = binding(index)
             if expected is not None and output_ref[0] is None:
-                validate_columns(pa.RecordBatch.from_pylist([out_row]).schema, expected)
+                validate_prediction_row_schema(out_row, expected)
             out = _output_record(record_id, source.source_position, out_row, source.sequence, services,
                                  schema_ref=output_ref[0], retained=retained)
             budget.charge(out)
             yield out
-        if expected is not None and count != len(records):
-            raise _err('INVALID_CONTRACT', 'Predictor must return one result row for every input')
+        if expected is not None:
+            validate_prediction_count(count, len(records))
     finally:
         close = getattr(out_rows, 'close', None)
         if close is not None:
@@ -890,10 +660,21 @@ def make_kernel(
     if kind not in KERNEL_KINDS:
         raise _err("INVALID_CONTRACT", "unknown kernel kind", kind=kind)
     if kind not in _AGGREGATE_KINDS and spec.configuration.get("cache_namespace") is not None:
-        from demiflow.execution.dataflow_models import bind_cached_map
+        from demiflow.execution.kernels.model_state import bind_cached_map
 
         return bind_cached_map(spec, services=services)
-    from .operator import OperatorKernel
+    from demiflow.execution.kernels.operator import OperatorKernel
 
     return OperatorKernel(spec, services=services, partition_id=partition_id,
                           finite_services=finite_services)
+
+
+def invoke_native_batch(batch, transform, on_callback_error):
+    """Invoke the sealed native batch callback without owning its algorithm or sink."""
+    if transform is not None:
+        try:
+            batch = transform(batch)
+        except Exception as error:
+            on_callback_error(error)
+            raise
+    return batch

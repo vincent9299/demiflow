@@ -359,7 +359,7 @@ class RowEnvironment:
         async with self._actor_lock:
             name = api['name']
             if name not in self._actors:
-                from .execution.stream_resources import StreamResources
+                from demiflow.execution.worker.stream_resources import StreamResources
                 # Constructors configure state; async I/O belongs in astart.
                 actor = factory(**deepcopy(api['init']))
                 lifecycle = StreamResources([actor])

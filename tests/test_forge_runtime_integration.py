@@ -244,7 +244,7 @@ def _flood(batch):
 
 
 def test_rm16_real_native_stdout_and_query_rotation(tmp_path):
-    from demiflow.execution.datafusion import DataFusionSession, DataFusionOptions
+    from demiflow.execution.hosts.datafusion import DataFusionSession, DataFusionOptions
 
     diagnostic = tmp_path / "diagnostics"
     scratch = tmp_path / "scratch"
@@ -290,7 +290,8 @@ def test_rm16_real_native_stdout_and_query_rotation(tmp_path):
             assert not (diagnostic / "worker_result.json").exists()
         # More than one retention window, using the same public slot primitive
         # across attempts; an active slot cannot be reclaimed.
-        from demiflow.execution.native_diagnostics import slot, write_document
+        from demiflow.execution.hosts.datafusion import slot
+        from demiflow.execution.journal.native_diagnostics import write_document
 
         for index in range(40):
             with slot(diagnostic, "query-" + str(index)) as path:

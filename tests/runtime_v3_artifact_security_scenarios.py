@@ -80,11 +80,11 @@ def _mutate(store, ref, invoke, *, replacement=None):
 
 
 def _artifact_attacks(execution, root):
-    from demiflow.execution.dataflow_artifacts import fetch_runtime_bundle
+    from demiflow.execution.seal.runtime_bundle import fetch_runtime_bundle
     from demiflow.execution.seal.plan import (verify_dataflow_program, load_dataflow,
                                                 _artifact_from_json)
     from demiflow.execution.seal.business_sources import mount_sources
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     store, bounds, sealed = execution._store, execution._bounds, execution._sealed
     node = next(n for n in execution._graph.nodes if n.kind == 'transform')
     pin = json.loads(_read(store, sealed.code_pin_ref, bounds))
@@ -158,11 +158,12 @@ class _NativeTransport:
 
 
 def _assignment_attacks(execution, assignment, root):
-    from demiflow.execution.dataflow_authority import WorkerJournalClient
-    from demiflow.execution.dataflow_services import _load_programs, make_runtime_services
+    from demiflow.execution.worker.runtime import WorkerJournalClient
+    from demiflow.execution.seal.plan import load_worker_programs as _load_programs
+    from demiflow.execution.worker.runtime import make_runtime_services
     from demiflow.execution.contracts.dataflow import WorkerEvent
     from demiflow.execution.contracts.dataflow_codec import encode_wire, runtime_scope_id
-    from demiflow.execution.recovery_contract import document, identity
+    from demiflow.execution.contracts.recovery_contract import document, identity
     store, bounds = execution._store, execution._bounds
     # This is the actual allocator-issued lease, not a synthetic worker ID.
     transport = _NativeTransport(execution._services)
@@ -205,10 +206,10 @@ def _bootstrap_attack(root):
     import os
     import subprocess
     import sys
-    from demiflow.execution.worker.bootstrap import LAUNCH_ENV, CONTROL_FD_ENV, _MAX_LAUNCH_BYTES
+    from demiflow.execution.hosts.worker_bootstrap import LAUNCH_ENV, CONTROL_FD_ENV, _MAX_LAUNCH_BYTES
     path = root/'oversized-launch.json'
     path.write_bytes(b' '*(_MAX_LAUNCH_BYTES+1))
-    command = [sys.executable, '-B', '-m', 'demiflow.execution.worker.bootstrap']
+    command = [sys.executable, '-B', '-m', 'demiflow.execution.hosts.worker_bootstrap']
     tree = str(Path(__file__).resolve().parents[1])
     result = subprocess.run(command, cwd=tree, env={**os.environ, 'PYTHONPATH':tree,
         LAUNCH_ENV: str(path), CONTROL_FD_ENV:'-1'}, capture_output=True, text=True, timeout=20)
@@ -245,10 +246,10 @@ def artifact_security(fx, fault=None):
     from demiflow import data
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.action_driver import dataflow as dataflow_module
-    from demiflow.execution.dataflow_hosts import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
+    from demiflow.execution.hosts.endpoints import _EndpointBase, LocalHostEndpoint, RayHostEndpoint
     from demiflow.execution.contracts.dataflow_codec import encode_wire
     from demiflow.execution.worker.runtime import _decode_v3_assignment
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     from runtime_v3_residency_scenarios import _provider
     from runtime_v3_support import assert_tree_binding
     import builtins

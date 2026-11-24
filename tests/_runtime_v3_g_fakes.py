@@ -21,7 +21,7 @@ FAKE_MODULE_NAMES = (
     "demiflow.execution.contracts.dataflow",
     "demiflow.execution.contracts.dataflow_codec",
     "demiflow.execution.contracts.dataflow_errors",
-    "demiflow.execution.dataflow_models",
+    'demiflow.execution.operator_bindings.dataflow_models',
 )
 
 
@@ -197,7 +197,7 @@ def _real_module_available(name):
 def _install_fakes():
     if _real_module_available("demiflow.execution.contracts.dataflow"):
         return
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
 
     dataflow = types.ModuleType("demiflow.execution.contracts.dataflow")
     for name in ("ArtifactRef", "Bounds", "ActionProgram", "ActionRequest", "InputPort",
@@ -223,7 +223,7 @@ def _install_fakes():
     errors.DataflowError = DataflowError
     sys.modules["demiflow.execution.contracts.dataflow_errors"] = errors
 
-    models = types.ModuleType("demiflow.execution.dataflow_models")
+    models = types.ModuleType('demiflow.execution.operator_bindings.dataflow_models')
 
     def build_model_factory(operation, *, program_ref, bounds):
         from demiflow.data.dataflow_operation import NativeOperation
@@ -236,7 +236,7 @@ def _install_fakes():
         )
 
     models.build_model_factory = build_model_factory
-    sys.modules["demiflow.execution.dataflow_models"] = models
+    sys.modules['demiflow.execution.operator_bindings.dataflow_models'] = models
 
 
 def assert_tree_binding():

@@ -13,7 +13,7 @@ def ray_api_scope(tmp_path_factory):
     from runtime_v3_api_scenarios import _fixtures, _cases
     from runtime_v3_recovery_scenarios import _provider
     import ray
-    import demiflow.execution.dataflow_hosts as hosts
+    import demiflow.execution.hosts.endpoints as hosts
     import demiflow.resources.ray as provider
     assert hosts.ray is ray and provider.ray is ray, 'real Ray must not share a process with carrier doubles'
     assert Path(ray.__file__).is_file() and ray.ObjectRef is ray._raylet.ObjectRef
@@ -57,7 +57,7 @@ def test_real_ray_api_boundary(ray_api_scope, name):
 
 def test_unrelated_driver_environment_not_copied(ray_api_scope, monkeypatch):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     root, _, _ = ray_api_scope
     from _ray_native_boundary_fixtures import read_worker_environment
     monkeypatch.setenv('DEMIFLOW_RAY_BOUNDARY_UNDECLARED', 'must-not-cross')
@@ -71,7 +71,7 @@ def test_unrelated_driver_environment_not_copied(ray_api_scope, monkeypatch):
 
 def test_missing_declared_environment_is_not_cluster_fallback(ray_api_scope, monkeypatch):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.operator_llm.parser import parse_prompt_pack
     from test_runtime_v3_native_execution import PACK
     root, _, _ = ray_api_scope
@@ -85,7 +85,7 @@ def test_missing_declared_environment_is_not_cluster_fallback(ray_api_scope, mon
 
 def test_declaration_environment_does_not_run_user_hooks():
     from demiflow.data.plan import CallableSpec
-    from demiflow.execution.dataflow_environment import native_environment_names
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_environment_names
     class User:
         @property
         def required_environment_names(self):
@@ -101,7 +101,7 @@ def test_declaration_environment_does_not_run_user_hooks():
 
 
 def test_sql_failure_roundtrip_preserves_type_and_bounded_message():
-    from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+    from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
     error = sqlite3.OperationalError('no such column: invalid_column')
     payload = failure_payload(error)
     payload['traceback'] = 't' * 8000
@@ -119,8 +119,8 @@ def test_real_ray_typed_finite_borrow(ray_api_scope, tmp_path):
 def test_real_ray_finite_join_restores_original_cut(ray_api_scope, tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.kernels import state_codec
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.contracts import state_codec
+    from demiflow.execution.pipeline.run_context import RunContext
     from test_runtime_v3_finite_finish import pipeline, Interrupted
     original_event = DataflowExecution._handle_event
     original_commit = DataflowCheckpointCoordinator.commit

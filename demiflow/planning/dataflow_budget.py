@@ -74,7 +74,7 @@ def default_profile(operation: LogicalOp | None, *, bounds: Bounds, state="none"
         owners = concurrency if getattr(options, "callable_scope", None) == "worker" else 1
         working_set += bounds.max_state_bytes * owners
         minimum += bounds.max_state_bytes * owners
-    from ..execution.dataflow_native import collect_fixed_residency
+    from demiflow.execution.compiler_support.dataflow_native import collect_fixed_residency
     fixed = collect_fixed_residency(operation, concurrency=concurrency)
     if fixed > bounds.max_resident_bytes:
         from ..execution.contracts.dataflow_errors import DataflowRecoveryError
@@ -120,7 +120,8 @@ def relational_profile(kind, source, bounds):
         profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
     reducer_memory = None
     if kind == 'reduce':
-        from ..execution.kernels.reducer_memory import declare, FIELD
+        from demiflow.operators.reducer_memory import declare
+        from demiflow.execution.contracts.relational_region import REDUCER_MEMORY_FIELD as FIELD
         from demiflow.execution.contracts.relational_region import reducer_resident_bytes as resident_bytes
         declared = declare(source.initial, bounds)
         profile = ResourceProfile(requests={**profile.requests,
@@ -159,7 +160,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     reference carrier is selected the producer node in ``nodes`` is rewritten in place.
     """
     from .dataflow_compile import _plain
-    from ..execution.dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE
+    from demiflow.execution.contracts.dataflow import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE
     # The first terminal block and its first forest root occupy 3 KiB
     # while the input/output payload is still resident. Seal both windows
     # into the original profile; do not borrow half of that payload grant.
@@ -184,7 +185,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     configuration = {**semantic, "terminal_memory": {"payload_bytes": payload, "metadata_bytes": metadata}}
     native_publication = request.kind in {'write_lance', 'write_file', 'write_datasink'}
     if request.kind == 'write_datasink':
-        from ..execution.dataflow_native import publishes_natively
+        from demiflow.execution.compiler_support.dataflow_native import publishes_natively
         # Queue tasks were settled by their original authority already;
         # this terminal only publishes the result manifest, without Arrow.
         native_publication = publishes_natively(request.sink)
@@ -193,7 +194,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         if carrier is not None:
             configuration['input_carrier'] = carrier
     if native_publication:
-        from ..execution.dataflow_publication_budget import FIELD, SCHEMA
+        from demiflow.execution.scheduler.dataflow_publication_budget import FIELD, SCHEMA
         # A native consumer can still hold its previous yielded Arrow
         # batch when asking this generator to decode the next record.
         configuration[FIELD] = {'schema': SCHEMA,
@@ -203,7 +204,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         and bool(finite_producer.inputs)
         and all(p.requirement == 'finite_complete' for p in finite_producer.inputs))
     if phased_publication:
-        from ..execution.dataflow_publication_budget import PHASE_SCHEMA
+        from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA
         configuration[FIELD]['schema'] = PHASE_SCHEMA
     # A pure completed join can publish immutable typed row artifacts.
     # Its terminal handles only the original bounded Record references;
@@ -221,7 +222,8 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         and all(n.kernel.kind in {'items', 'range', 'materialized'}
                 for n in nodes if n.kind == 'source'))
     if compact:
-        from ..execution.dataflow_publication_budget import PHASE_SCHEMA, REF_CARRIER
+        from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA
+        from demiflow.execution.contracts.dataflow import REF_CARRIER
         metadata = min(bounds.max_state_bytes, max(MIN_TERMINAL_INDEX, bounds.max_resident_bytes // 128))
         payload = min(128 * 1024, max(4096, bounds.max_resident_bytes // 64))
         configuration['terminal_memory'] = {'payload_bytes': payload, 'metadata_bytes': metadata,
@@ -254,7 +256,8 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         legacy_floor = 2 * (bounds.max_batch_bytes + bounds.max_row_bytes) + metadata
         if (legacy_floor > bounds.max_resident_bytes - control
                 and MIN_TERMINAL_WORKSPACE <= terminal_space < profile.requests['memory_bytes']):
-            from ..execution.dataflow_publication_budget import PHASE_SCHEMA, TERMINAL_WORKSPACE
+            from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA
+            from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
             bounded_workspace = True
             configuration[FIELD]['schema'] = PHASE_SCHEMA
             configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE,
@@ -263,7 +266,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     elif not native_publication and payload + metadata > bounds.max_resident_bytes - control:
         # Keep the original row contract. The terminal already measures codec,
         # index and flush peaks against one worker grant on each real append.
-        from ..execution.dataflow_publication_budget import TERMINAL_WORKSPACE
+        from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
         available = bounds.max_resident_bytes - control
         if available < MIN_TERMINAL_WORKSPACE:
             raise DataflowError('RESOURCE_INFEASIBLE',
@@ -297,7 +300,7 @@ def codec_window(kernel, operation, bounds):
     if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
         return None  # These kernels own explicit copy/reducer working sets.
     if kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
-        from ..execution.dataflow_models import _model_profile
+
         concurrency = kernel.configuration.get('concurrency', 1)
         expected = _model_profile(kernel.resource_role, bounds, concurrency,
                                   kernel.state, operation=operation)
@@ -317,7 +320,7 @@ def codec_window(kernel, operation, bounds):
         measured = kernel.state == 'none'
         if not measured and 'task_batch_rows' in kernel.configuration and operation is not None:
             from .dataflow_configuration import TASK_KINDS
-            from ..execution.kernels.task_scope import task_has_measurable_state
+            from demiflow.execution.compiler_support.operator_policy import task_has_measurable_state
             measured = (kernel.kind in TASK_KINDS
                         and task_has_measurable_state(getattr(operation, 'callable', None)))
         baseline = bounds.max_batch_bytes + bounds.max_row_bytes
@@ -347,7 +350,7 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
     can carry the corresponding minimum into physical planning.
     """
     from ..execution.contracts.dataflow import thaw_json
-    from ..execution.dataflow_publication_budget import FIELD, workspace_bytes
+    from demiflow.execution.scheduler.dataflow_publication_budget import FIELD, workspace_bytes
     for index, node in enumerate(nodes):
         fields = {}
         codec = codec_windows.get(index)
@@ -363,7 +366,7 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
 
 def minimum_workspace_graph(graph, bounds, *, allow_measured_terminal=False):
     """Use real, indivisible demands when testing a physical layout."""
-    from ..execution.dataflow_publication_budget import with_publication_workspace
+    from demiflow.execution.scheduler.dataflow_publication_budget import with_publication_workspace
     nodes = []
     for node in graph.nodes:
         config = node.kernel.configuration
@@ -390,7 +393,7 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
     Publication is a single driver grant, shared across the phases that use it.
     """
     from fractions import Fraction
-    from ..execution.dataflow_publication_budget import PublicationReservation, graph_workspace_bytes
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, graph_workspace_bytes
     reservation = PublicationReservation(floor_graph, stages, bounds)
     publication_extra = graph_workspace_bytes(graph) - reservation.bytes
     nodes = {n.occurrence_id: n.kernel for n in graph.nodes}
@@ -468,3 +471,20 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
         selected.append(stage)
     publication = reservation.bytes + int(publication_share * publication_extra)
     return tuple(selected), reservation.base + publication
+
+
+def _model_profile(resource_role, bounds, concurrency, state, *, operation=None,
+                   codec_workspace=True):
+    # Native actors carry the same typed records as ordinary kernels. Their
+    # codec copies must fit the original stage grant too; input+output alone
+    # is not that peak. Keep one planner and every explicit worker constraint.
+
+    profile = default_profile(operation, bounds=bounds, state=state,
+        codec_workspace=codec_workspace, concurrency=concurrency)
+    requests = dict(profile.requests)
+    resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
+    if 'cpu' not in resources:
+        requests['cpu_millis'] = 100
+    if resource_role == 'gpu' and 'accelerators' not in requests:
+        requests['accelerators'] = [{'type': 'gpu', 'count': 1}]
+    return ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)

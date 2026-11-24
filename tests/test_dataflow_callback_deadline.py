@@ -60,7 +60,7 @@ def test_callback_cancel_translation_preserves_actual_outcome(returns):
 
 
 def test_callback_deadline_drains_only_its_shared_owner_invocation():
-    from demiflow.execution.dataflow_shared import SharedActor
+    from demiflow.execution.kernels.shared import SharedActor
     class Actor:
         async def __call__(self,row):
             await asyncio.sleep(.12 if row=='long' else 10)
@@ -164,7 +164,7 @@ def test_real_stream_deadline_preserves_catch_statistics_and_dead_rows(tmp_path,
 
 @pytest.mark.parametrize('reason,settled', [('cooperative:operator_stop_file',True),('cancel',False),('cooperative:other',False),(None,False)])
 def test_explicit_deadline_preserves_only_original_cooperative_paid_drain(reason, settled):
-    from demiflow.execution.request_limits import drain_on_service_stop, COOPERATIVE_STOP_REASON
+    from demiflow.services.request_limits import drain_on_service_stop, COOPERATIVE_STOP_REASON
     if settled:
         reason=COOPERATIVE_STOP_REASON
     entered,finished,cancelled=threading.Event(),threading.Event(),threading.Event()

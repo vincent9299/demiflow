@@ -22,9 +22,9 @@ import pytest
 
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.block_sink import BlockSink
+from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 
@@ -86,7 +86,7 @@ def _committed_rows(run, action_id, rid, facts):
 def _release(root):
     # The native driver must already have reclaimed its allocations; do not
     # force-stop workers here and disguise a lifecycle leak as a passing test.
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     domain, capacity = local_capacity()
     pool = LocalCapacityPool(domain / 'capacity', capacity=capacity)
     assert pool.snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}

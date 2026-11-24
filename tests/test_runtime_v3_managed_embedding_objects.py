@@ -17,8 +17,8 @@ from demiflow import data
 from demiflow.data.flow_contract import arrow_fields
 from demiflow.embeddings.config import embedding_options
 from demiflow.embeddings.object_input import object_read_binding, read_bound_object
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
 from demiflow.objects import LocalObjectStore
@@ -215,7 +215,7 @@ def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
     if corrupt:
         assert result['status'] == 'failed', result
         assert not server['bodies'] and not Path(prepared['outputs'][0]['uri']).exists()
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         journal = RunJournal(runs.directory(root, result['run_id']))
         assert not any(c['status'] == 'acked' for action in prepared['report']['actions']
                        for c in journal.execution_commits(action))

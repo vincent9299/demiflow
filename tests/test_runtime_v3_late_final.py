@@ -7,12 +7,12 @@ import pytest
 
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.dataflow_hosts import _EndpointBase
-from demiflow.execution.run_context import RunContext
-from demiflow.operator_llm.stream_recovery import RunPromptJournal
+from demiflow.execution.hosts.endpoints import _EndpointBase
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.prompt import RunPromptJournal
 
 
 @pytest.mark.parametrize('stop_when_complete', [False, True])
@@ -170,7 +170,7 @@ def test_late_native_eoi_obtains_final_ack_and_replays_live_result(
 @pytest.mark.parametrize('stop_when_complete', [False, True])
 def test_parked_complete_input_replays_without_new_worker_or_commit(
         tmp_path, monkeypatch, stop_when_complete):
-    from demiflow.execution.dataflow_thread_host import ThreadHostEndpoint
+    from demiflow.execution.hosts.thread import ThreadHostEndpoint
 
     original_send = ThreadHostEndpoint.send_business
     original_begin = DataflowCheckpointCoordinator.begin

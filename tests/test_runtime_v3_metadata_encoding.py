@@ -5,7 +5,7 @@ import random
 
 import pytest
 
-from demiflow.execution.recovery_contract import document, identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import document, identity, RecoveryContractError
 
 
 def original_bytes(value):

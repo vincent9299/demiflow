@@ -5,7 +5,9 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.plan_capture import capture_pipeline, current_capture, build_logical_plan_view
+from demiflow.execution.pipeline.managed_native import capture_pipeline
+from demiflow.execution.executors.plan_capture import current_capture
+from demiflow.execution.journal.program_materials import build_logical_plan_view
 
 
 def forbidden(*args, **kwargs):
@@ -15,7 +17,7 @@ def forbidden(*args, **kwargs):
 @pytest.fixture
 def no_execution(monkeypatch):
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.observability import ActionObserver
     monkeypatch.setattr(dataflow, 'make_driver_services', forbidden)
     monkeypatch.setattr(dataflow, 'snapshot_source', forbidden)
@@ -147,8 +149,10 @@ def test_prompt_configuration_is_compiled_without_model_lifecycle(no_execution, 
     from test_map_prompt_async import PACK
     # The public API creates a passive declaration object. Its execution
     # lifecycle and transport acquisition must never run during capture.
-    for name in ('astart', 'aclose', '__call__', 'bind_execution', 'native_stream_recovery'):
+    for name in ('astart', 'aclose', '__call__'):
         monkeypatch.setattr(PromptActor, name, forbidden)
+    from demiflow.execution.operator_bindings import dataflow_model_journal
+    monkeypatch.setattr(dataflow_model_journal, 'bind_prompt_adapter', forbidden)
     monkeypatch.setattr(AsyncOperatorLLMRuntime, 'call_with_trace', forbidden)
     monkeypatch.setattr(AsyncOperatorLLMRuntime, 'transport_context', forbidden)
     pack = parse_prompt_pack(PACK)
@@ -207,7 +211,7 @@ def test_declared_business_labels_are_compiler_facts_not_topology(no_execution):
 
 def test_lance_write_keeps_original_program_without_publication(no_execution, tmp_path):
     import pyarrow as pa
-    from demiflow.execution.lance_action import bind_lance_action
+    from demiflow.execution.executors.dataset_runtime import bind_lance_action
     target = tmp_path / 'untouched.lance'
 
     def entry():
@@ -264,7 +268,7 @@ def test_prerequisite_failure_and_no_action_are_not_success(no_execution):
 
 
 def test_lance_location_alias_uses_authoritative_manifest_without_cache_writes(no_execution, tmp_path, monkeypatch):
-    from demiflow.execution.location_index import IndexedLocations
+    from demiflow.execution.storage.location_index import IndexedLocations
     root = tmp_path / 'storage'
     (root / '_demiflow').mkdir(parents=True)
     manifest = root / '_demiflow' / 'lance_locations.json'
@@ -282,7 +286,7 @@ def test_lance_location_alias_uses_authoritative_manifest_without_cache_writes(n
 
 
 def test_readonly_location_lookup_keeps_duplicate_and_whole_document_validation(tmp_path):
-    from demiflow.execution.location_index import IndexedLocations, identity
+    from demiflow.execution.storage.location_index import IndexedLocations, identity
     path = tmp_path / 'locations.json'
     path.write_text('{"version":1,"tables":{"x.lance":"old.lance"},'
                     '"tables":{"x.lance":"middle.lance","x.lance":"last.lance"}}')
@@ -310,7 +314,7 @@ def test_swallowed_boundary_and_nested_capture_fail_closed(no_execution):
 
 
 def test_explicit_run_start_is_rejected_before_creation(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     target = tmp_path / 'run'
 
     def entry():
@@ -323,9 +327,44 @@ def test_explicit_run_start_is_rejected_before_creation(tmp_path):
 
 
 def test_capture_does_not_leak_into_ordinary_execution(tmp_path):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     captured = capture_pipeline(lambda: data.range(3).take_all(), {})
     with RunContext.start(tmp_path / 'run'):
         assert data.range(3).take_all() == [{'id': 0}, {'id': 1}, {'id': 2}]
     assert captured.kind == 'take_all'
     assert current_capture() is None
+
+
+def test_close_keeps_capture_bound_and_does_not_swallow_a_second_boundary(no_execution):
+    from demiflow.execution.executors.plan_capture import _Captured
+    events = []
+    def closing():
+        try:
+            yield
+        finally:
+            events.append(current_capture() is not None)
+            raise _Captured()
+    def entry():
+        try:
+            data.range(1).take_all()
+        except _Captured:
+            events.append(current_capture().result is not None)
+        result = closing()
+        next(result)
+        return result
+    with pytest.raises(_Captured):
+        capture_pipeline(entry, {})
+    assert events == [True, True]
+    assert current_capture() is None
+
+
+def test_compile_callback_failure_resets_only_its_capture_scope(no_execution):
+    failure = ValueError('callback failed')
+    def callback(_):
+        assert current_capture() is not None
+        raise failure
+    with pytest.raises(ValueError) as caught:
+        capture_pipeline(lambda: data.range(1).take_all(), {}, on_compiled=callback)
+    assert caught.value is failure
+    assert current_capture() is None
+    assert capture_pipeline(lambda: data.range(1).count(), {}).kind == 'count'

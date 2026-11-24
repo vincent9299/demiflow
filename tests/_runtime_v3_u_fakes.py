@@ -24,7 +24,7 @@ from typing import Any, Mapping
 _TREE = Path(__file__).resolve().parents[1]
 
 FAKE_MODULE_NAMES = (
-    "demiflow.execution.dataflow_api",
+    'demiflow.execution.executors.dataflow_api',
     "demiflow.execution.contracts.dataflow",
 )
 
@@ -140,14 +140,14 @@ def _real_module_available(name):
 
 
 def install_fakes() -> None:
-    if _real_module_available("demiflow.execution.dataflow_api"):
+    if _real_module_available('demiflow.execution.executors.dataflow_api'):
         return
-    api = types.ModuleType("demiflow.execution.dataflow_api")
+    api = types.ModuleType('demiflow.execution.executors.dataflow_api')
     api.make_native_operation = make_native_operation
     api.make_action_request = make_action_request
     api.run_dataset_action = run_dataset_action
     api._ACTION_KINDS = _ACTION_KINDS
-    sys.modules["demiflow.execution.dataflow_api"] = api
+    sys.modules['demiflow.execution.executors.dataflow_api'] = api
 
     dto = types.ModuleType("demiflow.execution.contracts.dataflow")
     dto.ActionProgram = ActionProgram

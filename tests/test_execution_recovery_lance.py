@@ -11,7 +11,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, RunRef, UnresolvedCommit
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def write_graph(root, mode, window=None):
@@ -20,7 +20,7 @@ def write_graph(root, mode, window=None):
     prior = RunJournal(directory).recovery_identity()
     scope = RunContext.resume(RunRef(str(directory), prior['run_id'])) if prior else RunContext.start(directory)
     if window:
-        import demiflow.execution.commit as protocol
+        import demiflow.execution.checkpoint.commit as protocol
         def crash(name, commit_id):
             if name == window:
                 os._exit(37)
@@ -56,7 +56,7 @@ def test_native_write_has_one_version_after_process_loss(tmp_path, mode, window)
 
 
 def test_foreign_successor_is_not_adopted_or_overwritten(tmp_path, monkeypatch):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     target = str(tmp_path / 'out.lance')
     def stop(name, commit_id):
         if name == 'after_prepared':
@@ -73,8 +73,8 @@ def test_foreign_successor_is_not_adopted_or_overwritten(tmp_path, monkeypatch):
 
 
 def test_observer_projects_the_same_native_receipt_without_advancing_progress(tmp_path, monkeypatch):
-    import demiflow.execution.commit as protocol
-    from demiflow.execution.publication_facts import inspect_write_receipt
+    import demiflow.execution.checkpoint.commit as protocol
+    from demiflow.execution.journal.publication_facts import inspect_write_receipt
     def stop(name, commit_id):
         if name == 'after_sink_commit_before_receipt':
             raise RuntimeError('lost response')

@@ -1,9 +1,9 @@
 """Original native journal backpressure survives authenticated worker RPC."""
 from demiflow import data
-from demiflow.execution.dataflow_failures import failure_payload, restore_failure
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
-from demiflow.operator_llm.stream_recovery import _CapacityPending
+from demiflow.execution.contracts.errors import _CapacityPending
 from test_runtime_v3_native_execution import PACK, native_server
 from test_runtime_v3_native_rpc_replay import interrupted_run, service, event
 
@@ -41,7 +41,7 @@ def test_native_capacity_refusal_is_not_memoized_or_charged(tmp_path, monkeypatc
 
 
 def test_real_eight_concurrent_prompts_wait_for_original_response_capacity(tmp_path, native_server, monkeypatch):
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
     import time
     from types import SimpleNamespace
     native_server.barrier = SimpleNamespace(wait=lambda timeout: time.sleep(.05))
@@ -61,9 +61,12 @@ def test_real_eight_concurrent_prompts_wait_for_original_response_capacity(tmp_p
     # Keep the original test's 64 MiB control budget and 8 MiB+64 KiB response
     # bound: eight concurrent calls cannot all reserve responses at once.
     from demiflow.data.api import DataAPI
-    saved = DataAPI().from_items([{'item': str(i)} for i in range(8)]).map_prompt_async('enrich',
-            config=parse_prompt_pack(PACK), inputs={'payload': 'item'}, output='answer', concurrency=8,
-            max_requests=8, options={'trust_env': False}).materialize()
+    # Supply the plan's resident workspace while keeping its response budget unchanged.
+    with RunContext.start(tmp_path/'run', limits={'memory_bytes': 512*1024**2,
+            'max_row_bytes': 16*1024**2, 'max_batch_bytes': 16*1024**2}):
+        saved = DataAPI().from_items([{'item': str(i)} for i in range(8)]).map_prompt_async('enrich',
+                config=parse_prompt_pack(PACK), inputs={'payload': 'item'}, output='answer', concurrency=8,
+                max_requests=8, options={'trust_env': False}).materialize()
     try:
         run = runs[0]
         assert run.limits['max_control_bytes'] == 64*1024**2

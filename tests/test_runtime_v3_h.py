@@ -21,6 +21,8 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace as NS
 
+import demiflow.execution.worker.mailbox as MAILBOX
+import demiflow.execution.contracts.worker as WORKER_CONTRACT
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -49,16 +51,19 @@ _RAY = D.build_fake_ray()
 sys.modules['ray'] = _RAY
 sys.modules['ray.exceptions'] = _RAY.exceptions
 
-from demiflow.execution import dataflow_authority as AUTH
-from demiflow.execution import dataflow_artifacts as ART
-from demiflow.execution import dataflow_control as CTRL
-from demiflow.execution import dataflow_hosts as HOSTS
-from demiflow.execution import dataflow_services as SVC
+from demiflow.execution.journal import dataflow_authority as AUTH
+from demiflow.execution.storage import staging as ARTIFACT_PORT
+from demiflow.execution.seal import runtime_bundle as ART
+from demiflow.execution.hosts import configuration as HOST_DOMAIN
+from demiflow.execution.hosts import dataflow_control as CTRL
+from demiflow.execution.hosts import endpoints as HOSTS
+from demiflow.execution.action_driver import services as DRIVER_SERVICES
+from demiflow.execution.worker import runtime as WORKER_SERVICES
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import ARTIFACT_STAGING_BUDGET, RunArtifactStore
-from demiflow.execution.run_context import RunAction, RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.worker import dataflow_host as WH
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.hosts import dataflow_worker_host as WH
 from demiflow.resources.manager import ResourceManager
 
 del sys.modules['ray'], sys.modules['ray.exceptions']
@@ -150,7 +155,7 @@ def driver_env(name):
     with RunContext.start(directory=tmp / 'run', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx:
         action = RunAction(ctx, 'action-1', {'kind': 'test'})
         ctx.journal.bind_execution_action(ctx.fence, 'action-1', {'kind': 'test'})
-        port = AUTH.DriverArtifactPort(action, bounds=BIG)
+        port = ARTIFACT_PORT.DriverArtifactPort(action, bounds=BIG)
         store = RunArtifactStore(root=ctx.directory / '.dataflow-store', store_id='store-1', journal=port, bounds=BIG)
         svc = AUTH.DriverJournalService(action, store=store, bounds=BIG)
         svc.register_worker(mklease(), ())
@@ -196,7 +201,7 @@ def worker_client(replies=None, error=None, expires=None):
     doc = {'run_id': 'run-1', 'attempt': 1, 'fence': 'fence-1', 'plan_revision': 0, 'controller_epoch': 0, 'scope_id': 'scope-1'}
     lease = mklease(expires=expires if expires is not None else int(time.time() * 1000) + 100000)
     t = ClientTransport(GrantStore(doc), replies, error)
-    return AUTH.WorkerJournalClient(transport=t, lease=lease, bounds=BIG), t, lease
+    return WORKER_SERVICES.WorkerJournalClient(transport=t, lease=lease, bounds=BIG), t, lease
 
 
 class FakeConnection:
@@ -310,7 +315,7 @@ class FakeExecutor:
         self._closed = True
 
 
-class FakeRuntime:
+class FakeRuntime(WORKER_SERVICES.WorkerRuntime):
     def __init__(self, launch_spec, *, control=None, manifest_loader=None):
         self._control = control
         self._v3_config = dict(launch_spec.get('dataflow_v3') or {})
@@ -590,19 +595,19 @@ def test_h013():
     challenge = store.put(iter([b'challenge-bytes']), max_bytes=100, media_type='x')
     host = df.HostDescriptor(host_id='host-1', provider='local', runtime_revision='r',
                              store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-    proof = ART.verify_host_domain(host, store=store, challenge=challenge, bounds=BIG)
+    proof = HOST_DOMAIN.verify_host_domain(host, store=store, challenge=challenge, bounds=BIG)
     assert proof.durable and proof.challenge_digest == challenge.digest
     wrong = ArtifactRef(digest='a' * 64, size_bytes=challenge.size_bytes, store_id='store-1',
                         key=challenge.digest, media_type='x')
     with pytest.raises(DataflowError):
-        ART.verify_host_domain(host, store=store, challenge=wrong, bounds=BIG)
+        HOST_DOMAIN.verify_host_domain(host, store=store, challenge=wrong, bounds=BIG)
     with pytest.raises(DataflowError) as ei:
-        ART.verify_host_domain(host, store=store, challenge=aref('absent'), bounds=BIG)
+        HOST_DOMAIN.verify_host_domain(host, store=store, challenge=aref('absent'), bounds=BIG)
     assert ei.value.code == 'UNKNOWN_EFFECT'
     host2 = df.HostDescriptor(host_id='h2', provider='local', runtime_revision='r',
                               store_domains=('other',), logical_resources={}, isolation_capabilities=())
     with pytest.raises(DataflowError):
-        ART.verify_host_domain(host2, store=store, challenge=challenge, bounds=BIG)
+        HOST_DOMAIN.verify_host_domain(host2, store=store, challenge=challenge, bounds=BIG)
 
 
 def test_h014():
@@ -611,14 +616,14 @@ def test_h014():
     ref = store.put(iter([b'durable']), max_bytes=100, media_type='x')
     host = df.HostDescriptor(host_id='h', provider='local', runtime_revision='r',
                              store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-    loc = ART.resolve_data_location(ref, host=host, store=store)
+    loc = HOST_DOMAIN.resolve_data_location(ref, host=host, store=store)
     assert loc.domain == 'store-1' and loc.durable_ref == ref and loc.temporary_locator is None
     rayhost = df.HostDescriptor(host_id='h', provider='ray_core', runtime_revision='r',
                                 store_domains=('store-1',), logical_resources={}, isolation_capabilities=())
-    loc2 = ART.resolve_data_location(ref, host=rayhost, store=store)
+    loc2 = HOST_DOMAIN.resolve_data_location(ref, host=rayhost, store=store)
     assert loc2.temporary_locator is None and loc2.durable_ref == ref  # no fabricated Ray object handle
     with pytest.raises(DataflowError) as ei:
-        ART.resolve_data_location(aref('gone'), host=host, store=store)
+        HOST_DOMAIN.resolve_data_location(aref('gone'), host=host, store=store)
     assert ei.value.code == 'UNKNOWN_EFFECT'
 
 
@@ -642,8 +647,8 @@ def test_h015():
 
 
 def test_h016(monkeypatch):
-    import demiflow.execution.contracts.worker as W
-    import demiflow.execution.worker.bootstrap as B
+    import demiflow.execution.hosts.endpoints as W
+    import demiflow.execution.hosts.worker_bootstrap as B
     with driver_env('h016') as e:
         services = NS(action=e.action, policy=POLICY, bounds=BIG, hosts=(LOCAL_HOST,))
         ep = doubled_endpoint(HOSTS.LocalHostEndpoint, services)
@@ -653,7 +658,7 @@ def test_h016(monkeypatch):
         ep._send_k3 = lambda kind, payload: calls.append(kind) or {}
         monkeypatch.setattr(B, 'recv_message', lambda sock: {'kind': 'Register'})
         monkeypatch.setattr(W, 'WorkerProtocolModel', FakeModel)
-        monkeypatch.setattr(WH, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
+        monkeypatch.setattr(WORKER_CONTRACT, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
         ep._connector.driver_socks = {'alloc-1': ep._sock}
         with pytest.raises(DataflowError, match='staged'):
             ep.activate(assignment)
@@ -675,7 +680,7 @@ def test_h016(monkeypatch):
 def test_h017(monkeypatch):
     import socket
     from collections import deque
-    import demiflow.execution.worker.bootstrap as B
+    import demiflow.execution.hosts.worker_bootstrap as B
     ep = HOSTS.LocalHostEndpoint.__new__(HOSTS.LocalHostEndpoint)
     ev = mk_event('e')
     payload = json.loads(codec.encode_wire(ev, type_name='WorkerEvent', bounds=BIG))['payload']
@@ -747,7 +752,7 @@ def test_h021(monkeypatch):
         ep = doubled_endpoint(HOSTS.RayHostEndpoint, services)
         # This is the K3 staging-order unit, with no artifact store/real program.
         # Credential selection is exercised through real Ray native API cases.
-        import demiflow.execution.dataflow_environment as envs
+        import demiflow.execution.hosts.environment as envs
         services.store = object()
         selected = []
         monkeypatch.setattr(envs, 'allocation_environment',
@@ -756,7 +761,7 @@ def test_h021(monkeypatch):
         ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g', 'scope_id': 'scope-1'}, {'sha256': oid('pin')})
         ep._open_scope = lambda *a: None
         ep._apply = lambda *a: None
-        monkeypatch.setattr(WH, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
+        monkeypatch.setattr(WORKER_CONTRACT, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
         assignment = mkassignment()
         ep._send_k3 = lambda kind, payload: ep._connector.handled.append(kind) or {}
         with pytest.raises(DataflowError, match='staged'):
@@ -874,7 +879,7 @@ def test_h026():
     tmp = newtmp()
     with RunContext.start(directory=tmp / 'a', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx1:
         a1 = RunAction(ctx1, 'action-a', {'kind': 'literal_empty', 'tag': 'a'})
-        s1 = SVC.make_driver_services(a1, policy=POLICY, bounds=BIG)
+        s1 = DRIVER_SERVICES.make_driver_services(a1, policy=POLICY, bounds=BIG)
         assert isinstance(s1.journal_service, AUTH.DriverJournalService)
         assert s1.store.store_id == 'store-1' and s1.hosts[0].host_id == 'local'
         assert isinstance(s1.resources, ResourceManager)
@@ -885,7 +890,7 @@ def test_h026():
     tmp2 = newtmp()
     with RunContext.start(directory=tmp2 / 'b', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx2:
         a2 = RunAction(ctx2, 'action-b', {'kind': 'literal_empty', 'tag': 'b'})
-        s2 = SVC.make_driver_services(a2, policy=POLICY, bounds=BIG)
+        s2 = DRIVER_SERVICES.make_driver_services(a2, policy=POLICY, bounds=BIG)
         assert s2.journal_service is not js1
         assert s2.journal_service._journal.directory != root1
         assert s2.journal_service._journal is ctx2.journal
@@ -898,7 +903,7 @@ def test_h027(monkeypatch):
     tmp = newtmp()
     with RunContext.start(directory=tmp / 'run', limits={'checkpoint_rows': 2, 'max_requests': 10}) as ctx:
         action = RunAction(ctx, 'action-a', {'kind': 'literal_empty'})
-        s1 = SVC.make_driver_services(action, policy=POLICY, bounds=BIG)
+        s1 = DRIVER_SERVICES.make_driver_services(action, policy=POLICY, bounds=BIG)
         prog_raw = json.dumps({'name': 'mod'}).encode()
         program_ref = s1.store.put(iter([prog_raw]), max_bytes=1 << 20, media_type='application/json')
         constants_ref = s1.store.put(iter([json.dumps({'k': 1}).encode()]), max_bytes=1 << 20, media_type='application/json')
@@ -944,9 +949,12 @@ def test_h027(monkeypatch):
         transport = FakeTransport(s1.store)
         def load_programs(given, *, store, bounds, cache):
             assert given is assignment and store.store_id == 'store-1'
-            return {oid('occ'): df.LoadedProgram('callable', {'digest': program_ref.digest}, program_ref.digest)}
-        monkeypatch.setattr(SVC, '_load_programs', load_programs)
-        rs = SVC.make_runtime_services(assignment, transport=transport, cache=cache)
+            from demiflow.execution.seal.plan import _VerifiedPrograms
+            values = _VerifiedPrograms({oid('occ'): df.LoadedProgram('callable', {'digest': program_ref.digest}, program_ref.digest)})
+            values.prediction_bindings = {}
+            return values
+        monkeypatch.setattr(WORKER_SERVICES, 'load_worker_programs', load_programs)
+        rs = WORKER_SERVICES.make_runtime_services(assignment, transport=transport, cache=cache)
         assert rs.store.store_id == 'store-1' and rs.constants == {'k': 1}
         occ = hashlib.sha256(b'occ').hexdigest()
         assert occ in rs.programs and rs.programs[occ].digest == program_ref.digest
@@ -988,7 +996,7 @@ def test_h031():
     # charged before writing. Exercise the real authority, not an unmetered port.
     with driver_env('h031-budget') as e:
         small = Bounds(max_spill_bytes=64)
-        port = AUTH.DriverArtifactPort(e.action, bounds=small)
+        port = ARTIFACT_PORT.DriverArtifactPort(e.action, bounds=small)
         bounded = RunArtifactStore(root=e.ctx.directory / '.dataflow-store',
                                    store_id='bounded', journal=port, bounds=small)
         with pytest.raises(DataflowError) as ei:
@@ -1195,11 +1203,11 @@ def test_h074():
     with driver_env('h074') as e:
         ref = e.store.put(iter([b'x']), max_bytes=100, media_type='x')
         cmd = df.ArtifactCommand(operation_id=oid('pin-1'), kind='pin', ref=ref, owner='owner-1', size_bytes=ref.size_bytes)
-        assert AUTH.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
-        assert AUTH.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
+        assert ARTIFACT_PORT.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
+        assert ARTIFACT_PORT.apply_artifact_command(e.action, cmd, bounds=BIG).present is True
         with pytest.raises(DataflowError):
-            AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('x'), kind='unknown', ref=ref, owner='o', size_bytes=0), bounds=BIG)
-        rs = AUTH.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('rs-1'), kind='reserve_staging', ref=None, owner='o', size_bytes=100), bounds=BIG)
+            ARTIFACT_PORT.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('x'), kind='unknown', ref=ref, owner='o', size_bytes=0), bounds=BIG)
+        rs = ARTIFACT_PORT.apply_artifact_command(e.action, df.ArtifactCommand(operation_id=oid('rs-1'), kind='reserve_staging', ref=None, owner='o', size_bytes=100), bounds=BIG)
         assert rs.charged_bytes == 100
 
 
@@ -1232,7 +1240,7 @@ def test_h038():
 def test_h039():
     w = new_worker()
     w.activate(mkassignment())
-    assert w._activated and isinstance(w._executor, FakeExecutor)
+    assert w._activated and isinstance(w._runtime._v3_executor, FakeExecutor)
     assert w._runtime.plan_revision == 2
 
 
@@ -1255,14 +1263,14 @@ def test_h041():
     assert ei.value.code == 'FENCED'
     w.activate(mkassignment())
     w.request_cut(cut)
-    assert w._executor.cuts == [cut]
+    assert w._runtime._v3_executor.cuts == [cut]
 
 
 def test_h042():
     w = new_worker()
     w.activate(mkassignment())
     w.cancel('test', deadline_ms=100)
-    assert w._executor.cancelled == ('test', 100)
+    assert w._runtime._v3_executor.cancelled == ('test', 100)
     assert w._cancel_event.is_set()
 
 
@@ -1271,17 +1279,17 @@ def test_h043():
     assert w.closed() is False
     w.activate(mkassignment())
     assert w.closed() is False
-    w._executor._closed = True
+    w._runtime._v3_executor._closed = True
     assert w.closed() is True
 
 
 def test_h044():
-    ctrl = WH.make_worker_control_assignment(mkassignment(), grant={'grant_id': 'grant-1', 'scope_id': 'action-1'},
+    ctrl = WORKER_CONTRACT.make_worker_control_assignment(mkassignment(), grant={'grant_id': 'grant-1', 'scope_id': 'action-1'},
                                              manifest_ref={'manifest_id': oid('pin'), 'sha256': oid('pin')},
                                              ready_deadline_ms=60000)
     assert ctrl['schema_version'] == 'demiflow.worker_assignment.v1'
     assert ctrl['stages'] == ['stage-a', 'stage-b']
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     assert ctrl['partitions'] == [identity(['dataflow-k3-partition-v3', p]) for p in ('p0', 'p1')]
     assert mkassignment().lease.partition_ids == ('p0', 'p1')
     assert ctrl['channels'] == {'inputs': [{'channel_id': 'in-0'}], 'outputs': ['out-0', 'out-1']}
@@ -1289,7 +1297,7 @@ def test_h044():
     assert ctrl['plan_revision'] == 2 and ctrl['expected_plan_revision'] == 2
     assert ctrl['restore_point'] == {'checkpoint_id': oid('cp')}
     a2 = NS(**{**mkassignment().__dict__, 'restore_refs': ()})
-    assert WH.make_worker_control_assignment(a2, grant={'grant_id': 'g', 'scope_id': 'action-1'}, manifest_ref={'manifest_id': 'm', 'sha256': 'm'}, ready_deadline_ms=1)['restore_point'] is None
+    assert WORKER_CONTRACT.make_worker_control_assignment(a2, grant={'grant_id': 'g', 'scope_id': 'action-1'}, manifest_ref={'manifest_id': 'm', 'sha256': 'm'}, ready_deadline_ms=1)['restore_point'] is None
 
 
 def test_h049():
@@ -1330,7 +1338,7 @@ def test_h052():
         w.deliver_receipt({'boot_id': 'other', 'commit_id': 'c', 'cut_id': 'cut-1'})
     assert ei.value.code == 'FENCED'
     w.deliver_receipt({'boot_id': 'boot-1', 'commit_id': 'commit-1', 'cut_id': 'cut-1'})
-    assert w._executor.receipts == [('commit-1', 'cut-1')]
+    assert w._runtime._v3_executor.receipts == [('commit-1', 'cut-1')]
 
 
 def test_h053():
@@ -1396,14 +1404,14 @@ def test_h046():
 
 
 def test_h047():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     rt = CTRL.RayControlTransport(mb, bounds=BIG)
     assert rt._mailbox is mb and rt.store is None
     assert not hasattr(rt, '_journal') and not hasattr(rt, '_connection')
 
 
 def test_h048():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     rt = CTRL.RayControlTransport(mb, bounds=BIG)
     ev = mk_event('op1')
 
@@ -1427,7 +1435,7 @@ def test_h048():
 
 
 def test_h061():
-    mb = HOSTS.ControlMailbox(bounds=Bounds(max_pending_events=2), check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=Bounds(max_pending_events=2), check_stop=lambda: None)
     ths = []
 
     def req(e):
@@ -1449,7 +1457,7 @@ def test_h061():
 
 
 def test_h062():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     with pytest.raises(DataflowError) as ei:
         mb.request(mk_event('timeout'), deadline_ms=50)
     assert ei.value.code == 'UNKNOWN_EFFECT'
@@ -1457,14 +1465,14 @@ def test_h062():
     def stopped():
         raise DataflowError('CANCELLED', 'stopped')
 
-    mb2 = HOSTS.ControlMailbox(bounds=BIG, check_stop=stopped)
+    mb2 = MAILBOX.ControlMailbox(bounds=BIG, check_stop=stopped)
     with pytest.raises(DataflowError) as ei:
         mb2.request(mk_event('c'), deadline_ms=100)
     assert ei.value.code == 'CANCELLED'
 
 
 def test_h063():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     ths = []
 
     def req(e):
@@ -1491,7 +1499,7 @@ def test_h063():
 
 
 def test_h064():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     result = {}
 
     def req():
@@ -1508,8 +1516,8 @@ def test_h064():
     mb.deliver(mk_reply('op1'))
     th.join(timeout=2)
     assert result['r'].status == 'ok'
-    mb2 = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
-    waiter = HOSTS._Waiter(oid('opX'), 'digest')
+    mb2 = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    waiter = MAILBOX._Waiter(oid('opX'), 'digest')
     waiter.done = True
     waiter.reply = mk_reply('opX')
     mb2._pending[oid('opX')] = waiter
@@ -1519,7 +1527,7 @@ def test_h064():
 
 
 def test_h065():
-    mb = HOSTS.ControlMailbox(bounds=BIG, check_stop=lambda: None)
+    mb = MAILBOX.ControlMailbox(bounds=BIG, check_stop=lambda: None)
     errors = []
 
     def req():

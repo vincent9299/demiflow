@@ -7,7 +7,7 @@ import pytest
 from demiflow.collect.native_search import NativeSearchSession, SearchConfig
 from demiflow.collect.search_routes import SearchRoutePool
 from demiflow.collect.search_fallback import FallbackSearchSession, fallback_policy
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 
 
 def primary(path):

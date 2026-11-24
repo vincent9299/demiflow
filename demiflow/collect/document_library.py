@@ -107,7 +107,7 @@ class DocumentLibrary:
         return [self.index_path, self.object_directory, self.policy, self.max_age_s, self.parser_versions, self.max_alias_hops]
 
     def _db(self):
-        from demiflow.execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         index = resolve_local_artifact(self.index_path)
         index.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(str(index), timeout=self.lock_timeout_s)
@@ -145,7 +145,7 @@ class DocumentLibrary:
     async def claim(self, url):
         """Coalesce misses across processes without holding a SQLite transaction."""
         key = hashlib.sha256(source_url(url).encode()).hexdigest()
-        from demiflow.execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         directory = Path(str(resolve_local_artifact(self.index_path)) + '.locks')
         directory.mkdir(parents=True, exist_ok=True)
         # Bound directory growth to 4096 lock inodes, even for millions of URLs.

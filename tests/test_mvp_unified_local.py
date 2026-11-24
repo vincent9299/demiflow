@@ -6,7 +6,7 @@ import pytest
 from runtime_v3_owned_crash import kill_owned_worker
 
 import demiflow.data as data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="Local managed units require Linux")
@@ -72,7 +72,7 @@ def test_workbench_unified_take_and_count_read_back_committed_handle(tmp_path):
 
 def test_unified_readback_is_single_committed_handle_authority(tmp_path):
     from demiflow.data.sources import MaterializedSource
-    from demiflow.execution.dataflow_handles import StoredMaterializedHandle
+    from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
 
     def double(row):
         return {**row, "x": row["x"] * 2}
@@ -160,7 +160,7 @@ def test_workbench_unified_chain_kill_recovers_acked_prefix_exactly_once(tmp_pat
 def test_paid_call_with_unknown_effect_refuses_new_dispatch_after_restart(tmp_path):
     from demiflow.operator_llm.journal import UncertainPromptCall
     from demiflow.operator_llm.sqlite_journal import _SQLiteJournalShard
-    from demiflow.operator_llm.stream_recovery import RunPromptJournal
+    from demiflow.execution.journal.prompt import RunPromptJournal
 
     def bind_gate(run):
         # Mirrors bind_stages' native_stream_recovery rebind: bind the run-level durable

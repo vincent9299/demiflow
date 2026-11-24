@@ -11,8 +11,8 @@ from demiflow import data
 from demiflow.execution.seal import plan as seal
 from demiflow.execution.contracts.dataflow_codec import compute_graph_digest, compute_physical_digest
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_history import load_execution_version
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.journal.dataflow_history import load_execution_version
+from demiflow.execution.contracts.recovery_contract import document
 from demiflow.workbench.runs.facts import read_sealed_plan
 from test_runtime_v3_real_seams import prepared
 

@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.run_reader import storage_snapshot as native_storage_snapshot
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.journal.run_reader import storage_snapshot as native_storage_snapshot
 from demiflow.workbench.runs import storage as run_storage
 from demiflow.workbench.runs import domain as run_domain
 from demiflow.forge.schema import ForgeError
@@ -494,7 +494,7 @@ def test_directory_descriptors_grow_with_depth_and_close(tmp_path, monkeypatch):
 
 def test_decode_does_not_hold_a_sql_read_transaction(tmp_path, monkeypatch):
     target, _ = run_fixture(tmp_path)
-    from demiflow.execution import run_reader
+    from demiflow.execution.journal import run_reader
     original = run_reader._bounded_object
     def decode(*args, **kwargs):
         # A real exclusive writer can enter while Python decodes the snapshot.

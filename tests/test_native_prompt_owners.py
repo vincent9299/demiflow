@@ -2,9 +2,9 @@
 import json
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.operator_llm import parse_prompt_pack
 from image_http_fixture import fixture_http, json_definition
 
@@ -62,7 +62,7 @@ def test_native_pending_input_precedes_mutating_predicate(tmp_path, fixture_http
     import os
     import threading
     import pytest
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     from demiflow.operator_llm.runtime import PromptActor
     reached = threading.Event()
     original = PromptActor.__call__

@@ -59,7 +59,7 @@ def materialize_action_id(run):
 
 def action_process_records(run, action_id):
     """Select physical hosts using the action's authenticated original plan."""
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.contracts.dataflow_codec import runtime_scope_id
     physical = load_sealed_plan(run.directory, action_id, version='v3')['physical']
     scopes = {runtime_scope_id(physical.plan_id, attempt)
@@ -70,8 +70,8 @@ def action_process_records(run, action_id):
 
 def assert_released(directory):
     """Observe the real allocator and birth/lock evidence; do no cleanup here."""
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.process_unit import ManagedProcessUnit
     records = process_records(directory)

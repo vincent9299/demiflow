@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def test_read_images_shape_mode_paths_and_owned_array(tmp_path):

@@ -52,20 +52,19 @@ import pytest
 import demiflow.data as data
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
+from demiflow.execution.outputs.block_sink import BlockSink
+from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
-from demiflow.execution.queue_commit import producer_action
-from demiflow.execution.queue_contract import HistoryReadLimit, HistoryReadLimits
-from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink
-from demiflow.execution.recovery_contract import (
-    RecoveryContractError, RunRef, SourcePosition, identity,
-)
-from demiflow.execution.run_context import RunAction, RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+from demiflow.execution.native_queue.queue_commit import producer_action
+from demiflow.execution.contracts.queue_contract import HistoryReadLimit, HistoryReadLimits
+from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, identity
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
-from demiflow.operator_llm.stream_recovery import CALL_RESERVATION, RunPromptJournal
+from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
+from demiflow.execution.journal.prompt import RunPromptJournal
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 from demiflow.workbench.graph import model as graph_model
@@ -415,7 +414,7 @@ def _chain_recovery(fixture, *, fault):
     def resource_evidence():
         value = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
         # v3 uses the selected deployment capacity domain, not run-resources.
-        from demiflow.execution.dataflow_capacity import local_capacity
+        from demiflow.execution.hosts.capacity import local_capacity
         domain, capacity = local_capacity()
         value['capacity_charged'] = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
         return value
@@ -501,8 +500,8 @@ def _keyed_recovery(fixture, *, fault):
     instead of blindly resending, and a replay of the same logical keys is
     idempotent under the append contract.
     """
-    import demiflow.execution.stream_lance as stream_lance
-    from demiflow.execution.stream_lance import StreamLanceWriter
+    import demiflow.execution.native_queue.stream_lance as stream_lance
+    from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
     root = fixture['root']
     schema, rows = fixture['schema'], fixture['rows']
     target = root / 'out.lance'
@@ -662,7 +661,7 @@ def _prompt_setup(root, count):
 
 
 def _prompt_execute(root):
-    from demiflow.execution.checked import CheckedExecution
+    from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
     root = Path(root)
     os.chdir(root)
@@ -777,7 +776,7 @@ def test_workbench_normal_flow_real_worker(tmp_path, pidfds):
         assert sealed['version'] == 'v3'
         dag = sealed['plan_view']['dag']
         assert dag['nodes']
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         import json
         journal = RunJournal(observed['target'])
         bridge_ref = journal.source_binding(action_id + '-identity-bridge')
@@ -968,7 +967,7 @@ def test_keyed_append_conflicting_content_refused(tmp_path):
 def test_keyed_overwrite_duplicate_key_refused(tmp_path):
     # The managed public save_lance contract now requires append; the native keyed
     # writer still enforces overwrite uniqueness directly.
-    from demiflow.execution.stream_lance import StreamLanceWriter
+    from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
     root = tmp_path / 'keyed'
     root.mkdir()
     writer = StreamLanceWriter(root / 'out.lance', KEYED_SCHEMA, key='id', mode='overwrite')
@@ -990,7 +989,7 @@ def test_keyed_public_save_lance_append_commits(tmp_path):
 
 
 def test_keyed_oversized_row_refused_before_commit(tmp_path):
-    from demiflow.execution.stream_lance import StreamLanceWriter
+    from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
     root = tmp_path / 'keyed'
     root.mkdir()
     target = root / 'out.lance'

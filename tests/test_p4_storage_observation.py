@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 
-from demiflow.execution.run_reader import observe_storage, RunReadError
+from demiflow.execution.journal.run_reader import observe_storage, RunReadError
 from test_forge_history_admission import run_fixture
 
 
@@ -100,7 +100,7 @@ def test_coordination_sidecars_cannot_be_symlinks_or_special_files(tmp_path,name
 
 def test_overflow_and_watch_setup_failure_refuse_and_close(tmp_path,monkeypatch):
     import struct
-    from demiflow.execution import run_reader
+    from demiflow.execution.journal import run_reader
     target,_=run_fixture(tmp_path)
     original=os.read
     with pytest.raises(RunReadError,match='identity changed'):

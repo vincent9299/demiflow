@@ -5,11 +5,12 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.row_scope import RowScope, set_row_scope
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.embeddings.runtime import EmbeddingActor
 from demiflow.embeddings.model import EmbeddingModel
+from demiflow.execution.operator_bindings.dataflow_model_journal import NativeEmbeddingRecovery
 from demiflow.operator_llm.journal import RequestRecord, canonical
 
 
@@ -37,7 +38,7 @@ def test_exchange_reserves_persists_reuses_and_tracks_inflight(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor()
         action = SimpleNamespace(context=run, action_id='act-1', object_sinks={})
-        rec = actor.native_stream_recovery(action, 'node')
+        rec = actor._native_recovery = NativeEmbeddingRecovery(actor, action, 'node')
         sent, inflight_seen = [], []
 
         def handler(request):
@@ -75,7 +76,7 @@ def test_exchange_native_budget_exhaustion_blocks_fresh(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor(max_requests=1)
         action = SimpleNamespace(context=run, action_id='act-1', object_sinks={})
-        actor.native_stream_recovery(action, 'node')
+        actor._native_recovery = NativeEmbeddingRecovery(actor, action, 'node')
         sent = []
 
         def handler(request):
@@ -105,7 +106,7 @@ def test_exchange_requires_row_scope(tmp_path):
     with RunContext.start(tmp_path / 'run', limits={'max_requests': 5}) as run:
         actor = _actor()
         action = SimpleNamespace(context=run, action_id='act-1', object_sinks={})
-        actor.native_stream_recovery(action, 'node')
+        actor._native_recovery = NativeEmbeddingRecovery(actor, action, 'node')
 
         async def exercise():
             await actor.astart()

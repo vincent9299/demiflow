@@ -14,7 +14,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _smi(fields, kind='gpu'):
@@ -62,7 +62,7 @@ def _cuda_calculate(row):
     from pathlib import Path
     import time
     import torch
-    from demiflow.execution.dataflow_devices import gpu_capacity
+    from demiflow.execution.hosts.devices import gpu_capacity
     from demiflow.resources.capacity import inherited_envelope
     if gpu_capacity('local') != 0:
         raise RuntimeError('worker opened a second GPU allocator')
@@ -127,7 +127,7 @@ def _calls(evidence):
 
 
 def _assert_released(tmp_path, selected, evidence):
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     snapshot = device_pool('local').snapshot()
     assert snapshot['charged'] == {} and snapshot['active'] == []
     allocations = [json.loads(path.read_text()) for path in

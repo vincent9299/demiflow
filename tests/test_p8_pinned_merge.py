@@ -5,8 +5,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, UnresolvedCommit
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.publication_facts import inspect_write_receipt
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.journal.publication_facts import inspect_write_receipt
 
 
 def _inputs(tmp_path, n):
@@ -23,7 +23,7 @@ def _merge(source, target):
 
 
 def test_fixed_source_cut_resume_and_pin(tmp_path, monkeypatch):
-    from demiflow.execution import commit as protocol
+    from demiflow.execution.checkpoint import commit as protocol
     patch, target = _inputs(tmp_path, 13)
     directory = tmp_path/'run'
     def interrupt(name, commit_id):
@@ -79,7 +79,7 @@ def test_python_callback_uses_original_record_path(tmp_path):
 
 
 def test_fixed_merge_ambiguous_native_commit_never_reinvokes_writer(tmp_path, monkeypatch):
-    from demiflow.execution.lance_sink import LanceSink
+    from demiflow.execution.outputs.lance_sink import LanceSink
     patch, target = _inputs(tmp_path, 3)
     source = lambda: data.read_lance(patch, version=1, batch_size=3)
     directory = tmp_path/'run'
@@ -98,7 +98,7 @@ def test_fixed_merge_ambiguous_native_commit_never_reinvokes_writer(tmp_path, mo
 
 
 def test_foreign_target_after_fixed_merge_prepare_fences_commit(tmp_path, monkeypatch):
-    from demiflow.execution import commit as protocol
+    from demiflow.execution.checkpoint import commit as protocol
     patch, target = _inputs(tmp_path, 3)
     def compete(name, _):
         if name == 'after_prepared':

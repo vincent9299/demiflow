@@ -26,8 +26,8 @@ import pytest
 import demiflow
 
 from demiflow.execution import RecoveryContractError
-from demiflow.execution.recovery_identity import describe
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.seal.program_identity import describe
+from demiflow.execution.contracts.recovery_contract import document, identity
 
 
 class Hooked:
@@ -220,7 +220,7 @@ def test_closure_resources_cross_process_consistent():
     script = '''import json,os,threading,contextvars
 from pathlib import Path
 import demiflow
-from demiflow.execution.recovery_identity import describe
+from demiflow.execution.seal.program_identity import describe
 assert Path(demiflow.__file__).resolve().is_relative_to(Path(os.environ['DF_INTEGRATION_ROOT']))
 def make_worker():
     lock=threading.Lock(); event=threading.Event(); var=contextvars.ContextVar("worker",default=0)

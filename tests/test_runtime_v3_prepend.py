@@ -2,7 +2,7 @@
 import time
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @pytest.mark.parametrize('main,prefix', [([{'n':3}],[{'n':1},{'n':2}]),([],[]),([],[{'n':1}]),([{'n':3}],[])])
@@ -47,11 +47,11 @@ def test_prepend_driver_crash_after_native_checkpoint_does_not_repeat_prefix(tmp
 import json,os,sys
 from pathlib import Path
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RunRef
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.state_artifacts import StateArtifacts
-from demiflow.execution import commit
+from demiflow.execution.checkpoint import commit
 root=Path(sys.argv[1]);mode=sys.argv[2];shared=sys.argv[3]=='True';directory=root/'run'
 prior=RunJournal(directory).recovery_identity() if directory.exists() else None
 scope=RunContext.resume(RunRef(str(directory),prior['run_id'])) if prior else RunContext.start(directory,limits={'checkpoint_rows':2,'timeout_s':30})
@@ -88,7 +88,7 @@ with scope as run,data.local_execution():
 
 def test_prepend_cancel_after_prefix_reaches_downstream(tmp_path):
     import threading
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     ready=tmp_path/'seen'
     def endless():
         n=3

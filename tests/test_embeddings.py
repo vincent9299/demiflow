@@ -16,7 +16,7 @@ from PIL import Image
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
 from demiflow.embeddings.payload import EmbeddingProtocolError
-from demiflow.execution.adaptive_requests import AdaptiveRequestGate
+from demiflow.services.adaptive_requests import AdaptiveRequestGate
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 
@@ -300,7 +300,7 @@ def test_budget_and_blocking_io_stay_bounded(server, tmp_path, monkeypatch):
 
 
 def test_budget_without_journal_is_atomic_across_workers(server):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     ds = data.from_items([{'text': str(i)} for i in range(10)]).map_embeddings(
         model=server['model'], inputs={'text': 'text'}, batch_size=1, concurrency=4, max_requests=1)
     with pytest.raises(RecoveryContractError, match='Execution budget exhausted'): ds.materialize()
@@ -309,7 +309,7 @@ def test_budget_without_journal_is_atomic_across_workers(server):
 
 @pytest.mark.parametrize('prefetch', [0, 2])
 def test_cooperative_stop_drains_only_admitted_calls(server, tmp_path, monkeypatch, prefetch):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     stop = tmp_path / 'STOP'
     server['delay'] = .15
     def stop_after_two():

@@ -8,9 +8,9 @@ from demiflow import data
 from demiflow.data.api import _use_executor
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.state_artifacts import StateArtifacts
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 
 LIMITS = {'memory_bytes': 80 * 1024, 'max_batch_bytes': 16 * 1024,

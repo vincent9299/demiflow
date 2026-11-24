@@ -14,9 +14,9 @@ from demiflow.execution.contracts.dataflow import LoadedProgram, ProgramDeclarat
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.seal.plan import (_stage_one_program, _code_identity_from_value,
     verify_dataflow_program)
-from demiflow.execution.dataflow_sources import snapshot_source, plan_source_splits, open_source_reader
-from demiflow.execution.literal_source import items_fingerprint, literal_reference, LiteralSourceReference
-from demiflow.execution.recovery_contract import identity, RecoveryContractError
+from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits, open_source_reader
+from demiflow.execution.sources.literal_source import items_fingerprint, literal_reference, LiteralSourceReference
+from demiflow.execution.contracts.recovery_contract import identity, RecoveryContractError
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
 from test_runtime_v3_artifact_accounting import store_fixture
 
@@ -145,7 +145,7 @@ def test_source_data_quota_rejects_before_snapshot_or_program_can_publish_a_resu
 @pytest.mark.parametrize('format',['items','arrow','numpy','pandas'])
 def test_materialized_literal_uses_original_handle_digest_and_declared_schema(tmp_path,format):
     from demiflow.data.sources import MaterializedSource
-    from demiflow.execution.dataflow_inputs import build_input_handle
+    from demiflow.execution.sources.materialized_input import build_input_handle
     import numpy as np
     import pandas as pd
     import pyarrow as pa
@@ -189,7 +189,7 @@ def test_real_dataset_literal_original_ack_gc_and_resume(tmp_path,monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.dataflow_segments import tree_refs
+    from demiflow.execution.storage.segments import tree_refs
     rows=list(example())
     limits={'memory_bytes':64*1024**2,'max_row_bytes':8192,'max_batch_bytes':16384,
             'checkpoint_rows':8,'checkpoint_interval_ms':60000}
@@ -263,7 +263,7 @@ def test_real_ray_literal_original_ack_gc_and_resume(tmp_path, monkeypatch):
 
 
 def test_other_finished_split_pending_record_shares_original_worker_grant(tmp_path):
-    from demiflow.execution.dataflow_record_frames import admit_workspace
+    from demiflow.execution.contracts.record_codec import admit_workspace
     from test_runtime_v3_finite_reader_credit import HeldState
     with store_fixture(tmp_path) as (_,store,_):
         bounds=replace(store._bounds,max_resident_bytes=256*1024,max_control_bytes=4096,
@@ -328,7 +328,7 @@ def test_small_public_input_keeps_legacy_source_without_data_artifacts(tmp_path)
 
 def test_legacy_large_program_and_source_carriers_remain_readable(tmp_path,monkeypatch):
     from demiflow import data
-    import demiflow.execution.literal_source as literal
+    import demiflow.execution.sources.literal_source as literal
     source=data.from_items(list(example()))._source
     with store_fixture(tmp_path) as (_,store,_):
         bounds=replace(store._bounds,max_state_bytes=2*1024**2,max_row_bytes=8192,max_batch_bytes=16384)
@@ -353,7 +353,7 @@ def test_legacy_large_program_and_source_carriers_remain_readable(tmp_path,monke
 
 def test_literal_leaf_is_authenticated_before_first_row(tmp_path):
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.dataflow_segments import segment_refs
+    from demiflow.execution.storage.segments import segment_refs
     with store_fixture(tmp_path) as (_,store,_):
         bounds=replace(store._bounds,max_state_bytes=4096,max_row_bytes=8192,max_batch_bytes=16384)
         source=ItemsSource(example(40))
@@ -373,7 +373,7 @@ def test_literal_leaf_is_authenticated_before_first_row(tmp_path):
 
 
 def test_literal_root_authentication_failure_releases_manifest_workspace(tmp_path):
-    from demiflow.execution.dataflow_record_frames import read_document
+    from demiflow.execution.storage.streams import read_document
     from test_runtime_v3_finite_reader_credit import HeldState
     with store_fixture(tmp_path) as (_,store,_):
         bounds=replace(store._bounds,max_resident_bytes=256*1024,max_control_bytes=4096,

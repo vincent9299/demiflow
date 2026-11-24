@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 MEMORY = 192 * 1024
@@ -89,7 +89,7 @@ def test_take_all_zero_limit_empty_input_succeeds(tmp_path):
 @pytest.mark.parametrize('worker_mode', ['thread', 'process'])
 @pytest.mark.parametrize('limit', [0, 2, 65])
 def test_direct_collection_stops_input_at_first_overflow(tmp_path, worker_mode, limit):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with pytest.raises(ValueError, match='more than the take_all limit'):
         with RunContext.start(tmp_path / 'run', limits={'timeout_s': 30,
                 'checkpoint_rows': 8}), data.local_execution(workers=2, worker_mode=worker_mode):
@@ -137,9 +137,9 @@ def test_admission_precedes_second_record_decode(monkeypatch, mode):
     """Narrow sequencing proof complements the real worker cases above."""
     from dataclasses import replace
     from types import SimpleNamespace
-    from demiflow.execution import dataflow_terminals as terminals
+    from demiflow.execution.outputs import terminals as terminals
     from demiflow.execution.contracts.dataflow import Record
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
     _, bounds = resolve_runtime_policy({}, {}, provider='local')

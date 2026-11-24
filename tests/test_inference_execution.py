@@ -10,9 +10,9 @@ import pytest
 from demiflow import data
 from demiflow.embeddings import embedding_execution_config
 from demiflow.inference import request_admission_config
-from demiflow.execution.blocking_io import BlockingIOPool
-from demiflow.execution.request_limits import RequestGate
-from demiflow.execution.run_context import RunContext
+from demiflow.services.blocking_io import BlockingIOPool
+from demiflow.services.request_limits import RequestGate
+from demiflow.execution.pipeline.run_context import RunContext
 from test_embeddings import server as embedding_server
 from test_map_prompt_async import server as prompt_server, prompt, PACK
 
@@ -161,7 +161,7 @@ async def test_prompt_response_pool_progresses_while_journal_pool_is_busy(prompt
 
 def test_prompt_real_calls_use_owned_pools_and_skip_historical_audit(prompt_server, tmp_path, monkeypatch):
     from demiflow.operator_llm import client as clients, call_ref
-    from demiflow.execution.dataflow_model_journal import RemotePromptJournal
+    from demiflow.execution.operator_bindings.dataflow_model_journal import RemotePromptJournal
     observed, closed = {}, []
     def record(name, function):
         def wrapped(*args, **kwargs):

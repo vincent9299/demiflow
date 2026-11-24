@@ -43,8 +43,8 @@ def query_config(value):
 def run_query(config):
     sources = query_config(config)
     # Imports remain after the role/sandbox checks performed by main().
-    from demiflow.execution.datafusion import DataFusionOptions
-    from demiflow.execution.datafusion import DataFusionSession
+    from demiflow.execution.hosts.datafusion import DataFusionOptions
+    from demiflow.execution.hosts.datafusion import DataFusionSession
     import lance
     with DataFusionSession(resource_directory=job_path("/var/lib/demiflow-analysis/native-slots"),
             options=DataFusionOptions(**NATIVE_OPTIONS), max_concurrent=1,

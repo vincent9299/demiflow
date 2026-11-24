@@ -462,14 +462,14 @@ class Observations:
         old = getattr(owner, name); self.patches.append((owner, name, old)); setattr(owner, name, fn)
     def __enter__(self):
         import importlib.util
-        if importlib.util.find_spec('demiflow.execution.dataflow_api') is None:
+        if importlib.util.find_spec('demiflow.execution.executors.dataflow_api') is None:
             self.copy = {'status': 'not_observable', 'reason': 'historical carrier has no matching v3 codec boundary'}
             return self
         # Import the consumer first, then patch both aliases, so the first API
         # call is observed rather than getting an unpatched late import alias.
-        from demiflow.execution import dataflow_api
+        from demiflow.execution.executors import dataflow_api
         from demiflow.execution.action_driver import dataflow
-        from demiflow.execution import dataflow_hosts
+        from demiflow.execution.hosts import endpoints as dataflow_hosts
         from demiflow.execution.contracts import dataflow_codec
         for name, counter in (('encode_wire', 'driver_control_encode'), ('decode_wire', 'driver_control_decode')):
             original_codec = getattr(dataflow_codec, name)
@@ -662,7 +662,7 @@ def run_child(config):
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(expected_root)
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     cancellation = config['phase'] == 'cancel'
     facts = {'schema': 'demiflow.performance.trial.v1', **config,
              'private_environment': private_environment,

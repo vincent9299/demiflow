@@ -1,4 +1,5 @@
 """异步物化固定通用数据行：执行一次、可续接 writer、异常不发布部分缓存。"""
+from demiflow.execution.contracts import record_codec
 
 import asyncio
 import os
@@ -8,9 +9,9 @@ import pyarrow as pa
 import pytest
 from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.dataflow_handles import StoredMaterializedHandle
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 from _worker_event_fixtures import emit, events
 
 
@@ -177,14 +178,14 @@ def test_wide_rows_spill_before_row_limit_and_restore_individually(tmp_path, mon
         assert isinstance(handle, StoredMaterializedHandle)
         assert handle.num_blocks() > 0 and all(handle._store.inspect(r) for r in handle._blocks)
         restored = []
-        original = dataflow_bridge._decode_record_document
+        original = record_codec._decode_record_document
         def record_decode(*args, **kwargs):
             record = original(*args, **kwargs)
             restored.append(record)
             assert record.encoded_bytes <= 8192
             return record
         with monkeypatch.context() as probe:
-            probe.setattr(dataflow_bridge, '_decode_record_document', record_decode)
+            probe.setattr(record_codec, '_decode_record_document', record_decode)
             iterator = handle.rows()
             assert next(iterator) == {'i': 0, 'payload': '0' * 2048, 'nested': [0]}
             iterator.close()

@@ -35,7 +35,7 @@ def test_conflicting_or_invalid_observation_id_fails_closed():
 
 def test_real_nested_recorders_observe_one_action_once_each(tmp_path):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     with RunContext.start(tmp_path/'run') as run, data.local_execution():
         with support._ExecuteActionRecorder() as outer:
             with support._ExecuteActionRecorder() as inner:
@@ -54,7 +54,7 @@ def test_nested_facade_invocations_get_separate_observation_identities(monkeypat
     # simulate a facade that itself calls the public facade again. This proves
     # identity sharing is limited to observer wrappers, not dynamic call scope.
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     calls=[]
     request=SimpleNamespace(provider='local',kind='take',action=SimpleNamespace(action_id='action-1'))
     def facade(request,depth=0):

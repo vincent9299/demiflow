@@ -41,6 +41,9 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Mapping
 
+SHUFFLE_ORDER_FIELD = "shuffle_order_version"
+SHUFFLE_ORDER_VERSION = "typed-multiset-v1"
+
 TYPED = "typed"
 NATIVE = "native"
 
@@ -66,12 +69,12 @@ ROLES = FAMILIES + (
 )
 
 _COMPILE = "demiflow.planning.dataflow_compile:compile_kernel_spec"
-_MODEL_COMPILE = "demiflow.execution.dataflow_models:build_model_factory"
+_MODEL_COMPILE = "demiflow.planning.dataflow_models:build_model_factory"
 _UNARY = "demiflow.execution.kernels.dataflow:invoke_unary"
 _BATCH = "demiflow.execution.kernels.dataflow:invoke_batch"
 _ORDER = "demiflow.execution.kernels.ordering:build_sort_runs"
-_REPARTITION = "demiflow.execution.kernels.ordering:repartition_records"
-_MODEL_KERNEL = "demiflow.execution.dataflow_models:bind_model_services"
+_REPARTITION = "demiflow.execution.exchange.dataflow_channels:repartition_records"
+_MODEL_KERNEL = "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
 
 
 @dataclass(frozen=True)
@@ -195,3 +198,12 @@ def operator_rows() -> tuple:
 def traits_of(entry: str) -> Mapping[str, tuple]:
     """kind -> (state, effect, resource role, mergeable) for the operators declared through ``entry``."""
     return MappingProxyType({record.name: record.traits for record in _RECORDS if record.entry == entry})
+
+
+TASK_KINDS = kinds_with('task')
+
+
+MANAGED_HTTP_DEVICES_FIELD = 'managed_http_devices'
+
+NATIVE_BATCH_SCHEMA = 'demiflow.native_batch_membership.v1'
+NATIVE_BATCH_KINDS = kinds_with("batch_membership")

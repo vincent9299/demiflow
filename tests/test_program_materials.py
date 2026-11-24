@@ -7,9 +7,9 @@ import pytest
 
 from demiflow import data
 from demiflow.data.plan import CallableSpec
-from demiflow.execution.dataflow_model_factory import CacheFactory, PromptFactory, RoutedPromptFactory
-from demiflow.execution.plan_capture import capture_pipeline
-from demiflow.execution.program_materials import program_prompt_materials
+from demiflow.execution.operator_bindings.dataflow_model_factory import CacheFactory, PromptFactory, RoutedPromptFactory
+from demiflow.execution.pipeline.managed_native import capture_pipeline
+from demiflow.execution.journal.program_materials import program_prompt_materials
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.workbench.graph.plan_details import build_plan_details
 from test_map_prompt_async import PACK

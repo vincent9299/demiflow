@@ -28,8 +28,8 @@ import demiflow  # noqa: E402
 
 assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), "demiflow not tree-bound"
 
-from demiflow.execution import dataflow_handles as handles  # noqa: E402
-from demiflow.execution import dataflow_terminals as terminals  # noqa: E402
+from demiflow.execution.outputs import dataflow_handles as handles  # noqa: E402
+from demiflow.execution.outputs import terminals as terminals  # noqa: E402
 from demiflow.data.datasink import WriteResult  # noqa: E402
 
 
@@ -380,7 +380,7 @@ def build_materialized(store, rows, *, columns=None, num_blocks=1, owner_rows=No
 @pytest.fixture(autouse=True)
 def _tree_binding():
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
-    for name in ("demiflow.execution.dataflow_handles", "demiflow.execution.dataflow_terminals"):
+    for name in ('demiflow.execution.outputs.dataflow_handles', 'demiflow.execution.outputs.terminals'):
         assert Path(sys.modules[name].__file__).resolve().is_relative_to(WORKTREE)
     yield
 
@@ -446,7 +446,7 @@ def test_t002():
 # --- T003 iterate_rows -----------------------------------------------------
 def test_t003():
     store = FakeStore()
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     payload = _encode_payload({"id": 9, "tag": "ref"}, max_bytes=1 << 20)
     ref = store.put(iter([payload]), max_bytes=len(payload) + 1, media_type="application/vnd.demiflow.record.v3")
     records = [make_record(0, row={"id": 0}), make_record(1, payload_ref=ref)]

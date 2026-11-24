@@ -6,11 +6,12 @@ and its coverage validation. A single source ordinal never impersonates DAG
 coverage: the single-source/single-partition/no-channel case is an explicit
 degenerate vector, not a general assumption.
 """
+
+from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, CutRequest, SourceCursor
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 import re
 
-from ..recovery_contract import (
-    MAX_STATES, document, identifier, identity, RecoveryContractError,
-)
+from demiflow.execution.contracts.recovery_contract import MAX_STATES, document, identifier, identity, RecoveryContractError
 from .errors import ProtocolError
 
 CHECKPOINT_SCHEMA = "demiflow.checkpoint_manifest.v1"
@@ -276,3 +277,85 @@ def recovery_route(run_facts):
     if run_facts.get("artifact_manifest_ref") is None:
         return "legacy"
     return "protocol"
+
+
+def artifact_json(ref: ArtifactRef) -> dict:
+    return {"digest": ref.digest, "size_bytes": ref.size_bytes,
+            "store_id": ref.store_id, "key": ref.key, "media_type": ref.media_type}
+
+
+def artifact_from_json(value) -> ArtifactRef:
+    if type(value) is not dict or set(value) != {
+            "digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in recovery image")
+    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
+                       store_id=value["store_id"], key=value["key"],
+                       media_type=value["media_type"])
+
+
+def cursor_json(cursor: SourceCursor) -> dict:
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    return {"split_id": cursor.split_id, "offset": thaw_record_value(cursor.offset),
+            "next_sequence": cursor.next_sequence, "end_of_input": cursor.end_of_input,
+            "lease_ref": artifact_json(cursor.lease_ref) if cursor.lease_ref is not None else None,
+            "pending_refs": [artifact_json(r) for r in cursor.pending_refs]}
+
+
+def cursor_from_json(value) -> SourceCursor:
+    if type(value) is not dict or set(value) != {
+            "split_id", "offset", "next_sequence", "end_of_input", "lease_ref", "pending_refs"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid source cursor in recovery image")
+    return SourceCursor(
+        split_id=value["split_id"], offset=value["offset"],
+        next_sequence=value["next_sequence"], end_of_input=value["end_of_input"],
+        lease_ref=artifact_from_json(value["lease_ref"]) if value["lease_ref"] is not None else None,
+        pending_refs=tuple(artifact_from_json(r) for r in value["pending_refs"]))
+
+
+def cut_json(cut: CutRequest) -> dict:
+    return {"cut_id": cut.cut_id, "sequence": cut.sequence,
+            "plan_revision": cut.plan_revision, "route_epoch": cut.route_epoch,
+            "participants": list(cut.participants), "final": cut.final}
+
+
+def cut_from_json(value) -> CutRequest:
+    if type(value) is not dict or set(value) != {
+            "cut_id", "sequence", "plan_revision", "route_epoch", "participants", "final"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid cut request in recovery image")
+    return CutRequest(cut_id=value["cut_id"], sequence=value["sequence"],
+                      plan_revision=value["plan_revision"], route_epoch=value["route_epoch"],
+                      participants=tuple(value["participants"]), final=value["final"])
+
+
+def contribution_json(contribution: CutContribution) -> dict:
+    from demiflow.execution.contracts.dataflow import thaw_record_value
+    return {"cut_id": contribution.cut_id, "participant_id": contribution.participant_id,
+            "boot_id": contribution.boot_id,
+            "sources": [cursor_json(c) for c in contribution.sources],
+            "operator_states": {k: artifact_json(v) for k, v in contribution.operator_states.items()},
+            "channels": thaw_record_value(contribution.channels),
+            "buffers": [artifact_json(r) for r in contribution.buffers],
+            "effects": [artifact_json(r) for r in contribution.effects],
+            "sinks": {k: artifact_json(v) for k, v in contribution.sinks.items()},
+            "final": contribution.final}
+
+
+def contribution_from_json(value) -> CutContribution:
+    if type(value) is not dict or set(value) != {
+            "cut_id", "participant_id", "boot_id", "sources", "operator_states",
+            "channels", "buffers", "effects", "sinks", "final"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid cut contribution in recovery image")
+    return CutContribution(
+        cut_id=value["cut_id"], participant_id=value["participant_id"],
+        boot_id=value["boot_id"],
+        sources=tuple(cursor_from_json(c) for c in value["sources"]),
+        operator_states={k: artifact_from_json(v) for k, v in value["operator_states"].items()},
+        channels={k: dict(v) for k, v in value["channels"].items()},
+        buffers=tuple(artifact_from_json(r) for r in value["buffers"]),
+        effects=tuple(artifact_from_json(r) for r in value["effects"]),
+        sinks={k: artifact_from_json(v) for k, v in value["sinks"].items()},
+        final=value["final"])
+
+
+def contribution_digest(contribution: CutContribution) -> str:
+    return identity(contribution_json(contribution))

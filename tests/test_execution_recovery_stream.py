@@ -8,9 +8,9 @@ from unittest.mock import patch
 
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef, RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RunRef, RecoveryContractError
 
 
 class Counter:
@@ -69,7 +69,7 @@ def run_graph(root, window=None):
     with ExitStack() as stack:
         stack.enter_context(patch.object(DataflowCheckpointCoordinator, 'recover', observe_recovery))
         if window and window != 'during_batch':
-            stack.enter_context(patch('demiflow.execution.commit.fault_point', interrupt))
+            stack.enter_context(patch('demiflow.execution.checkpoint.commit.fault_point', interrupt))
         run = stack.enter_context(scope)
         rows = [{"id": i} for i in range(1093)] + [{"id": 1}] * 7
         materialized = data.from_items(rows).map_async(Counter(), concurrency=1).materialize()
@@ -149,7 +149,8 @@ def test_real_actor_state_outputs_and_occurrences_resume_together(tmp_path, monk
 
 
 def test_actor_without_state_contract_fails_before_first_call(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
     calls = tmp_path/'calls'
     class UnsafeCounter:
         def __init__(self):
@@ -160,10 +161,10 @@ def test_actor_without_state_contract_fails_before_first_call(tmp_path, monkeypa
                 stream.write(json.dumps(row)+'\n')
             self.n += 1
             return row
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
     def checkpoint(options, limits, **kwargs):
         return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', checkpoint)
     with pytest.raises(RecoveryContractError, match="snapshot_state"):
         with RunContext.start(tmp_path / "run") as run:
             data.range(10).map_async(UnsafeCounter).materialize()
@@ -174,7 +175,8 @@ def test_actor_without_state_contract_fails_before_first_call(tmp_path, monkeypa
 
 @pytest.mark.parametrize('resource', ['lock', 'task'])
 def test_checkpoint_factory_rejection_closes_started_resources_once(tmp_path, monkeypatch, resource):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
     events = tmp_path/'lifecycle'
     class ResourceActor:
         def __init__(self):
@@ -206,10 +208,10 @@ def test_checkpoint_factory_rejection_closes_started_resources_once(tmp_path, mo
             if resource == 'task':
                 assert self.resource.done()
             self.event('closed')
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
     def checkpoint(options, limits, **kwargs):
         return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', checkpoint)
     with pytest.raises(RecoveryContractError, match='required_recovery=checkpoint'):
         with RunContext.start(tmp_path/'run') as run:
             data.from_items([{'id': 1}]).map_async(ResourceActor).materialize()
@@ -220,7 +222,8 @@ def test_checkpoint_factory_rejection_closes_started_resources_once(tmp_path, mo
 
 @pytest.mark.parametrize('hooks', [False, True])
 def test_checkpoint_accepts_plain_state_and_explicit_hooks(tmp_path, monkeypatch, hooks):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
     class PlainCounter:
         def __init__(self):
             self.n = 0
@@ -232,10 +235,10 @@ def test_checkpoint_accepts_plain_state_and_explicit_hooks(tmp_path, monkeypatch
             return {'n': self.n}
         def restore_state(self, state):
             self.n = state['n']
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
     def checkpoint(options, limits, **kwargs):
         return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', checkpoint)
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}) as run:
         rows = data.from_items([{'id': i} for i in range(4)]).map_async(
             HookCounter if hooks else PlainCounter).materialize().take_all()
@@ -288,9 +291,10 @@ def test_opaque_actor_default_attempt_only_is_recorded_and_cannot_resume(tmp_pat
 
 
 def test_resume_keeps_sealed_checkpoint_requirement_over_current_default(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     calls = tmp_path/'calls'
     class RuntimeResourceCounter:
         def __init__(self):
@@ -304,7 +308,7 @@ def test_resume_keeps_sealed_checkpoint_requirement_over_current_default(tmp_pat
             return {**row, 'n': self.n}
     def dataset():
         return data.from_items([{'id': i} for i in range(10)]).map_async(RuntimeResourceCounter)
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
     def checkpoint(options, limits, **kwargs):
         return resolve({**options, 'required_recovery': 'checkpoint'}, limits, **kwargs)
     class AfterAck(Exception):
@@ -319,7 +323,7 @@ def test_resume_keeps_sealed_checkpoint_requirement_over_current_default(tmp_pat
         with RunContext.start(tmp_path/'run', limits={'checkpoint_rows': 2}) as run:
             reference = run.ref
             with monkeypatch.context() as scoped:
-                scoped.setattr(dataflow_api, 'resolve_runtime_policy', checkpoint)
+                scoped.setattr(action_limits, 'resolve_runtime_policy', checkpoint)
                 scoped.setattr(DataflowCheckpointCoordinator, 'commit', stop)
                 dataset().materialize()
     physical = load_sealed_plan(reference.directory, 'action-1')['physical']

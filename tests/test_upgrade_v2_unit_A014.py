@@ -4,7 +4,7 @@ from contextlib import closing
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext, current_action
+from demiflow.execution.pipeline.run_context import RunContext, current_action
 
 
 def test_public_take_records_one_action_and_rejects_negative_limit_before_work(tmp_path):

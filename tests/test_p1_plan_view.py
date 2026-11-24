@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from demiflow import data
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import LogicalPlan
-from demiflow.execution import checked
+from demiflow.execution.pipeline import checked
 
 
 def test_checked_prefix_rebinding_keeps_view_owner_without_constructing_dataset(monkeypatch):

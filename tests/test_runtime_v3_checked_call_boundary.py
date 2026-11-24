@@ -6,7 +6,7 @@ from demiflow import data
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.flow_contract import scalar,field
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def checked(ds,*,batch=False):

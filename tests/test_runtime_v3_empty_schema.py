@@ -5,7 +5,7 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def typed_source(tmp_path, kind):
@@ -113,7 +113,7 @@ def test_filter_projection_keeps_declared_empty_types_and_field_order(tmp_path):
 
 def test_schema_metadata_is_bounded_and_corruption_is_not_inferred():
     from test_runtime_v3_k import Bounds
-    from demiflow.execution.dataflow_schema import encode, decode
+    from demiflow.execution.contracts.record_schema import encode, decode
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     bounds = Bounds(max_row_bytes=64, max_batch_bytes=128, max_control_bytes=128)
     with pytest.raises(DataflowError, match='budget'):
@@ -128,9 +128,10 @@ def test_combined_schema_conflict_rejected_and_legacy_missing_field_preserved():
     # Component check for the original sink-combine authority. No alternate
     # publication or row execution is introduced by this store-boundary fixture.
     from test_runtime_v3_k import services
-    from demiflow.execution.record_schema import RecordSchemas
-    from demiflow.execution.dataflow_sinks import combine_prepared_sinks, _artifact_json, RECORDS_MEDIA, MANIFEST_MEDIA
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.storage.record_schema import RecordSchemas
+    from demiflow.execution.outputs.sinks import combine_prepared_sinks
+    from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _artifact_json, RECORDS_MEDIA, MANIFEST_MEDIA
+    from demiflow.execution.contracts.recovery_contract import document
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     svc = services()
     schemas = RecordSchemas(svc)
@@ -146,9 +147,9 @@ def test_combined_schema_conflict_rejected_and_legacy_missing_field_preserved():
     left = manifest(0, pa.schema([('k', pa.int32())]))
     right = manifest(1, pa.schema([('k', pa.large_string())]))
     with pytest.raises(DataflowError, match='schema drifted'):
-        combine_prepared_sinks([left, right], sink_id='materialize', services=svc)
+        combine_prepared_sinks([left, right], sink_id='materialize', store=svc.store, bounds=svc.bounds)
     old = manifest(0, None)
-    combined = combine_prepared_sinks([old], sink_id='materialize', services=svc)
+    combined = combine_prepared_sinks([old], sink_id='materialize', store=svc.store, bounds=svc.bounds)
     assert 'schema_ref' not in combined
 
 

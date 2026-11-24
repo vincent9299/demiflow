@@ -62,19 +62,19 @@ if mode == 'supervise':
     finally:
         observe('finish')
 elif mode == 'execute':
-    from demiflow.execution.runtime_limits import RECOVERY_LIMITS
+    from demiflow.planning.dataflow_policy import RECOVERY_LIMITS
     if window.get('image_checkpoint_fixture') and 'checkpoint_rows' in RECOVERY_LIMITS:
         # Bind a deterministic row-trigger workload in each isolated attempt;
         # these defaults are recorded in the native recovery identity.
         RECOVERY_LIMITS.update(checkpoint_rows=128, checkpoint_interval_ms=60000)
-    from demiflow.execution.run_context import current_run
-    import demiflow.execution.commit as protocol
-    from demiflow.execution.object_sink import ObjectSink
+    from demiflow.execution.pipeline.run_context import current_run
+    import demiflow.execution.checkpoint.commit as protocol
+    from demiflow.execution.outputs.object_sink import ObjectSink
     def pause(commit_id=None, run=None):
         run = run or current_run()
         fact = run.journal.execution_commit(commit_id) if commit_id else None
         observe('fault')
-        from demiflow.execution.state_artifacts import StateArtifacts
+        from demiflow.execution.storage.state_artifacts import StateArtifacts
         cut = (StateArtifacts(run).read(fact['prepared']['state']['dataflow-cut-v3'])
                if fact and 'dataflow-cut-v3' in fact['prepared'].get('state', {}) else None)
         write_json(Path(root)/'joint_fault_ready.json',dict(window=window['window'],fact=fact,cut=cut,run_id=run.ref.run_id))
@@ -91,7 +91,7 @@ elif mode == 'execute':
             fact = run.journal.execution_commit(commit_id)
             final=window['window'].startswith('final_')
             point=window['window'].removeprefix('final_') if final else window['window']
-            from demiflow.execution.state_artifacts import StateArtifacts
+            from demiflow.execution.storage.state_artifacts import StateArtifacts
             state = (fact.get('prepared') or {}).get('state', {}).get('dataflow-cut-v3')
             cut = StateArtifacts(run).read(state) if state else None
             matches = bool(cut) and (

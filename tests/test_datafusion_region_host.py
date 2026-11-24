@@ -3,7 +3,7 @@ import os
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution import datafusion as host
+from demiflow.execution.hosts import datafusion as host
 
 
 # The calling relation owns table and column semantics. This exercises the

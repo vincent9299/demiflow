@@ -7,7 +7,7 @@ import pytest
 
 from demiflow.collect.native_search import SearchConfig, NativeSearchSession
 from demiflow.collect.search_sessions import RenewableSearchRoutePool, session_pool_policy
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 from test_search_route_pool import fixture
 
 

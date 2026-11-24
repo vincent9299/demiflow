@@ -257,7 +257,7 @@ def test_missing_pack_and_unsupported_executor_fail_at_declaration():
 def test_bundle_discovers_async_prompt_configuration(tmp_path,monkeypatch,method):
     from types import SimpleNamespace
     import demiflow.pipeline
-    import demiflow.execution.pipeline_sources
+    import demiflow.execution.seal.pipeline_sources
     from demiflow.operator_llm.parser import load_referenced_prompt_packs
     pipeline=tmp_path/'pipeline';pipeline.mkdir()
     source=pipeline/'main.py'
@@ -268,7 +268,7 @@ def test_bundle_discovers_async_prompt_configuration(tmp_path,monkeypatch,method
         agent_path, _, _ = entries(pipeline)
         (pipeline/'p.yaml').write_text(agent_path.read_text())
     monkeypatch.setattr(demiflow.pipeline,'discover_pipeline_definition',lambda root:SimpleNamespace(entrypoint='main.py'))
-    monkeypatch.setattr(demiflow.execution.pipeline_sources,'reachable_pipeline_sources',lambda root,entrypoint:[source])
+    monkeypatch.setattr(demiflow.execution.seal.pipeline_sources,'reachable_pipeline_sources',lambda root,entrypoint:[source])
     assert set(load_referenced_prompt_packs(tmp_path))=={'p.yaml'}
 
 

@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from ..data.runtime_contract import RuntimeContractError
-from ..execution.recovery_contract import document, identifier, identity
-from ..execution.recovery_identity import describe, source_identity
+from demiflow.execution.contracts.recovery_contract import document, identifier, identity
+from demiflow.execution.seal.program_identity import describe, source_identity
 from .traits import (
     unified_operation_traits, unified_source_traits, unified_terminal_traits,
 )
@@ -38,7 +38,7 @@ def _traits_dict(traits):
 
 
 def _operation_semantics(operation):
-    from ..execution.plan_facts import operation_capability, operation_facts
+    from demiflow.execution.seal.plan_facts import operation_capability, operation_facts
     try:
         facts = operation_facts(operation)
     except (RuntimeContractError, RuntimeError, ValueError):
@@ -159,7 +159,7 @@ def compile_declared_dag(*, action_id, nodes, edges, descriptors):
     structure reuses plan_facts.execution_instances, so shared bridges keep the
     existing reuse semantics and every ancestor executes once per action.
     """
-    from ..execution.plan_facts import execution_instances
+    from demiflow.execution.seal.plan_facts import execution_instances
     identifier(action_id)
     by_id = {node["id"]: node for node in nodes}
     instances = execution_instances(nodes, edges, [action_id])

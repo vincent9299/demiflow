@@ -34,9 +34,9 @@ from demiflow.data.plan import CallableSpec, FilterOp, LogicalPlan, MapOp, MapSt
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.ray import RayDatasetExecutor
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.resource_state import RunResourceState
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.hosts.run_state import RunResourceState
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.contracts import (
     RESOURCE_PROTOCOL_VERSION, MutationContext, ResourcePlan, ResourceProfile,
     ResourceScope, WorkerLaunchSpec, WorkerRequest,
@@ -106,9 +106,9 @@ def _commit_shape(run):
 def _k6_shapes(run, execution, expected):
     """Verify native cuts/retained ACK proofs and every ordered published prefix."""
     import hashlib
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
-    from demiflow.execution.dataflow_record_frames import document_limit
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.outputs.replay import PublishedRecordReader
+    from demiflow.execution.contracts.record_codec import document_limit
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     shapes, inherited, prior_ids, growth = [], {}, [], []
     for fact in run.journal.execution_commits(_chain_child_id(run)):
         assert fact['status'] == 'acked'
@@ -170,7 +170,7 @@ def _k6_shapes(run, execution, expected):
 # ---------------- SEM: same plan/source, two providers, identical semantics ----------------
 
 def test_sem_local_ray_equivalence(tmp_path, ray_cluster, monkeypatch):
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     original = dataflow_api.execute_action
     executions = []
     def observe(request, **kwargs):

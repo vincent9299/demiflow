@@ -15,7 +15,7 @@ import httpx
 from PIL import Image
 
 from .objects import ObjectRef
-from .execution.artifacts import digest
+from demiflow.execution.contracts.artifact import digest
 
 
 def checked_image(raw, *, max_bytes, max_pixels=24_000_000):

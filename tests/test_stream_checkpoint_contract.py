@@ -7,9 +7,9 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RecoveryContractError, RunRef
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
@@ -166,7 +166,7 @@ def test_legacy_checkpoint_cannot_supply_declared_resource_read(tmp_path):
 
 @pytest.mark.parametrize('commit_number', [1, 2])
 def test_recovery_after_table_commit_before_checkpoint_publish(tmp_path, monkeypatch, commit_number):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     schema, outputs = declared(tmp_path)
     rows = [{'id': 'a'}, {'id': 'b'}]
     calls = []

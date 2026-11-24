@@ -39,8 +39,8 @@ __all__ = [
 # resolved from their original modules and cached, preserving object identity.
 _EXPORTS = {
     **{name: (".pipeline", name) for name in ("Pipeline", "PipelineProgram", "ResourceAPI")},
-    "StreamCheckpoint": (".execution.stream_checkpoint", "StreamCheckpoint"),
-    "AdmissionQuotaReader": (".execution.stream_admission", "AdmissionQuotaReader"),
+    "StreamCheckpoint": ('demiflow.execution.executors.stream_checkpoint', "StreamCheckpoint"),
+    "AdmissionQuotaReader": ('demiflow.operators.admission', "AdmissionQuotaReader"),
     "data": (".data", None),
     **{name: (".data", name) for name in (
         "Dataset", "MaterializedDataset", "Datasource", "Datasink", "ReadTask",

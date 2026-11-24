@@ -149,7 +149,7 @@ def test_publish_does_not_sleep_over_credit_ack_between_check_and_wait():
         release=lambda key: operations.append(('release', key)),
         put=lambda raw: operations.append(('put', raw)) or {'key':'new-buffer'})
     value._send = lambda kind,payload: sent.append((kind,payload))
-    from demiflow.execution.kernels.dataflow import _row_bytes
+    from demiflow.execution.contracts.record_codec import row_bytes as _row_bytes
     row = {'row':1}
     record = make('Record', inline=row, encoded_bytes=_row_bytes(row, max_bytes=value.bounds.max_row_bytes))
     def ack():

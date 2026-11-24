@@ -77,7 +77,7 @@ class ImageLibrary:
                     db.execute('INSERT OR IGNORE INTO image_library_meta VALUES (?,?)', ('object_directory', self.object_directory))
                     db.execute('INSERT OR IGNORE INTO image_library_meta VALUES (?,?)', ('schema_version', '1'))
             meta = dict(db.execute('SELECT key,value FROM image_library_meta'))
-            from demiflow.execution.artifacts import resolve_local_artifact
+            from demiflow.execution.storage.artifacts import resolve_local_artifact
             if (meta.get('schema_version') != '1' or
                 resolve_local_artifact(meta['object_directory']) != resolve_local_artifact(self.object_directory)):
                 raise ValueError('Image index is bound to a different library/schema')

@@ -6,7 +6,7 @@ import pytest
 
 from demiflow.data.sources import MaterializedSource
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.checked import CheckedExecution
+from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
 from demiflow.forge.schema import ForgeError

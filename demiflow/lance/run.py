@@ -4,12 +4,12 @@ The application provides a row schema and pure row encoders. This class stores
 run identity, stage references and revisions; it does not schedule business steps.
 """
 from pathlib import Path
-from ..execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from .refs import DatasetRef
 from .registry import Catalog
 from .checkpoint import read_checkpoint_record
 from .storage import schema_hash
-from ..execution.artifacts import digest
+from demiflow.execution.contracts.artifact import digest
 from ..data.api import DataAPI
 
 

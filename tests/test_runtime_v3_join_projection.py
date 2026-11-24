@@ -7,10 +7,10 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import Record
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_finite_input import validate_finite_members
+from demiflow.execution.worker.finite_input import validate_finite_members
 from demiflow.execution.kernels.operator import _SpoolPort
 from demiflow.execution.kernels.join_spool import _EncodedJoinInput, join_pairs
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_finite_borrow import fixture, make_seal, record
 
@@ -26,7 +26,7 @@ def port_for(svc, seal, spec):
 @pytest.mark.parametrize('routing', ['forward', 'rebalance', 'broadcast', 'hash', 'target'])
 @pytest.mark.parametrize('restore', [False, True])
 def test_join_projection_keeps_original_routes_and_revalidates_after_restore(tmp_path, monkeypatch, routing, restore):
-    from demiflow.execution import dataflow_finite_input as finite
+    from demiflow.execution.worker import finite_input as finite
     with store_fixture(tmp_path) as (run, store, _):
         svc, spec = fixture(store, routing=routing)
         seal, _, expected = make_seal(svc, spec)
@@ -83,7 +83,7 @@ def test_projection_capability_cannot_change_binding_or_cross_store(tmp_path):
         with pytest.raises(DataflowError, match='full-scan proof'):
             list(port.records().for_join(('key',)))
         fresh = port_for(svc, seal, spec)
-        from demiflow.execution.dataflow_finite_input import borrowed_join_records
+        from demiflow.execution.worker.finite_input import borrowed_join_records
         proof = fresh._borrowed_proofs[0]
         foreign = SimpleNamespace(**{**vars(svc), 'store': object()})
         with pytest.raises(DataflowError, match='full-scan proof'):
@@ -97,7 +97,7 @@ def test_projection_capability_cannot_change_binding_or_cross_store(tmp_path):
 
 
 def test_projection_falls_back_when_same_row_window_cannot_hold_copies(tmp_path):
-    from demiflow.execution.dataflow_finite_input import borrowed_join_records
+    from demiflow.execution.worker.finite_input import borrowed_join_records
     with store_fixture(tmp_path) as (_, store, _):
         svc, spec = fixture(store)
         seal, _, expected = make_seal(svc, spec)
@@ -113,7 +113,7 @@ def test_projection_falls_back_when_same_row_window_cannot_hold_copies(tmp_path)
 @pytest.mark.parametrize('how', ['inner', 'left', 'semi', 'anti'])
 def test_join_key_codec_matches_original_for_null_binary_tuple_negative_zero_and_skew(tmp_path, how):
     from demiflow.execution.kernels.join_spool import project_join_document
-    from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
+    from demiflow.execution.contracts.record_codec import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
         values = [None, b'bytes', ('a', 7), -0.0, 0.0, 3, *([9]*15)]
@@ -158,9 +158,9 @@ def test_duplicate_declared_keys_keep_original_row_admission(tmp_path):
 
 def test_projected_scratch_preserves_original_schema_provenance_and_document_bytes(tmp_path):
     import pyarrow as pa
-    from demiflow.execution.record_schema import RecordSchemas
-    from demiflow.execution.kernels.join_spool import project_join_document, _Spool
-    from demiflow.execution.exchange.dataflow_bridge import _encode_record_document
+    from demiflow.execution.storage.record_schema import RecordSchemas
+    from demiflow.execution.kernels.join_spool import project_join_document, bind_spool
+    from demiflow.execution.contracts.record_codec import _encode_record_document
     with store_fixture(tmp_path) as (_, store, _):
         svc, _ = fixture(store)
         schemas = RecordSchemas(svc)
@@ -171,7 +171,7 @@ def test_projected_scratch_preserves_original_schema_provenance_and_document_byt
             max_bytes=svc.bounds.max_row_bytes,fields=('k',),row_window=svc.bounds.max_resident_bytes//4)
         assert type(projected) is _EncodedJoinInput
         with store.scratch(max_bytes=svc.bounds.max_spill_bytes,max_io_bytes=svc.bounds.max_resident_bytes//4) as file:
-            spool = _Spool(file,svc)
+            spool = bind_spool(file,svc)
             offset,_ = spool.append(projected,('k',))
             recovered = spool.record(offset,spool.header(offset))
             assert recovered == source
@@ -186,7 +186,7 @@ def test_fixed_lance_probe_filters_before_finite_port_and_preserves_right_multip
     from demiflow.execution import RunContext
     from demiflow.execution.kernels.operator import _SpoolPort
     from demiflow.execution.contracts.relational_region import JOIN_PROBE_SUFFIX
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
     uri = str(tmp_path/'left.lance')
     source = lance.write_dataset(pa.table({'k': pa.array([2, -1, 1, 2, None, 6], type=pa.int32()),
@@ -332,7 +332,7 @@ def test_fixed_join_honors_original_source_credit_once(tmp_path, right_key):
     import pyarrow as pa
     from demiflow import data
     from demiflow.execution import RunContext
-    from demiflow.execution.source_readers import _encoded_size
+    from demiflow.execution.sources.source_readers import _encoded_size
 
     row = {'k':1, 'body':b'x'*512}
     source = lance.write_dataset(pa.table({'k':pa.array([1],type=pa.int64()),

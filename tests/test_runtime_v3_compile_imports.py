@@ -13,7 +13,7 @@ import pathlib
 import sys
 import demiflow
 assert pathlib.Path(demiflow.__file__).resolve().is_relative_to(pathlib.Path.cwd())
-blocked = {'demiflow.execution.dataflow_stream_lance', 'demiflow.execution.stream_lance',
+blocked = {'demiflow.execution.native_queue.dataflow_stream_lance', 'demiflow.execution.native_queue.stream_lance',
            'demiflow.operator_llm.runtime', 'demiflow.lance.search'}
 assert not blocked.intersection(sys.modules)
 class Guard(importlib.abc.MetaPathFinder):

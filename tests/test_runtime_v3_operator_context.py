@@ -7,12 +7,12 @@ import pytest
 from demiflow import data
 from demiflow.execution import RunContext, current_run
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def _record(path, phase):
-    from demiflow.execution.run_context import current_action
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.pipeline.run_context import current_action
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     run = current_run()
     assert run is not None and current_action() is None
     assert not hasattr(run, 'journal') and not hasattr(run, 'reserve')

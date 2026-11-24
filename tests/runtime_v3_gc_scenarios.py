@@ -15,7 +15,7 @@ def disk_gc(fx, fault):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.storage.gc import collect_published_orphans
-    from demiflow.execution.run_context import current_run
+    from demiflow.execution.pipeline.run_context import current_run
 
     def consumed(run):
         with run.journal._connection() as db:

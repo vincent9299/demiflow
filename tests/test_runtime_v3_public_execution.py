@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _rows():
@@ -47,7 +47,7 @@ def test_materialized_count_uses_authenticated_rows_and_records_action(tmp_path)
 @pytest.mark.parametrize('damage', ['missing', 'same-size', 'manifest'])
 def test_materialized_count_rejects_damaged_input(tmp_path, damage):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_segments import segment_refs
+    from demiflow.execution.storage.segments import segment_refs
     with pytest.raises(DataflowError) as rejected, RunContext.start(tmp_path / 'run') as run, data.local_execution():
         stored = data.from_items(_rows()).map(lambda row: row).materialize()
         handle = stored._source.handle
@@ -73,7 +73,7 @@ def test_materialized_count_rejects_damaged_input(tmp_path, damage):
 @pytest.mark.parametrize('change', ['mtime', 'replace-before-reopen', 'damaged', 'missing'])
 def test_completed_direct_count_reopens_its_receipt_without_sealing(tmp_path, change):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.dataflow_segments import segment_refs
+    from demiflow.execution.storage.segments import segment_refs
 
     def materialize():
         return data.from_items(_rows()).map(lambda row: row).materialize()
@@ -202,7 +202,7 @@ def test_partial_cut_restores_input_kernel_and_terminal_prefix(tmp_path, monkeyp
 
 def test_public_lance_write_recovery_after_prepared(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     class Interrupted(Exception):
         pass
     def fault(name, commit_id):
@@ -409,7 +409,7 @@ def test_private_actor_state_resumes_at_committed_prefix(tmp_path, monkeypatch):
 
 def test_resource_actor_partial_resume_rejects_before_any_new_call(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     log = str(tmp_path / 'calls')
     class ResourceActor:
         def __init__(self):

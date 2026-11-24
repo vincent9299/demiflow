@@ -5,7 +5,7 @@ import os
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _worker_event_fixtures import emit, events
 
 
@@ -57,7 +57,7 @@ def test_worker_factory_constructs_only_invoked_slot(tmp_path, worker_mode):
     observed = events(path)
     assert [item['event'] for item in observed] == ['construct', 'start', 'call', 'stop', 'close']
     assert all((item['pid'] != os.getpid()) == (worker_mode == 'process') for item in observed)
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     sealed = load_sealed_plan(run.ref.directory, 'action-1')
     assert sealed['physical'].policy.worker_mode == ('thread' if worker_mode == 'thread' else None)
     assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
@@ -171,7 +171,7 @@ def test_factory_checkpoint_restores_only_previously_constructed_slots(tmp_path,
 
 
 def test_cancel_wire_mapping_is_closed_and_preserves_cancellation_type():
-    from demiflow.execution.dataflow_failures import failure_payload, restore_failure
+    from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     error = restore_failure(failure_payload(asyncio.CancelledError('caller stopped')))
     assert type(error) is asyncio.CancelledError and str(error) == 'caller stopped'

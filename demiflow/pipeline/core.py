@@ -95,7 +95,7 @@ class Pipeline:
 
         started = time.monotonic()
         from .context import ProgramContext
-        from ..execution.run_context import execution_scope
+        from demiflow.execution.pipeline.run_context import execution_scope
         try:
             with execution_scope() as run, _use_executor(dataset_executor):
                 dataset_executor._run_ref = run.ref

@@ -12,6 +12,16 @@ The historical code-pin (``chain.plan_code_pin``) and identity-bridge
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.record_schema import KEY, decode
+
+from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
+
+from demiflow.execution.contracts.dataflow import EXECUTION_LIMITS, DELIVERY_LIMIT
+
+import json
+from demiflow.execution.contracts.dataflow import WorkerAssignment
+from demiflow.execution.storage.objects import RunArtifactStore
+
 import hashlib
 import secrets
 from dataclasses import replace
@@ -30,11 +40,11 @@ from ..contracts.dataflow_codec import (
     compute_graph_digest, compute_physical_digest, decode_wire, encode_wire,
 )
 from ..contracts.dataflow_errors import DataflowError
-from ..identity_bridge import build_identity_bridge
-from ..recovery_contract import RecoveryContractError, document, identifier, identity
-from ..recovery_identity import describe
-from ..run_context import RunAction
-from ..run_journal import RunJournal
+from demiflow.execution.seal.identity_bridge import build_identity_bridge
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
+from demiflow.execution.seal.program_identity import describe
+from demiflow.execution.pipeline.run_context import RunAction
+from demiflow.execution.journal.run_journal import RunJournal
 
 SEAL_SCHEMA = "demiflow.dataflow_seal.v3"
 TRAINING_SEAL_SCHEMA = "demiflow.dataflow_seal.v4"
@@ -155,10 +165,10 @@ def _program_value(declaration: ProgramDeclaration):
         return declaration.callable_spec
     if declaration.source_spec is not None:
         from ...data.sources import DatasourceSource
-        from ..queue_source import QueueDatasource
+        from demiflow.execution.native_queue.queue_source import QueueDatasource
         source = declaration.source_spec
         if isinstance(source, DatasourceSource) and type(source.datasource) is QueueDatasource:
-            from ..dataflow_acquisition_call import QueueSourceDeclaration
+            from demiflow.execution.native_queue.dataflow_acquisition_call import QueueSourceDeclaration
             return replace(source, datasource=QueueSourceDeclaration(source.datasource.declaration()))
         return source
     if declaration.action_program is not None:
@@ -207,34 +217,17 @@ def _code_identity_from_value(kind, value, *, sources=None):
             'imports': source_identity(business_sources(kind, value) if sources is None else sources)}
 
 
-
 def _matches_original_program(kind, value, expected):
-    actual = _code_identity_from_value(kind, value)
-    expected_digest = identity(expected)
-    if identity(actual) == expected_digest:
-        return True
-    if kind != 'callable' or type(value) is not CallableSpec:
-        return False
-    # This is a fresh plan_code_pin for one MapOp. Business arguments, the
-    # entire code record and every dependency remain in the digest comparison.
-    from ..recovery_sdk_v3 import routing_source_revisions
-    revisions = routing_source_revisions(value.target)
-    if revisions is None:
-        return False
-    target = actual['operations'][0]['fields']['callable']['fields']['target']
-    if target['source_hash'] != revisions[0]:
-        return False
-    target['source_hash'] = revisions[1]
-    return identity(actual) == expected_digest
+    return identity(_code_identity_from_value(kind, value)) == identity(expected)
 
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
                        live_binding=None, force_live=False, shared_payload=None) -> ArtifactRef:
-    from ..dataflow_program_pickle import stage_payload
+    from demiflow.execution.seal.program_pickle import stage_payload
     kind = _program_kind(declaration)
     value = _program_value(declaration)
     if kind == 'source':
-        from ..literal_source import literal_reference
+        from demiflow.execution.sources.literal_source import literal_reference
         literal = literal_reference(value, bounds)
         if literal is not None:
             value = literal
@@ -251,7 +244,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
         payload_ref = None if force_live else stage_payload(
             value, store=store, media_type=PAYLOAD_MEDIA, allow_live=live_binding is not None)
     if payload_ref is None:
-        from ..dataflow_thread_programs import marker
+        from demiflow.execution.seal.thread_programs import marker
         manifest['thread_attempt'] = marker(declaration.occurrence_id, code_identity)
     else:
         manifest['payload_ref'] = _artifact_json(payload_ref)
@@ -259,7 +252,7 @@ def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds
     raw = document(manifest, bounds.max_control_bytes)
     ref = store.put(iter([raw]), max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if 'thread_attempt' in manifest:
-        from ..dataflow_thread_programs import register
+        from demiflow.execution.seal.thread_programs import register
         register(value, binding=live_binding, occurrence_id=declaration.occurrence_id,
                  max_entries=bounds.max_nodes, program_marker=manifest['thread_attempt'])
     return ref
@@ -278,13 +271,13 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         if declaration.occurrence_id in declarations:
             raise DataflowError("INVALID_CONTRACT", "Duplicate program declaration occurrence")
         declarations[declaration.occurrence_id] = declaration
-    from ..dataflow_shared import shared_binding
+    from demiflow.execution.contracts.dataflow import shared_binding
     shared_payloads = {}
     for node in graph.nodes:
         binding = shared_binding(node.kernel.configuration, node.occurrence_id)
         if binding is None or binding['owner'] in shared_payloads:
             continue
-        from ..dataflow_program_pickle import stage_payload
+        from demiflow.execution.seal.program_pickle import stage_payload
         from .business_sources import business_sources, source_identity, stage_sources, MAX_SOURCES
         sources = {}
         for occ in binding['members']:
@@ -328,7 +321,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
         # Unserializable constructors still use the existing attempt-only path;
         # ordinary shared functions/instances must retain their live identity.
         thread_stream = bool(config.get('streaming_map') and config.get('execution') == 'thread')
-        from ..kernels.task_scope import owned_factory_declaration
+        from demiflow.execution.compiler_support.operator_policy import owned_factory_declaration
         owned_factory = (worker_mode == 'thread' and thread_stream
                          and owned_factory_declaration(declaration.callable_spec))
         force_live = bool(worker_mode == 'thread' and (live_iterator
@@ -336,7 +329,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
                           and node.kernel.kind == 'AsyncMapOp' and not config.get('task_batch_rows')))
         eligible = worker_mode == 'thread' and not config.get('task_batch_rows') and (
             thread_stream or force_live or node.kernel.kind == 'AsyncMapOp')
-        from ..dataflow_thread_programs import owner
+        from demiflow.execution.seal.thread_programs import owner
         ref = _stage_one_program(declaration, store=store, bounds=bounds,
             live_binding=owner(action) if eligible else None, force_live=force_live,
             shared_payload=shared_payloads.get(config.get("shared_actor", {}).get("owner")))
@@ -346,7 +339,7 @@ def stage_dataflow_programs(compiled: CompiledDataflow, *, action: RunAction,
             node = replace(node, kernel=replace(node.kernel, state='nonrecoverable',
                 configuration={**_plain(config), 'thread_attempt': True}))
         elif config.get('task_batch_rows') and not config.get('shared_actor'):
-            from ..kernels.task_scope import task_uses_function_slots
+            from demiflow.execution.compiler_support.operator_policy import task_uses_function_slots
             if not task_uses_function_slots(_program_value(declaration)):
                 node = replace(node, kernel=replace(node.kernel, configuration={
                     **thaw_json(config), 'task_load_bytes': manifest['payload_ref']['size_bytes']}))
@@ -387,18 +380,18 @@ def verify_dataflow_program(ref: ArtifactRef, *, expected_pin, store, bounds: Bo
     if 'thread_attempt' in manifest:
         if 'payload_ref' in manifest:
             raise DataflowError('CORRUPT_ARTIFACT', 'live program cannot also claim a pickle payload')
-        from ..dataflow_thread_programs import lookup
+        from demiflow.execution.seal.thread_programs import lookup
         value = lookup(manifest['thread_attempt'], binding=live_binding,
                        occurrence_id=manifest['occurrence_id'])
     else:
         payload_ref = _artifact_from_json(manifest["payload_ref"])
-        from ..dataflow_shared import shared_binding
+        from demiflow.execution.contracts.dataflow import shared_binding
         binding = shared_binding(manifest, manifest['occurrence_id'])
         cached = shared_cache.get(binding['owner']) if binding and shared_cache is not None else None
         if cached is not None and (cached[0] != payload_ref or cached[1] != binding):
             raise DataflowError('CORRUPT_ARTIFACT', 'Shared actor program bundle differs between members')
         from ..contracts.dataflow_errors import MAX_MESSAGE_CHARS
-        from ..dataflow_program_pickle import load_payload, load_private_payload
+        from demiflow.execution.seal.program_pickle import load_payload, load_private_payload
         occurrence = manifest['occurrence_id']
 
         def load(*, private=False):
@@ -441,7 +434,7 @@ def verify_completed_live_program(ref, *, expected_pin, declaration, store, boun
     Current declarations are inspected, never instantiated or invoked.
     """
     from .business_sources import MAX_SOURCES, source_media
-    from ..dataflow_thread_programs import marker
+    from demiflow.execution.seal.thread_programs import marker
     manifest = _read_json(store, ref, max_bytes=bounds.max_control_bytes, media_type=PROGRAM_MEDIA)
     if type(manifest) is not dict:
         raise DataflowError('CORRUPT_ARTIFACT', 'completed live program manifest must be an object')
@@ -531,7 +524,7 @@ def resolve_execution_constants(graph: DataflowGraph, *, action: RunAction, stor
     constants = _generate_constants(graph)
     for occurrence, binding in (column_bindings or {}).items():
         constants.setdefault(occurrence, {}).update(binding)
-    from ..dataflow_managed_devices import service_constants
+
     for occurrence, value in service_constants(graph, policy=policy).items():
         constants.setdefault(occurrence, {}).update(value)
     raw = document({"schema": CONSTANTS_SCHEMA, "action_id": action.action_id,
@@ -588,7 +581,7 @@ def seal_dataflow(action: RunAction, graph: DataflowGraph, physical: PhysicalDat
     else:
         if bridge.get("action_id") != action.action_id or bridge.get("dag_id") != graph.dag_id:
             raise DataflowError("INVALID_CONTRACT", "report bridge differs from executed graph")
-        from ..identity_bridge import seal_identity_bridge
+        from demiflow.execution.seal.identity_bridge import seal_identity_bridge
         seal_identity_bridge(context, action, bridge)
     bridge_raw = document(bridge, bounds.max_control_bytes)
     identity_bridge_ref = store.put(iter([bridge_raw]), max_bytes=bounds.max_control_bytes, media_type=BRIDGE_MEDIA)
@@ -658,8 +651,15 @@ def load_dataflow(directory: Path, action_id: str, *, store, bounds: Bounds, _re
         raise DataflowError("INCOMPATIBLE_HISTORY", "Run journal is absent")
     facts = journal.source_binding(action_id + _SEAL_KEY)
     if facts is None:
-        from ..dataflow_history import load_execution_version
-        binding = load_execution_version(directory, action_id, max_bytes=bounds.max_state_bytes)
+        from demiflow.execution.seal.history import load_native_binding
+        native = journal.source_binding(action_id + "-sealed-plan")
+        if native is None:
+            raise DataflowError("INCOMPATIBLE_HISTORY",
+                               "action has no sealed plan facts (pre-seal run); cannot bind a historical execution")
+        identity = journal.recovery_identity()
+        run_id = identity.get("run_id") if type(identity) is dict else None
+        binding = load_native_binding(run_id, Path(directory), action_id, native,
+                                      max_bytes=bounds.max_state_bytes)
         raise DataflowError("INCOMPATIBLE_HISTORY",
                             "Historical action schema " + str(binding.schema_version)
                             + " is not a v3 sealed dataflow")
@@ -779,7 +779,7 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
             if action.replaying:
                 pending.append((node, expected))
                 continue
-            from ..dataflow_thread_programs import owner
+            from demiflow.execution.seal.thread_programs import owner
             live_binding = owner(action)
         verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                 bounds=bounds, live_binding=live_binding)
@@ -790,7 +790,7 @@ def validate_graph_replay(action, declaration, credit):
     """Verify original routing and admitted credit before creating any graph workers."""
     if action.context.journal.source_binding(action.action_id + _SEAL_KEY) is None:
         return
-    from ..sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     bundle = load_sealed_plan(action.context.directory, action.action_id)
     graph, physical = bundle['graph'], bundle['physical']
     originals = [node.kernel.configuration['arguments'].get('graph') for node in graph.nodes if node.occurrence_id in graph.terminals]
@@ -805,8 +805,9 @@ def validate_graph_replay(action, declaration, credit):
 
 def load_native_execution(run, action_id, *, execution_id):
     """Read one published v2 placement, using only its immutable F1 and bindings."""
-    from ..plan_interpreter import PlanContractError, interpret_physical_plan
-    from ..sealed_plans import load_execution_bindings, load_sealed_plan
+    from demiflow.execution.contracts.errors import PlanContractError
+    from demiflow.execution.seal.plan_interpreter import interpret_physical_plan
+    from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 
     sealed = load_sealed_plan(run.directory, action_id, version='v2')
     bindings = load_execution_bindings(run.directory, action_id, sealed_plan=sealed)
@@ -817,3 +818,141 @@ def load_native_execution(run, action_id, *, execution_id):
     if len(matches) != 1:
         raise PlanContractError("invalid_contract", "execution_id is absent or ambiguous in the sealed layout")
     return layout, matches[0]
+
+
+def read_execution_constants(ref: "ArtifactRef", *, store: RunArtifactStore, bounds: Bounds) -> dict:
+    raw = b"".join(store.read(ref, max_bytes=bounds.max_control_bytes))
+    value = json.loads(raw)
+    if type(value) is not dict:
+        raise DataflowError("INVALID_CONTRACT", "runtime constants must be a JSON object")
+    return value
+
+class _VerifiedPrograms(dict):
+    """Programs and policy returned from the same authenticated sealed plan."""
+    native_limits = None
+
+def load_worker_programs(assignment: WorkerAssignment, *, store: RunArtifactStore, bounds: Bounds, cache=None) -> dict[str, LoadedProgram]:
+    graph, physical, pin = load_sealed_dataflow(assignment.sealed,
+        action_id=assignment.action_id, store=store, bounds=bounds)
+    if physical.plan_id != assignment.plan_id:
+        raise DataflowError("CODE_MISMATCH", "loaded plan_id differs from the assignment")
+    if physical.plan_revision != assignment.plan_revision:
+        raise DataflowError("FENCED", "loaded plan_revision differs from the assignment")
+    if physical.policy.worker_mode == "thread":
+        cache = None  # Never mutate sys.path/module namespaces in the hosting process.
+    programs = _VerifiedPrograms()
+    programs.prediction_bindings = {}
+    programs.native_limits = physical.policy.native_limits
+    shared_cache = {}
+    owned = {occurrence for stage in assignment.stages for occurrence in stage.occurrences}
+    for node in graph.nodes:
+        if node.occurrence_id not in owned or node.program_ref is None:
+            continue
+        programs[node.occurrence_id] = verify_dataflow_program(
+            node.program_ref, expected_pin=pin["programs"][node.occurrence_id],
+            store=store, bounds=bounds, cache=cache, shared_cache=shared_cache,
+            live_binding={"run_id": assignment.run_id, "action_id": assignment.action_id,
+                          "attempt": assignment.attempt, "fence": assignment.fence})
+    if graph.jobs:
+        from demiflow.execution.contracts.dataflow import thaw_record_value
+        from demiflow.data.plan import CallableSpec
+        predictors = {n.occurrence_id: n.kernel.configuration for n in graph.nodes
+                      if n.occurrence_id in owned and 'predict_step' in n.kernel.configuration}
+        bindings = assignment.model_bindings
+        if bindings is None or bindings.keys() != predictors.keys():
+            raise DataflowError('INVALID_CONTRACT', 'Prediction assignment model membership differs from seal')
+        for occurrence, config in predictors.items():
+            model = thaw_record_value(bindings[occurrence])
+            program = programs[occurrence]
+            if (model['step'] != config['predict_step'] or model['snapshot']['step'] != model['step']
+                    or model['predictor_digest'] != program.digest
+                    or model['snapshot']['model_format'] != config['predict_model_format']
+                    or not isinstance(program.value, CallableSpec) or not program.value.is_class):
+                raise DataflowError('CODE_MISMATCH', 'Prediction assignment differs from sealed actor or selector')
+            programs.prediction_bindings[occurrence] = (bindings[occurrence], config)
+    return programs
+
+
+def validate_execution_binding(request, graph):
+    """An existing action may borrow its original sealed native adapter only.
+
+    Older callers declared the source/plan before choosing a native placement.
+    Their added ceilings/schema belong to this same graph seal, not a nested
+    action or a mutable side ledger. Refuse drift before loading/starting work.
+    """
+    from demiflow.execution.contracts.record_schema import KEY
+    keys = (EXECUTION_LIMITS, KEY, DELIVERY_LIMIT)
+    expected = {key: request.arguments.get(key) for key in keys}
+    for node in graph.nodes:
+        if node.kind != 'terminal':
+            continue
+        actual = {key: node.kernel.configuration.get('arguments', {}).get(key) for key in keys}
+        if actual != expected:
+            raise DataflowError('INCOMPATIBLE_HISTORY',
+                                'native execution limits or schema differ from the sealed binding')
+
+
+def service_constants(graph, *, policy):
+    result = {}
+    for node in graph.nodes:
+        declaration = node.kernel.configuration.get(MANAGED_HTTP_DEVICES_FIELD)
+        if not declaration:
+            continue
+        if policy is None or policy.provider != 'local' or policy.worker_mode == 'thread':
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Legacy managed service GPU slots require a Local process host')
+        rss = (policy.native_limits or {}).get('max_rss_bytes')
+        if type(rss) is not int or rss <= 0:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service requires explicit native_resources.max_rss_bytes')
+        from demiflow.execution.hosts.managed_devices import service_device_facts
+        facts = service_device_facts(declaration)
+        result[node.occurrence_id] = {MANAGED_HTTP_DEVICES_FIELD: dict(facts, max_rss_bytes=rss)}
+    return result
+
+def sealed_service_placements(graph, physical, *, store):
+    from demiflow.execution.hosts.managed_devices import deployment_inventory, device_binding
+    occurrences = {n.occurrence_id: n for n in graph.nodes if n.kernel.configuration.get(MANAGED_HTTP_DEVICES_FIELD)}
+    if not occurrences:
+        return None
+    raw = b''.join(store.read(physical.constants_ref, max_bytes=physical.bounds.max_state_bytes))
+    constants = json.loads(raw)
+    if constants.get('dag_id') != graph.dag_id or physical.dag_id != graph.dag_id:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service placement differs from the sealed graph')
+    inventory_digest = identity(deployment_inventory())
+    placements = {}
+    for stage in physical.stages:
+        selected = set(stage.occurrences) & occurrences.keys()
+        if not selected:
+            continue
+        if len(selected) != 1 or len(stage.occurrences) != 1:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service requires its original exclusive worker stage')
+        occurrence = next(iter(selected)); binding = device_binding(constants, occurrence)
+        if binding['inventory_digest'] != inventory_digest:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU deployment inventory changed since sealing')
+        if stage.profile.requests['memory_bytes'] < binding['max_rss_bytes']:
+            raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service worker profile lacks its sealed RSS grant')
+        placements[stage.stage_id] = {'required': {'device_ids': list(binding['device_ids'])}}
+    if len(placements) != len(occurrences):
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed service placement does not cover every original occurrence')
+    return placements
+
+
+def validate_literal_schema_replay(request, graph, *, bounds):
+    """Compare only explicit new-seal type facts, without rewriting old identity.
+
+    Historical literal action identities intentionally retain their old bytes.
+    New schema facts close the empty-literal ambiguity at the original seal gate.
+    Old graphs lacking these facts continue through the existing history checks.
+    """
+    expected = {node.occurrence_id: node.kernel.configuration[KEY]
+        for node in graph.nodes if node.kind == 'source' and KEY in node.kernel.configuration}
+    if not expected:
+        return
+    from demiflow.planning.dataflow_compile import revalidate_action
+    current = revalidate_action(request, bounds=bounds).graph
+    actual = {node.occurrence_id: node.kernel.configuration.get(KEY)
+        for node in current.nodes if node.kind == 'source'}
+    for occurrence, value in expected.items():
+        current_value = actual.get(occurrence)
+        if current_value is None or not decode(value, bounds=bounds).equals(
+                decode(current_value, bounds=bounds), check_metadata=True):
+            raise DataflowError('SOURCE_CHANGED', 'Literal source schema differs from its original sealed plan')

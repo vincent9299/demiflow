@@ -16,14 +16,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from demiflow.execution.plan_interpreter import (
-    CheckpointPolicy, ExecutionLayout, PlanContractError, WorkerPlacement,
-    interpret_physical_plan, to_wire, validate_worker_assignment,
-)
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.sealed_plans import (
-    load_execution_bindings, load_sealed_plan, read_plan_artifact,
-)
+from demiflow.execution.seal.plan_interpreter import CheckpointPolicy, ExecutionLayout, WorkerPlacement, interpret_physical_plan, to_wire, validate_worker_assignment
+from demiflow.execution.contracts.errors import PlanContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
+from demiflow.execution.storage.reading import read_plan_artifact
 from demiflow.resources.contracts import ResourceProfile
 from test_execution_layout import (
     MANIFEST_REF, PROFILE, PROFILE_REF, bundle_for, chain_fixture,
@@ -138,7 +135,7 @@ class TestScenario4StageLimits:
 
 class TestScenario5IdentityBridge:
     def test_build_and_validate(self):
-        from demiflow.execution.identity_bridge import build_identity_bridge
+        from demiflow.execution.seal.identity_bridge import build_identity_bridge
         fx = chain_fixture()
         bindings = [
             {"report_node_id": "src", "report_occurrence": 0,
@@ -155,7 +152,7 @@ class TestScenario5IdentityBridge:
         assert bridge["dag_id"] == fx.ld["dag_id"]
 
     def test_duplicate_report_key_rejected(self):
-        from demiflow.execution.identity_bridge import build_identity_bridge
+        from demiflow.execution.seal.identity_bridge import build_identity_bridge
         fx = chain_fixture()
         bindings = [
             {"report_node_id": "x", "report_occurrence": 0,
@@ -170,7 +167,7 @@ class TestScenario5IdentityBridge:
                                   report_digest="d1", bindings=bindings)
 
     def test_unknown_occurrence_rejected(self):
-        from demiflow.execution.identity_bridge import build_identity_bridge
+        from demiflow.execution.seal.identity_bridge import build_identity_bridge
         fx = chain_fixture()
         bindings = [{"report_node_id": "x", "report_occurrence": 0,
                      "logical_node_id": fx.ld["nodes"][0]["logical_node_id"],

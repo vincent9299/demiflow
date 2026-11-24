@@ -7,7 +7,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
 from runtime_v3_managed_http_scenarios import managed_fixture, events, assert_reaped
 from test_map_prompt_async import PACK
@@ -74,11 +74,11 @@ def test_zero_prompt_budget_starts_no_service(tmp_path, monkeypatch, request):
 
 def test_service_facts_keep_native_identity_and_private_environment_in_program(tmp_path, monkeypatch, request):
     from demiflow.operator_llm.flow_contract import prompt_facts
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
-    from demiflow.execution.dataflow_prompt_service import service_kernel
-    from demiflow.execution.dataflow_models import build_model_factory
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
+    from demiflow.planning.dataflow_models import service_kernel
+    from demiflow.planning.dataflow_models import build_model_factory
     from demiflow.execution.contracts.dataflow import thaw_record_value
-    from demiflow.execution.dataflow_api import resolve_runtime_policy
+    from demiflow.execution.scheduler.native_limits import resolve_runtime_policy
     from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
     value = fixture(tmp_path, monkeypatch, request)
     value['service'].env['FIXTURE_PRIVATE_TOKEN'] = 'fixture-secret-only'
@@ -101,7 +101,7 @@ def test_service_facts_keep_native_identity_and_private_environment_in_program(t
 
 @pytest.mark.parametrize('mutation', ['environment', 'removed', 'owner', 'method'])
 def test_prompt_service_mutations_are_rejected_before_start(tmp_path, monkeypatch, request, mutation):
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     value = fixture(tmp_path, monkeypatch, request)
     op = dataset(value, tmp_path)._plan.operations[-1]
     actor = op.callable.target.__self__
@@ -147,7 +147,7 @@ def test_prompt_service_runs_on_its_actual_original_gpu_grant(tmp_path, monkeypa
     import os
     import subprocess
     from pathlib import Path
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     from test_runtime_v3_managed_service_gpu import _released
     value = prompt_transport(gpu_service, monkeypatch)
     observed, errors, done = [], [], threading.Event()

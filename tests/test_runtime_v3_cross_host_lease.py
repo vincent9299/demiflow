@@ -129,7 +129,7 @@ def test_v1_original_header_and_row_are_never_implicitly_upgraded(tmp_path):
 
 def test_readonly_old_database_without_new_column_keeps_v1_contract(tmp_path):
     import sqlite3
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with sqlite3.connect(':memory:') as db:
         db.execute('CREATE TABLE runtime_dataflow_gc_protocol '
                    '(singleton INTEGER, device INTEGER, inode INTEGER, eligible INTEGER)')

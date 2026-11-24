@@ -2,8 +2,8 @@
 from pathlib import Path
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 
 def build_chain():
@@ -35,8 +35,8 @@ def test_region_planner_preserves_legacy_disable_isolation_and_budget():
     from dataclasses import replace
     import pytest
     from demiflow.execution.contracts.dataflow import ActionRequest
-    from demiflow.execution.dataflow_api import _CompileContext
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.executors.dataflow_api import _CompileContext
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
@@ -102,8 +102,8 @@ def test_region_original_final_ack_replay_does_not_repeat_reducer(tmp_path):
 def test_region_pure_join_nonfinal_ack_restores_original_input_refs(tmp_path,monkeypatch):
     import pytest
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.dataflow_kernel_pack import read_kernel_image
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.storage.streams import read_kernel_image
+    from demiflow.execution.contracts import state_codec
     def flow():
         return data.from_items([{'k':1,'v':i} for i in range(20)]).join(
             data.from_items([{'k':1,'r':i} for i in range(8)]),on='k').join(
@@ -208,7 +208,8 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
     from types import SimpleNamespace
     import pytest
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.kernels.ordering import SortWindow,build_sort_runs,merge_sort_runs
+    from demiflow.operators.ordering import SortWindow
+    from demiflow.execution.kernels.ordering import build_sort_runs, merge_sort_runs
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_finite_borrow import fixture,record
     from test_runtime_v3_c import make
@@ -248,7 +249,7 @@ def test_sort_subwindow_uses_original_store_and_closes_readers(tmp_path,monkeypa
 
 
 def test_group_after_left_join_keeps_composite_null_groups_and_typed_keys(tmp_path):
-    from demiflow.execution.kernels.dataflow import _group_key as group_key, group_key_values
+    from demiflow.operators.relational import group_key as group_key, group_key_values
 
     complex_key = {'x': [b'v', None], 'y': (-0.0, True, 1)}
     encoded = group_key({'a': complex_key, 'b': 'y'}, ('a', 'b')).encode()
@@ -266,7 +267,7 @@ def test_group_after_left_join_keeps_composite_null_groups_and_typed_keys(tmp_pa
 def test_fixed_three_way_join_selects_sql_only_under_its_actual_stage_grant(tmp_path, monkeypatch, record_property):
     import lance
     import pyarrow as pa
-    from demiflow.execution import datafusion as host
+    from demiflow.execution.hosts import datafusion as host
     from demiflow.execution.contracts.relational_region import SQL_CHILD_RSS, SQL_PARENT_WINDOW, interpret_region
     from _native_relational_fixtures import native_region_evidence
 
@@ -289,7 +290,7 @@ def test_fixed_three_way_join_selects_sql_only_under_its_actual_stage_grant(tmp_
         return result
     monkeypatch.setattr(host, '_start_sql_worker', start)
     monkeypatch.setattr(host, 'query_region_offsets', query)
-    from demiflow.execution.kernels.relational_region import _RegionSpool
+    from demiflow.operators.relational_region import RegionSpool as _RegionSpool
     from collections import Counter
     reads, observed = Counter(), []
     raw_key, raw_header = _RegionSpool.key, _RegionSpool.header
@@ -336,8 +337,8 @@ def test_skewed_bucket_refuses_unbounded_native_sort_before_spawning(tmp_path, m
     import hashlib
     import lance
     import pyarrow as pa
-    from demiflow.execution.kernels.dataflow import _group_key as group_key
-    from demiflow.execution import datafusion as host
+    from demiflow.operators.relational import group_key as group_key
+    from demiflow.execution.hosts import datafusion as host
     from _native_relational_fixtures import native_region_evidence
 
     # Distinct keys in one hash bucket. A conservative multiplicity bound
@@ -367,8 +368,8 @@ def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch
     import lance
     import pyarrow as pa
     import pytest
-    from demiflow.execution import datafusion
-    from demiflow.execution.kernels import relational_region
+    from demiflow.execution.hosts import datafusion
+    from demiflow.operators import relational_region
 
     for name in ('a', 'b', 'c'):
         lance.write_dataset(pa.table({'k': [3, 6, 9], name: [1, 2, 3]}), str(tmp_path / name))

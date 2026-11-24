@@ -1,6 +1,7 @@
 """Standalone CLI for inspecting and running immutable Demiflow bundles."""
 
 from __future__ import annotations
+
 import json
 import sys
 import uuid
@@ -19,7 +20,8 @@ from .execution import (
     backend_for,
     inspect_pipeline_run_readiness,
 )
-from .execution.contracts import PipelineBundleRef, PipelineRunRequest
+from demiflow.execution.pipeline.package_loader import PipelineBundleRef
+from demiflow.execution.contracts import PipelineRunRequest
 
 
 def _environment(config_path):

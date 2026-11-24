@@ -6,8 +6,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.exchange.dataflow_bridge import _encode_payload
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.record_codec import _encode_payload
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_reducer_values import LIMITS, provider, value_executor
 
 

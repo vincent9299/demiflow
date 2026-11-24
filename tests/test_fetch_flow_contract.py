@@ -5,8 +5,8 @@ from demiflow import data
 from demiflow.forge.platform import inspect_modules,LIMITS
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.project_bindings import resolve_flow_resources
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
 from test_collect_flow_contract import base,root
 from test_operator_foundation_models import load

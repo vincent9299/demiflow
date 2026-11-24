@@ -12,11 +12,12 @@ from demiflow.execution.contracts.training import (
     FitBinding, FitRequest, FitResult, FixedDatasetRef, InputCopyReceipt, JobLookup, JobRef,
     ProjectObject, TrainingSnapshotRef,
 )
-from demiflow.execution.recovery_contract import RecoveryContractError, identity
-from demiflow.execution.run_context import RunAction, RunContext
-from demiflow.execution.training.deployment import TrainingDeployment, bind_action_deployment
-from demiflow.execution.training.index import FitConflict, TrainingIndex
-from demiflow.execution.training.runtime import FitRuntime, read_parent
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
+from demiflow.execution.pipeline.training_deployment import TrainingDeployment, bind_action_deployment
+from demiflow.execution.journal.training_index import FitConflict, TrainingIndex
+from demiflow.execution.action_driver.training_runtime import FitRuntime
+from demiflow.execution.outputs.training_publication import read_parent
 
 
 def setup_request(tmp_path, *, paid=False, managed=False):
@@ -129,12 +130,12 @@ def test_original_receipt_cross_action_and_parent(tmp_path):
         selected = first.selected_model(result, 1, identity('predictor'))
         assert 'resume_files' not in selected['snapshot']
         first.hold_active()
-        from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.lance_sink import LanceSink
-        from demiflow.execution.recovery_contract import SourcePosition
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
+        from demiflow.execution.outputs.lance_sink import LanceSink
+        from demiflow.execution.contracts.recovery_contract import SourcePosition
         from demiflow.lance.model import LanceWriteSpec
-        from demiflow.execution.training.runtime import confirm_table_consumption
-        from demiflow.execution.run_reader import read_run
+        from demiflow.execution.outputs.training_publication import confirm_table_consumption
+        from demiflow.execution.journal.run_reader import read_run
         import pyarrow as pa
         uri = str(tmp_path / 'scores.lance')
         provenance = dict(uri=uri, selection=[{'step':1},{'step':3}])
@@ -163,7 +164,7 @@ def test_original_receipt_cross_action_and_parent(tmp_path):
 
 
 def test_missing_receipt_not_a_cache_hit(tmp_path, monkeypatch):
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     request,binding = setup_request(tmp_path)
     provider = Provider()
     failed = []
@@ -340,7 +341,7 @@ def test_cancel_requires_original_provider_terminal(tmp_path):
 
 
 def test_fit_observation_is_attempt_scoped_and_read_only(tmp_path):
-    from demiflow.execution.run_reader import read_run
+    from demiflow.execution.journal.run_reader import read_run
     request,binding = setup_request(tmp_path)
     provider = Provider()
     with pytest.raises(RuntimeError):
@@ -363,9 +364,9 @@ def test_fit_observation_is_attempt_scoped_and_read_only(tmp_path):
 
 
 def test_stopped_control_reconciles_model_without_replaying_rows(tmp_path):
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.training.deployment import TrainingDeployment
-    from demiflow.execution.training.maintenance import reconcile_stopped_fits
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.pipeline.training_deployment import TrainingDeployment
+    from demiflow.execution.pipeline.training_maintenance import reconcile_stopped_fits
     request,binding = setup_request(tmp_path)
     provider = Provider()
     provider.lose_reply = True
@@ -432,7 +433,7 @@ def test_unresponsive_submit_does_not_block_driver_or_trigger_second_submission(
 
 def _interrupted_import(binding, ready, stop):
     import io
-    from demiflow.execution.training.store import ModelStore
+    from demiflow.execution.storage.model_store import ModelStore
     payload = b'bbbb'
     class AtReservation(io.BytesIO):
         def read(self, size):
@@ -446,7 +447,7 @@ def _interrupted_import(binding, ready, stop):
 def test_dead_import_returns_quota_but_a_live_import_and_published_inode_are_retained(tmp_path):
     import multiprocessing as mp
     import io
-    from demiflow.execution.training.store import ModelStore
+    from demiflow.execution.storage.model_store import ModelStore
     _, binding = setup_request(tmp_path)
     binding = replace(binding,max_model_bytes=4,max_files=1)
     store = ModelStore(TrainingIndex(binding, quotas='apply'))
@@ -515,7 +516,7 @@ def test_stopped_run_prevents_new_dispatch_but_can_observe_existing_submit(tmp_p
 
 def _concurrent_dataset_driver(root, run_name):
     from demiflow import data
-    from demiflow.execution.training.deployment import TrainingDeployment
+    from demiflow.execution.pipeline.training_deployment import TrainingDeployment
     from test_training_dataset_action import recipe
     _, binding = setup_request(root)
     class SharedTransport(Provider):
@@ -538,7 +539,7 @@ def test_two_live_dataset_drivers_submit_one_actual_job(tmp_path):
     import sys
     import lance
     import pyarrow as pa
-    from demiflow.execution.run_reader import read_run, RunReadError
+    from demiflow.execution.journal.run_reader import read_run, RunReadError
     lance.write_dataset(pa.table({'x':[1,2]}),str(tmp_path/'inputs.lance'))
     names = ('first','second')
     command = [sys.executable,'-B','-c','from pathlib import Path; import sys; '
@@ -585,10 +586,10 @@ def test_two_live_dataset_drivers_submit_one_actual_job(tmp_path):
 
 
 def test_stopped_candidate_before_election_does_not_acquire_or_dispatch(tmp_path,monkeypatch):
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.training.deployment import TrainingDeployment
-    from demiflow.execution.training.maintenance import reconcile_stopped_fits
-    from demiflow.execution.run_reader import read_run
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.pipeline.training_deployment import TrainingDeployment
+    from demiflow.execution.pipeline.training_maintenance import reconcile_stopped_fits
+    from demiflow.execution.journal.run_reader import read_run
     request,binding=setup_request(tmp_path)
     provider=Provider()
     directory=tmp_path/'candidate'
@@ -611,7 +612,7 @@ def test_stopped_candidate_before_election_does_not_acquire_or_dispatch(tmp_path
 def test_model_import_contention_honors_consumers_deadline(tmp_path):
     import fcntl
     import io
-    from demiflow.execution.training.store import ModelStore
+    from demiflow.execution.storage.model_store import ModelStore
     _, binding = setup_request(tmp_path)
     start = time.monotonic()
 
@@ -679,7 +680,7 @@ def test_legacy_quota_settings_upgrade_atomically(tmp_path):
 
 def test_sealed_consumers_observe_raised_byte_and_file_limits(tmp_path):
     import io
-    from demiflow.execution.training.store import ModelStore
+    from demiflow.execution.storage.model_store import ModelStore
     request, binding = setup_request(tmp_path)
     binding = replace(binding, max_model_bytes=4, max_files=1)
     index = TrainingIndex(binding, quotas='apply')
@@ -755,10 +756,10 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
         result = finish(fit)
         row = fit.index.read(request.instance_id)
         import pyarrow as pa
-        from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.lance_sink import LanceSink
-        from demiflow.execution.recovery_contract import SourcePosition
-        from demiflow.execution.training.runtime import confirm_table_consumption
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
+        from demiflow.execution.outputs.lance_sink import LanceSink
+        from demiflow.execution.contracts.recovery_contract import SourcePosition
+        from demiflow.execution.outputs.training_publication import confirm_table_consumption
         from demiflow.lance.model import LanceWriteSpec
         uri = str(tmp_path/'scores.lance')
         provenance = {'uri':uri, 'selection':[{'step':1}]}
@@ -788,8 +789,8 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
 
 def _quota_lance_action(root, resume):
     from demiflow import data
-    from demiflow.execution.recovery_contract import RunRef
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.contracts.recovery_contract import RunRef
+    from demiflow.execution.journal.run_journal import RunJournal
     from test_training_dataset_action import recipe
     from training_action_programs import waiting_trainer
     _, binding = setup_request(root,managed=True)
@@ -812,7 +813,7 @@ def test_original_submitted_action_recovers_using_raised_storage_quota(tmp_path)
     import sys
     import lance
     import pyarrow as pa
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     lance.write_dataset(pa.table({'x':[1]}),str(tmp_path/'input.lance'))
     _, binding = setup_request(tmp_path,managed=True)
     original = replace(binding,max_files=1,provider_options={'cpu_millis':100,'memory_bytes':16<<20})

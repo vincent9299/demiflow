@@ -9,6 +9,7 @@ change to any of them is a visible, deliberate edit rather than drift.
 Nothing here changes behaviour, and no table is duplicated: the inventory is
 derived from the engine's own source every time.
 """
+from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS
 import ast
 
 import compile_contract_inventory as inventory
@@ -143,8 +144,8 @@ def test_one_function_resolves_the_compiler_inputs():
     """Executor defaults and report bindings are read in one module and handed over explicitly."""
     reads = inventory.implicit_inputs((inventory.INPUT_RESOLVER,))
     assert sorted({item.split(': ', 1)[0] for item in reads}) == [
-        'execution/dataflow_compile_inputs.py::compile_inputs',       # the action's executor, the report context
-        'execution/dataflow_compile_inputs.py::executor_defaults',    # the three executor attributes
+        'execution/compiler_support/dataflow_compile_inputs.py::compile_inputs',       # the action's executor, the report context
+        'execution/compiler_support/dataflow_compile_inputs.py::executor_defaults',    # the three executor attributes
     ]
     compiler = inventory.source(inventory.COMPILER)
     assert compiler.count('compile_inputs(request)') == 1             # resolved once, at the capture entry
@@ -152,8 +153,9 @@ def test_one_function_resolves_the_compiler_inputs():
 
 def test_source_tables_equal_the_imported_objects():
     """The source reader must agree with what the engine actually loads."""
-    from demiflow.execution import dataflow_batch_membership
-    from demiflow.execution.kernels import dataflow as kernels, operator, task_scope
+    from demiflow.execution.kernels import batch_membership as dataflow_batch_membership
+    from demiflow.execution.kernels import dataflow as kernels, operator
+    from demiflow.execution.contracts.dataflow_kinds import TASK_KINDS
     from demiflow.planning import dataflow_compile as compiler, dataflow_registry as registry
 
     assert set(registry.operator_registry()) == set(TABLES['registry.operators'])
@@ -176,6 +178,6 @@ def test_source_tables_equal_the_imported_objects():
             ('runtime.stream_group_kinds', kernels._STREAM_GROUP_KINDS),
             ('runtime.instance_kinds', operator._INSTANCE_KINDS),
             ('runtime.batch_instance_kinds', operator._BATCH_INSTANCE_KINDS),
-            ('runtime.task_kinds', task_scope.TASK_KINDS),
-            ('runtime.batch_membership_kinds', dataflow_batch_membership.KINDS)):
+            ('runtime.task_kinds', TASK_KINDS),
+            ('runtime.batch_membership_kinds', NATIVE_BATCH_KINDS)):
         assert set(actual) == set(TABLES[name]), name

@@ -1,6 +1,6 @@
 import time
 import pytest
-from demiflow.execution import datafusion as engine
+from demiflow.execution.hosts import datafusion as engine
 
 GiB = 1024**3
 

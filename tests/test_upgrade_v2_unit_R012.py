@@ -6,8 +6,8 @@ standalone StreamMaterialization wraps a second executor or fabricates sinks.
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
 from _runtime_v3_buffer_recovery import images_at, crash_with_remainder, assert_prefix_unchanged
 
 

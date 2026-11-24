@@ -8,7 +8,7 @@ import math
 from .documents import DocumentError, PARSER_VERSION, parse_document, read_document
 from .pdf_text import pdf_policy, pdf_identity
 from ..objects import LocalObjectStore, ObjectRef
-from ..execution.isolation import run_isolated
+from demiflow.execution.hosts.isolation import run_isolated
 
 
 def publish_document(store, document, raw_ref, *, max_document_bytes):

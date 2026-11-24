@@ -1,7 +1,7 @@
 """Pure helper defaults are code declarations; mutable helper state is not."""
 import pytest
 
-from demiflow.execution.kernels.task_scope import function_residency_kind
+from demiflow.execution.compiler_support.operator_policy import function_residency_kind
 
 
 def test_immutable_helper_defaults_do_not_invent_a_state_owner():

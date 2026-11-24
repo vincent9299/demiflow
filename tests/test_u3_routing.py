@@ -9,7 +9,7 @@ declared and never changed by balancing; broadcast multiplicity is explicit.
 import pytest
 
 from demiflow.execution.contracts.errors import ProtocolError
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.planning.dag import (
     build_channel_plan, compile_declared_dag, compile_physical_execution_plan,
 )

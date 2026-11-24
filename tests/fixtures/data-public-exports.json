@@ -58,11 +58,11 @@
       "schema"
     ],
     "open_checkpoint": [
-      "demiflow.execution.stream_checkpoint",
+      "demiflow.execution.executors.stream_checkpoint",
       "open_checkpoint"
     ],
     "read_checkpoint": [
-      "demiflow.execution.stream_checkpoint",
+      "demiflow.execution.executors.stream_checkpoint",
       "read_checkpoint"
     ],
     "read_queue": [
@@ -86,7 +86,7 @@
       "ensure_lance_vector_index"
     ],
     "local_execution": [
-      "demiflow.execution.local_kernel",
+      "demiflow.execution.pipeline.local_kernel",
       "local_execution"
     ],
     "from_items": [

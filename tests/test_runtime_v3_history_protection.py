@@ -5,7 +5,8 @@ import json
 import pytest
 
 from demiflow.execution.contracts.dataflow import ArtifactRef, CutRequest, HistoricalBinding, RecoveryImage
-from demiflow.execution.dataflow_history import SEALED_PLAN_FACTS_SCHEMA, validate_resume_compatibility
+from demiflow.execution.seal.history import SEALED_PLAN_FACTS_SCHEMA
+from demiflow.execution.checkpoint.history import validate_resume_compatibility
 import runtime_v3_history_scenarios as scenarios
 
 

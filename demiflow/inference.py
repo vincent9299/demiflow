@@ -1,5 +1,5 @@
 """Public, declarative request admission shared by native model operators."""
-from .execution.adaptive_requests import request_admission_policy
+from demiflow.services.adaptive_requests import request_admission_policy
 
 
 def request_admission_config(value=None, *, concurrency=None):
@@ -16,13 +16,13 @@ def request_admission_config(value=None, *, concurrency=None):
     return policy
 
 
-def _resolve_request_gate(*, policy, gate, concurrency):
+def resolve_request_gate(*, policy, gate, concurrency):
     if policy is not None and gate is not None:
         raise ValueError('Choose request_policy or request_gate, not both')
     normalized = request_admission_config(policy, concurrency=concurrency)
     if normalized is None:
         return gate
-    from .execution.adaptive_requests import AdaptiveRequestGate
+    from demiflow.services.adaptive_requests import AdaptiveRequestGate
     return AdaptiveRequestGate(normalized)
 
 

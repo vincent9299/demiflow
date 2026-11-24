@@ -244,18 +244,18 @@ def _queue_service_request(command, *, services):
     return services.journal.queue(command)
 
 
-_install("demiflow.execution.dataflow_queue", queue_service_request=_queue_service_request)
+_install('demiflow.execution.native_queue.dataflow_queue', queue_service_request=_queue_service_request)
 
-from demiflow.execution import dataflow_sources as ds  # noqa: E402
-from demiflow.execution import source_readers as sr  # noqa: E402
-from demiflow.execution.recovery_contract import identity  # noqa: E402
+from demiflow.execution.sources import snapshots as ds  # noqa: E402
+from demiflow.execution.sources import source_readers as sr  # noqa: E402
+from demiflow.execution.contracts.recovery_contract import identity  # noqa: E402
 from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata  # noqa: E402
 from demiflow.data.records import FileRecords  # noqa: E402
 from demiflow.data.sources import (  # noqa: E402
     DatasourceSource, FileSource, ItemsSource, IterableSource, LanceSource,
     MaterializedSource, RangeSource, SqlSource,
 )
-from demiflow.execution.queue_source import QueueDatasource  # noqa: E402
+from demiflow.execution.native_queue.queue_source import QueueDatasource  # noqa: E402
 from demiflow.lance.model import LanceScanSpec, LanceVectorSearchSpec  # noqa: E402
 
 assert Path(ds.__file__).resolve().is_relative_to(WORKTREE)
@@ -391,7 +391,8 @@ def drain(reader):
 def load_inline(record, store):
     if record.inline is not None:
         return record.inline
-    from demiflow.execution.arrow_payload import is_arrow_record, batch_cache
+    from demiflow.execution.contracts.record_codec import is_arrow_record
+    from demiflow.execution.storage.arrow_payload import batch_cache
     if is_arrow_record(record):
         return batch_cache(store, make_bounds()).row(record)
     return pickle.loads(b"".join(store.read(record.payload_ref, max_bytes=1 << 20)))

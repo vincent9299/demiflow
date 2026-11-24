@@ -172,7 +172,7 @@ class VectorSearch:
         return state
 
     def restore_state(self, state):
-        from ..execution.recovery_contract import RecoveryContractError
+        from demiflow.execution.contracts.recovery_contract import RecoveryContractError
         if type(state) is not dict:
             raise RecoveryContractError('VectorSearch recovery state must be a JSON object')
         unknown = set(state) - {'version', 'queries', 'hits'}

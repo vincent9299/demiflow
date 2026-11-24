@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 from .dataflow_errors import DataflowError
-from ..recovery_contract import identity
+from demiflow.execution.contracts.recovery_contract import identity
 
 PREFIX = 'relational-v1-'
 SQL_PREFIX = PREFIX + 'sql1-'

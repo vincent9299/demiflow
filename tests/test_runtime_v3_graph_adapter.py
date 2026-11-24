@@ -7,7 +7,7 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _observe(row, *, directory, name, increment):
@@ -154,8 +154,8 @@ def test_real_graph_preserves_caller_and_run_bounds(graph_environment, monkeypat
 @pytest.mark.parametrize('routing', ['broadcast', 'hash', 'rebalance', 'target'])
 def test_actual_graph_routes_reach_distinct_programs(graph_environment, monkeypatch, routing):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_terminals import materialized_handle
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.outputs.terminals import materialized_handle
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory = graph_environment
     spec = _spec(directory)
     spec['source'] = ItemsSource(tuple({'x': i, 'group': 'a' if i % 2 == 0 else 'b'} for i in range(6)))
@@ -209,9 +209,9 @@ def test_actual_graph_routes_reach_distinct_programs(graph_environment, monkeypa
 @pytest.mark.parametrize('routing', ['broadcast', 'hash', 'rebalance', 'target'])
 def test_actual_graph_recovers_native_routes_and_target_identities(runtime_v3_fixture, monkeypatch, routing):
     from demiflow.data.api import _current_executor
-    from demiflow.execution.run_context import current_run
+    from demiflow.execution.pipeline.run_context import current_run
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_terminals import materialized_handle
+    from demiflow.execution.outputs.terminals import materialized_handle
     from runtime_v3_route_recovery_scenarios import _recover
     fx = runtime_v3_fixture
     directory = fx.root / 'graph-observations'
@@ -285,7 +285,7 @@ def test_actual_graph_recovers_native_routes_and_target_identities(runtime_v3_fi
 @pytest.mark.parametrize('mode,empty', [('memory_incremental', False), ('finite_sealed', False), ('finite_sealed', True)])
 def test_reused_target_actor_is_independent_and_final_replay_starts_no_worker(graph_environment, monkeypatch, mode, empty):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_terminals import materialized_handle
+    from demiflow.execution.outputs.terminals import materialized_handle
     directory = graph_environment
     results, executions = [], []
     original = DataflowExecution.finish
@@ -351,7 +351,7 @@ def test_reused_target_actor_is_independent_and_final_replay_starts_no_worker(gr
 def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(graph_environment, monkeypatch, expand):
     from demiflow.data.plan import FlatMapOp
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     commits = []
     commit = DataflowCheckpointCoordinator.commit
@@ -394,7 +394,7 @@ def test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion(gra
 
 def test_source_credit_pause_drains_pending_memory_before_original_cut(graph_environment, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory = graph_environment
     spec = _spec(directory)
     spec['prefetch_slots'] = 1

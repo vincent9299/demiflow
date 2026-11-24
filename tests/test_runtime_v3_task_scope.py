@@ -4,7 +4,7 @@ import time
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _worker_event_fixtures import emit, events
 
 
@@ -121,7 +121,7 @@ def test_task_state_rejects_aliases_mutable_globals_and_invalid_frontier():
     from test_runtime_v3_k import services, spec, program, InputPort
     from demiflow.data.plan import CallableSpec
     from demiflow.execution.kernels.operator import OperatorKernel, IMAGE_MEDIA_TYPE
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     svc = services(programs={'fn': program(CallableSpec.create(Number))})
     policy = spec('MapOp', {'program': 'fn', 'task_batch_rows': 3},
         inputs=[InputPort('input', 'incremental')], state='auto_json')
@@ -156,7 +156,7 @@ def test_filtered_and_expanded_chains_keep_original_task_boundaries():
 @pytest.mark.parametrize('form', ['class', 'closure'])
 def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_path, monkeypatch, form):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
     class Interrupted(Exception):
         pass
     path = str(tmp_path / 'calls')
@@ -206,7 +206,7 @@ def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_pa
     committed_calls = [event for event in before if event['event'] == 'call' and event['row'] < cut['frontier']]
     assert [event['row'] for event in committed_calls] == list(range(cut['frontier']))
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(ref.directory)
     commits_before = journal.execution_commits('action-1')
     started = time.monotonic()
@@ -290,7 +290,7 @@ def test_private_task_rejects_oversize_mutable_checkpoint(form, measured):
             self.value = 'x' * row['n']
             return row
 
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     target = grow if form == "function" else Grow
     svc = services(programs={'fn': program(CallableSpec.create(target))})
     svc.bounds = replace(svc.bounds, max_state_bytes=4096)
@@ -436,7 +436,7 @@ def test_adaptive_task_rejects_growth_before_ack_of_filtered_row():
 
 def test_task_checkpoint_rejects_before_building_tagged_container_tree():
     import tracemalloc
-    from demiflow.execution.kernels import state_codec
+    from demiflow.execution.contracts import state_codec
 
     values = list(range(10000))
     grant = 1 << 20
@@ -451,7 +451,7 @@ def test_task_checkpoint_rejects_before_building_tagged_container_tree():
         raise TooLarge
 
     # Imports and the immutable input predate the working grant.
-    from demiflow.execution.dataflow_record_frames import json_encoding_shape
+    from demiflow.execution.contracts.record_codec import json_encoding_shape
     json_encoding_shape(0)
     tracemalloc.start()
     try:

@@ -34,7 +34,7 @@ class RayDatasetExecutor(DatasetExecutor):
     ) -> None:
         if workers is not None and (type(workers) is not int or workers < 1):
             raise ValueError('workers must be a positive integer or None')
-        from ..native_resources import parse_native_resources
+        from demiflow.planning.dataflow_policy import parse_native_resources
         self._workers = workers
         self._native_resources = parse_native_resources(native_resources)
         self.resource_root = Path(resource_root or ".").resolve()
@@ -43,13 +43,12 @@ class RayDatasetExecutor(DatasetExecutor):
         self._policy, self._bounds = resolve_runtime_policy(
             {}, {}, provider=self.PROVIDER,
         )
-        self._hosted_scopes: list[Any] = []
         self._last_metadata: ExecutionMetadata | None = None
         self._run_ref = None
         self._closed = False
 
     def operator_llm_usage(self) -> dict[str, int]:
-        from ..dataflow_usage import executor_prompt_usage
+        from demiflow.execution.journal.dataflow_usage import executor_prompt_usage
         return executor_prompt_usage(self)
 
     def plan(
@@ -58,7 +57,7 @@ class RayDatasetExecutor(DatasetExecutor):
         terminal_parallelism_cap=None,
     ):
         reject_streaming_map_options(plan, 'ray')
-        from ..dataflow_api import explain_dataset
+        from demiflow.execution.executors.dataflow_api import explain_dataset
         options: dict[str, Any] = {
             'action_kind': action_kind,
             'terminal_category': terminal_category,
@@ -79,7 +78,7 @@ class RayDatasetExecutor(DatasetExecutor):
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:
             return None
-        from ..dataflow_api import make_action_request, run_dataset_action
+        from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind="schema",
                                       arguments={"fetch_if_missing": fetch_if_missing})
         return run_dataset_action(request)
@@ -89,7 +88,7 @@ class RayDatasetExecutor(DatasetExecutor):
     ) -> list[str] | None:
         if not fetch_if_missing:
             return None
-        from ..dataflow_api import make_action_request, run_dataset_action
+        from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind="columns",
                                       arguments={"fetch_if_missing": fetch_if_missing})
         return run_dataset_action(request)
@@ -115,20 +114,5 @@ class RayDatasetExecutor(DatasetExecutor):
         return None
 
     def close(self) -> None:
-        # Release only this executor's hosted resource scope; unified ActionHandles
-        # are owned by their callers and other runs' pins are never touched here.
-        errors: list[BaseException] = []
-        for scope in self._hosted_scopes:
-            release = getattr(scope, "release", None)
-            close = getattr(scope, "close", None)
-            try:
-                if callable(release):
-                    release()
-                elif callable(close):
-                    close()
-            except BaseException as exc:  # noqa: BLE001 - aggregate, never swallow
-                errors.append(exc)
-        self._hosted_scopes.clear()
+        # Action handles own their real endpoints and published-result pins.
         self._closed = True
-        if errors:
-            raise errors[0]

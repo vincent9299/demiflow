@@ -4,7 +4,7 @@ import tracemalloc
 
 import pytest
 
-from demiflow.execution import dataflow_record_frames as frames
+from demiflow.execution.contracts import record_codec as frames
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 

@@ -13,8 +13,8 @@ from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactRef, 
 from demiflow.execution.storage.gc import collect_published_orphans, recover_published_gc
 from demiflow.execution.storage.lease import ObjectLease, exclusive_access
 from demiflow.execution.storage.objects import RunArtifactStore
-from demiflow.execution.kernels import state_codec
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts import state_codec
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_artifact_accounting import store_fixture, consumed
 from test_runtime_v3_artifact_recovery import _open, _store
 from test_runtime_v3_real_seams import PreparationOnly
@@ -54,9 +54,9 @@ def test_released_unrooted_publication_refunds_once_and_reput_charges_again(tmp_
 
 
 def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_and_borrowed(tmp_path):
-    from demiflow.execution.state_artifacts import StateArtifacts
-    from demiflow.execution.dataflow_segments import SegmentForest, FINITE_RECORDS_MEDIA
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload, _encode_record_document
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.segments import SegmentForest, FINITE_RECORDS_MEDIA
+    from demiflow.execution.contracts.record_codec import _encode_payload, _encode_record_document
     with store_fixture(tmp_path) as (run,store,port):
         payload = put(store,_encode_payload({'value':-0.0},max_bytes=4096),'application/vnd.demiflow.record.v3')
         schema = put(store,b'opaque-test-schema','application/vnd.demiflow.arrow-schema.v1')
@@ -70,9 +70,9 @@ def test_old_and_pending_native_state_roots_keep_nested_record_payload_schema_an
         image = put(store,state_codec.dumps({'ports':{'input':{'borrowed':[{'position':0,'input':{
             'seal_ref':seal,'manifest_ref':manifest}}]}},'batch':[record]},max_bytes=65536),
             'application/x-demiflow-kernel-image-v3')
-        from demiflow.execution.commit import CommitCoordinator
-        from demiflow.execution.recovery_contract import SourcePosition
-        from demiflow.execution.dataflow_sinks import _DataflowArtifactSink
+        from demiflow.execution.checkpoint.commit import CommitCoordinator
+        from demiflow.execution.contracts.recovery_contract import SourcePosition
+        from demiflow.execution.outputs.sinks import _DataflowArtifactSink
         sink=_DataflowArtifactSink(sink_id='test',store=store,action=port._action,
                                    bounds=port._bounds,configuration={})
         old = CommitCoordinator(port._action).commit(1,outputs={'test':(sink,{
@@ -195,7 +195,7 @@ def test_concurrent_pin_cannot_cross_exclusive_gc_snapshot(tmp_path,monkeypatch)
 
 def test_stop_flag_does_not_prove_journal_thread_exit():
     import threading
-    from demiflow.execution.dataflow_authority import DriverJournalService
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
     gate=threading.Event()
     thread=threading.Thread(target=gate.wait);thread.start()
     service=object.__new__(DriverJournalService)
@@ -357,7 +357,7 @@ def test_optional_gc_near_original_deadline_preserves_successful_run(tmp_path,mo
 def test_optional_gc_skip_does_not_bypass_original_timeout(tmp_path):
     import time
     from demiflow.execution.storage.gc import defer_run_gc
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     with pytest.raises(RecoveryContractError,match='time budget exhausted'):
         with RunContext.start(tmp_path/'expired') as run:
@@ -381,7 +381,7 @@ def test_action_close_near_timeout_retains_orphan_and_original_charge(tmp_path):
 
 def test_optional_gc_never_waits_for_a_live_publication_owner(tmp_path):
     import threading,time
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with store_fixture(tmp_path) as (run,store,port):
         ref=put(store,b'publication-in-progress')
         owner=RunJournal(run.directory,attempt=run.attempt)

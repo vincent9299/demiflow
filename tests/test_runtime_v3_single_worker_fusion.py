@@ -3,7 +3,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def pipeline():
@@ -11,9 +11,9 @@ def pipeline():
 
 
 def test_timer_operator_cannot_share_a_blocking_source_business_thread():
-    from demiflow.execution.dataflow_api import _CompileContext
+    from demiflow.execution.executors.dataflow_api import _CompileContext
     from demiflow.execution.contracts.dataflow import ActionRequest
-    from demiflow.execution.run_context import RunAction
+    from demiflow.execution.pipeline.run_context import RunAction
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_fusion import fuse_single_worker_pipeline
     from demiflow.planning.dataflow_place import partition_stages

@@ -7,11 +7,11 @@ import pyarrow as pa
 import lance
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.recovery_identity import plan_identity
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.seal.program_identity import plan_identity
 from demiflow.execution.seal.business_sources import plan_code_pin
-from demiflow.execution.plan_facts import operation_facts
+from demiflow.execution.seal.plan_facts import operation_facts
 from test_embeddings import server as embedding_server
 
 
@@ -20,7 +20,7 @@ def _identity(row):
 
 
 def test_run_stream_uses_the_sealed_worker_limits(tmp_path):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':2}) as run:
         stats = data.from_items([{'id': 1}, {'id': 2}]).map_async(lambda row: row).run_stream()
         physical = load_sealed_plan(run.directory, 'action-1', version='v3')['physical']
@@ -33,7 +33,7 @@ def test_run_stream_uses_the_sealed_worker_limits(tmp_path):
                                     'materialize', 'schema', 'size_bytes', 'write_lance'])
 def test_public_terminal_consumes_sealed_execution(tmp_path, monkeypatch, terminal):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     calls = []
     original = DataflowExecution.start
     def observed(execution):
@@ -143,8 +143,8 @@ def test_arrow_public_write_uses_admitted_physical_reader(tmp_path, monkeypatch)
 
 @pytest.mark.parametrize('window', ['after_prepared', 'after_acked'])
 def test_embedding_resume_keeps_batches_and_does_not_repeat_paid_calls(embedding_server, tmp_path, monkeypatch, window):
-    from demiflow.execution import commit
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.checkpoint import commit
+    from demiflow.execution.journal.run_journal import RunJournal
     root = tmp_path / 'run'
     def build():
         return data.from_items([{'text': str(i)} for i in range(11)]).map_embeddings(
@@ -188,8 +188,8 @@ def test_embedding_known_http_failure_is_replayed_without_request(embedding_serv
 
 
 def test_auto_json_state_restores_with_committed_prepend_frontier(tmp_path, monkeypatch):
-    from demiflow.execution import commit
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.checkpoint import commit
+    from demiflow.execution.journal.run_journal import RunJournal
     def build():
         return data.from_items([{'id': i} for i in range(1, 9)]).prepend(
             data.from_items([{'id': 0}]), max_rows=1).map(Counter(), concurrency=1).materialize().take_all()
@@ -220,10 +220,10 @@ import os, sys, json
 from pathlib import Path
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
-import demiflow.execution.commit as commit
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RunRef
+import demiflow.execution.checkpoint.commit as commit
 root, endpoint, window = sys.argv[1:]
 if window != 'resume':
     def fault(name, commit_id):
@@ -288,9 +288,9 @@ from pathlib import Path
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
 from demiflow.embeddings.runtime import EmbeddingActor
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RunRef
 root, endpoint, mode = sys.argv[1:]
 if mode == 'crash':
     async def unknown(self, request, encoded, timings):
@@ -333,7 +333,7 @@ def test_reduce_program_tree_executes_under_the_sealed_layout(tmp_path):
     with RunContext.start(tmp_path/'run') as run:
         ds = data.from_items([{'k': 1}, {'k': 2}, {'k': 1}]).reduce_by_key('k', fold)
         assert sorted(ds.take_all(), key=lambda r:r['k']) == [{'k':1, 'n':2}, {'k':2, 'n':1}]
-        from demiflow.execution.sealed_plans import load_sealed_plan
+        from demiflow.execution.seal.sealed_plans import load_sealed_plan
         assert len(load_sealed_plan(run.directory, 'action-1')['logical_dag']['nodes']) == 3
 
 

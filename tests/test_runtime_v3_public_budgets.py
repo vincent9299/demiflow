@@ -9,7 +9,7 @@ from demiflow.execution.contracts.dataflow_codec import (
     encode_wire, decode_wire, compute_physical_digest,
 )
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 
 
@@ -44,7 +44,7 @@ def test_optional_worker_limit_keeps_historical_wire_and_identity():
 
 
 def test_memory_option_tightens_defaults_without_erasing_explicit_limits():
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     run = execution_limits({'memory_bytes': 512 * 1024})
     policy, limits = resolve_runtime_policy({'memory_bytes': 64 * 1024, 'max_active_workers': 1},
                                            run, provider='local')
@@ -70,17 +70,18 @@ def test_memory_option_tightens_defaults_without_erasing_explicit_limits():
 def _require_separate_stages(monkeypatch):
     # These tests exercise parking/resuming an unchanged sealed plan. Optional
     # pure-kernel fusion can remove the very phase boundary being tested.
-    from demiflow.execution import dataflow_api
-    original = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    original = action_limits.resolve_runtime_policy
     def resolve(*args, **kwargs):
         policy, bounds = original(*args, **kwargs)
         return replace(policy, fusion=False), bounds
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', resolve)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', resolve)
 
 
 @pytest.mark.parametrize('workers', [1, 2])
 def test_public_worker_budget_uses_actual_phases_and_native_allocation(tmp_path, monkeypatch, workers):
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     _require_separate_stages(monkeypatch)
     physicals, charges = [], []
     original_prepare = DataflowExecution.prepare
@@ -145,8 +146,9 @@ def test_concurrent_profile_must_fit_before_any_upstream_launch(tmp_path, monkey
 
 
 def test_real_source_split_coverage_with_fewer_active_workers(tmp_path, monkeypatch):
-    from demiflow.execution import dataflow_api
-    original = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    original = action_limits.resolve_runtime_policy
     seen = []
     def policy(*args, **kwargs):
         policy, bounds = original(*args, **kwargs)
@@ -156,7 +158,7 @@ def test_real_source_split_coverage_with_fewer_active_workers(tmp_path, monkeypa
         result = prepare(execution)
         seen.append(execution._physical)
         return result
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', policy)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', policy)
     monkeypatch.setattr(DataflowExecution, 'prepare', capture)
     with RunContext.start(tmp_path/'run'), data.local_execution(workers=2):
         rows = _three_stage_dataset().take_all()
@@ -215,7 +217,7 @@ def test_public_worker_count_keeps_one_legal_wide_row(tmp_path, workers):
 
 
 def test_equal_small_run_and_executor_keep_the_run_row_contract(tmp_path):
-    from demiflow.execution.runtime_limits import execution_limits
+    from demiflow.planning.dataflow_policy import execution_limits
     memory = 1024**2
     inherited = execution_limits({'memory_bytes': memory})
     with RunContext.start(tmp_path / 'equal', limits={'memory_bytes': memory}), data.local_execution(

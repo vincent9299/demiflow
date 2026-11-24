@@ -7,6 +7,8 @@ admitted budgets. ``resources/contracts.py`` is byte-frozen and only consumed.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
+
 import json
 from dataclasses import replace
 from typing import Mapping
@@ -169,7 +171,8 @@ def partition_stages(
         # below the full pair of maximum business rows.
         if 'codec_min_bytes' in kernel.configuration and kernel.state == 'none':
             resident = min(resident, kernel.profile.requests['memory_bytes'])
-        from ..execution.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
+        from demiflow.execution.contracts.dataflow import REF_CARRIER
+        from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
         memory = kernel.configuration.get('terminal_memory', {})
         if node.kind == 'terminal' and (kernel.configuration.get('input_carrier') == REF_CARRIER
                 or memory.get('schema') == TERMINAL_WORKSPACE):
@@ -182,7 +185,7 @@ def partition_stages(
                 resident = resident_bytes(reducer_memory,bounds)
                 state_bytes = bounds.max_state_bytes
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
-        from ..execution.dataflow_managed_devices import service_profile
+
         profile = service_profile(kernel, policy=policy, bounds=bounds)
         # Task-scoped opaque declarations are reloaded synchronously once per
         # worker. The sealed payload size accounts its decode buffer; Python
@@ -365,7 +368,7 @@ def plan_exchanges(
     owner = _stage_of_occurrence(stages)
     credit_rows = max(1, min(256, bounds.max_pending_events))
     credit_bytes = max(1, min(bounds.max_resident_bytes, bounds.max_batch_bytes * 4))
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     ceilings = sealed_execution_ceilings(graph)
     credit_rows = min(credit_rows, ceilings.get('inflight_rows', credit_rows))
     credit_bytes = min(credit_bytes, ceilings.get('inflight_bytes', credit_bytes))
@@ -834,12 +837,12 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
     If it cannot fit, checkpointable boundaries may park a bounded durable
     window. The fixed-plan solver remains strict about memory co-residency.
     """
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     ceilings = sealed_execution_ceilings(graph)
     cpu_ceiling = ceilings.get('cpu_millis')
-    from ..execution.dataflow_publication_budget import graph_workspace_bytes
+    from demiflow.execution.scheduler.dataflow_publication_budget import graph_workspace_bytes
     publication = graph_workspace_bytes(graph)
-    from ..execution.dataflow_publication_budget import PublicationReservation
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
     reservation = PublicationReservation(graph, stages, bounds)
     try:
         return exchanges, solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
@@ -968,7 +971,7 @@ def compile_physical_dataflow(
     # Optional co-location must fit the same caller ceiling as the original
     # allocation scope. Project capacity only for planning; real providers keep
     # their original descriptors and admission authority.
-    from ..execution.dataflow_native_limits import sealed_execution_ceilings
+    from demiflow.execution.contracts.dataflow import sealed_execution_ceilings
     cpu_ceiling = sealed_execution_ceilings(graph).get('cpu_millis')
     if cpu_ceiling is not None:
         hosts = tuple(replace(host, logical_resources={**host.logical_resources,
@@ -1027,14 +1030,14 @@ def compile_physical_dataflow(
         # Automatic durable parking must not discard an explicit graph limit.
         # Keep the same sole solver's sealed spill/accounting facts consistent.
         exchanges = _share_exchange_storage(constrained, bounds)
-        from ..execution.dataflow_publication_budget import PublicationReservation
+        from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
         residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
             max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
             publication_reservation=PublicationReservation(graph, stages, bounds))
     stages, reserved = allocate_workspace_slack(declared_graph, graph, stages, residency,
                                                 hosts=hosts, bounds=bounds)
     # Validate the exact grants and the original (not floor) publication contract.
-    from ..execution.dataflow_publication_budget import PublicationReservation
+    from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation
     residency = solve_residency(stages, exchanges, hosts=hosts, bounds=bounds,
         max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
         publication_reservation=PublicationReservation(declared_graph, stages, bounds, declared=reserved))
@@ -1079,3 +1082,55 @@ def compile_physical_dataflow(
         from .dataflow_training import validate_training_inputs
         validate_training_inputs(graph, physical, bounds=bounds)
     return physical
+
+
+def batch_carrier(graph, physical):
+    """Optimize only a sealed, sequential source-to-terminal slice.
+
+    Reordering, forks and mixed sources keep the original row codec. Otherwise
+    one-cache consumers could reread an entire batch once per interleaved row.
+    This selects a payload representation, never another execution route.
+    """
+    if len(physical.splits) != 1:
+        return None
+    if sum(node.kind == 'source' for node in graph.nodes) != 1:
+        return None
+    if sum(node.kind == 'terminal' for node in graph.nodes) != 1:
+        return None
+    terminal = next(node for node in graph.nodes if node.kind == 'terminal')
+    if terminal.kernel.kind not in ('write_lance', 'materialize', 'iter_rows', 'count'):
+        # size_bytes/summary and bounded collectors retain their original exact
+        # row accounting. The carrier estimate is a resource bound, not a new
+        # public measurement of a row's serialized size.
+        return None
+    mapped_arrow = terminal.kernel.configuration.get('input_carrier') == 'mapped_arrow.v1'
+    if any(node.kind not in ('source', 'terminal') and node.kernel.kind != 'LimitOp'
+           and not (mapped_arrow and node.kernel.kind == 'MapBatchesOp')
+           for node in graph.nodes):
+        return None
+    if len(graph.edges) != len(graph.nodes) - 1:
+        return None
+    producers = [edge.producer for edge in graph.edges]
+    consumers = [edge.consumer for edge in graph.edges]
+    if (len(set(producers)) != len(producers) or len(set(consumers)) != len(consumers)
+            or any(len(edge.producer_partitions) != 1 or len(edge.consumer_partitions) != 1
+                   for edge in physical.exchanges)):
+        return None
+    if mapped_arrow:
+        return 'mapped_arrow.v1'
+    # Existing seals did not request contiguous native batches. Keep their
+    # original scan boundaries and reference representation on recovery.
+    return 'original_scan_batches'
+
+
+def service_profile(kernel, *, policy, bounds):
+    if not kernel.configuration.get(MANAGED_HTTP_DEVICES_FIELD):
+        return kernel.profile
+    if policy.provider != 'local' or policy.worker_mode == 'thread':
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Legacy managed service GPU slots require a Local process host')
+    rss = (policy.native_limits or {}).get('max_rss_bytes')
+    if type(rss) is not int or rss <= 0:
+        raise DataflowError('UNSUPPORTED_CAPABILITY', 'Managed GPU service requires explicit native_resources.max_rss_bytes')
+    if rss < kernel.profile.requests['memory_bytes'] or rss > bounds.max_resident_bytes:
+        raise DataflowError('RESOURCE_INFEASIBLE', 'Managed GPU service RSS does not fit the original run envelope')
+    return replace(kernel.profile, requests={**kernel.profile.requests, 'memory_bytes': rss})

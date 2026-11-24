@@ -41,8 +41,8 @@ def execute(value):
     from demiflow.workbench.analysis import case_query
     reader=getattr(case_query,'read_private',None)
     if not callable(reader):c.reject('Private Case reader is absent from this intermediate release')
-    from demiflow.execution.datafusion import DataFusionOptions
-    from demiflow.execution.datafusion import DataFusionSession
+    from demiflow.execution.hosts.datafusion import DataFusionOptions
+    from demiflow.execution.hosts.datafusion import DataFusionSession
     from demiflow.workbench.analysis.query import NATIVE_OPTIONS
     from demiflow.workbench.analysis.query import NATIVE_CAPACITY
     with DataFusionSession(resource_directory=job_path('/var/lib/demiflow-analysis/native-slots'),

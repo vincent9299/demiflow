@@ -8,7 +8,7 @@ from demiflow.data.native_options import NativeOptions
 from demiflow.data.plan import CallableSpec, MapOp, MapBatchesOp
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_compile import compile_kernel_spec
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from demiflow.operator_llm.parser import parse_prompt_pack

@@ -27,21 +27,8 @@ class _LocalMaterializedHandle:
     def rows(self):
         """Read the published block representations lazily, in archive order."""
         self.check_open()
-        import pickle
-        for block in self.blocks:
-            if isinstance(block, _SpilledBlock):
-                with open(block.path, 'rb') as stream:
-                    while True:
-                        try:
-                            row = pickle.load(stream)
-                        except EOFError:
-                            break
-                        yield row
-            elif isinstance(block, _EncodedBlock):
-                for raw in block.rows:
-                    yield pickle.loads(raw)
-            else:
-                yield from block
+        from demiflow.execution.storage.streams import read_published_blocks
+        yield from read_published_blocks(self.blocks, spilled_type=_SpilledBlock, encoded_type=_EncodedBlock)
 
     def num_blocks(self):
         self.check_open()
@@ -50,9 +37,8 @@ class _LocalMaterializedHandle:
     def release(self):
         if self.released:
             return
-        for block in self.blocks:
-            if isinstance(block, _SpilledBlock) and not block.durable:
-                Path(block.path).unlink(missing_ok=True)
+        from demiflow.execution.storage.streams import release_published_blocks
+        release_published_blocks(self.blocks, spilled_type=_SpilledBlock)
         self.blocks = ()
         self.released = True
 
@@ -65,19 +51,10 @@ class _CheckpointBlocks:
         self.sink, self.coordinator = terminal.sink, terminal.coordinator
 
     def __iter__(self):
-        for fact in self.run.journal.iter_execution_commits(self.action_id, through_sequence=self.sequence):
-            # Historical rows also own object publications. Verify the complete
-            # native receipt lazily before exposing this generation's blocks.
-            receipt = self.sink.inspect(fact['prepared']['sinks']['output'],
-                                        self.coordinator._context(fact['commit_id']))
-            if receipt != fact['receipts']['output']:
-                from ..recovery_contract import RecoveryContractError
-                raise RecoveryContractError('Completed receipt differs from artifact evidence')
-            value = receipt['data']
-            if self.has_objects:
-                value = value['rows']
-            for block in self.reader.block_entries(value):
-                yield _SpilledBlock(str(self.run.directory / block['path']), durable=True)
+        from demiflow.execution.outputs.dataflow_handles import checkpoint_block_paths
+        for path in checkpoint_block_paths(self.run, self.action_id, self.sequence, reader=self.reader,
+                has_objects=self.has_objects, sink=self.sink, coordinator=self.coordinator):
+            yield _SpilledBlock(path, durable=True)
 
     def __len__(self):
         return sum(1 for _ in self)
@@ -124,7 +101,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         self.diagnostics_root = Path(diagnostics_root).resolve() if diagnostics_root is not None else None
 
     def operator_llm_usage(self) -> dict[str, int]:
-        from ..dataflow_usage import executor_prompt_usage
+        from demiflow.execution.journal.dataflow_usage import executor_prompt_usage
         return executor_prompt_usage(self)
 
     def plan(
@@ -133,7 +110,7 @@ class LocalDatasetExecutor(DatasetExecutor):
         terminal_parallelism_cap=None,
     ):
         reject_streaming_map_options(plan, 'local')
-        from ..dataflow_api import explain_dataset
+        from demiflow.execution.executors.dataflow_api import explain_dataset
         options: dict[str, Any] = {
             'action_kind': action_kind,
             'terminal_category': terminal_category,
@@ -154,7 +131,7 @@ class LocalDatasetExecutor(DatasetExecutor):
     def schema(self, source: SourcePlan, plan: LogicalPlan, *, fetch_if_missing: bool = True) -> Any:
         if not fetch_if_missing:
             return None
-        from ..dataflow_api import make_action_request, run_dataset_action
+        from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind='schema',
             arguments={'fetch_if_missing': fetch_if_missing})
         return run_dataset_action(request)
@@ -164,7 +141,7 @@ class LocalDatasetExecutor(DatasetExecutor):
     ) -> list[str] | None:
         if not fetch_if_missing:
             return None
-        from ..dataflow_api import make_action_request, run_dataset_action
+        from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
         request = make_action_request(self, source, plan, kind='columns',
             arguments={'fetch_if_missing': fetch_if_missing})
         return run_dataset_action(request)

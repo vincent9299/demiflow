@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from demiflow.execution.isolated_pool import IsolatedWorkerPool
+from demiflow.execution.hosts.isolated_pool import IsolatedWorkerPool
 
 
 @pytest.fixture

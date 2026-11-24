@@ -12,7 +12,7 @@ from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from tests.test_local_relational import _oracle_join, assert_same_rows
 from _worker_event_fixtures import emit, events
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def api(tmp_path):
@@ -317,7 +317,7 @@ def test_partition_callbacks_preserve_task_state_and_failure_before_commit(tmp_p
 def test_large_group_orders_only_keys_and_preserves_sequential_reducer(tmp_path, monkeypatch):
     """80 MiB of opaque input under a 32 MiB engine pool; no wide final sort."""
     from _group_order_fixtures import install_group_order_probe
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     proof_path = install_group_order_probe(tmp_path, monkeypatch)
     source = api(tmp_path)
     count = 20000

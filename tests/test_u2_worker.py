@@ -16,16 +16,17 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.errors import ExecutionConflict
-from demiflow.execution.artifacts import read
+from demiflow.execution.storage.artifacts import read
 from demiflow.execution.contracts import artifact
+from demiflow.execution.storage.artifacts import save_manifest
 from demiflow.execution.contracts.envelope import WORKER_PROTOCOL_VERSION
 from demiflow.execution.contracts.worker import validate_message
 from demiflow.execution.contracts.errors import ProtocolError
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext, _CURRENT, current_run
-from demiflow.execution.state_artifacts import StateArtifacts
-from demiflow.execution.worker.authority import WorkerAuthority
-from demiflow.execution.worker.bootstrap import recv_message, send_message, spawn_local_worker
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext, run_scope, current_run
+from demiflow.execution.storage.state_artifacts import StateArtifacts
+from demiflow.execution.worker.runtime import WorkerAuthority
+from demiflow.execution.hosts.worker_bootstrap import recv_message, send_message, spawn_local_worker
 from demiflow.execution.worker.runtime import WorkerRuntime
 
 
@@ -56,7 +57,7 @@ def env(tmp_path):
                  "fence": run.fence, "scope_id": ids["scope_id"], "allocation_id": ids["allocation_id"],
                  "boot_id": ids["boot_id"], "controller_epoch": run.attempt,
                  "expires_at_ms": int(time.time() * 1000) + 120000}
-        ref = artifact.save_manifest(run.directory, _manifest(run.ref.run_id))
+        ref = save_manifest(run.directory, _manifest(run.ref.run_id))
         mref = {"manifest_id": ref["manifest_id"], "sha256": ref["sha256"]}
         launch_spec = {"directory": str(run.directory), "run_id": run.ref.run_id,
                        "scope_id": ids["scope_id"], "allocation_id": ids["allocation_id"],
@@ -101,8 +102,6 @@ def _assignment(env, *, plan_revision=0, expected=0):
 def _verify(env, rt, caps=("cpu-map",), **over):
     return _handle(env, rt, "VerifyArtifactAndCapabilities",
                    {"artifact_manifest_ref": env.mref, "required_capabilities": list(caps)}, **over)
-
-
 def _restore(env, rt, state_refs=()):
     return _handle(env, rt, "Restore", {"assignment_ref": uuid.uuid4().hex,
                                         "restore_point": None, "state_refs": list(state_refs)})
@@ -124,11 +123,8 @@ def _activate(env, rt, **over):
 def as_worker():
     """Simulate the worker process context: no driver ContextVar bound while the
     driver keeps live ownership of the run (runtime_owner stays (attempt, fence))."""
-    token = _CURRENT.set(None)
-    try:
+    with run_scope(None):
         yield
-    finally:
-        _CURRENT.reset(token)
 
 
 # ---------------- LIF: lifecycle command executor ----------------
@@ -422,7 +418,7 @@ def test_local_worker_rejects_stale_boot_real_process(env):
         Path(launch_path).unlink(missing_ok=True)
 
 def test_retired_execution_launch_never_enters_a_control_connector(tmp_path):
-    from demiflow.execution.worker.bootstrap import LocalControlConnector
+    from demiflow.execution.hosts.worker_bootstrap import LocalControlConnector
 
     invalid = {'execution': {}}
     with pytest.raises(ProtocolError, match='retired'):

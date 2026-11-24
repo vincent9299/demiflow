@@ -4,7 +4,7 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.execution.training.inputs import prove_lance
+from demiflow.execution.sources.training_inputs import prove_lance
 
 
 def proof(root, table, *, media=(), media_roots=()):

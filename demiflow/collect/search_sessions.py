@@ -17,7 +17,7 @@ from .native_search import SearchConfig
 from .native_search.config import digest, public, validate_secrets
 from .native_search.config import validate_language
 from .search_routes import SearchRoutePool, _RoutedSession, _RouteGate, route_declarations, RouteLeaseExpired
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 
 
 DEFAULTS = dict(size=32, ttl_s=300., interval_s=5., refill_interval_s=.5,

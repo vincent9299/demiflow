@@ -54,7 +54,7 @@ def arrow_worker_preallocation(directory, *, provider='local', rejected=True):
     """Typed nulls amplify into native fixed-list buffers before any callback."""
     import pyarrow as pa
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     schema = pa.schema([('value', pa.list_(pa.float64(), 1024) if rejected else pa.float64())])
     count = 16 if rejected else 8  # Separate legal positive; the 16-row red case never shrinks.
@@ -117,13 +117,13 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     import pyarrow as pa
     from pytest import MonkeyPatch
     from demiflow import data
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution import arrow_batch_sink
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts import record_codec
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     observed, casts = [], []
     prepare = LanceSink.prepare
-    original_cast_bound = arrow_batch_sink._cast_allocation
+    original_cast_bound = record_codec.cast_allocation
     def cast_bound(table, schema):
         allocation = original_cast_bound(table, schema)
         casts.append({'retained_input_bytes': table.get_total_buffer_size(),
@@ -147,7 +147,7 @@ def lance_cast_preallocation(directory, *, provider='local', case='conversion_ne
     error = None
     with MonkeyPatch.context() as patch:
         patch.setattr(LanceSink, 'prepare', measured)
-        patch.setattr(arrow_batch_sink, '_cast_allocation', cast_bound)
+        patch.setattr(record_codec, 'cast_allocation', cast_bound)
         try:
             with RunContext.start(directory / 'run', limits=limits), _executor(provider,
                     workers=4, memory_bytes=limits['memory_bytes']):
@@ -189,10 +189,10 @@ def equal_width_cast_residency(directory, *, rejected):
     conservatively bounded Python-to-Arrow builder.
     """
     import pyarrow as pa
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.commit import CommitCoordinator
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.recovery_contract import SourcePosition
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.contracts.recovery_contract import SourcePosition
     from demiflow.lance.model import LanceWriteSpec
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     count = 4300 if rejected else 3000
@@ -322,9 +322,9 @@ def observe_execution(*, workers, memory_bytes):
     """Tap original successful decisions, never replace their results or grants."""
     from pytest import MonkeyPatch
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     from demiflow.execution.exchange.dataflow_state import ChannelSetState
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from runtime_v3_performance_scenarios import _plain
     report = {'plans': [], 'launches': [], 'charged_peak': {}, 'credit_peak_bytes': 0,
               'credit_peak_rows': 0, 'credit_samples': 0, 'budget_peaks': {}}
@@ -415,7 +415,7 @@ def partial_capacity(directory, *, provider):
             assert report['released_cpu'] >= 5
             _write(directory / 'holder-proof.json', report)
         return
-    from demiflow.execution.dataflow_capacity import local_capacity
+    from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.process_unit import ManagedProcessUnit
     domain, capacity = local_capacity()
@@ -471,7 +471,7 @@ def _source_rows(count, width, directory):
 
 def fanout_slow_sink(directory, *, provider='local', partial=False):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from contextlib import nullcontext
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     count, width = (64, 4096) if partial else (8, 8192)
@@ -532,7 +532,7 @@ def _hot_reduce(acc, row):
 
 def hot_key_disk(directory, *, provider='local', small_disk=False):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     limits=dict(memory_bytes=64*1024**2,max_row_bytes=65536,max_batch_bytes=262144,
         max_scratch_bytes=8*1024**2 if small_disk else 2*1024**3,max_state_bytes=2*1024**2,
@@ -570,7 +570,7 @@ def _oversized_row():
 
 def single_row_admission(directory, *, provider='local'):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     limits=dict(memory_bytes=4*1024**2,max_row_bytes=32768,max_batch_bytes=65536,
                 max_state_bytes=512*1024,timeout_s=30)
@@ -593,7 +593,7 @@ def single_row_admission(directory, *, provider='local'):
 
 def state_output_residency(directory, *, provider='local', rejected=False):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     limits=dict(memory_bytes=1024**2 if rejected else 4*1024**2,
         max_row_bytes=128*1024,max_batch_bytes=256*1024,

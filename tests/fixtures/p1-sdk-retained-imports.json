@@ -2,77 +2,62 @@
   "demiflow/data/dataset.py": [
     [
       "",
-      "demiflow.execution",
+      "demiflow.execution.executors",
       "queue_flow"
     ],
     [
       "Dataset.ack_queue",
-      "demiflow.execution.queue_ack",
+      "demiflow.execution.native_queue.queue_ack",
       "QueueAcknowledge"
     ],
     [
-      "Dataset.admit_rows",
-      "demiflow.execution.stream_admission",
-      "StreamAdmission"
-    ],
-    [
       "Dataset.batch_map",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint_async",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint_lance",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.checkpoint_lance_async",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
       "Dataset.deduplicate",
-      "demiflow.execution.plan_facts",
+      "demiflow.execution.seal.plan_facts",
       "_deduplicate_arguments"
     ],
     [
       "Dataset.deduplicate",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "identity"
     ],
     [
       "Dataset.enqueue",
-      "demiflow.execution.queue_producer",
+      "demiflow.execution.native_queue.queue_producer",
       "QueueProducer"
     ],
     [
       "Dataset.fetch",
-      "demiflow.execution.raw_fetch",
+      "demiflow.execution.native_queue.raw_fetch",
       "RawFetch"
     ],
     [
-      "Dataset.group_batches",
-      "demiflow.execution.stream_grouping",
-      "pack_group"
-    ],
-    [
-      "Dataset.lookup_lance",
-      "demiflow.execution.stream_lookup",
-      "LanceLookup"
-    ],
-    [
       "Dataset.map_async",
-      "demiflow.execution.capabilities",
+      "demiflow.execution.compiler_support.capabilities",
       "require_action"
     ],
     [
@@ -87,22 +72,22 @@
     ],
     [
       "Dataset.run_stream",
-      "demiflow.execution.capabilities",
+      "demiflow.planning.dataflow_compile",
       "validate_stream_plan"
     ],
     [
       "Dataset.run_stream",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ],
     [
       "Dataset.save_lance",
-      "demiflow.execution.stream_lance",
+      "demiflow.execution.native_queue.stream_lance",
       "StreamLanceSink"
     ],
     [
       "Dataset.write_datasink",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ]
   ],
@@ -124,17 +109,7 @@
     ],
     [
       "CacheCall.restore_state",
-      "demiflow.execution.kernels.task_scope",
-      "restore_resident_function"
-    ],
-    [
-      "CacheCall.restore_state",
-      "demiflow.execution.operator_policy",
-      "restore_auto_state"
-    ],
-    [
-      "CacheCall.restore_state",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ],
     [
@@ -143,39 +118,29 @@
       "DataflowError"
     ],
     [
-      "CacheCall.snapshot_state",
-      "demiflow.execution.kernels.task_scope",
-      "snapshot_resident_function"
-    ],
-    [
-      "CacheCall.snapshot_state",
-      "demiflow.execution.operator_policy",
-      "snapshot_auto_state"
-    ],
-    [
       "CacheCall.validate_runtime_state",
-      "demiflow.execution.kernels.task_scope",
+      "demiflow.execution.compiler_support.operator_policy",
       "_resident_slots"
     ],
     [
       "CacheCall.validate_runtime_state",
-      "demiflow.execution.recovery_contract",
+      "demiflow.execution.contracts.recovery_contract",
       "RecoveryContractError"
     ],
     [
       "_state_policy",
-      "demiflow.execution.kernels.task_scope",
-      "function_residency_kind"
+      "demiflow.execution.compiler_support.operator_policy",
+      "_resident_slots"
     ],
     [
       "_state_policy",
-      "demiflow.execution.kernels.task_scope",
-      "snapshot_resident_function"
-    ],
-    [
-      "_state_policy",
-      "demiflow.execution.operator_policy",
+      "demiflow.execution.compiler_support.operator_policy",
       "classify_operator_state"
+    ],
+    [
+      "_state_policy",
+      "demiflow.execution.compiler_support.operator_policy",
+      "function_residency_kind"
     ]
   ]
 }

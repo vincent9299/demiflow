@@ -9,8 +9,8 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def test_retained_python_rows_reject_before_the_next_decode_or_constructor(tmp_path, monkeypatch):
-    import demiflow.execution.dataflow_record_frames as frames
-    import demiflow.execution.batch_conversion as conversion
+    import demiflow.execution.contracts.record_codec as frames
+    import demiflow.execution.outputs.batch_conversion as conversion
     original = frames.decode_document
     retained = []
     encoded = []
@@ -41,7 +41,7 @@ def test_retained_python_rows_reject_before_the_next_decode_or_constructor(tmp_p
 
 
 def test_multi_segment_wide_small_rows_share_index_buffer_and_writer_budget(tmp_path, monkeypatch):
-    import demiflow.execution.dataflow_segments as segments
+    import demiflow.execution.storage.segments as segments
     original = segments.block_chunks
     seen = []
     def chunks(*args, **kwargs):

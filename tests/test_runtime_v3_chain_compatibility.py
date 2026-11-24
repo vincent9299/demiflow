@@ -6,9 +6,9 @@ import pytest
 
 from demiflow.data.api import DataAPI
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_handles import StoredMaterializedHandle
-from demiflow.execution.recovery_identity import plan_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
+from demiflow.execution.seal.program_identity import plan_identity
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 @contextmanager
@@ -27,7 +27,7 @@ def _entry(tmp_path):
 
 def _observe(monkeypatch):
     from demiflow.execution.action_driver import dataflow
-    from demiflow.execution import dataflow_api
+    from demiflow.execution.executors import dataflow_api
     original = dataflow_api.execute_action
     observed = []
     def execute(request, *, policy, bounds):
@@ -95,7 +95,7 @@ def test_chain_keeps_the_original_row_ceiling(tmp_path, monkeypatch):
 
 
 def test_materialize_rejects_a_nested_action_before_starting_workers(tmp_path, monkeypatch):
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     observed = _observe(monkeypatch)
     with pytest.raises(RecoveryContractError, match='Nested Dataset actions'):
         with RunContext.start(tmp_path / 'run') as run, _entry(tmp_path) as api:

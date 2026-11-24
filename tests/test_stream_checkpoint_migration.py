@@ -1,9 +1,9 @@
 """Changing a pipeline creates a new run, never rewrites the old identity."""
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def test_explicit_identity_migration_rebinds_checkpoint(tmp_path):

@@ -15,8 +15,8 @@ import pytest
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.manager import ResourceManager
 
 @pytest.mark.ray
@@ -138,8 +138,8 @@ import test_upgrade_v2_unit_L015 as chain_contract
 def ray_chain_facts(ray_local, tmp_path_factory):
     import builtins
     from demiflow.resources.capacity import LocalCapacityPool
-    from demiflow.execution.dataflow_hosts import DataflowRayConnector, RayHostEndpoint
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.hosts.endpoints import DataflowRayConnector, RayHostEndpoint
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     events, reservations, imports = [], [], []
     original_apply = ResourceManager.apply
     original_terminal = ResourceManager.close
@@ -247,7 +247,7 @@ def _repair_owned_resource_terminal(execution):
 def _ray_failure(tmp_path, ray, *, mode, reference=None):
     """Inject one transport/provision fault; execute the real Ray chain driver."""
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_hosts import RayHostEndpoint, DataflowRayConnector
+    from demiflow.execution.hosts.endpoints import RayHostEndpoint, DataflowRayConnector
     from demiflow.execution.scheduler.placement import DataflowScheduler
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.resources.contracts import ResourceError
@@ -581,7 +581,7 @@ def _converge_terminal(run, timeout_s=45.0):
     observation leaves the ensure_absent intent claimed for its full 30s lease,
     so convergence is bounded by that lease rather than by the kill itself.
     """
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.hosts.run_state import RunResourceState
     from demiflow.execution.hosts.ray_worker_host import RayControlConnector
     from demiflow.resources.manager import ManagerBounds, ResourceManager
     from demiflow.resources.ray import RayResourceProvider

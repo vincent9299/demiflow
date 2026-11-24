@@ -105,3 +105,53 @@ def save_facts(actor, operation):
     values.update({name: getattr(operation, name) for name in ('max_batch', 'flush_interval', 'queue_depth')})
     return {'contract': 'demiflow.save_lance', 'arguments': normalize_save(values), 'when': actor.when is not None}
 
+
+def lookup_declaration(actor, target):
+    from demiflow.operators.lookup import LanceLookup
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    declaration = lookup_facts(actor)['arguments']
+    if getattr(target, '__func__', None) is not LanceLookup.__call__:
+        raise DataflowError('INVALID_CONTRACT', 'Lookup must bind the native lookup callable')
+    if actor.table is not None:
+        raise DataflowError('INVALID_CONTRACT', 'Lookup requires an unstarted fixed-version declaration')
+    return declaration
+
+
+def vector_search_declaration(actor):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    if (actor._dataset is not None or actor._vector_type is not None or actor._version is not None
+            or actor._queries or actor._hits):
+        raise DataflowError('INVALID_CONTRACT', 'Vector search requires an unstarted declaration')
+    return {**actor.spec, 'query': actor.query, 'output': actor.output, 'label': actor.label}
+
+
+def vector_search_facts(operation):
+    from demiflow.data.runtime_contract import RuntimeContractError
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.lance.search import VectorSearch
+    target = operation.callable.target
+    actor = getattr(target, '__self__', None)
+    if (type(actor) is not VectorSearch or getattr(target, '__func__', None) is not VectorSearch.__call__
+            or actor.spec != operation.search_spec or actor.query != operation.query
+            or actor.output != operation.output or actor.options != operation.search_spec.get('options')
+            or actor.filter_column != operation.search_spec.get('filter_column')):
+        raise RuntimeContractError('VectorSearch actor differs from its declared plan')
+    spec = dict(operation.search_spec)
+    storage = spec.get("storage_options") or {}
+    # Reference storage options by bounded identity; never copy credential
+    # material into the permanent plan fact.
+    spec["storage_options"] = {"sha256": identity(sorted(storage.items())),
+                               "keys": sorted(storage)}
+    return {'contract': 'demiflow.search_vectors',
+            'arguments': dict(spec, query=operation.query, output=operation.output)}
+
+
+def stream_lance_output_schema(schema, output_ref):
+    """A native publication passes input fields through and may add a receipt."""
+    if schema is None or output_ref is None:
+        return schema
+    if output_ref in schema.names:
+        raise ValueError('output_ref would overwrite an input field')
+    import pyarrow as pa
+    return schema.append(pa.field(output_ref,
+        pa.struct([pa.field('uri', pa.string()), pa.field('version', pa.int64())]), nullable=True))

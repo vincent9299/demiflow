@@ -3,7 +3,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def joined():
@@ -13,15 +13,16 @@ def joined():
 
 def test_finite_result_keeps_original_small_budget_and_resumes_original_seal(tmp_path, monkeypatch):
     from dataclasses import replace
-    from demiflow.execution import dataflow_api
-    original_policy = dataflow_api.resolve_runtime_policy
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    original_policy = action_limits.resolve_runtime_policy
     def separate_finite_phases(*args, **kwargs):
         policy, bounds = original_policy(*args, **kwargs)
         return replace(policy, fusion=False), bounds
     # This counterexample interrupts the seal between join and terminal. Pin
     # separate operators and the original windows; adaptive defaults may put
     # both in the same live phase and remove this retirement boundary.
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', separate_finite_phases)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', separate_finite_phases)
     limits = {'max_row_bytes': 16 * 1024, 'max_batch_bytes': 16 * 1024,
               'max_state_bytes': 16 * 1024}
     class Interrupted(Exception):
@@ -35,7 +36,7 @@ def test_finite_result_keeps_original_small_budget_and_resumes_original_seal(tmp
             outputs = [edge for edge in execution._physical.exchanges
                        if set(edge.producer_partitions) & set(stage.partitions)]
             assert outputs and all(edge.mode == 'finite_sealed' for edge in outputs)
-            assert all(edge.channel_id in execution._finite_seals for edge in outputs)
+            assert all(edge.channel_id in execution._exchange.finite_seals for edge in outputs)
             assert execution._bounds.max_resident_bytes == 128 * 1024
             assert execution._bounds.max_state_bytes == 16 * 1024
             sealed.append(execution._physical.plan_id)

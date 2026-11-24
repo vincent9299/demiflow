@@ -7,6 +7,10 @@ This transport executes no business code and has no journal/commit authority.
 """
 from __future__ import annotations
 
+from demiflow.execution.contracts.record_codec import admit_receive, peer_chunk_bytes
+
+from demiflow.execution.contracts.record_codec import document_limit, _frame_budget_error, _admit, resident_limit
+
 import hashlib
 import json
 import queue
@@ -18,7 +22,8 @@ import threading
 import time
 
 from ..contracts.dataflow_errors import DataflowError
-from ..dataflow_record_frames import document_limit, admit_receive, peer_chunk_bytes
+from demiflow.execution.contracts.record_codec import document_limit
+
 
 MAX_PEER_BATCH = 32
 

@@ -6,7 +6,7 @@ import sqlite3
 import pytest
 
 from demiflow.errors import ExecutionConflict
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def managed(directory, *, actions=()):

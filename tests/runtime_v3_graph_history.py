@@ -4,11 +4,11 @@ import json
 
 
 def committed_rows(run, action_id, reader_id, facts, *, require_final=True):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.objects import RunArtifactStore
-    from demiflow.execution.dataflow_replay import PublishedRecordReader
-    from demiflow.execution.dataflow_record_frames import document_limit
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.outputs.replay import PublishedRecordReader
+    from demiflow.execution.contracts.record_codec import document_limit
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     sealed = load_sealed_plan(run.directory, action_id, version='v3')
     bounds = sealed['physical'].bounds
     store = RunArtifactStore(root=run.directory / '.dataflow-store', store_id='local',
@@ -70,12 +70,12 @@ def capture_acks(run, action_id):
 
 def acknowledged_ancestor_rows(run, action_id, facts):
     """Read the actual business boundary, not a pre-read source cursor/cut size."""
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.execution.storage.objects import RunArtifactStore
-    from demiflow.execution.checkpoint.coordinator import _artifact_from_json
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.contracts.checkpoint import artifact_from_json as _artifact_from_json
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.contracts.dataflow_codec import compute_participant_id
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     sealed = load_sealed_plan(run.directory, action_id, version='v3')
     physical = sealed['physical']
     result_nodes = [node for node in sealed['graph'].nodes
@@ -127,7 +127,7 @@ def assert_closed(run_directory, *, allow_unprovisioned=False):
     if process_records(run_directory):
         return assert_released(run_directory)
     assert allow_unprovisioned, 'expected an actual process worker'
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with RunJournal(run_directory)._connection() as db:
         if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resource_allocations'").fetchone():
             assert db.execute('SELECT count(*) FROM resource_allocations').fetchone()[0] == 0

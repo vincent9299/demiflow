@@ -1,6 +1,14 @@
 """Join key membership, matching, row combination and native offset queries."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+import json
+import copy
+import pickle
+from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 from collections.abc import Mapping
 import itertools
 from typing import Any
@@ -165,7 +173,6 @@ def merge_join_rows(
     return out
 
 
-
 def match_probe(spool, key, matches, how, load_left, *left_position):
     """Apply inner/left/semi/anti multiplicity before hydrating either payload."""
     left = None
@@ -244,3 +251,154 @@ def project_columns(columns, kind, configuration):
             return None
         return tuple(range(len(columns))), names
     return None
+
+
+def key_token(value: Any) -> Any:
+    """Type-tagged encoding keeping -0.0/bytes/tuple/IEEE distinct (C01/C06)."""
+    if value is None:
+        return ["n"]
+    if isinstance(value, bool):
+        return ["b", value]
+    if isinstance(value, int):
+        return ["i", value]
+    if isinstance(value, float):
+        return ["f", repr(value)]
+    if isinstance(value, str):
+        return ["s", value]
+    if isinstance(value, bytes):
+        return ["y", value.hex()]
+    if isinstance(value, tuple):
+        return ["t", [key_token(item) for item in value]]
+    if isinstance(value, list):
+        return ["l", [key_token(item) for item in value]]
+    if isinstance(value, Mapping):
+        items = sorted(value.items(), key=lambda kv: _canonical(key_token(kv[0])))
+        return ["d", [[key_token(k), key_token(v)] for k, v in items]]
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+def group_key(row: Mapping[str, Any], fields: tuple[str, ...]) -> str:
+    return _canonical([key_token(row[field]) for field in fields])
+
+def group_key_values(raw):
+    """Recover the typed sort columns from a canonical finite join key."""
+    def value(token):
+        kind = token[0]
+        if kind == 'n':
+            return None
+        payload = token[1]
+        if kind in ('s', 'i', 'b'):
+            return payload
+        if kind == 'f':
+            return float(payload)
+        if kind == 'y':
+            return bytes.fromhex(payload)
+        if kind == 'l':
+            return [value(item) for item in payload]
+        if kind == 't':
+            return tuple(value(item) for item in payload)
+        if kind == 'd':
+            return {value(k): value(v) for k, v in payload}
+        raise DataflowError('CORRUPT_ARTIFACT', 'unknown tag in a finite join key')
+    return tuple(value(token) for token in json.loads(raw))
+
+
+def reduce_ordered_groups(ordered, *, reducer, initial, fn_kwargs, validation,
+                          memory, bounds, output, output_roots, check_stop, retain=None):
+    """Original sequential key-group fold over rows and explicit bound ports.
+
+    Group order, initial copying, state validation and suspended-yield accounting
+    remain here. The partition binding owns its output record and runtime budget.
+    """
+    from demiflow.operators.reducer_memory import check_initial, check_state, yielded_peers
+    max_state = bounds.max_state_bytes
+    sequence = 0
+
+    missing = object()
+    current_key, state = missing, None
+    iterator = iter(ordered)
+    try:
+        # Do not let itertools.groupby keep the previous row alive while the
+        # producer hydrates the next one. Only the group key and state survive.
+        for key,row in iterator:
+            check_stop()
+            if current_key is missing or key != current_key:
+                if current_key is not missing and state is not None:
+                    out=output(state,current_key,sequence)
+                    sequence+=1
+                    if memory is not None and retain is not None:
+                        retain(yielded_peers(initial,state,output_roots(out),memory,bounds,
+                                            pending=(row,current_key,key)))
+                    try:
+                        yield out
+                    finally:
+                        if retain is not None:
+                            retain(0)
+                    del out
+                state=None  # previous group cannot coexist with the next deepcopy
+                current_key=key
+                if memory is not None:
+                    check_initial(initial,memory)
+                state=copy.deepcopy(initial)
+            if validation is not None:
+                validation.inputs((state,row),fn_kwargs)
+            state=reducer(state,row,**fn_kwargs)
+            if validation is not None:
+                state=validation.output(state)
+            if memory is not None:
+                check_state(state,memory,serialized_limit=max_state)
+            elif max_state>0 and len(pickle.dumps(state,protocol=pickle.HIGHEST_PROTOCOL))>max_state:
+                raise DataflowError('BUDGET_EXCEEDED','reducer state exceeds max_state_bytes')
+            del row
+        if current_key is not missing and state is not None:
+            out=output(state,current_key,sequence)
+            if memory is not None and retain is not None:
+                retain(yielded_peers(initial,state,output_roots(out),memory,bounds))
+            yield out
+    finally:
+        if retain is not None:
+            retain(0)
+        close=getattr(iterator,'close',None)
+        if close is not None:
+            close()
+
+
+def select_columns(row, columns):
+    """Original Python row projection; a missing column raises its KeyError."""
+    return {column: row[column] for column in columns}
+
+def drop_columns(row, columns):
+    """Original checked row projection, independent of record identity/schema."""
+    missing = [column for column in columns if column not in row]
+    if missing:
+        raise DataflowError("INVALID_CONTRACT", "drop column missing", context={"fields": missing})
+    return {key: value for key, value in row.items() if key not in columns}
+
+def rename_columns(row, names):
+    """Original mapping/positional rename; retain their distinct validation."""
+    if isinstance(names, Mapping):
+        targets = [names.get(key, key) for key in row]
+        if len(targets) != len(set(targets)):
+            raise DataflowError("INVALID_CONTRACT", "rename produces duplicate column names")
+        return {names.get(key, key): value for key, value in row.items()}
+    else:
+        targets = tuple(names)
+        if len(row) != len(targets):
+            raise DataflowError("INVALID_CONTRACT", "rename list length must match schema")
+        return dict(zip(targets, row.values()))
+
+
+def add_column_row(row, column, values):
+    if len(values) != 1:
+        raise DataflowError('INVALID_CONTRACT', 'add_column result length must match batch')
+    return {**row, column: values[0]}
+
+
+def add_column_rows(rows, column, values, *, schema, on_schema):
+    if len(values) != len(rows):
+        raise DataflowError('INVALID_CONTRACT', 'add_column result length must match batch')
+    if schema is not None:
+        import pyarrow as pa
+        fields = [field for field in schema if field.name != column]
+        fields.append(pa.field(column, pa.array(values).type))
+        on_schema(pa.schema(fields, metadata=schema.metadata))
+    return [{**row, column: value} for row, value in zip(rows, values)]

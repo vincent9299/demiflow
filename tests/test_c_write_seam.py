@@ -17,9 +17,9 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunAction, RunContext
-from demiflow.execution.sealed_plans import load_execution_bindings, load_sealed_plan
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunAction, RunContext
+from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from demiflow.workbench.runs.facts import read_sealed_plan
 
 
@@ -81,11 +81,13 @@ def assert_sealed_readable(run_dir, run, expected_kinds):
 
 
 def read_program_evidence(run_dir, action_id):
-    from demiflow.execution.sealed_plans import _v3_read_store
+    from demiflow.execution.seal.sealed_plans import sealed_read_bounds
+    from demiflow.execution.storage.objects import readonly_run_store
     import json
     bundle = load_sealed_plan(run_dir, action_id, version="v3")
     sealed = bundle["sealed"]
-    store, bounds = _v3_read_store(run_dir, store_id=sealed.code_pin_ref.store_id)
+    bounds = sealed_read_bounds()
+    store = readonly_run_store(run_dir, store_id=sealed.code_pin_ref.store_id, bounds=bounds)
     pin_bytes = b"".join(store.read(sealed.code_pin_ref, max_bytes=bounds.max_control_bytes))
     pin = json.loads(pin_bytes)
     manifests = []
@@ -175,7 +177,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
     import cloudpickle
     import json
     from demiflow.execution.seal import plan as sealing
-    from demiflow.execution.recovery_contract import document
+    from demiflow.execution.contracts.recovery_contract import document
     original = sealing._stage_one_program
     altered = []
 
@@ -199,7 +201,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
             relational_dataset().write_lance(str(target), mode="create", return_receipt=True)
     assert len(altered) == 1
     assert not target.exists(), "publication happened despite a failed binding gate"
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(run_dir)
     action_id = sealed_action_id(journal)
     assert journal.execution_action(action_id)['result'] is None
@@ -218,7 +220,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
 
 def test_streamed_consumes_sealed_checkpoint_and_stage_limits(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_hosts import _EndpointBase
+    from demiflow.execution.hosts.endpoints import _EndpointBase
     captured, assignments = [], []
     original = DataflowExecution.start
     original_prepare = _EndpointBase.prepare
@@ -292,8 +294,8 @@ def test_identity_bridge_carrier_survives_run_exit(tmp_path):
     identity_bridge_corrupt). It must be written unregistered so the workbench
     reads it back after the run, with every entry four-way identity linked.
     """
-    from demiflow.execution.identity_bridge import build_identity_bridge, seal_identity_bridge
-    from demiflow.execution.sealed_plans import read_plan_artifact
+    from demiflow.execution.seal.identity_bridge import build_identity_bridge, seal_identity_bridge
+    from demiflow.execution.storage.reading import read_plan_artifact
     from demiflow.planning.dag import compile_logical_dag
     from demiflow.workbench.runs import facts
 
@@ -372,7 +374,7 @@ def test_write_seam_bundle_identity_is_code_pin_carrier_survives(tmp_path, monke
     """The actual sealed pin carrier binds loaded-code identities independently
     of pickle payload digests and survives run-exit orphan collection.
     """
-    from demiflow.execution.recovery_contract import document, identity
+    from demiflow.execution.contracts.recovery_contract import document, identity
     run_dir = tmp_path / "run"
     with RunContext.start(run_dir) as run:
         relational_dataset().write_lance(str(tmp_path / "out.lance"), mode="create", return_receipt=True)
@@ -514,8 +516,8 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
 def test_catch_nonempty_canonical_strict_json():
     """A non-empty exception whitelist serializes to sorted qualified names so the
     sealed plan identity is strict-JSON (the seam compiles every write_lance plan)."""
-    from demiflow.execution.plan_facts import operation_facts
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.seal.plan_facts import operation_facts
+    from demiflow.execution.contracts.recovery_contract import identity
 
     async def callback(row):
         return row
@@ -530,8 +532,8 @@ def test_catch_canonical_preserves_empty_identity():
     """The shared canonicalizer keeps the exact prior JSON form for empty/None so
     neither catch copy site (stream_options fields nor the async/batch/save names
     loop) can drift a sealed identity."""
-    from demiflow.execution.plan_facts import _catch_facts
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.seal.plan_facts import _catch_facts
+    from demiflow.execution.contracts.recovery_contract import identity
 
     for raw in ((), None, []):
         assert identity({"catch": _catch_facts(raw)}) == identity({"catch": raw})
@@ -543,7 +545,7 @@ def test_catch_empty_dag_id_unchanged(monkeypatch):
     pre-fix raw operation.catch copy) and after (canonical) — byte-identical. The
     None defensive path is covered by test_catch_canonical_preserves_empty_identity
     (the public map_async API normalizes catch=None to ())."""
-    import demiflow.execution.plan_facts as pf
+    import demiflow.execution.seal.plan_facts as pf
     from demiflow.planning.dag import compile_logical_dag
 
     real_facts = pf.operation_facts

@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow.data.api import DataAPI
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_runtime_v3_native_execution import PACK, native_server
 
@@ -98,14 +98,14 @@ def test_offline_response_is_bounded_before_reading_into_python(tmp_path, storag
 
 
 def test_offline_worker_cannot_supply_an_unverified_port():
-    from demiflow.execution.dataflow_offline import RemoteOfflinePromptClient
+    from demiflow.operator_llm.offline import RemoteOfflinePromptClient
     with pytest.raises(ValueError, match='verified native'):
         RemoteOfflinePromptClient(None, {'offline_dir': '/unused'}, object())
 
 
 def test_prompt_observation_replay_and_new_boot_do_not_duplicate_accounting():
     from types import SimpleNamespace
-    from demiflow.execution.dataflow_usage import empty_usage, observe_prompt_usage, publish_prompt_usage
+    from demiflow.execution.journal.dataflow_usage import empty_usage, observe_prompt_usage, publish_prompt_usage
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     execution, executor = SimpleNamespace(), SimpleNamespace()
     counts = {**empty_usage(), 'provider_requests_started': 2}

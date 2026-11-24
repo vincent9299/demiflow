@@ -61,7 +61,7 @@ def test_admission_bounds_and_skipped_rows(tmp_path):
 
 def test_quota_reader_observes_live_commits_without_reserving(tmp_path):
     from demiflow import AdmissionQuotaReader
-    from demiflow.execution.stream_admission import StreamAdmission
+    from demiflow.operators.admission import StreamAdmission
     path = tmp_path/'quota.sqlite'
     quotas = [{'on': [], 'limit': 3}, {'on': ['group'], 'limit': 1}]
     reader = AdmissionQuotaReader(path, quotas=quotas)

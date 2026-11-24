@@ -1,4 +1,5 @@
 """The unfinished terminal manifest shares the original worker frame grant."""
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from collections import deque
 from types import SimpleNamespace as NS
 import threading
@@ -7,12 +8,12 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import BlockPartition
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_publication_budget import TERMINAL_WORKSPACE
-from demiflow.execution.dataflow_record_frames import frame_parts
-from demiflow.execution.dataflow_sinks import MANIFEST_MEDIA
-from demiflow.execution.recovery_contract import document, identity
+from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
+from demiflow.execution.contracts.record_codec import frame_parts
+from demiflow.execution.contracts.dataflow_codec import MANIFEST_MEDIA
+from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
-from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
 from test_runtime_v3_artifact_accounting import store_fixture
 from test_runtime_v3_c import bounds, make
 
@@ -25,12 +26,12 @@ def unfinished(store, *, columns):
     writer = TerminalBlocks(services, 'worker')
     names = [f'column-{i:03d}-' + 'name' * 8 for i in range(columns)]
     row = dict.fromkeys(names, 1)
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     try:
         for index in range(2):
             record = make('Record', inline=row, encoded_bytes=len(_encode_payload(row, max_bytes=8192)),
                           block_partition=BlockPartition(identity(['two-blocks']), index, 2))
-            size, chunks = frame_parts(record, limits, services=services)
+            size, chunks = frame_parts(record, limits, resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)))
             writer.append_parts(record, chunks, size=size)
         manifest = {'schema':'demiflow.dataflow_sink_manifest.v3', 'sink_id':'write_lance',
                     'partition_id':'worker', 'rows':writer.rows, 'bytes':writer.bytes,
@@ -136,7 +137,7 @@ def test_manifest_encoding_counts_columns_and_partitions_once_and_admits_before_
 
 
 def test_index_decode_keeps_the_unfinished_outer_manifest_and_live_control_body(tmp_path):
-    from demiflow.execution.dataflow_record_frames import raw_workspace, metadata_bytes
+    from demiflow.execution.contracts.record_codec import raw_workspace, metadata_bytes
     with store_fixture(tmp_path) as (_, store, _):
         ref, manifest = unfinished(store, columns=12)
         runner = owner(store, ref)
@@ -170,7 +171,7 @@ def test_index_decode_keeps_the_unfinished_outer_manifest_and_live_control_body(
 
 def test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_before_encoder(tmp_path, monkeypatch):
     import json
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with store_fixture(tmp_path) as (_, store, _):
         ref, _ = unfinished(store, columns=2)
         runner = owner(store, ref)
@@ -202,8 +203,8 @@ def test_streamed_manifest_preserves_original_bytes_and_rejects_long_token_befor
 @pytest.mark.parametrize('blocked', [False, True])
 def test_merge_keeps_popped_children_live_before_index_construction(tmp_path, monkeypatch, blocked):
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.dataflow_segments import SEGMENTS_MEDIA, block_chunks
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.storage.segments import SEGMENTS_MEDIA, block_chunks
+    from demiflow.execution.contracts.record_codec import _encode_payload
     with store_fixture(tmp_path) as (run, store, _):
         runner = owner(store, None)
         blocks = runner._terminal_blocks
@@ -234,7 +235,7 @@ def test_merge_keeps_popped_children_live_before_index_construction(tmp_path, mo
             for index in range(2):
                 row = {'n':index}
                 record = make('Record', inline=row, encoded_bytes=len(_encode_payload(row, max_bytes=8192)))
-                size, chunks = frame_parts(record, runner.bounds, services=runner.services)
+                size, chunks = frame_parts(record, runner.bounds, resident_bytes=stage_resident_bytes(getattr(runner.services, 'assignment', None)))
                 raw = b''.join(chunks)
                 expected.extend(raw)
                 blocks.append_parts(record, iter((raw,)), size=size)

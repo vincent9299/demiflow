@@ -44,9 +44,9 @@ class PublicIntegrationTests(unittest.TestCase):
             if name in {"Pipeline", "PipelineProgram", "ResourceAPI"}:
                 module = importlib.import_module("demiflow.pipeline")
             elif name == "StreamCheckpoint":
-                module = importlib.import_module("demiflow.execution.stream_checkpoint")
+                module = importlib.import_module('demiflow.execution.executors.stream_checkpoint')
             elif name == "AdmissionQuotaReader":
-                module = importlib.import_module("demiflow.execution.stream_admission")
+                module = importlib.import_module('demiflow.operators.admission')
             elif name.startswith("Pipeline") or name == "PlatformRuntimeIdentity":
                 module = importlib.import_module("demiflow.execution")
             else:

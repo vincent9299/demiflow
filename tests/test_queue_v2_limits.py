@@ -9,11 +9,11 @@ import pytest
 from demiflow import data
 from demiflow.collect import FetchPolicy, HttpSource
 from demiflow.objects import LocalObjectStore
-from demiflow.execution.queue import QueueChannel, ProducerSourceSpec, task_message
-from demiflow.execution.queue_contract import QueueIncomplete
-from demiflow.execution.queue_sinks import QueueResultSink
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.native_queue.queue import QueueChannel, ProducerSourceSpec, task_message
+from demiflow.execution.contracts.queue_contract import QueueIncomplete
+from demiflow.execution.native_queue.queue_sinks import QueueResultSink
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel, native_parent, publish, source, worker
 from test_raw_fetch import origin_server
 
@@ -203,7 +203,7 @@ def test_hash_verification_does_not_block_lease_renewal_or_other_claim(channel, 
 
 
 def test_stop_after_request_admission_prevents_new_body_grants(channel,tmp_path,monkeypatch):
-    from demiflow.execution.raw_budget import RawBudget
+    from demiflow.execution.native_queue.raw_budget import RawBudget
     stop=tmp_path/'stop'
     original=RawBudget.extend
     def interrupt(self,attempt,expected_grant,granted,requests):

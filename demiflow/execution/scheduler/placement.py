@@ -279,7 +279,7 @@ class DataflowScheduler:
             "location": "store://" + self._physical.constants_ref.store_id + "/" + self._physical.constants_ref.key}
         return WorkerLaunchSpec(
             artifact_refs=artifact_refs, entrypoint="demiflow-worker",
-            argv=(sys.executable, "-B", "-m", "demiflow.execution.worker.bootstrap"),
+            argv=(sys.executable, "-B", "-m", 'demiflow.execution.hosts.worker_bootstrap'),
             bootstrap_ref="bootstrap-ref", access_refs={},
             runtime_protocol_version=RESOURCE_PROTOCOL_VERSION)
 
@@ -379,7 +379,7 @@ class DataflowScheduler:
             if prepare is None:
                 raise DataflowError("INVALID_CONTRACT", "placement requires a staged worker launch")
             allocation_id, boot_id = uuid.uuid4().hex, uuid.uuid4().hex
-            from ..dataflow_native_limits import admission_timeout_ms
+            from demiflow.execution.scheduler.native_limits import admission_timeout_ms
             request = WorkerRequest(uuid.uuid4().hex, allocation_id, stage.profile,
                 self._launch_spec(stage), provision_deadline_ms=admission_timeout_ms(self._policy),
                 placement=self._placements.get(work.stage_id), reservation_group=work.stage_id)
@@ -403,7 +403,7 @@ class DataflowScheduler:
         grant = json.loads(self.grants[allocation_id])
         if grant['fence'] != fence or grant['attempt'] != attempt:
             raise DataflowError("FENCED", "worker launch belongs to a different owner")
-        from ..dataflow_native_limits import admission_timeout_ms
+        from demiflow.execution.scheduler.native_limits import admission_timeout_ms
         self._resources.reconcile_once(fence,
             time.monotonic() + admission_timeout_ms(self._policy) / 1000.0, 16)
         observed = self._observation(allocation_id)

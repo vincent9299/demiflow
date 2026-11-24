@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Iterator
 
 from ..contracts.dataflow import ArtifactRef, ArtifactCommand
 from ..contracts.dataflow_errors import DataflowError
-from ..recovery_contract import identifier, identity, RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import identifier, identity, RecoveryContractError
 
 if TYPE_CHECKING:
     from ..contracts.dataflow import ArtifactAuthorityPort, Bounds
@@ -267,7 +267,7 @@ class RunArtifactStore:
 
     def scratch(self, *, max_bytes, max_io_bytes):
         """Borrow bounded random-access scratch from this store's authority."""
-        from ..dataflow_scratch import KernelScratch
+        from demiflow.execution.storage.scratch import KernelScratch
         return KernelScratch(self, max_bytes=max_bytes, max_io_bytes=max_io_bytes)
 
     def put(self, chunks: Iterator[bytes], *, max_bytes: int, media_type: str) -> ArtifactRef:
@@ -327,7 +327,7 @@ class RunArtifactStore:
                         if size > reserved:
                             # Admission precedes every write beyond the owned extent.
                             # Do not reserve an entire source/spill ceiling up front.
-                            from ..dataflow_staging_growth import grow_staging
+                            from demiflow.execution.storage.staging import grow_staging
                             reserved = grow_staging(self._journal, operation_id,
                                 reserved=reserved, required=size, maximum=max_bytes,
                                 spill_budget=self._bounds.max_spill_bytes)
@@ -480,7 +480,7 @@ class RunArtifactStore:
 
     def object_signature(self, ref):
         """Identify the current readable local object without opening its payload."""
-        from ..artifact_proof import ArtifactProofs
+        from demiflow.execution.storage.artifact_proof import ArtifactProofs
         path = self._object_path(ref)
         try:
             metadata = path.stat()
@@ -586,7 +586,7 @@ def _release_files(state, count, limit, *, final=True):
 
 
 def _pin_identity(ref: ArtifactRef, owner: str) -> str:
-    from ..recovery_contract import identity
+    from demiflow.execution.contracts.recovery_contract import identity
     return identity({"digest": ref.digest, "store_id": ref.store_id, "key": ref.key, "owner": owner})
 
 
@@ -608,3 +608,16 @@ def _file_digest(path: Path, *, max_bytes: int) -> str:
     finally:
         os.close(fd)
     return digest.hexdigest()
+
+
+def readonly_run_store(directory, *, store_id, bounds):
+    """Single adjustable v3 read point (W007/W008).
+
+    Builds the run-rooted artifact store and read bounds used to load a v3 sealed
+    dataflow. The root is the writer's .dataflow-store directory and the domain
+    comes from its authenticated artifact reference. Reading history creates no
+    directories, reservations or journal writes.
+    """
+    store = RunArtifactStore(root=Path(directory).absolute() / ".dataflow-store", store_id=store_id,
+                             journal=None, bounds=bounds, readonly=True)
+    return store

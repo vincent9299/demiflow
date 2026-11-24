@@ -1,4 +1,6 @@
 """Public native budgets constrain the unified path and survive recovery."""
+
+from demiflow.execution.action_driver import services as action_services
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -9,10 +11,9 @@ from demiflow import data
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire, compute_physical_digest
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_native_limits import (
-    NativeBudgetGuard, admission_timeout_ms, intersect_native_limits,
-)
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.hosts.configuration import NativeBudgetGuard
+from demiflow.execution.scheduler.native_limits import admission_timeout_ms, intersect_native_limits
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def test_policy_and_assignment_preserve_old_wire_and_bind_new_ceilings():
@@ -50,8 +51,8 @@ def test_native_guard_samples_actual_process_and_preserves_headroom_direction():
 def test_public_native_limits_constrain_real_lance_input_join_and_sink(tmp_path, monkeypatch):
     import lance
     import pyarrow as pa
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.resource_state import RunResourceState
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.hosts.run_state import RunResourceState
     source = tmp_path/'input.lance'
     lance.write_dataset(pa.table({'n': list(range(4))}), str(source))
     batches, physicals, charges = [], [], []
@@ -122,12 +123,12 @@ def test_resume_retains_native_ceilings_and_original_plan_when_option_omitted(tm
     # This fault targets a real durable phase boundary. Explicitly select the
     # existing unfused policy so optional pure-pipeline co-location cannot
     # remove the injection point and turn the test into a successful full run.
-    from demiflow.execution import dataflow_api
-    resolve = dataflow_api.resolve_action_runtime
+    from demiflow.execution.executors import dataflow_api
+    resolve = action_services.resolve_action_runtime
     def unfused(request):
         policy, bounds = resolve(request)
         return replace(policy, fusion=False), bounds
-    monkeypatch.setattr(dataflow_api, 'resolve_action_runtime', unfused)
+    monkeypatch.setattr(action_services, 'resolve_action_runtime', unfused)
     def stop(execution, image):
         assert not image.cut.final
         assert any(edge.mode == 'durable_incremental' for edge in execution._physical.exchanges)

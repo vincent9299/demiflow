@@ -20,7 +20,7 @@ import time
 
 from PIL import Image
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm import parse_prompt_pack
 from image_http_fixture import definition, json_definition
 
@@ -87,7 +87,7 @@ os.environ['SYNTHETIC_JSON_KEY'] = 'local-fixture-only'
 transactions = Counter()
 original_transaction = None
 from contextlib import contextmanager
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 original_transaction = RunJournal._transaction
 @contextmanager
 def observed_transaction(self):
@@ -104,8 +104,8 @@ def observed_fsync(fd):
         fsyncs['python_artifact_fsync'] += 1
     return original_fsync(fd)
 os.fsync = observed_fsync
-import demiflow.execution.commit as protocol
-from demiflow.execution.recovery_contract import RunRef
+import demiflow.execution.checkpoint.commit as protocol
+from demiflow.execution.contracts.recovery_contract import RunRef
 WRITER_METRICS = []
 ATTEMPTS = []
 INITIAL_USAGE = resource.getrusage(resource.RUSAGE_SELF)

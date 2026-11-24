@@ -3,7 +3,7 @@ import concurrent.futures
 
 import pytest
 
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def interrupted(tmp_path):

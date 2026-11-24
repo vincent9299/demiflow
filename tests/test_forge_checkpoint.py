@@ -8,7 +8,7 @@ import pytest
 
 from demiflow import data
 from demiflow.data.flow_contract import arrow_fields
-from demiflow.execution.checked import CheckedExecution
+from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
@@ -79,7 +79,7 @@ def test_checkpoint_contract_rejects_forged_or_unowned_resources(tmp_path, catal
 
 
 def test_actual_sink_cannot_add_an_unchecked_predicate(tmp_path, catalog, monkeypatch):
-    from demiflow.execution.stream_lance import StreamLanceSink
+    from demiflow.execution.native_queue.stream_lance import StreamLanceSink
     path, report, arguments = inspect(tmp_path, catalog)
     assert report['status'] == 'checked', report['diagnostics']
     spec = importlib.util.spec_from_file_location('flows.checkpoint', path)

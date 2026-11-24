@@ -40,7 +40,7 @@ async def _prepare(row):
 class ResidentModel:
     def __init__(self, directory, provider):
         import torch
-        from demiflow.execution.dataflow_devices import gpu_capacity
+        from demiflow.execution.hosts.devices import gpu_capacity
         assert gpu_capacity(provider) == 0, 'worker must not create another device allocator'
         assert torch.cuda.is_available() and torch.cuda.device_count() == 1
         self.directory, self.provider, self.calls = directory, provider, 0
@@ -125,9 +125,9 @@ def _execute(root, provider):
     from types import SimpleNamespace
     from unittest.mock import patch
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_devices import device_pool
+    from demiflow.execution.hosts.devices import device_pool
     from runtime_v3_residency_scenarios import _provider
     from runtime_v3_performance_scenarios import _plain
     from test_runtime_v3_physical_gpu import _smi

@@ -10,11 +10,11 @@ import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.dataflow_codec import _thaw_json
-from demiflow.execution.dataflow_authority import _ref_to_json
-from demiflow.execution.dataflow_failures import failure_payload, restore_failure
-from demiflow.execution.dataflow_model_journal import _rpc_operation_id
+from demiflow.execution.contracts.dataflow_codec import encode_artifact_reference as _ref_to_json
+from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
+from demiflow.execution.operator_bindings.dataflow_model_journal import _rpc_operation_id
 from demiflow.execution.kernels.async_instance import AsyncInstance
-from demiflow.execution.request_limits import COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON, ServiceStopped, drain_on_service_stop
+from demiflow.services.request_limits import COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON, ServiceStopped, drain_on_service_stop
 from test_runtime_v3_private_embedding_journal import (
     service, interrupted_run, private_graph, private_event, bind_private_embedding_contracts, charged)
 from test_runtime_v3_native_rpc_replay import event
@@ -52,7 +52,7 @@ def test_async_owner_drains_only_fixed_service_reason(reason, settled):
 @pytest.mark.parametrize('private', [False, True])
 @pytest.mark.parametrize('reason', [COOPERATIVE_STOP_REASON, COOPERATIVE_RUN_STOP_REASON])
 def test_stop_closes_fresh_driver_reserve_but_allows_original_receipt_and_response(tmp_path, private, reason):
-    from demiflow.execution.dataflow_private_storage import bind_private_storage
+    from demiflow.execution.journal.dataflow_authority import bind_private_storage
     with interrupted_run(tmp_path/'run') as run, service(run) as (authority, store, _):
         if private:
             authority._action.declaration['kind'] = 'take_all'
@@ -91,7 +91,7 @@ def test_service_stop_exception_remains_fixed_known_type():
 def test_real_native_and_private_admitted_responses_survive_cooperative_stop(tmp_path, server, mode, private):
     import sqlite3
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     stop = tmp_path/'STOP'
     server['delay'] = .2
     def on_request():
@@ -110,7 +110,7 @@ def test_real_native_and_private_admitted_responses_survive_cooperative_stop(tmp
     if private:
         connection = sqlite3.connect(path)
     else:
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         context = RunJournal(tmp_path/'run')._connection()
         connection = context.__enter__()
     try:
@@ -149,8 +149,8 @@ def test_cooperative_drain_remains_bounded_by_original_instance_deadline():
 
 def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.journal.run_journal import RunJournal
     stop = tmp_path/'STOP'
     server['delay'] = .2
     def on_request():
@@ -167,7 +167,7 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
     assert len(server['bodies']) == 2
     assert not RunJournal(tmp_path/'run').execution_commits('action-1')
     stop.unlink()
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     with pytest.raises(RecoveryContractError, match='P3 native sink adapter'):
         with RunContext.resume(reference):
             flow().run_stream(stop_file=stop)
@@ -178,8 +178,8 @@ def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
 
 
 def test_handle_requires_original_run_cancel_fact_to_drain(tmp_path):
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.dataflow_handles import RuntimeActionHandle
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.outputs.dataflow_handles import RuntimeActionHandle
     class EndInspection(Exception):pass
     with pytest.raises(EndInspection):
         with RunContext.start(tmp_path/'run') as run:
@@ -207,7 +207,7 @@ def test_handle_requires_original_run_cancel_fact_to_drain(tmp_path):
                                     'terminal handle closed before completion', 'terminal deadline exceeded'])
 def test_original_worker_cancel_reason_survives_cleanup_drain(reason):
     from demiflow.execution.worker.dataflow_execution import DataflowWorkerExecutor
-    from demiflow.execution.request_limits import cooperative_stop_error
+    from demiflow.services.request_limits import cooperative_stop_error
     services=SimpleNamespace(bounds=SimpleNamespace(timeout_ms=1000,max_pending_events=8,
         max_row_bytes=1024,max_batch_bytes=4096),check_stop=lambda:None)
     executor=DataflowWorkerExecutor(services=services,mailbox=SimpleNamespace())

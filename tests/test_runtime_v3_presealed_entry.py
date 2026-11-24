@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
@@ -14,8 +14,8 @@ def _plain(row):return {**row,'out':row['i']*2}
 @contextmanager
 def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_api import make_action_request
-    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.execution.executors.dataflow_api import make_action_request
+    from demiflow.execution.action_driver.services import make_driver_services
     from demiflow.planning.dataflow_policy import resolve_runtime_policy
     shared=[]
     def live(row):
@@ -32,8 +32,8 @@ def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
             second=DataflowExecution(request,services=services)
             from demiflow.planning.dataflow_compile import lower_action
             from demiflow.execution.seal.plan import stage_dataflow_programs,resolve_execution_constants,seal_dataflow
-            from demiflow.execution.dataflow_sources import snapshot_source,plan_source_splits
-            from demiflow.execution.dataflow_artifacts import stage_runtime_bundle
+            from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
+            from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
             from demiflow.planning.dataflow_place import compile_physical_dataflow
             try:
                 compiled=lower_action(request,bounds=bounds)
@@ -44,7 +44,7 @@ def _prepared(tmp_path,*,thread=False,wrong_program_pin=False):
                     # the original loader's code recomputation can reject it.
                     import json
                     from dataclasses import replace
-                    from demiflow.execution.recovery_contract import document
+                    from demiflow.execution.contracts.recovery_contract import document
                     node=next(n for n in graph.nodes if n.kind=='transform')
                     manifest=json.loads(b''.join(services.store.read(node.program_ref,max_bytes=bounds.max_control_bytes)))
                     manifest['code_identity']={**manifest['code_identity'],'wrong_program_pin':True}
@@ -80,7 +80,7 @@ def isolated_tree(tmp_path,monkeypatch):
 @pytest.mark.parametrize('thread',[False,True])
 def test_first_sealed_plan_executes_without_a_second_compile_or_final_ack(tmp_path,monkeypatch,thread):
     from demiflow.execution.action_driver import dataflow as driver
-    from demiflow.execution.dataflow_terminals import open_terminal,collect_rows
+    from demiflow.execution.outputs.terminals import open_terminal, collect_rows
     observed=[];lower=driver.lower_action
     def watch(*args,**kwargs):observed.append(1);return lower(*args,**kwargs)
     with _prepared(tmp_path,thread=thread) as (run,ds,first,second,shared):
@@ -109,8 +109,8 @@ def test_first_sealed_plan_bad_code_pin_carrier_is_rejected_before_execution(tmp
 
 def test_first_sealed_plan_for_another_action_is_rejected(tmp_path):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
-    from demiflow.execution.dataflow_api import make_action_request
-    from demiflow.execution.dataflow_services import make_driver_services
+    from demiflow.execution.executors.dataflow_api import make_action_request
+    from demiflow.execution.action_driver.services import make_driver_services
     with _prepared(tmp_path) as (run,ds,first,unused,_):
         request=make_action_request(ds._executor,ds._source,ds._plan,kind='take_all',arguments={'limit':None})
         assert request.action.action_id!='action-1'

@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.contracts.errors import ReservationError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
@@ -60,7 +60,7 @@ def test_default_credit_tightens_to_admitted_grant():
 
 
 def test_native_channels_use_both_resolved_credit_dimensions(graph_environment):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory=graph_environment;spec=_spec(directory);spec['prefetch_slots']=1
     with RunContext.start(directory/'run',limits={'memory_bytes':64*1024**2,'max_row_bytes':4096,
             'max_batch_bytes':16384,'max_state_bytes':65536,'timeout_s':60}) as run:
@@ -79,7 +79,7 @@ def test_native_channels_use_both_resolved_credit_dimensions(graph_environment):
 
 
 def test_recovery_byte_grant_guard_is_present(graph_environment):
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     directory=graph_environment;spec=_spec(directory);spec['prefetch_slots']=4
     class Interrupted(Exception):pass
     limits={'memory_bytes':64*1024**2,'max_row_bytes':4096,'max_batch_bytes':16384,

@@ -45,15 +45,13 @@ GUARDS = (
 )
 
 # The seven files no change may touch without an explicit decision.
-FROZEN = {
-    'demiflow/execution/raw_fetch.py': '55bbc1e592fbe285b54d174d79f9cd0faa3d2f4beb6d41dc43d588daba596493',
-    'demiflow/execution/queue_execution.py': '1e73b86fc7fe77c7a537d6e4215e6bdb98017f738ebca53c85c3b7bce6c25045',
-    'demiflow/execution/queue_sinks.py': 'b44601ef8742301c4f0ec11e1f11f14a2dafb5cbd5a96e1475d2d0e237828074',
-    'demiflow/execution/queue_source.py': '1c3717b3e5db84c92d0d249870ddf720fe79481b1ede4e6b885a6431f1bbd307',
-    'demiflow/execution/contracts/exchange.py': 'dac2f80fce4b4d4b3bd8b7f2cd14e31b8189590baeeeba6182310464f18cb6b2',
-    'demiflow/planning/dag.py': '294d2de6a417d611470b7e4b00cf9c4b887377988c63a6f80b0a2d7e41d4c48b',
-    'demiflow/resources/contracts.py': '61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff',
-}
+FROZEN = {'demiflow/execution/native_queue/raw_fetch.py': '3f30b38de02350505786cc6656cda5d3434f3460459b0c0ce784009c945ba629',
+ 'demiflow/execution/native_queue/queue_execution.py': 'f9cf112b9e5d77fe3bb6f00813ef200161ea5f8f99c8c8be257d05312fee4a56',
+ 'demiflow/execution/native_queue/queue_sinks.py': '1ad7957a5ab8f7594ba00aa80614ab3a85a9d56457b8da666e5c5dcd2278a410',
+ 'demiflow/execution/native_queue/queue_source.py': '90ca628be16d92d4fe8c43b80306975f7326929d85d349c8e0cb398abf843100',
+ 'demiflow/execution/contracts/exchange.py': 'ef3eebd8df881b09f62e86002924fde991e276f499cd27e9b6bcf359ec0f84ce',
+ 'demiflow/planning/dag.py': 'be22c2dc4914e24731cc68690949ddc07481f53112b500562c8946bb7ed65728',
+ 'demiflow/resources/contracts.py': '61ff1db526a0d7a669fb63f6fb72a8fe6243dadaa9be14671527203f146225ff'}
 
 PRIVATE_DIRECTORIES = {'DEMIFLOW_RESOURCE_ROOT': 'resources', 'DEMIFLOW_RESOURCE_HOME': 'home',
                        'DEMIFLOW_FORGE_DOMAIN': 'forge', 'DEMIFLOW_LOCATION_CACHE': 'locations'}

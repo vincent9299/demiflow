@@ -3,8 +3,8 @@ import importlib.util
 import lance
 import pytest
 from demiflow import data
-from demiflow.execution.checked import CheckedExecution
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.checked import CheckedExecution
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.workbench.runs.manager import DEFAULT_LIMITS
 from test_forge_native_values import catalog,fixture
 

@@ -148,7 +148,7 @@ async def test_partial_and_unsupported(server, engines, tmp_path):
 
 
 async def test_query_circuit_empty_fallback_and_durable_receipts(server, engines, tmp_path):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     import sqlite3
     config = (engines[0], {**engines[1], 'paging': False})
     s = session(tmp_path, config, query_failure_limit=2)
@@ -177,7 +177,7 @@ async def test_query_circuit_empty_fallback_and_durable_receipts(server, engines
 
 
 async def test_query_circuit_counts_suspended_sources(server, engines, tmp_path):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     s = session(tmp_path, engines[:1], query_failure_limit=2)
     try:
         assert (await s.search('status429'))['status'] == 'search_failed'

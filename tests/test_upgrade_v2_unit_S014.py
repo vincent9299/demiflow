@@ -10,7 +10,7 @@ import pytest
 
 import demiflow
 from demiflow.lance.search import VectorSearch
-from demiflow.execution.recovery_contract import document
+from demiflow.execution.contracts.recovery_contract import document
 
 ROOT = Path(__file__).resolve().parents[1]
 

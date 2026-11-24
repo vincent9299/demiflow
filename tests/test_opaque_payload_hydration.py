@@ -7,7 +7,7 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.execution import opaque_payloads
+from demiflow.lance import read as opaque_payloads
 
 
 def _stats():

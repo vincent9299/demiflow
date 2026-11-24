@@ -1,7 +1,7 @@
 """Serializable execution configuration for native embeddings, independent of models."""
 import math
 from pathlib import Path
-from demiflow.execution.inference_options import CALL_OPTION_DEFAULTS, normalize_call_options
+from demiflow.services.inference_options import CALL_OPTION_DEFAULTS, normalize_call_options
 from demiflow.inference import request_admission_config
 
 

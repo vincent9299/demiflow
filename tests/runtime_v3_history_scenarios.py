@@ -33,9 +33,9 @@ def _digest(path):
 def prompt_identities():
     from demiflow import data
     from demiflow.operator_llm.parser import parse_prompt_pack
-    from demiflow.execution.recovery_contract import identity
-    from demiflow.execution.recovery_identity import plan_identity
-    from demiflow.execution.plan_facts import operation_facts
+    from demiflow.execution.contracts.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import plan_identity
+    from demiflow.execution.seal.plan_facts import operation_facts
     from demiflow.execution.seal.business_sources import plan_code_pin
 
     golden = json.loads(GOLDEN.read_text())
@@ -134,14 +134,15 @@ def original_native_history(root):
     """Real old producer, current read/admission/report, then old continuation."""
     import demiflow
     import lance
-    from demiflow.execution.run_journal import RunJournal
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.recovery_contract import RunRef
-    from demiflow.execution.recovery_identity import platform_identity
-    from demiflow.execution.dataflow_history import load_execution_version, validate_resume_compatibility
+    from demiflow.execution.journal.run_journal import RunJournal
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.contracts.recovery_contract import RunRef
+    from demiflow.execution.seal.program_identity import platform_identity
+    from demiflow.execution.journal.dataflow_history import load_execution_version
+    from demiflow.execution.checkpoint.history import validate_resume_compatibility
     from demiflow.workbench.runs.facts import read_sealed_plan
     # The workbench no longer re-exports the engine reader under a private name (P4).
-    from demiflow.execution.publication_facts import inspect_write_receipt as _native_execution_receipt
+    from demiflow.execution.journal.publication_facts import inspect_write_receipt as _native_execution_receipt
 
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE)
     assert root.resolve().is_relative_to(Path("/tmp"))

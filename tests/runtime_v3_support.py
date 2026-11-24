@@ -98,31 +98,31 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "no_ray_data": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.data.dataset", "U")),
     "api_matrix": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.data.dataset", "U")),
     "shared_diamond": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.planning.dataflow_compile", "G")),
-    "incremental_first_row": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.source_readers", "S")),
+    "incremental_first_row": (("demiflow.execution.action_driver.dataflow", "E"), ('demiflow.execution.sources.source_readers', "S")),
     "three_exchange_modes": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.action_driver.dataflow", "E")),
     "cpu_gpu_isolation": (("demiflow.planning.dataflow_place", "P"), ("demiflow.execution.action_driver.dataflow", "E")),
     "fairness_deadlock": (("demiflow.execution.scheduler.placement", "E"), ("demiflow.execution.action_driver.dataflow", "E")),
     "relational_semantics": (("demiflow.execution.kernels.relational", "K"), ("demiflow.execution.action_driver.dataflow", "E")),
     "sort_shuffle_aggregate": (("demiflow.execution.kernels.ordering", "K"), ("demiflow.execution.kernels.aggregate", "K")),
-    "source_snapshots": (("demiflow.execution.source_readers", "S"), ("demiflow.execution.dataflow_sources", "S")),
+    "source_snapshots": (('demiflow.execution.sources.source_readers', "S"), ('demiflow.execution.sources.snapshots', "S")),
     "multiworker_barrier": (("demiflow.execution.checkpoint.coordinator", "D"), ("demiflow.execution.worker.dataflow_execution", "B")),
     "route_recovery": (("demiflow.execution.exchange.dataflow_state", "X"), ("demiflow.execution.checkpoint.coordinator", "D")),
-    "commit_crash_matrix": (("demiflow.execution.checkpoint.coordinator", "D"), ("demiflow.execution.commit", "D")),
-    "model_effect_recovery": (("demiflow.execution.dataflow_models", "M"), ("demiflow.execution.dataflow_model_journal", "M")),
+    "commit_crash_matrix": (("demiflow.execution.checkpoint.coordinator", "D"), ('demiflow.execution.checkpoint.commit', "D")),
+    "model_effect_recovery": (('demiflow.execution.operator_bindings.dataflow_models', "M"), ('demiflow.execution.operator_bindings.dataflow_model_journal', "M")),
     "actor_state_lifecycle": (("demiflow.execution.kernels.operator", "K"), ("demiflow.execution.worker.runtime", "B")),
-    "cache_materialize": (("demiflow.execution.dataflow_models", "M"), ("demiflow.execution.dataflow_handles", "T")),
-    "queue_full_business": (("demiflow.execution.dataflow_queue", "Q"), ("demiflow.execution.queue_execution", "Q")),
-    "memory_peak": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.payload_limits", "E")),
+    "cache_materialize": (('demiflow.execution.operator_bindings.dataflow_models', "M"), ('demiflow.execution.outputs.dataflow_handles', "T")),
+    "queue_full_business": (('demiflow.execution.native_queue.dataflow_queue', "Q"), ('demiflow.execution.native_queue.queue_execution', "Q")),
+    "memory_peak": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.planning.dataflow_policy", "E")),
     "disk_gc": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.storage.objects", "H")),
-    "remote_journal": (("demiflow.execution.dataflow_authority", "H"), ("demiflow.execution.worker.dataflow_host", "H")),
-    "two_hosts": (("demiflow.execution.dataflow_hosts", "H"), ("demiflow.execution.storage.objects", "H")),
-    "node_loss": (("demiflow.execution.dataflow_hosts", "H"), ("demiflow.execution.checkpoint.coordinator", "D")),
-    "driver_restart": (("demiflow.execution.dataflow_authority", "H"), ("demiflow.execution.action_driver.dataflow", "E")),
-    "history_identity": (("demiflow.execution.dataflow_history", "W"), ("demiflow.execution.recovery_identity", "W")),
+    "remote_journal": (('demiflow.execution.journal.dataflow_authority', "H"), ('demiflow.execution.hosts.dataflow_worker_host', "H")),
+    "two_hosts": (('demiflow.execution.hosts.endpoints', "H"), ("demiflow.execution.storage.objects", "H")),
+    "node_loss": (('demiflow.execution.hosts.endpoints', "H"), ("demiflow.execution.checkpoint.coordinator", "D")),
+    "driver_restart": (('demiflow.execution.journal.dataflow_authority', "H"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "history_identity": (("demiflow.execution.journal.dataflow_history", "W"), ('demiflow.execution.seal.program_identity', "W")),
     "workbench_real_plan": (("demiflow.workbench.runs.facts", "W"), ("demiflow.workbench.graph.model", "W")),
     "product_regression": (("demiflow.workbench.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
-    "bounded_terminal": (("demiflow.execution.dataflow_terminals", "T"), ("demiflow.execution.action_driver.dataflow", "E")),
-    "artifact_security": (("demiflow.execution.dataflow_artifacts", "H"), ("demiflow.execution.storage.objects", "H")),
+    "bounded_terminal": (('demiflow.execution.outputs.terminals', "T"), ("demiflow.execution.action_driver.dataflow", "E")),
+    "artifact_security": (("demiflow.execution.seal.runtime_bundle", "H"), ("demiflow.execution.storage.objects", "H")),
     "performance": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.scheduler.placement", "E")),
     "all_regressions": (("demiflow.execution.action_driver.dataflow", "E"),),
 }
@@ -387,7 +387,7 @@ class _ExecuteActionRecorder:
 
         wrapped._runtime_v3_observe = observe
         aliases = [importlib.import_module(name) for name in
-                   ("demiflow.execution.dataflow_api", "demiflow.execution.dataflow_stream")]
+                   ('demiflow.execution.executors.dataflow_api', 'demiflow.execution.action_driver.stream')]
         self._module.execute_action = wrapped
         for api in aliases:
             if getattr(api, "execute_action", None) is self._original:
@@ -548,7 +548,7 @@ class RuntimeV3Fixture:
         from demiflow.data.api import _use_executor
         from demiflow.execution.executors.local import LocalDatasetExecutor
         from demiflow.execution.executors.ray import RayDatasetExecutor
-        from demiflow.execution.run_context import RunContext
+        from demiflow.execution.pipeline.run_context import RunContext
         executor = LocalDatasetExecutor() if self.provider == "local" else RayDatasetExecutor()
         from contextlib import nullcontext
         self_managed = scenario in {'commit_crash_matrix', 'model_effect_recovery', 'remote_journal', 'api_matrix',
@@ -1031,7 +1031,7 @@ def _s_incremental_first_row(fx: RuntimeV3Fixture, fault: str | None) -> dict[st
 def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str, Any]:
     from dataclasses import replace
     from pytest import MonkeyPatch
-    from demiflow.execution import dataflow_api as api
+    from demiflow.execution.executors import dataflow_api as api
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     resolve, prepare = api.resolve_runtime_policy, DataflowExecution.prepare
     observed, results = [], {}
@@ -1058,9 +1058,9 @@ def _s_three_exchange_modes(fx: RuntimeV3Fixture, fault: str | None) -> dict[str
         assert channels and execution.finish().complete
         if mode == 'finite_sealed':
             for edge in channels:
-                assert edge.channel_id in execution._finite_seals
+                assert edge.channel_id in execution._exchange.finite_seals
                 # The consumer ran only after every real producer succeeded.
-                ref = execution._finite_seals[edge.channel_id]
+                ref = execution._exchange.finite_seals[edge.channel_id]
                 assert execution._store.inspect(ref)
                 seal = json.loads(b''.join(execution._store.read(ref, max_bytes=execution._bounds.max_control_bytes)))
                 assert set(seal['membership']) == set(edge.producer_partitions)

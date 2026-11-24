@@ -9,7 +9,7 @@ def test_real_ray_region_values_seal_and_final_ack_replay(tmp_path,monkeypatch):
     ray=pytest.importorskip('ray')
     from demiflow.data.api import _use_executor
     from demiflow.execution.executors.ray import RayDatasetExecutor
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from runtime_v3_support import _RayDataBlocker
     from test_runtime_v3_relational_regions import build_chain

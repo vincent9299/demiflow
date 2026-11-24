@@ -39,6 +39,7 @@
    "StreamLanceSink"
   ],
   "planning.compiler": [
+   "BoundMapOp",
    "Count",
    "DatasourceSource",
    "FileSource",
@@ -47,6 +48,7 @@
    "IterableSource",
    "KeyedSource",
    "LanceSource",
+   "MapOp",
    "MaterializedSource",
    "NativeOperation",
    "OperatorLLMMapOp",
@@ -79,9 +81,6 @@
  },
  "configuration_access": {
   "accessor": {
-   "aggregates": [
-    "execution/kernels/aggregate.py"
-   ],
    "buffer_bytes": [
     "execution/kernels/operator.py"
    ],
@@ -137,41 +136,49 @@
   },
   "constant": {
    "FIELD": [
-    "execution/dataflow_publication_budget.py",
-    "execution/kernels/operator.py",
-    "execution/kernels/shuffle_order.py",
-    "planning/dataflow_budget.py",
-    "planning/dataflow_compile.py"
+    "execution/scheduler/dataflow_publication_budget.py",
+    "planning/dataflow_budget.py"
    ],
    "KEY": [
-    "execution/dataflow_schema.py"
+    "execution/compiler_support/dataflow_schema.py",
+    "execution/seal/plan.py"
+   ],
+   "MANAGED_HTTP_DEVICES_FIELD": [
+    "execution/operator_bindings/dataflow_managed_http.py",
+    "execution/seal/plan.py",
+    "planning/dataflow_place.py"
    ],
    "REDUCER_MEMORY_FIELD": [
     "execution/contracts/relational_region.py"
    ],
-   "_KEY": [
-    "execution/dataflow_managed_devices.py"
+   "SHUFFLE_ORDER_FIELD": [
+    "execution/kernels/operator.py",
+    "execution/kernels/shuffle_order.py",
+    "planning/dataflow_compile.py"
    ]
   },
   "literal": {
    "actor_binding_version": [
-    "execution/dataflow_shared.py"
+    "execution/seal/program_identity.py"
    ],
    "actor_recovery_rows": [
     "planning/dataflow_shared.py"
+   ],
+   "aggregates": [
+    "operators/aggregate.py"
    ],
    "ancestor": [
     "execution/outputs/terminals.py"
    ],
    "arguments": [
+    "execution/contracts/dataflow.py",
     "execution/contracts/relational_region.py",
-    "execution/dataflow_native_limits.py",
     "execution/seal/plan.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_place.py"
    ],
    "batch_size": [
-    "execution/dataflow_batch_membership.py",
+    "execution/journal/dataflow_authority.py",
     "execution/kernels/operator.py",
     "planning/dataflow_compile.py",
     "planning/dataflow_configuration.py"
@@ -180,7 +187,7 @@
     "execution/kernels/lance_keys.py"
    ],
    "cache": [
-    "execution/dataflow_models.py"
+    "execution/kernels/model_state.py"
    ],
    "cache_namespace": [
     "execution/kernels/dataflow.py"
@@ -197,21 +204,23 @@
    ],
    "columns": [
     "execution/contracts/relational_region.py",
+    "operators/relational.py",
     "planning/dataflow_relational_regions.py"
    ],
    "concurrency": [
-    "execution/dataflow_model_observations.py",
-    "execution/dataflow_models.py",
+    "execution/journal/dataflow_model_observations.py",
     "execution/kernels/operator.py",
+    "execution/operator_bindings/dataflow_models.py",
     "planning/dataflow_budget.py",
     "planning/dataflow_finite_fusion.py",
     "planning/dataflow_fusion.py",
     "planning/dataflow_graph_adapter.py",
+    "planning/dataflow_models.py",
     "planning/dataflow_single_worker.py",
     "planning/dataflow_thread_fusion.py"
    ],
    "default_batch_size": [
-    "execution/dataflow_batch_membership.py",
+    "execution/journal/dataflow_authority.py",
     "execution/kernels/operator.py",
     "planning/dataflow_configuration.py"
    ],
@@ -234,7 +243,7 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "format": [
-    "execution/run_context.py"
+    "execution/pipeline/run_context.py"
    ],
    "graph_literal_prefix": [
     "planning/dataflow_graph_adapter.py"
@@ -266,6 +275,7 @@
     "execution/contracts/relational_region.py",
     "execution/kernels/relational.py",
     "execution/kernels/relational_region.py",
+    "operators/relational_region.py",
     "planning/dataflow_place.py"
    ],
    "initial": [
@@ -276,8 +286,7 @@
    ],
    "input_carrier": [
     "execution/action_driver/dataflow.py",
-    "execution/arrow_payload.py",
-    "execution/dataflow_sinks.py",
+    "execution/outputs/sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_fusion.py",
@@ -292,14 +301,15 @@
    "keys": [
     "execution/kernels/block_partition.py",
     "execution/kernels/operator.py",
-    "execution/kernels/ordering.py"
+    "execution/kernels/ordering.py",
+    "operators/ordering.py"
    ],
    "kind": [
     "planning/dataflow_configuration.py"
    ],
    "lance_key_source": [
     "execution/contracts/relational_region.py",
-    "execution/lance_key_source.py",
+    "execution/sources/source_readers.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_relational_regions.py"
    ],
@@ -308,27 +318,27 @@
     "execution/worker/dataflow_graph_runner.py"
    ],
    "limits": [
-    "execution/dataflow_resource_recovery.py",
-    "execution/run_context.py",
-    "execution/run_journal.py",
-    "execution/worker/authority.py"
+    "execution/hosts/execution_recovery.py",
+    "execution/journal/run_journal.py",
+    "execution/pipeline/run_context.py",
+    "execution/worker/runtime.py"
    ],
    "limits_explicit": [
-    "execution/run_context.py",
-    "execution/worker/authority.py"
+    "execution/pipeline/run_context.py",
+    "execution/worker/runtime.py"
    ],
    "managed_http_service_digest": [
-    "execution/dataflow_prompt_service.py"
+    "execution/operator_bindings/dataflow_prompt_service.py"
    ],
    "max_batch": [
-    "execution/dataflow_batch_membership.py",
-    "execution/dataflow_embedding_journal.py",
-    "execution/kernels/operator.py"
+    "execution/journal/dataflow_authority.py",
+    "execution/kernels/operator.py",
+    "execution/operator_bindings/dataflow_embedding_journal.py"
    ],
    "max_requests": [
-    "execution/dataflow_embedding_journal.py",
-    "execution/dataflow_images.py",
-    "execution/dataflow_prompt_journal.py"
+    "execution/operator_bindings/dataflow_embedding_journal.py",
+    "execution/operator_bindings/dataflow_prompt_journal.py",
+    "execution/outputs/object_sink.py"
    ],
    "max_row_bytes": [
     "execution/kernels/operator.py"
@@ -341,36 +351,36 @@
     "planning/dataflow_training.py"
    ],
    "names": [
+    "operators/relational.py",
     "planning/dataflow_relational_regions.py"
    ],
    "native_key": [
-    "execution/dataflow_fetch.py",
-    "execution/dataflow_search.py",
+    "execution/native_queue/dataflow_fetch.py",
+    "execution/operator_bindings/dataflow_search.py",
     "planning/dataflow_configuration.py"
    ],
    "native_operation": [
     "execution/action_driver/dataflow.py",
-    "execution/dataflow_fetch.py",
-    "execution/dataflow_native.py",
-    "execution/dataflow_producer.py",
-    "execution/dataflow_queue.py",
-    "execution/dataflow_search.py",
+    "execution/compiler_support/dataflow_native.py",
+    "execution/native_queue/dataflow_fetch.py",
+    "execution/native_queue/dataflow_queue.py",
+    "execution/operator_bindings/dataflow_search.py",
     "planning/dataflow_configuration.py"
    ],
    "node_id": [
-    "execution/dataflow_models.py"
+    "execution/operator_bindings/dataflow_models.py"
    ],
    "num_blocks": [
-    "execution/kernels/block_partition.py",
-    "execution/kernels/ordering.py",
-    "execution/worker/terminal_blocks.py",
+    "execution/outputs/terminal_blocks.py",
+    "operators/block_partition.py",
+    "operators/ordering.py",
     "planning/dataflow_compile.py"
    ],
    "occurrence_id": [
-    "execution/dataflow_models.py",
     "execution/kernels/dataflow.py",
     "execution/kernels/lance_keys.py",
     "execution/kernels/relational_region.py",
+    "execution/operator_bindings/dataflow_models.py",
     "planning/dataflow_configuration.py"
    ],
    "on": [
@@ -381,6 +391,7 @@
     "execution/kernels/relational_region.py",
     "execution/worker/dataflow_graph_runner.py",
     "execution/worker/key_exclusion.py",
+    "operators/relational_region.py",
     "planning/dataflow_place.py",
     "planning/dataflow_relational_regions.py"
    ],
@@ -398,77 +409,78 @@
     "planning/dataflow_training.py"
    ],
    "partition_id": [
-    "execution/dataflow_sinks.py"
+    "execution/outputs/sinks.py"
    ],
    "payload_columns": [
-    "execution/lance_key_source.py"
+    "execution/sources/source_readers.py"
    ],
    "predict_input_schema": [
     "planning/dataflow_training.py"
    ],
    "predict_inputs": [
-    "execution/dataflow_services.py"
+    "execution/worker/runtime.py"
    ],
    "predict_parameters": [
-    "execution/dataflow_services.py"
+    "execution/worker/runtime.py"
    ],
    "predict_step": [
-    "execution/dataflow_services.py",
     "execution/seal/plan.py",
     "planning/dataflow_place.py",
     "planning/dataflow_training.py"
    ],
    "private_journal": [
-    "execution/dataflow_embedding_journal.py",
-    "execution/dataflow_models.py",
-    "execution/dataflow_prompt_journal.py",
-    "execution/dataflow_routed_prompt.py"
+    "execution/journal/dataflow_embedding_journal.py",
+    "execution/operator_bindings/dataflow_embedding_journal.py",
+    "execution/operator_bindings/dataflow_models.py",
+    "execution/operator_bindings/dataflow_prompt_journal.py",
+    "planning/dataflow_models.py"
    ],
    "program": [
     "execution/kernels/operator.py",
     "execution/kernels/recovery_rows.py"
    ],
    "prompt_name": [
-    "execution/plan_capture.py"
+    "execution/journal/program_materials.py"
    ],
    "publication_workspace": [
     "planning/dataflow_budget.py"
    ],
    "query": [
-    "execution/program_materials.py"
+    "execution/journal/program_materials.py"
    ],
    "reducer_kwargs": [
     "execution/kernels/relational.py"
    ],
    "response_format": [
-    "execution/dataflow_models.py"
+    "execution/operator_bindings/dataflow_models.py"
    ],
    "right_on": [
     "execution/kernels/operator.py",
     "execution/kernels/relational.py",
-    "execution/kernels/relational_region.py"
+    "operators/relational_region.py"
    ],
    "routes": [
-    "execution/dataflow_model_observations.py",
-    "execution/dataflow_models.py",
-    "execution/dataflow_offline.py",
-    "execution/dataflow_routed_prompt.py"
+    "execution/journal/dataflow_model_observations.py",
+    "execution/operator_bindings/dataflow_models.py",
+    "execution/operator_bindings/dataflow_routed_prompt.py",
+    "execution/seal/history.py"
    ],
    "run_id": [
-    "execution/dataflow_resource_recovery.py",
-    "execution/run_context.py",
-    "execution/run_journal.py",
-    "execution/worker/authority.py"
+    "execution/hosts/execution_recovery.py",
+    "execution/journal/run_journal.py",
+    "execution/journal/run_reader.py",
+    "execution/pipeline/run_context.py",
+    "execution/worker/runtime.py"
    ],
    "seed": [
     "execution/kernels/dataflow.py"
    ],
    "semantics": [
-    "execution/managed_native.py",
+    "execution/journal/dataflow_history.py",
     "planning/dataflow_training.py"
    ],
    "shared_actor": [
-    "execution/dataflow_shared.py",
+    "execution/contracts/dataflow.py",
     "execution/kernels/operator.py",
     "planning/dataflow_configuration.py",
     "planning/dataflow_place.py"
@@ -481,7 +493,7 @@
    ],
    "sink_id": [
     "execution/action_driver/dataflow.py",
-    "execution/dataflow_sinks.py",
+    "execution/outputs/sinks.py",
     "execution/worker/dataflow_graph_runner.py",
     "planning/dataflow_training.py"
    ],
@@ -491,14 +503,14 @@
    ],
    "sort": [
     "execution/kernels/block_partition.py",
-    "execution/kernels/ordering.py"
+    "operators/ordering.py"
    ],
    "started_at": [
-    "execution/run_context.py",
-    "execution/worker/authority.py"
+    "execution/pipeline/run_context.py",
+    "execution/worker/runtime.py"
    ],
    "stream_protocol": [
-    "execution/run_context.py"
+    "execution/pipeline/run_context.py"
    ],
    "streaming_map": [
     "execution/kernels/operator.py",
@@ -512,10 +524,11 @@
     "planning/dataflow_thread_fusion.py"
    ],
    "suffix": [
-    "execution/kernels/relational_region.py"
+    "operators/relational_region.py"
    ],
    "target_num_rows_per_block": [
-    "execution/kernels/block_partition.py"
+    "execution/kernels/block_partition.py",
+    "operators/block_partition.py"
    ],
    "targets": [
     "execution/outputs/terminals.py"
@@ -565,12 +578,12 @@
     "planning/dataflow_compile.py"
    ],
    "catch": [
-    "execution/dataflow_models.py",
-    "planning/dataflow_compile.py"
+    "planning/dataflow_compile.py",
+    "planning/dataflow_models.py"
    ],
    "concurrency": [
-    "execution/dataflow_models.py",
-    "planning/dataflow_compile.py"
+    "planning/dataflow_compile.py",
+    "planning/dataflow_models.py"
    ],
    "default_batch_size": [
     "planning/dataflow_compile.py"
@@ -592,16 +605,16 @@
     "planning/dataflow_compile.py"
    ],
    "managed_http_devices": [
-    "execution/dataflow_prompt_service.py"
+    "planning/dataflow_models.py"
    ],
    "native_key": [
-    "execution/dataflow_native.py"
+    "execution/compiler_support/dataflow_native.py"
    ],
    "native_operation": [
-    "execution/dataflow_native.py"
+    "execution/compiler_support/dataflow_native.py"
    ],
    "node_id": [
-    "execution/dataflow_routed_prompt.py"
+    "planning/dataflow_models.py"
    ],
    "num_blocks": [
     "execution/kernels/operator.py",
@@ -826,10 +839,10 @@
  },
  "implicit_inputs": [],
  "input_resolver": [
-  "execution/dataflow_compile_inputs.py::compile_inputs: context = current()",
-  "execution/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
-  "execution/dataflow_compile_inputs.py::executor_defaults: block_size=getattr(executor, '_block_size', None),",
-  "execution/dataflow_compile_inputs.py::executor_defaults: local = getattr(executor, '_local_kernel', None)"
+  "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: context = current()",
+  "execution/compiler_support/dataflow_compile_inputs.py::compile_inputs: return CompileInputs(defaults=executor_defaults(getattr(request.action, '_dataflow_executor', None)),",
+  "execution/compiler_support/dataflow_compile_inputs.py::executor_defaults: block_size=getattr(executor, '_block_size', None),",
+  "execution/compiler_support/dataflow_compile_inputs.py::executor_defaults: local = getattr(executor, '_local_kernel', None)"
  ],
  "predicates": {
   "AddColumnOp": {
@@ -2559,11 +2572,11 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "AgentMapOp": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "AsyncMapOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2601,11 +2614,11 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "EmbeddingMapOp": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "FilterOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2643,11 +2656,11 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "OperatorLLMMapOp": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "PredictOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2710,7 +2723,7 @@
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.kernels.ordering:repartition_records"
+    "kernel_symbol": "demiflow.execution.exchange.dataflow_channels:repartition_records"
    },
    "SaveLanceOp": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2763,11 +2776,11 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "agent": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "decode_document": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2784,11 +2797,11 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "embedding": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "encode_image": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2826,11 +2839,11 @@
     "kernel_symbol": "demiflow.execution.kernels.dataflow:invoke_unary"
    },
    "prompt": {
-    "compiler_symbol": "demiflow.execution.dataflow_models:build_model_factory",
+    "compiler_symbol": "demiflow.planning.dataflow_models:build_model_factory",
     "inputs": [
      "main"
     ],
-    "kernel_symbol": "demiflow.execution.dataflow_models:bind_model_services"
+    "kernel_symbol": "demiflow.execution.operator_bindings.dataflow_models:bind_model_services"
    },
    "queue_ack": {
     "compiler_symbol": "demiflow.planning.dataflow_compile:compile_kernel_spec",
@@ -2917,7 +2930,7 @@
      "segment",
      "record"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:TaskReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:TaskReader"
    },
    "exclude_keys": {
     "cursor_fields": [],
@@ -2928,7 +2941,7 @@
      "file_index",
      "record_index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:FileReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:FileReader"
    },
    "groups": {
     "cursor_fields": [],
@@ -2938,14 +2951,14 @@
     "cursor_fields": [
      "index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:ItemsReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:ItemsReader"
    },
    "iterable": {
     "cursor_fields": [
      "segment",
      "record"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:IteratorReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:IteratorReader"
    },
    "join": {
     "cursor_fields": [],
@@ -2957,40 +2970,40 @@
      "fragment_id",
      "row_offset"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:LanceReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:LanceReader"
    },
    "materialized": {
     "cursor_fields": [
      "index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:ItemsReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:ItemsReader"
    },
    "producer": {
     "cursor_fields": [
      "producer_position",
      "producer_cursor"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:ProducerReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:ProducerReader"
    },
    "queue": {
     "cursor_fields": [
      "claim_ref",
      "record_index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:QueueReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:QueueReader"
    },
    "queue_history": {
     "cursor_fields": [
      "claim_ref",
      "record_index"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:HistoryReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:HistoryReader"
    },
    "range": {
     "cursor_fields": [
      "next"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:RangeReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:RangeReader"
    },
    "reduce": {
     "cursor_fields": [],
@@ -3002,7 +3015,7 @@
      "partition",
      "last_key"
     ],
-    "reader_symbol": "demiflow.execution.source_readers:SqlReader"
+    "reader_symbol": "demiflow.execution.sources.source_readers:SqlReader"
    },
    "union": {
     "cursor_fields": [],
@@ -3011,67 +3024,67 @@
   },
   "registry.terminals": {
    "aggregate": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "scalar"
    },
    "collect_summary": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "rows"
    },
    "columns": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:inspect_result",
     "result_kind": "columns"
    },
    "count": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "scalar"
    },
    "iter_batches": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_batches",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:iterate_batches",
     "result_kind": "batch_iterator"
    },
    "iter_rows": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:iterate_rows",
     "result_kind": "row_iterator"
    },
    "materialize": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:materialized_handle",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:materialized_handle",
     "result_kind": "materialized"
    },
    "run_stream": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:iterate_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:iterate_rows",
     "result_kind": "row_iterator"
    },
    "schema": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:inspect_result",
     "result_kind": "schema"
    },
    "size_bytes": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:inspect_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:inspect_result",
     "result_kind": "scalar"
    },
    "take": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "rows"
    },
    "take_all": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "rows"
    },
    "take_batch": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:collect_rows",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:collect_rows",
     "result_kind": "batches"
    },
    "write_datasink": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:write_result",
     "result_kind": "write_result"
    },
    "write_file": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:write_result",
     "result_kind": "write_result"
    },
    "write_lance": {
-    "adapter_symbol": "demiflow.execution.dataflow_terminals:write_result",
+    "adapter_symbol": "demiflow.execution.outputs.terminals:write_result",
     "result_kind": "write_result"
    }
   },

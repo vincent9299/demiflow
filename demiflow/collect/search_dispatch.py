@@ -13,7 +13,7 @@ import sqlite3
 import time
 
 from .native_search.config import digest, runtime_id
-from demiflow.execution.request_limits import RequestGate, ServiceStopped
+from demiflow.services.request_limits import RequestGate, ServiceStopped
 
 
 def dispatch_policy(value):

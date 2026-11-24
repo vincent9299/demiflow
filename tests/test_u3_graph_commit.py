@@ -12,7 +12,7 @@ import pytest
 from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="Local managed units require Linux")
@@ -186,7 +186,7 @@ def test_private_tag_colocation_keeps_reader_and_resource_boundaries(tmp_path, v
     from dataclasses import replace
     from _native_graph_fixtures import HISTORICAL_MEMORY, HISTORICAL_WORKERS
     from demiflow.execution.executors.graph import graph_action_request
-    from demiflow.execution.dataflow_api import resolve_action_runtime
+    from demiflow.execution.action_driver.services import resolve_action_runtime
     from demiflow.planning.dataflow_compile import lower_action
     from demiflow.planning.dataflow_place import partition_stages
     from demiflow.planning.dataflow_graph_adapter import specialize_graph_stages

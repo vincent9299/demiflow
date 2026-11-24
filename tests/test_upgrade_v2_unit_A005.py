@@ -54,7 +54,7 @@ def test_non_streaming_boundaries_allow_plain_plan(backend):
 @pytest.mark.parametrize("bound", [False, True])
 def test_local_relational_streaming_map_uses_real_unified_execution(tmp_path, bound):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     for provider in ('local', 'local relational', 'ray', 'ray_core'):
         assert reject_streaming_map_options(_plan(_stream_bound_map() if bound else _stream_map()), provider) is None
     with RunContext.start(tmp_path / 'run') as run, data.local_execution():

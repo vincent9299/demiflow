@@ -6,6 +6,9 @@ same source + plan into their native execution model.
 
 from __future__ import annotations
 
+import functools
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 import inspect
 import copy
 import uuid
@@ -538,3 +541,20 @@ class SaveLanceOp(BatchMapOp):
     key: str = ''
     output_ref: str | None = None
     mode: str = 'overwrite'
+
+
+def actor_owner(target):
+    # Passive exact wrappers only. A factory or function is a declaration, not
+    # an already constructed actor, even when reused at several occurrences.
+    seen = set()
+    while id(target) not in seen:
+        seen.add(id(target))
+        if type(target) is functools.partial:
+            target = target.func
+        elif inspect.ismethodwrapper(target) and target.__name__ == '__call__' and type(target.__self__) is functools.partial:
+            target = target.__self__
+        elif inspect.ismethod(target):
+            target = target.__self__
+        else:
+            return None if inspect.isroutine(target) or inspect.isclass(target) else target
+    raise DataflowError('INVALID_CONTRACT', 'Cyclic shared actor wrapper')

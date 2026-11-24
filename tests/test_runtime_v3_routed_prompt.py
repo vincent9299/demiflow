@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_runtime_v3_native_execution import PACK
 
@@ -193,7 +193,7 @@ class _StatefulPredicate:
 def test_routed_mutable_predicate_cannot_claim_http_only_recovery(tmp_path, routed_server, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     class Interrupted(Exception):
         pass
     def pipeline():
@@ -224,7 +224,7 @@ def test_routed_mutable_predicate_cannot_claim_http_only_recovery(tmp_path, rout
 
 @pytest.mark.parametrize('change', ['capacity', 'gates', 'external_gate'])
 def test_routed_declaration_refuses_live_or_changed_children(change):
-    from demiflow.execution.dataflow_model_factory import native_model_declaration
+    from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     pipeline = _pipeline([{'item': 1, 'route': 'a'}])
     operation = pipeline._plan.operations[-1]
@@ -234,7 +234,7 @@ def test_routed_declaration_refuses_live_or_changed_children(change):
     elif change == 'gates':
         actor.gates['a'] = object()
     else:
-        from demiflow.execution.request_limits import RequestGate
+        from demiflow.services.request_limits import RequestGate
         actor.actors['a']._runtime.request_gate = RequestGate(1)
     with pytest.raises((ValueError, DataflowError), match='declaration|capacity|copies differ'):
         native_model_declaration(operation)
@@ -242,8 +242,8 @@ def test_routed_declaration_refuses_live_or_changed_children(change):
 
 @pytest.mark.parametrize('reason', ['cooperative:operator_stop_file','cooperative:run_cancelled'])
 def test_routed_global_stop_is_not_provider_route_failure(tmp_path,routed_server,monkeypatch,reason):
-    from demiflow.execution.dataflow_authority import DriverJournalService
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.execution.journal.dataflow_authority import DriverJournalService
+    from demiflow.services.request_limits import ServiceStopped
     original=DriverJournalService.native_request
     def stop_after_original_reservation(owner,command,**kwargs):
         reply=original(owner,command,**kwargs)

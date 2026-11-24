@@ -20,11 +20,11 @@ import pytest
 from demiflow.data.dataset import Dataset
 from demiflow.data.plan import CallableSpec, FilterOp, LogicalPlan, MapOp, MapStreamOptions
 from demiflow.data.sources import ItemsSource
-from demiflow.execution import commit as commit_module
+from demiflow.execution.checkpoint import commit as commit_module
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 
@@ -123,7 +123,7 @@ def test_f2_worker_crash_recovers_acked_prefix_exactly_once(tmp_path):
         before = {f['commit_id']: f for f in run2.journal.execution_commits(_chain_child_id(run2))
                   if f['status'] == 'acked'}
         assert before, 'the real crash must retain its original ACK prefix'
-        from demiflow.execution.state_artifacts import StateArtifacts
+        from demiflow.execution.storage.state_artifacts import StateArtifacts
         latest = max(before.values(), key=lambda fact: fact['sequence'])
         image = StateArtifacts(run2).read(latest['prepared']['state']['dataflow-cut-v3'])
         sources = image['dataflow.sources.v3']

@@ -46,13 +46,13 @@ import pytest
 
 import demiflow.data as data
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution import commit as commit_module
-from demiflow.execution.block_sink import BlockSink
-from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.lance_sink import LanceSink
-from demiflow.execution.recovery_contract import RecoveryContractError, SourcePosition, identity
-from demiflow.execution.run_context import RunContext, RunAction
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.checkpoint import commit as commit_module
+from demiflow.execution.outputs.block_sink import BlockSink
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.outputs.lance_sink import LanceSink
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
+from demiflow.execution.pipeline.run_context import RunContext, RunAction
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.lance.model import LanceWriteSpec
 
 from test_stage2_unified_plan import LIMITS, _crash_hook
@@ -320,7 +320,7 @@ def test_s6_gate8_nondeterministic_reprepare_fail_closed(tmp_path):
 
 def test_s6_gate10_equal_value_diff_identity_same_bytes_sha(tmp_path):
     import pickle
-    from demiflow.execution.block_sink import _canonical_row
+    from demiflow.execution.outputs.block_sink import _canonical_row
     rid = (b"r" * 64).decode()
     live = {"request_id": rid, "ref": {"request_id": rid}}
     rid_a, rid_b = (b"r" * 64).decode(), (b"r" * 64).decode()
@@ -369,7 +369,7 @@ def test_s6_gate10_canonical_changed_value_fail_closed(tmp_path):
 
 def test_s6_gate10_max_row_bytes_boundary(tmp_path):
     import pickle
-    from demiflow.execution.block_sink import _canonical_row
+    from demiflow.execution.outputs.block_sink import _canonical_row
     from demiflow.data.runtime_contract import check_size
     fit = {"x": "a" * 40}
     over = {"x": "a" * 41}
@@ -392,8 +392,8 @@ def test_s6_gate10_max_row_bytes_boundary(tmp_path):
 
 def test_s6_gate10_encoded_backstop_rejects(tmp_path, monkeypatch):
     import pickle
-    import demiflow.execution.block_sink as bs
-    from demiflow.execution.block_sink import _canonical_row
+    import demiflow.execution.outputs.block_sink as bs
+    from demiflow.execution.outputs.block_sink import _canonical_row
     # Isolate the :55 encoded-length backstop (check_size :53 normally binds first)
     # to prove canonical encoding keeps it fail-closed. Production check_size unchanged.
     monkeypatch.setattr(bs, "check_size", lambda *a, **k: 0)
@@ -412,7 +412,7 @@ def test_s6_gate10_encoded_backstop_rejects(tmp_path, monkeypatch):
 
 
 def test_s6_gate10_depth_fallback_raw_writes_reads(tmp_path, monkeypatch):
-    import demiflow.execution.block_sink as bs
+    import demiflow.execution.outputs.block_sink as bs
     # check_size caps valid rows at depth 16; lower the canon bound so a valid-depth
     # row exercises the value-determined depth fallback end-to-end through the sink.
     monkeypatch.setattr(bs, "_CANON_MAX_DEPTH", 3)
@@ -426,7 +426,7 @@ def test_s6_gate10_depth_fallback_raw_writes_reads(tmp_path, monkeypatch):
 
 def test_s6_gate10_deep_fallback_raw_roundtrip():
     import pickle
-    from demiflow.execution.block_sink import _canonical_row, _CANON_MAX_DEPTH
+    from demiflow.execution.outputs.block_sink import _canonical_row, _CANON_MAX_DEPTH
     deep = cur = {}
     for _ in range(_CANON_MAX_DEPTH + 5):
         cur["n"] = {}
@@ -437,7 +437,7 @@ def test_s6_gate10_deep_fallback_raw_roundtrip():
 
 def test_s6_gate10_cycle_fallback_raw_roundtrip():
     import pickle
-    from demiflow.execution.block_sink import _canonical_row
+    from demiflow.execution.outputs.block_sink import _canonical_row
     cyc = {}
     cyc["self"] = cyc
     assert _canonical_row(cyc) is cyc

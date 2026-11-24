@@ -11,13 +11,13 @@ import pytest
 
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.seal.plan import load_dataflow
-from demiflow.execution.recovery_identity import plan_identity
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.seal.program_identity import plan_identity
+from demiflow.execution.pipeline.run_context import RunContext
 from test_runtime_v3_chain_compatibility import _entry
 
 
 def _materialize(dataset):
-    from demiflow.execution.dataflow_api import make_action_request, run_dataset_action
+    from demiflow.execution.executors.dataflow_api import make_action_request, run_dataset_action
     request = make_action_request(dataset._executor, dataset._source, dataset._plan, kind='materialize', arguments={})
     return run_dataset_action(request)
 
@@ -41,7 +41,7 @@ def actual_chain(tmp_path_factory):
     root = tmp_path_factory.mktemp('chain-contract')
     assignments, executions, commits = [], [], []
     original_assignment = DataflowExecution._assignment
-    from demiflow.execution.commit import CommitCoordinator
+    from demiflow.execution.checkpoint.commit import CommitCoordinator
     original_commit = CommitCoordinator.commit
     def assign(execution, *args, **kwargs):
         value = original_assignment(execution, *args, **kwargs)

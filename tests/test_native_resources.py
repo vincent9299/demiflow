@@ -7,8 +7,8 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution import datafusion as native
-from demiflow.execution.local_kernel import LocalKernelOptions
+from demiflow.execution.hosts import datafusion as native
+from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
 
 GiB = 2**30
 
@@ -98,10 +98,10 @@ def test_public_native_resources_rejects_invalid_declarations(budget):
 
 def test_real_dataset_uses_explicit_limits_and_preserves_join_multiplicity(tmp_path, monkeypatch):
     import lance
-    from demiflow.execution.lance_sink import LanceSink
-    from demiflow.execution.resource_state import RunResourceState
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.outputs.lance_sink import LanceSink
+    from demiflow.execution.hosts.run_state import RunResourceState
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     original, charged = LanceSink.prepare, RunResourceState._charged
     observed, charges = [], []
     def bounded_batches(sink, blocks, context):

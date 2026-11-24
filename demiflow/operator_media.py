@@ -3,7 +3,7 @@ import base64
 import io
 
 from .objects import ObjectRef, _local_path
-from .execution.artifacts import resolve_local_artifact
+from demiflow.execution.storage.artifacts import resolve_local_artifact
 from .operator_llm.client import _journal_io
 from .operator_llm.errors import PromptBudgetExceededError
 

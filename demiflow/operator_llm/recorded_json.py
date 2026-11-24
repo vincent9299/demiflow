@@ -4,7 +4,8 @@ import json
 import time
 from pathlib import Path
 import httpx
-from demiflow.execution.artifacts import digest,immutable,read
+from demiflow.execution.contracts.artifact import digest
+from demiflow.execution.storage.artifacts import immutable, read
 
 class CallBudgetExceeded(RuntimeError):pass
 class UncertainPreviousCall(RuntimeError):pass

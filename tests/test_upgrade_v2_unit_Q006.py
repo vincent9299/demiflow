@@ -1,7 +1,7 @@
 """The published bounded row queue preserves its limits and wait metrics."""
 import pytest
 from demiflow.data.runtime_contract import RuntimeContractError
-from demiflow.execution.request_limits import ObservedQueue
+from demiflow.execution.worker.stream_resources import ObservedQueue
 
 
 def test_byte_capacity_must_cover_one_item():

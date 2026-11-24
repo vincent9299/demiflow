@@ -6,11 +6,11 @@ import pytest
 
 from demiflow.data.execution_contract import InputSpec, _current_executor, _use_executor
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.execution.input_runtime import prepare_public_items
+from demiflow.execution.executors.base import prepare_public_items
 
 
 def test_managed_input_rejection_precedes_host_selection(monkeypatch):
-    import demiflow.execution.checked as checked
+    import demiflow.execution.pipeline.checked as checked
     monkeypatch.setattr(checked, 'current', lambda: object())
     def select():
         pytest.fail('invalid managed input selected a host')
@@ -21,7 +21,7 @@ def test_managed_input_rejection_precedes_host_selection(monkeypatch):
 
 
 def test_public_registration_occurs_inside_action_after_host_selection(monkeypatch):
-    import demiflow.execution.checked as checked
+    import demiflow.execution.pipeline.checked as checked
     events = []
     monkeypatch.setattr(checked, 'current', lambda: None)
     @contextmanager
@@ -41,7 +41,7 @@ def test_public_registration_occurs_inside_action_after_host_selection(monkeypat
 
 
 def test_raw_input_keeps_copy_and_does_not_enter_checked(monkeypatch):
-    import demiflow.execution.checked as checked
+    import demiflow.execution.pipeline.checked as checked
     monkeypatch.setattr(checked, 'action', lambda *a, **k: pytest.fail('raw input opened an action'))
     rows = [{'x': 1}]
     executor = LocalDatasetExecutor()

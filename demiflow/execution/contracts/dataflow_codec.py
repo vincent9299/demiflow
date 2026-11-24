@@ -10,81 +10,35 @@ output is allocated. Identity formulas (IDENTITY.md) live here exactly once:
 """
 from __future__ import annotations
 
+RECORDS_MEDIA = "application/x-demiflow-records-v3"
+MANIFEST_MEDIA = "application/x-demiflow-sink-manifest-v3"
+PUBLICATION_MEDIA = "application/x-demiflow-sink-publication-v3"
+_MANIFEST_SCHEMA = "demiflow.dataflow_sink_manifest.v3"
+_COMBINED_SCHEMA = "demiflow.dataflow_sink_combined.v3"
+_PUBLICATION_SCHEMA = "demiflow.dataflow_sink_publication.v3"
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError as _err
+_JSON_MEDIA = "application/json"
+RUN_STORE_ID = "run"
+
+from demiflow.execution.contracts.recovery_contract import document, identity
+
+import math
+from dataclasses import fields, is_dataclass
+from typing import Mapping
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 import dataclasses
 import hashlib
 import json
-import math
+
 import re
-from types import MappingProxyType
-from typing import Mapping
+
 
 from demiflow.data.datasink import WriteResult
 from demiflow.resources.contracts import ResourceProfile
 
-from .dataflow import (
-    thaw_json as _thaw_json,
-    ActionProgram,
-    AggregateState,
-    ArtifactCommand,
-    ArtifactRef,
-    ArtifactReply,
-    Bounds,
-    CapabilityReport,
-    CompiledDataflow,
-    CompletedControl,
-    ControlReply,
-    CreditLease,
-    CutContribution,
-    CutRequest,
-    DataLocation,
-    DataflowGraph,
-    FitJobNode,
-    FitJobStage,
-    ValueEdge,
-    DomainProof,
-    EffectCommand,
-    EffectReply,
-    ExchangeSpec,
-    ExecutionStatus,
-    FiniteScope,
-    GraphEdge,
-    GraphNode,
-    HistoricalBinding,
-    HostDescriptor,
-    InputPort,
-    KernelSpec,
-    NativeJournalCommand,
-    NativeJournalReply,
-    NodeObservation,
-    OperatorDefinition,
-    PhysicalDataflow,
-    ProducerCompletion,
-    QueueBinding,
-    QueueCommand,
-    QueueReply,
-    ReadyWork,
-    Record,
-    BlockPartition,
-    RecoveryImage,
-    ResidencyPlan,
-    RoutedRecord,
-    RuntimePolicy,
-    ScheduleChoice,
-    SealedExecution,
-    SourceCursor,
-    SourceDefinition,
-    SourcePoll,
-    SourceSnapshot,
-    SourceSplit,
-    StageSpec,
-    TerminalDefinition,
-    TerminalResult,
-    WorkerAssignment,
-    WorkerEvent,
-    WorkerLease,
-    WorkerStep,
-    _artifact_key,
-)
+from .dataflow import thaw_json as _thaw_json, AggregateState, ArtifactCommand, ArtifactRef, ArtifactReply, Bounds, CapabilityReport, CompletedControl, ControlReply, CreditLease, CutContribution, CutRequest, DataLocation, DataflowGraph, FitJobNode, FitJobStage, ValueEdge, DomainProof, EffectCommand, EffectReply, ExchangeSpec, ExecutionStatus, FiniteScope, GraphEdge, GraphNode, HistoricalBinding, HostDescriptor, InputPort, KernelSpec, NativeJournalCommand, NativeJournalReply, NodeObservation, OperatorDefinition, PhysicalDataflow, ProducerCompletion, QueueBinding, QueueCommand, QueueReply, ReadyWork, Record, BlockPartition, RecoveryImage, ResidencyPlan, RoutedRecord, RuntimePolicy, ScheduleChoice, SealedExecution, SourceCursor, SourceDefinition, SourcePoll, SourceSnapshot, SourceSplit, StageSpec, TerminalDefinition, TerminalResult, WorkerAssignment, WorkerEvent, WorkerLease, WorkerStep, _artifact_key
 from .dataflow_errors import DATAFLOW_ERROR_CODES, DataflowError
 
 WIRE_SCHEMA = "demiflow.runtime_wire.v3"
@@ -1247,3 +1201,153 @@ def runtime_scope_id(plan_id: str, attempt: int) -> str:
     if type(attempt) is not int or attempt < 1:
         raise _err("runtime scope needs a positive attempt")
     return "df-" + plan_id + ("-a" + str(attempt) if attempt > 1 else "")
+
+
+def _json_config(value):
+    """Project a declaration to strict JSON, rejecting live code/locks/clients."""
+    if value is None or type(value) in (str, bool, int):
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise DataflowError('INVALID_CONTRACT', 'Model configuration has a nonfinite number')
+        return value
+    if isinstance(value, Mapping):
+        return {str(key): _json_config(item) for key, item in value.items()}
+    if type(value) in (list, tuple):
+        return [_json_config(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _json_config(getattr(value, field.name)) for field in fields(value)}
+    raise DataflowError('INVALID_CONTRACT', 'Model configuration must be declarative code/config, not a live object')
+
+
+def decode_artifact_reference(value):
+    from demiflow.execution.contracts.dataflow import ArtifactRef
+    if value is None:
+        return None
+    if type(value) is not dict or set(value) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise DataflowError("INVALID_CONTRACT", "artifact ref payload is unsupported")
+    return ArtifactRef(**value)
+
+def encode_artifact_reference(ref):
+    if ref is None:
+        return None
+    return artifact_reference_fields(ref)
+
+def validate_control_payload(event: WorkerEvent, bounds: "Bounds") -> None:
+    if event.payload is not None and event.payload_ref is not None:
+        raise DataflowError("INVALID_CONTRACT", "payload and payload_ref are mutually exclusive")
+    if event.payload is None and event.payload_ref is None:
+        raise DataflowError("INVALID_CONTRACT", "event needs payload or payload_ref")
+    if event.payload is not None:
+        from demiflow.execution.contracts.dataflow import thaw_record_value
+        raw = document(thaw_record_value(event.payload))
+        if len(raw) > bounds.max_control_bytes:
+            raise DataflowError("BUDGET_EXCEEDED", "control payload exceeds max_control_bytes")
+
+def decode_effect_command(payload) -> EffectCommand:
+    return EffectCommand(operation_id=payload["operation_id"], kind=payload["kind"],
+                         effect_id=payload["effect_id"], actor_id=payload["actor_id"],
+                         request_digest=payload["request_digest"],
+                         payload_ref=decode_artifact_reference(payload.get("payload_ref")),
+                         budget=payload.get("budget", {}))
+
+def decode_artifact_command(payload) -> ArtifactCommand:
+    return ArtifactCommand(operation_id=payload["operation_id"], kind=payload["kind"],
+                           ref=decode_artifact_reference(payload.get("ref")), owner=payload["owner"],
+                           size_bytes=payload.get("size_bytes", 0))
+
+def decode_queue_command(payload) -> QueueCommand:
+    from demiflow.execution.contracts.dataflow import QueueBinding
+    binding = payload["binding"]
+    return QueueCommand(operation_id=payload["operation_id"], operation=payload["operation"],
+                        binding=QueueBinding(**binding), record_id=payload.get("record_id"),
+                        delivery_ref=decode_artifact_reference(payload.get("delivery_ref")),
+                        row_ref=decode_artifact_reference(payload.get("row_ref")), node_id=payload.get('node_id'))
+
+def decode_native_command(payload) -> NativeJournalCommand:
+    return NativeJournalCommand(operation_id=payload["operation_id"], operation=payload["operation"],
+                                action_id=payload["action_id"], node_id=payload["node_id"],
+                                request_key=payload["request_key"],
+                                request_ref=decode_artifact_reference(payload.get("request_ref")),
+                                value_ref=decode_artifact_reference(payload.get("value_ref")),
+                                reservation=payload.get("reservation"), options=payload.get("options", {}))
+
+def private_prompt_rpc_id(command, scope, route):
+    return identity(['private-prompt-rpc-v1', command.action_id, command.node_id,
+                     command.request_key, command.operation, scope, route, dict(command.options)])
+
+def private_embedding_rpc_id(command):
+    return identity(['private-embedding-rpc-v1', command.action_id, command.node_id,
+                     command.request_key, command.operation, dict(command.options)])
+
+
+def image_request_budget(action_id):
+    return 'image-requests-'+identity(action_id)
+
+
+def artifact_reference_fields(ref: "ArtifactRef") -> dict:
+    return {"digest": ref.digest, "size_bytes": ref.size_bytes, "store_id": ref.store_id,
+            "key": ref.key, "media_type": ref.media_type}
+
+
+def history_carrier_reference(ref, *, media_type=_JSON_MEDIA):
+    """Present a run-relative {path, sha256, bytes} carrier as an ArtifactRef."""
+    return ArtifactRef(digest=ref["sha256"], size_bytes=ref["bytes"],
+                       store_id=RUN_STORE_ID, key=ref["path"], media_type=media_type)
+
+def decode_history_reference(value, label):
+    if type(value) is not dict or set(value) != {"digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise _err("INVALID_CONTRACT", label + " is not a closed artifact reference")
+    try:
+        return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
+                           store_id=value["store_id"], key=value["key"],
+                           media_type=value["media_type"])
+    except DataflowError:
+        raise
+    except (ValueError, TypeError) as exc:
+        raise _err("INVALID_CONTRACT", label + " invalid: " + str(exc))
+
+def history_reference_list(value):
+    if type(value) is not list:
+        raise _err("INVALID_CONTRACT", "sealed reference sequence is not a list")
+    return value
+
+
+def decode_sink_reference(value) -> ArtifactRef:
+    if type(value) is not dict or set(value) != {
+            "digest", "size_bytes", "store_id", "key", "media_type"}:
+        raise DataflowError("CORRUPT_ARTIFACT", "Invalid artifact reference in sink manifest")
+    return ArtifactRef(digest=value["digest"], size_bytes=value["size_bytes"],
+                       store_id=value["store_id"], key=value["key"],
+                       media_type=value["media_type"])
+
+def validate_sink_reference(ref, *, what: str) -> None:
+    if not isinstance(ref, ArtifactRef):
+        raise DataflowError("INVALID_CONTRACT", what + " must be a durable ArtifactRef")
+    if (type(ref.digest) is not str or len(ref.digest) != 64
+            or any(c not in "0123456789abcdef" for c in ref.digest)):
+        raise DataflowError("INVALID_CONTRACT", what + " has an invalid digest")
+    if type(ref.key) is not str or not ref.key or ".." in ref.key.split("/"):
+        raise DataflowError("INVALID_CONTRACT", what + " has an invalid store key")
+    if type(ref.size_bytes) is not int or ref.size_bytes < 0:
+        raise DataflowError("INVALID_CONTRACT", what + " has an invalid size")
+
+def sink_non_mapping_values(manifest):
+    flag = manifest.get('non_mapping_values', False)
+    if type(flag) is not bool:
+        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values must be a boolean')
+    if flag and (not manifest['rows'] or manifest['columns'] is not None
+                 or manifest.get('schema_ref') is not None):
+        raise DataflowError('CORRUPT_ARTIFACT', 'Sink non_mapping_values contradicts its table metadata')
+    return flag
+
+
+def wire_digest(value: object, type_name: str, bounds: "Bounds") -> str:
+    return hashlib.sha256(encode_wire(value, type_name=type_name, bounds=bounds)).hexdigest()
+
+def event_from_dict(data: dict, *, bounds) -> "WorkerEvent":
+    frame = {"schema": "demiflow.runtime_wire.v3", "type": "WorkerEvent", "payload": data}
+    return decode_wire_document(frame, type_name="WorkerEvent", bounds=bounds)
+
+def reply_frame(reply: "ControlReply", *, bounds) -> dict:
+    return {"type": "control_reply", "wire": encode_wire(reply, type_name="ControlReply", bounds=bounds).decode()}

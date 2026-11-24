@@ -6,7 +6,7 @@ from _worker_event_fixtures import emit, events
 
 
 def test_operator_stop_file_drains_admitted_work(tmp_path, monkeypatch):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     stop = tmp_path / 'STOP'
     observed = str(tmp_path / "actual-cancellation.jsonl")
     drained = []
@@ -39,7 +39,7 @@ def test_operator_stop_file_drains_admitted_work(tmp_path, monkeypatch):
 
 
 def test_existing_operator_stop_file_prevents_dispatch(tmp_path):
-    from demiflow.execution.request_limits import ServiceStopped
+    from demiflow.services.request_limits import ServiceStopped
     stop = tmp_path / 'STOP'
     stop.touch()
     admitted = str(tmp_path / "forbidden-admission.jsonl")

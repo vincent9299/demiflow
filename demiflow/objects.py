@@ -142,7 +142,7 @@ def open_object(uri):
         raise ValueError('Object URI requires an explicit scheme')
     scheme = urlsplit(uri).scheme
     if scheme == 'file':
-        from .execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         with resolve_local_artifact(_local_path(uri)).open('rb') as stream:
             yield stream
     elif scheme in {'http', 'https'}:
@@ -206,7 +206,7 @@ class LocalObjectStore:
     changing bytes beneath references. No table or registry is required to read.
     """
     def __init__(self, directory, *, read_domain='host', domain_id=None, store_id='raw'):
-        from .execution.recovery_contract import identifier
+        from demiflow.execution.contracts.recovery_contract import identifier
         if read_domain not in {'host', 'shared'}:
             raise ValueError('read_domain must be host or shared')
         if read_domain == 'shared':
@@ -221,7 +221,7 @@ class LocalObjectStore:
         # the original spelling for that check without changing legacy put/read
         # location and artifact-alias behavior.
         self._domain_read_directory = self.directory
-        from .execution.artifacts import resolve_local_artifact
+        from demiflow.execution.storage.artifacts import resolve_local_artifact
         self.directory = resolve_local_artifact(self.directory)
 
     def recovery_identity(self):
@@ -243,7 +243,7 @@ class LocalObjectStore:
         root=self.directory, max_bytes=...). Ordinary ObjectRef.read/verify keep
         their existing location/alias semantics and are not no-follow readers.
         """
-        from .execution.raw_objects import resolve_raw_reference
+        from demiflow.execution.native_queue.raw_objects import resolve_raw_reference
         return resolve_raw_reference(self, reference, domain=domain)
 
     def put(self, value, *, sha256=None, temporary=None, max_bytes=None):

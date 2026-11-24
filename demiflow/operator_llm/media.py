@@ -340,71 +340,20 @@ def response_location(body, configuration, options):
     return url
 
 
+def image_decode_policy(limits, *, memory_bytes, timeout_s):
+    """Original image content limits within the caller's memory/time budget."""
+    return dict(max_bytes=limits['max_image_bytes'], max_pixels=limits['max_pixels'], max_frames=1,
+        decode_memory_bytes=max(64*1024**2, min(512*1024**2, memory_bytes//4)),
+        decode_timeout_s=min(10, timeout_s))
+
+
 def store_image(raw, options, *, store=None):
-    from ..execution.dataflow_images import RemoteImageStore
-    if isinstance(store, RemoteImageStore):
-        return store.store_image(raw)
+    from demiflow.execution.contracts.dataflow import BoundImageWriter, inherits_bound_port
     if store is not None:
-        # These bytes have already arrived. A cooperative stop must not discard
-        # their only recovery evidence while local decoding/storage completes.
-        with store.run.persist_admitted_effect():
-            return _store_image(raw, options, store=store)
-    return _store_image(raw, options)
-
-
-def _store_image(raw, options, *, store=None):
+        if not inherits_bound_port(store, BoundImageWriter):
+            raise TypeError('Image output requires a bound image writer')
+        return store.store_image(raw, options)
     from demiflow.objects import LocalObjectStore
-    if store is not None:
-        import hashlib,os,tempfile
-        from pathlib import Path
-        from ..collect.image_decode import decode_image
-        from ..execution.block_sink import storage_usage
-        from ..execution.recovery_contract import RecoveryContractError
-        limits=media_limits(options)
-        if len(raw)>limits['max_image_bytes']:raise ValueError('Image exceeds max_image_bytes')
-        # Validation is content/policy specific. Retain only a bounded proof,
-        # never decoded pixels; stage() still verifies the owned immutable blob.
-        from collections import OrderedDict
-        validation_key = (hashlib.sha256(raw).hexdigest(), tuple(sorted(limits.items())))
-        with store.run._object_resource_lock:
-            validated = getattr(store.run, '_validated_images', None)
-            if validated is None:
-                validated = store.run._validated_images = OrderedDict()
-            known = validation_key in validated
-            if known:
-                validated.move_to_end(validation_key)
-        if known:
-            return store.stage(raw, admitted=True)
-        scratch=store.run.directory/'scratch'
-        scratch.mkdir(parents=True,exist_ok=True)
-        with store.run.temporary_artifacts() as allocate, tempfile.TemporaryDirectory(prefix='image-pixels-',dir=scratch) as directory:
-            path=Path(directory)/'encoded'
-            allocate(path)
-            store.run.reserve_artifact_bytes(path, len(raw))
-            with store.run.journal.publication_guard(store.run.fence):
-                storage_usage(store.run)
-                descriptor=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-                with os.fdopen(descriptor,'wb') as output:output.write(raw)
-            policy=dict(max_bytes=limits['max_image_bytes'],max_pixels=limits['max_pixels'],max_frames=1,
-                decode_memory_bytes=max(64*1024**2,min(512*1024**2,store.run.limits['max_rss_bytes']//4)),
-                decode_timeout_s=min(10,options['timeout_s']))
-            try:
-                def allocate_decoder(path):
-                    allocate(path)
-                    # Decoder metadata is independently bounded before the
-                    # child process allocates either JSON file.
-                    store.run.reserve_artifact_bytes(path, 32768)
-                decode_image(path.as_uri(),hashlib.sha256(raw).hexdigest(),policy,
-                    temporary_directory=scratch,allocate=allocate_decoder)
-            except OSError as exc:
-                raise ValueError('Invalid image pixels: '+str(exc)) from exc
-            except (MemoryError,RuntimeError) as exc:
-                raise RecoveryContractError('Image decoder resource failure: '+str(exc)) from exc
-        with store.run._object_resource_lock:
-            validated[validation_key] = True
-            while len(validated) > 256:
-                validated.popitem(last=False)
-        return store.stage(raw, admitted=True)
     picture = checked_image(raw, media_limits(options))
     picture.close()
     return LocalObjectStore(options['object_store']).put(raw).to_dict()

@@ -2,7 +2,7 @@
 import threading
 
 from demiflow.execution.storage.gc import _exclusive
-from demiflow.execution.run_journal import RunJournal, ExecutionConflict
+from demiflow.execution.journal.run_journal import RunJournal, ExecutionConflict
 from test_runtime_v3_artifact_accounting import store_fixture
 
 

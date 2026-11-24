@@ -10,9 +10,9 @@ from types import SimpleNamespace as NS
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_hosts import LocalHostEndpoint
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.worker.bootstrap import ControlFrameReader, recv_message, _MAX_CONTROL_BYTES
+from demiflow.execution.hosts.endpoints import LocalHostEndpoint
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.hosts.worker_bootstrap import ControlFrameReader, recv_message, _MAX_CONTROL_BYTES
 
 
 def _endpoint(sock):
@@ -151,7 +151,7 @@ def test_pre_registration_process_death_retains_its_actual_exit_code():
 
 @pytest.mark.parametrize('message', [{'kind': 'Heartbeat'}, []])
 def test_registration_rejects_wrong_frames_without_hiding_protocol_failure(message):
-    from demiflow.execution.worker.bootstrap import send_message
+    from demiflow.execution.hosts.worker_bootstrap import send_message
     driver, worker = socket.socketpair()
     try:
         endpoint = _endpoint(driver)
@@ -170,8 +170,9 @@ def test_registration_rejects_wrong_frames_without_hiding_protocol_failure(messa
 def test_owned_worker_loss_before_registration_preserves_recovery_admission(tmp_path, monkeypatch, after_ack):
     from dataclasses import replace
     from demiflow import data
-    from demiflow.execution import dataflow_api
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.executors import dataflow_api
+    from demiflow.execution.scheduler import native_limits as action_limits
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_owned_crash import assert_released, process_records
     from runtime_v3_graph_history import capture_acks, assert_acks_retained
 
@@ -183,13 +184,13 @@ def test_owned_worker_loss_before_registration_preserves_recovery_admission(tmp_
 
     # Keep real separate stages so a later bootstrap can fail after a real
     # acknowledged phase, without manufacturing a recoverable journal record.
-    resolve = dataflow_api.resolve_runtime_policy
+    resolve = action_limits.resolve_runtime_policy
 
     def unfused(*args, **kwargs):
         policy, bounds = resolve(*args, **kwargs)
         return replace(policy, fusion=False), bounds
 
-    monkeypatch.setattr(dataflow_api, 'resolve_runtime_policy', unfused)
+    monkeypatch.setattr(action_limits, 'resolve_runtime_policy', unfused)
     initialize, activate = LocalHostEndpoint.__init__, LocalHostEndpoint.activate
     paused = 'import time; time.sleep(30)'
     deaths, actions = [], []
@@ -242,7 +243,7 @@ def test_owned_worker_loss_before_registration_preserves_recovery_admission(tmp_
 
 
 def test_registration_timeout_is_distinct_from_eof(monkeypatch):
-    from demiflow.execution.worker import bootstrap
+    from demiflow.execution.hosts import worker_bootstrap as bootstrap
     endpoint = LocalHostEndpoint.__new__(LocalHostEndpoint)
     endpoint._sock = object()
     endpoint._allocation_id = 'allocation-before-register'

@@ -2,8 +2,8 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.recovery_contract import RecoveryContractError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.pipeline.run_context import RunContext
 
 
 def _action_spy(monkeypatch):

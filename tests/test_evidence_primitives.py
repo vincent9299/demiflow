@@ -9,8 +9,8 @@ import pytest
 from demiflow import data
 from demiflow.collect.documents import store_document,read_document,DocumentError
 from demiflow.collect.web import WebClient
-from demiflow.execution.request_limits import RequestGate,ServiceStopped
-from demiflow.execution.stream_lance import StreamLanceWriter
+from demiflow.services.request_limits import RequestGate, ServiceStopped
+from demiflow.execution.native_queue.stream_lance import StreamLanceWriter
 
 
 class Bytes(httpx.AsyncByteStream):
@@ -90,7 +90,7 @@ def test_explicit_role_counting_scales_with_system_content():
 
 
 def test_unknown_stream_append_is_reconciled_before_delivery(tmp_path,monkeypatch):
-    import demiflow.execution.stream_lance as module
+    import demiflow.execution.native_queue.stream_lance as module
     schema=pa.schema([('id',pa.string()),('v',pa.int64())])
     writer=StreamLanceWriter(tmp_path/'out.lance',schema,key='id');writer.initialize()
     native=module.write_lance

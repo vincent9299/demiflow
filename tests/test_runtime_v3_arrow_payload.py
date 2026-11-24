@@ -7,9 +7,10 @@ import pyarrow as pa
 import pytest
 
 from demiflow import data
-from demiflow.execution.arrow_payload import ArrowBatchCache, is_arrow_record, row_upper
+from demiflow.execution.storage.arrow_payload import ArrowBatchCache
+from demiflow.execution.contracts.record_codec import is_arrow_record, row_upper
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from _arrow_payload_fixtures import install_arrow_probe
 from _worker_event_fixtures import events
 
@@ -27,7 +28,7 @@ def source_table(n=25):
 
 
 def test_row_upper_bounds_original_typed_encoding_without_row_materialization():
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
+    from demiflow.execution.contracts.record_codec import _encode_payload
     table = source_table().append_column('float', pa.array([-0.0, 0.0, 1e300, -1e-300, None]*5))
     batch = table.to_batches()[0]
     for i, row in enumerate(table.to_pylist()):
@@ -38,7 +39,7 @@ def test_row_upper_bounds_original_typed_encoding_without_row_materialization():
 
 
 def test_compressed_ipc_is_refused_before_decoded_array_allocation():
-    from demiflow.execution.arrow_payload import _uncompressed_ipc
+    from demiflow.execution.contracts.record_codec import _uncompressed_ipc
     from test_runtime_v3_s import make_bounds
     batch = source_table(8).to_batches()[0]
     sink = pa.BufferOutputStream()
@@ -54,8 +55,8 @@ def test_actual_lance_reader_restores_inside_shared_batch_and_validates_binding(
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services, drain
     from demiflow.data.sources import LanceSource
     from demiflow.lance.model import LanceScanSpec
-    from demiflow.execution.source_readers import LanceReader
-    from demiflow.execution.dataflow_records import clone_record
+    from demiflow.execution.sources.source_readers import LanceReader
+    from demiflow.execution.contracts.dataflow import clone_record
     table = source_table(16)
     uri = str(tmp_path / 'source.lance')
     lance.write_dataset(table, uri)
@@ -87,13 +88,26 @@ def test_actual_lance_reader_restores_inside_shared_batch_and_validates_binding(
     with pytest.raises(DataflowError, match='offset/bytes'):
         cache.row(clone_record(first[0], encoded_bytes=1))
 
+    # Rebinding an existing authenticated cache must tighten its grant. Omission
+    # retains that grant, whereas explicit None restores the bounds-only grant.
+    from types import SimpleNamespace
+    from demiflow.execution.storage.arrow_payload import batch_cache
+    narrowed = SimpleNamespace(stages=(SimpleNamespace(
+        profile=SimpleNamespace(requests={'memory_bytes': 32})),))
+    shared = batch_cache(store, bounds, assignment=None)
+    assert shared.row(first[0]) == table.to_pylist()[0]
+    for current in (batch_cache(store, bounds, assignment=narrowed), batch_cache(store, bounds)):
+        with pytest.raises(DataflowError, match='current grant'):
+            current.row(first[0])
+    assert batch_cache(store, bounds, assignment=None).row(first[0]) == table.to_pylist()[0]
+
 
 def test_tiny_legal_row_uses_original_inline_when_reference_frame_does_not_fit(tmp_path):
     from test_runtime_v3_s import FakeStore, make_bounds, make_snapshot, first_split, make_services
     from demiflow.data.sources import LanceSource
     from demiflow.lance.model import LanceScanSpec
-    from demiflow.execution.source_readers import LanceReader
-    from demiflow.execution.dataflow_sinks import _encode_record
+    from demiflow.execution.sources.source_readers import LanceReader
+    from demiflow.execution.contracts.record_codec import encode_record as _encode_record
     uri = str(tmp_path/'source.lance')
     lance.write_dataset(pa.table({'x':[1,2]}), uri)
     store, bounds = FakeStore(), make_bounds(max_row_bytes=600, max_batch_bytes=2*1024**2)
@@ -114,7 +128,7 @@ def test_tiny_legal_row_uses_original_inline_when_reference_frame_does_not_fit(t
 @pytest.mark.parametrize('provider', ['process','thread','ray_core'])
 def test_real_multiline_copy_keeps_schema_batch_and_ack(tmp_path, monkeypatch, provider):
     from demiflow.data.api import DataAPI
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     path = install_arrow_probe(tmp_path, monkeypatch)
     table = source_table()
     source, target = str(tmp_path/'source.lance'), str(tmp_path/'target.lance')
@@ -131,7 +145,7 @@ def test_real_multiline_copy_keeps_schema_batch_and_ack(tmp_path, monkeypatch, p
             executor = RayDatasetExecutor(workers=2, resource_root=tmp_path, native_resources={'batch_rows':8})
         else:
             from demiflow.execution.executors.local import LocalDatasetExecutor
-            from demiflow.execution.local_kernel import LocalKernelOptions
+            from demiflow.execution.pipeline.local_kernel import LocalKernelOptions
             executor = LocalDatasetExecutor(workers=2, resource_root=tmp_path,
                 local_kernel=LocalKernelOptions(workers=2, worker_mode=provider, batch_rows=8,
                                                memory_bytes=LIMITS['memory_bytes']))
@@ -292,7 +306,7 @@ def test_wide_parent_buffers_use_original_rows_within_narrow_window(tmp_path, mo
     rows = [{'id':i, 'payload':'z'*12000} for i in range(9)]
     lance.write_dataset(pa.Table.from_pylist(rows), uri)
     limits = {**LIMITS, 'max_row_bytes':65536, 'max_batch_bytes':131072}
-    from demiflow.execution import batch_conversion
+    from demiflow.execution.contracts import record_codec as batch_conversion
     admission = batch_conversion.admit_batch_conversion
     conversions = []
     def checked(batch, fmt, **kwargs):
@@ -370,14 +384,14 @@ def test_slow_consumer_and_early_close_release_original_grants(tmp_path, monkeyp
 def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.contracts.dataflow import ArtifactRef
-    from demiflow.execution.state_artifacts import StateArtifacts
+    from demiflow.execution.storage.state_artifacts import StateArtifacts
     class Interrupted(Exception):
         pass
     proof = install_arrow_probe(tmp_path, monkeypatch)
     # Slow the real reader only; no fake graph, source, cut or checkpoint ACK.
     probe = tmp_path/'arrow-probe'/'sitecustomize.py'
     with probe.open('a') as stream:
-        stream.write("\nfrom demiflow.execution.source_readers import LanceReader\nimport time\n_original_next=LanceReader.next_record\ndef _slow_next(self):\n    time.sleep(.02)\n    return _original_next(self)\nLanceReader.next_record=_slow_next\n")
+        stream.write("\nfrom demiflow.execution.sources.source_readers import LanceReader\nimport time\n_original_next=LanceReader.next_record\ndef _slow_next(self):\n    time.sleep(.02)\n    return _original_next(self)\nLanceReader.next_record=_slow_next\n")
     table = source_table(64)
     uri, target = str(tmp_path/'input.lance'), str(tmp_path/'output.lance')
     lance.write_dataset(table, uri)
@@ -421,10 +435,10 @@ def test_real_committed_cut_inside_arrow_batch_resumes_once(tmp_path, monkeypatc
 
 def test_real_store_sha_failure_precedes_native_publication(tmp_path, monkeypatch):
     import json
-    from demiflow.execution import dataflow_sinks
-    from demiflow.execution.dataflow_segments import block_chunks
-    from demiflow.execution.dataflow_handles import _ChunkStream
-    from demiflow.execution.exchange.dataflow_bridge import _decode_record_document
+    from demiflow.execution.outputs import sinks as dataflow_sinks
+    from demiflow.execution.storage.segments import block_chunks
+    from demiflow.execution.storage.streams import _ChunkStream
+    from demiflow.execution.contracts.record_codec import _decode_record_document
     table = source_table(8)
     uri, target = str(tmp_path/'input.lance'), str(tmp_path/'output.lance')
     lance.write_dataset(table, uri)

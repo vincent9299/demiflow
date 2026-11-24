@@ -6,8 +6,8 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.dataflow import EffectCommand
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.dataflow_authority import DriverJournalService
-from demiflow.execution.recovery_contract import identity
+from demiflow.execution.journal.dataflow_authority import DriverJournalService
+from demiflow.execution.contracts.recovery_contract import identity
 from test_runtime_v3_real_seams import prepared
 
 

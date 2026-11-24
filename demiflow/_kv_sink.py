@@ -16,7 +16,7 @@ import struct
 import time
 import uuid
 
-from .execution.recovery_contract import RecoveryContractError, UnresolvedCommit, identifier, identity
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, identifier, identity
 
 _MAGIC = b'DFKV\x00\x01\x00\x00'
 _HEADER = struct.Struct('!II')
@@ -44,7 +44,7 @@ def _info(path):
 
 
 def _run(context):
-    from .execution.run_context import RunContext, current_run
+    from demiflow.execution.pipeline.run_context import RunContext, current_run
     run = current_run()
     if (not isinstance(run, RunContext) or not run.active
             or run.ref.run_id != context.run_id or run.attempt != context.attempt

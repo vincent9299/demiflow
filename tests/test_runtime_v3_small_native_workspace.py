@@ -1,4 +1,5 @@
 """Small native writes share one real residency envelope, including recovery."""
+from demiflow.execution.contracts.dataflow import stage_resident_bytes
 from types import SimpleNamespace as NS
 from hashlib import sha256
 
@@ -9,8 +10,8 @@ from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.dataflow_publication_budget import TERMINAL_WORKSPACE
-from demiflow.execution.lance_sink import LanceSink
+from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
+from demiflow.execution.outputs.lance_sink import LanceSink
 from test_runtime_v3_durable_residency import LIMITS
 
 
@@ -63,7 +64,7 @@ def test_real_small_native_publication_keeps_live_terminal_grant_and_original_re
 
 
 def test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor(tmp_path,monkeypatch):
-    import demiflow.execution.batch_conversion as conversion
+    import demiflow.execution.outputs.batch_conversion as conversion
     launch = DataflowExecution._prepare_launch
     launched, constructed = [], []
     def launching(execution,lease,stage):
@@ -89,11 +90,11 @@ def test_same_40k_envelope_rejects_a_real_unfit_row_before_native_constructor(tm
 
 def test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_window(tmp_path,monkeypatch):
     from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition
-    from demiflow.execution.dataflow_record_frames import frame_parts
-    from demiflow.execution.dataflow_scratch import ScratchStream
-    from demiflow.execution.dataflow_segments import block_chunks
-    from demiflow.execution.exchange.dataflow_bridge import _encode_payload
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.contracts.record_codec import frame_parts
+    from demiflow.execution.storage.scratch import ScratchStream
+    from demiflow.execution.storage.segments import block_chunks
+    from demiflow.execution.contracts.record_codec import _encode_payload
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     limits=bounds(max_resident_bytes=14336,max_row_bytes=8192,max_batch_bytes=16384,
@@ -116,10 +117,10 @@ def test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_w
                 row={'n':index,'value':'x'*40}
                 record=make('Record',inline=row,encoded_bytes=len(_encode_payload(row,max_bytes=8192)),
                     block_partition=BlockPartition(layout,index//24,2))
-                size,chunks=frame_parts(record,limits,services=services,retained=blocks.retained_bytes)
+                size,chunks=frame_parts(record,limits,resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)),retained=blocks.retained_bytes)
                 # Save expected bytes separately; append still uses the original
                 # lazy generator rather than retaining this verification copy.
-                _,proof=frame_parts(record,limits,services=services,retained=blocks.retained_bytes)
+                _,proof=frame_parts(record,limits,resident_bytes=stage_resident_bytes(getattr(services, 'assignment', None)),retained=blocks.retained_bytes)
                 expected[index//24].extend(b''.join(proof))
                 blocks.append_parts(record,chunks,size=size)
             parts=blocks.manifest_partitions()

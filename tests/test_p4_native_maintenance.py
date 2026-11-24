@@ -8,8 +8,8 @@ import time
 import pytest
 
 from demiflow.errors import ExecutionConflict, LanceResourceNotFound
-from demiflow.execution.run_context import RunContext, clean_stopped_execution, admit_absent_create
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.pipeline.run_context import RunContext, clean_stopped_execution, admit_absent_create
+from demiflow.execution.journal.run_journal import RunJournal
 from test_p4_attempt_reservations import managed, resume
 
 
@@ -143,7 +143,7 @@ def test_expired_cleanup_does_not_start_and_expiry_after_claim_retains_owner(tmp
         cleanup(journal, deadline=time.monotonic() - 1)
     assert not owners(journal)
     def expire(self, fence):
-        monkeypatch.setattr('demiflow.execution.run_journal.time.monotonic', lambda: 10**12)
+        monkeypatch.setattr('demiflow.execution.journal.run_journal.time.monotonic', lambda: 10**12)
     monkeypatch.setattr(RunJournal, 'clean_orphans', expire)
     with pytest.raises(ExecutionConflict, match='expired'):
         cleanup(journal)
@@ -154,8 +154,8 @@ def test_expired_cleanup_does_not_start_and_expiry_after_claim_retains_owner(tmp
 
 def create_action(journal, uri):
     from demiflow.lance.model import LanceWriteSpec
-    from demiflow.execution.recovery_identity import plan_identity
-    from demiflow.execution.recovery_contract import identity
+    from demiflow.execution.seal.program_identity import plan_identity
+    from demiflow.execution.contracts.recovery_contract import identity
     spec = LanceWriteSpec(str(uri), mode='create')
     configuration = journal.recovery_identity()
     journal.claim_execution(configuration, 'setup')

@@ -2,7 +2,7 @@
 from ..contracts.dataflow_errors import DataflowError
 from ..contracts.relational_region import KEY_BATCH_SUFFIXES, KEY_BATCH_SQL_SUFFIX, fixed_key_inputs
 from ...operators.key_exclusion import BatchKeySelection
-from ..lance_key_source import PinnedKeyPayload
+from demiflow.execution.sources.source_readers import PinnedKeyPayload
 
 
 class FixedKeyExclusion:

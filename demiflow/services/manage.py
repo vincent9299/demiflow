@@ -18,9 +18,9 @@ import sys
 import time
 import uuid
 from .http import ManagedHTTPService
-from ..execution.artifacts import read, run_lock
+from demiflow.execution.storage.artifacts import read, run_lock
 from contextlib import suppress
-from ..execution.local_storage import process_identity
+
 
 
 def _directory(root, name):
@@ -207,6 +207,15 @@ def main():
     result=(start_service(args.root,args.name,read(args.config)) if args.action=='start' else
             stop_service(args.root,args.name) if args.action=='stop' else status_service(args.root,args.name,probe=True))
     print(json.dumps(result,ensure_ascii=False,indent=2))
+
+
+def process_identity(pid):
+    try:
+        # /proc stat comm can contain spaces and parentheses.
+        fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+        return None if fields[0] == 'Z' else fields[19]
+    except FileNotFoundError:
+        return None
 
 
 if __name__=='__main__':main()

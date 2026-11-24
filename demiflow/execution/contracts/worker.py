@@ -5,12 +5,14 @@ owned by resource protocol v1 (module A); messages here reference their field
 names and semantics without redefining them. The worker state machine names
 are inherited verbatim; no parallel state machine is introduced.
 """
-from ..recovery_contract import document, identifier
-from .envelope import (
-    WORKER_PROTOCOL_VERSION, OperationReceipts, check_boot, check_controller_epoch,
-    check_grant, validate_envelope,
-)
-from .errors import ProtocolError
+
+from __future__ import annotations
+
+import uuid
+from demiflow.execution.contracts.recovery_contract import document, identifier
+from demiflow.execution.contracts.envelope import validate_envelope
+
+from demiflow.execution.contracts.errors import ProtocolError
 
 ASSIGNMENT_SCHEMA = "demiflow.worker_assignment.v1"
 
@@ -29,7 +31,7 @@ MESSAGE_KINDS = frozenset({
     "Register", "VerifyArtifactAndCapabilities", "Restore", "Ready", "Activate",
     "Assign", "CheckpointRequest", "Quiesce", "Drain", "Cancel", "Heartbeat",
 })
-_COORD_COMMANDS = frozenset({
+COORD_COMMANDS = frozenset({
     "VerifyArtifactAndCapabilities", "Restore", "Activate", "Assign",
     "CheckpointRequest", "Quiesce", "Drain", "Cancel",
 })
@@ -209,96 +211,45 @@ def validate_message(envelope):
         raise ProtocolError("INVALID_SPEC", "envelope must be an object")
     validate_envelope(
         envelope, kinds=MESSAGE_KINDS,
-        require_allocation=envelope.get("kind") in _COORD_COMMANDS,
+        require_allocation=envelope.get("kind") in COORD_COMMANDS,
         require_boot=True,
     )
     validate_payload(envelope["kind"], envelope["payload"])
     return envelope
 
 
-class WorkerProtocolModel:
-    """Pure conformance model: one worker boot, no transport or scheduling.
-
-    Commands are fenced by controller epoch/boot/grant, deduplicated by
-    operation_id, and gated by the inherited state machine. Business input is
-    admitted only after activate with a live grant (resource v1 activation rule).
-    """
-
-    def __init__(self, *, scope_id, run_id, allocation_id, boot_id,
-                 controller_epoch, grant, plan_revision=0, capabilities=()):
-        self.scope_id, self.run_id = scope_id, run_id
-        self.allocation_id, self.boot_id = allocation_id, boot_id
-        self.controller_epoch = controller_epoch
-        self.grant = grant
-        self.plan_revision = plan_revision
-        self.capabilities = list(capabilities)
-        self.state = "REGISTERED"
-        self.receipts = OperationReceipts()
-        self.assignment = None
-
-    def handle(self, envelope, *, now_ms):
-        validate_message(envelope)
-        if envelope["scope_id"] != self.scope_id or envelope["run_id"] != self.run_id:
-            raise ProtocolError("FENCED", "message belongs to another scope/run")
-        check_controller_epoch(self.controller_epoch, envelope["controller_epoch"])
-        kind, payload = envelope["kind"], envelope["payload"]
-        if kind in _COORD_COMMANDS or kind in ("Ready", "Heartbeat"):
-            check_boot(self.boot_id, envelope["boot_id"])
-        if kind in ("Register", "Ready", "Heartbeat"):
-            check_boot(self.boot_id, payload["boot_id"])
-        if kind == "Register":
-            if payload["boot_id"] != self.boot_id or payload["allocation_id"] != self.allocation_id:
-                raise ProtocolError("BOOT_FENCED", "registration boot/allocation mismatch")
-
-        def execute():
-            return self._apply(kind, payload, now_ms)
-
-        return self.receipts.apply(envelope["operation_id"], payload, execute)
-
-    def _apply(self, kind, payload, now_ms):
-        if kind == "Register":
-            return {"kind": "Registered", "state": self.state}
-        if kind == "VerifyArtifactAndCapabilities":
-            from .envelope import require_capabilities
-            require_capabilities(self.capabilities, payload["required_capabilities"])
-            self.state = next_worker_state(self.state, "VERIFIED")
-            return {"kind": "Verified", "state": self.state}
-        if kind == "Restore":
-            self.state = next_worker_state(self.state, "RESTORING")
-            self.state = next_worker_state(self.state, "READY")
-            return {"kind": "Restored", "state": self.state, "state_checksums": []}
-        if kind == "Ready":
-            if self.state == "VERIFIED":
-                self.state = next_worker_state(self.state, "READY")
-            return {"kind": "ReadyAck", "state": self.state}
-        if kind == "Activate":
-            check_grant(self.grant, controller_epoch=self.controller_epoch,
-                        allocation_id=self.allocation_id, boot_id=self.boot_id, now_ms=now_ms)
-            self.state = next_worker_state(self.state, "ACTIVATED")
-            return {"kind": "Activated", "state": self.state}
-        if kind == "Assign":
-            self.plan_revision = apply_assignment(self.plan_revision, payload["assignment"])
-            self.assignment = payload["assignment"]
-            return {"kind": "Assigned", "plan_revision": self.plan_revision}
-        if kind == "CheckpointRequest":
-            return {"kind": "CheckpointAck", "state_refs": [], "inflight_desc": [],
-                    "channel_cuts": []}
-        if kind in ("Quiesce", "Drain"):
-            if self.state == "ACTIVATED":
-                self.state = next_worker_state(self.state, "DRAINING")
-            return {"kind": "DrainProof", "state": self.state, "release_hint": "DRAINED"}
-        if kind == "Cancel":
-            if self.state != "RETIRED":
-                self.state = next_worker_state(self.state, "RETIRED")
-            return {"kind": "Cancelled", "state": self.state}
-        if kind == "Heartbeat":
-            # Liveness only: never extends control leases or admits input.
-            return {"kind": "HeartbeatAck", "state": self.state}
-        raise ProtocolError("INVALID_SPEC", "unhandled kind")
-
-    def admit_business_input(self, *, now_ms):
-        if self.state != "ACTIVATED":
-            raise ProtocolError("FENCED", "business input requires activation")
-        check_grant(self.grant, controller_epoch=self.controller_epoch,
-                    allocation_id=self.allocation_id, boot_id=self.boot_id, now_ms=now_ms)
-        return True
+def make_worker_control_assignment(assignment: "WorkerAssignment", *, grant: dict,
+                                   manifest_ref: dict, ready_deadline_ms: int) -> dict:
+    lease = assignment.lease
+    stages = [stage.stage_id for stage in assignment.stages]
+    # K3 identifiers exclude ':'; keep the physical v3 IDs in the sealed
+    # assignment and use a deterministic transport-only projection here.
+    from demiflow.execution.contracts.recovery_contract import identity
+    partitions = [identity(["dataflow-k3-partition-v3", value]) for value in lease.partition_ids]
+    inputs = [{"channel_id": exchange.channel_id} for exchange in assignment.inputs]
+    outputs = [exchange.channel_id for exchange in assignment.outputs]
+    restore_point = None
+    if assignment.restore_refs:
+        restore_point = {"checkpoint_id": assignment.restore_refs[0].digest}
+    control = {
+        "schema_version": "demiflow.worker_assignment.v1",
+        "assignment_id": assignment.action_id,
+        "operation_id": uuid.uuid4().hex,
+        "scope_id": grant["scope_id"],
+        "allocation_id": lease.allocation_id,
+        "boot_id": lease.boot_id,
+        "worker_id": lease.host_id,
+        "controller_epoch": assignment.attempt,
+        "grant_ref": grant["grant_id"],
+        "plan_revision": assignment.plan_revision,
+        "expected_plan_revision": assignment.plan_revision,
+        "artifact_manifest_ref": dict(manifest_ref),
+        "stages": stages,
+        "partitions": partitions,
+        "channels": {"inputs": inputs, "outputs": outputs},
+        "restore_point": restore_point,
+        "route_epoch": 0,
+        "topology_revision": 0,
+        "ready_deadline_ms": int(ready_deadline_ms),
+    }
+    return validate_assignment(control)

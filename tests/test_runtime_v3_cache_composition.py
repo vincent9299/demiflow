@@ -8,8 +8,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
-from demiflow.execution.run_context import RunContext
-from demiflow.execution.sealed_plans import load_sealed_plan
+from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.seal.sealed_plans import load_sealed_plan
 from test_runtime_v3_reducer_values import provider, value_executor
 
 
@@ -67,8 +67,8 @@ def test_cached_actor_resume_materialize_shuffle_and_read(provider, callback_kin
     def interrupt(execution, **kwargs):
         result = original(execution, **kwargs)
         if execution._restore_image is not None and not execution._restore_image.cut.final:
-            from demiflow.execution.kernels import state_codec
-            from demiflow.execution.dataflow_kernel_pack import PACK_MEDIA
+            from demiflow.execution.contracts import state_codec
+            from demiflow.execution.contracts.state_codec import PACK_MEDIA
             nodes = {node.occurrence_id for node in execution._graph.nodes
                      if node.kernel.kind == 'AsyncMapOp'}
             images = []

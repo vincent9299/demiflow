@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.worker.dataflow_host import HostedDataflowWorker
+from demiflow.execution.hosts.dataflow_worker_host import HostedDataflowWorker
 from demiflow.resources.capacity import inherited_envelope
 
 

@@ -9,7 +9,7 @@ import copy
 import time
 from contextlib import asynccontextmanager
 
-from demiflow.execution.request_limits import ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 
 
 class SearchRecovery:

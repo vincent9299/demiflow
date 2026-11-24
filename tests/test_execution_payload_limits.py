@@ -8,12 +8,14 @@ import pytest
 from demiflow import data
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution import RunContext, RecoveryContractError, current_run
-from demiflow.execution.runtime_limits import execution_limits
-from demiflow.execution.payload_limits import BATCH_TARGET_BYTES, run_row_limit, arrow_batches
-from demiflow.execution.run_journal import RunJournal
-from demiflow.execution.lance_sink import LanceSink
-from demiflow.execution.commit import CommitCoordinator
-from demiflow.execution.recovery_contract import SourcePosition
+from demiflow.planning.dataflow_policy import execution_limits
+from demiflow.execution.contracts.dataflow import BATCH_TARGET_BYTES
+from demiflow.planning.dataflow_policy import run_row_limit
+from demiflow.lance.arrow_batches import arrow_batches
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.outputs.lance_sink import LanceSink
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.contracts.recovery_contract import SourcePosition
 from demiflow.lance.model import LanceWriteSpec
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_map_prompt_async import PACK, server
@@ -106,7 +108,7 @@ def wide_graph(directory):
 
 @pytest.mark.parametrize('window', ['prepared_failure', 'cancel_after_prepared', 'native_return_loss'])
 def test_wide_model_output_recovers_with_identical_budget_without_repeating_effects(tmp_path, server, monkeypatch, window):
-    import demiflow.execution.commit as protocol
+    import demiflow.execution.checkpoint.commit as protocol
     original = LanceSink.commit
     def fault(name, commit_id):
         fact = current_run().journal.execution_commit(commit_id)
@@ -187,7 +189,7 @@ def test_native_small_explicit_budgets_preserve_duplicates_nulls_and_worker_limi
             rows = lance.dataset(str(target)).to_table().to_pylist()
             assert sorted((r['k'], r['tag'] or '') for r in rows) == [(1, 'a'), (1, 'a'), (1, 'b'), (1, 'b'), (2, '')]
             assert all(r['payload'] == b'full\x00' * 400 for r in rows if r['k'] == 1)
-            from demiflow.execution.sealed_plans import load_sealed_plan
+            from demiflow.execution.seal.sealed_plans import load_sealed_plan
             sealed = load_sealed_plan(run.ref.directory, 'action-1')
             physical = sealed['physical']
             assert physical.bounds.max_row_bytes == 8192
@@ -295,7 +297,7 @@ def test_resume_preserves_explicit_limit_semantics_even_when_numbers_match(tmp_p
 
 @pytest.mark.parametrize('payload_bytes', [512, 2048])
 def test_native_worker_honors_positive_row_cap_below_batch_target(tmp_path, payload_bytes):
-    from demiflow.execution.datafusion import DataFusionSession, DataFusionQueryError
+    from demiflow.execution.hosts.datafusion import DataFusionSession, DataFusionQueryError
     from test_datafusion_execution import options
     schema = pa.schema([('payload', pa.large_binary())])
     def transform(batch):
@@ -342,7 +344,7 @@ def test_explicit_row_allowance_can_exceed_default_estimate_without_raising_othe
 
 
 def test_native_default_row_floor_remains_compatible_when_pool_supports_it(tmp_path):
-    from demiflow.execution.payload_limits import native_row_limit
+    from demiflow.planning.dataflow_policy import native_row_limit
     assert native_row_limit(64 * 2**20, 2 * 2**30) == 8 * 2**20
     assert native_row_limit(2 * 2**20, 2 * 2**30) <= 2 * 2**20
     payload = b'full-original\x00' * 450000
@@ -357,8 +359,8 @@ def test_native_default_row_floor_remains_compatible_when_pool_supports_it(tmp_p
 
 
 def test_peak_scope_keeps_durable_cumulative_ceiling_across_resume(tmp_path):
-    from demiflow.execution.checked import CheckedExecution
-    from demiflow.execution.payload_limits import payload_scope
+    from demiflow.execution.pipeline.checked import CheckedExecution
+    from demiflow.execution.pipeline.run_context import payload_scope
     with pytest.raises(RuntimeError, match='interrupt'):
         with RunContext.start(tmp_path / 'run', limits={'max_output_bytes': 10}) as run:
             reference = run.ref

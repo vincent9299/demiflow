@@ -10,7 +10,7 @@ import pytest
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from test_forge_runs import base, root, execute
 
 BODY = '''from demiflow import data
@@ -52,9 +52,9 @@ def test_native_save_prepare_execute_and_fixed_result(root):
     with journal._connection() as db:
         declarations=[json.loads(row[0]) for row in db.execute('SELECT declaration FROM runtime_commit_scopes')]
     first=next(d for d in declarations if d.get('schema')=='demiflow.stream_lance.v3' and d['request']['ordinal']==0)
-    from demiflow.execution.lance_sink import spec_from_identity
+    from demiflow.execution.outputs.lance_sink import spec_from_identity
     assert spec_from_identity(first['spec']).mode=='create'  # native absence-CAS, not unchecked overwrite
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     bundle=load_sealed_plan(runs.directory(root,result['run_id']),commit['parent_action_id'])
     assert bundle['physical'].policy.max_active_workers==4
     assert bundle['physical'].bounds.max_resident_bytes <= prepared['limits']['memory_bytes']
@@ -62,7 +62,7 @@ def test_native_save_prepare_execute_and_fixed_result(root):
     versions=lance.dataset(stage['uri']).versions()
     assert len(versions)==3
     from demiflow.execution.host.inspection import verify_published_output
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     def verify_recorded():
         return verify_published_output(journal.directory, stage['action_id'],
             expected_uri=stage['uri'], expected_schema_identity=stage['schema_identity'],
@@ -223,7 +223,7 @@ def test_single_worker_native_adapter_recovery_preserves_microbatch_identity(tmp
     assert any(f['commit_id']==before['commit_id'] and f['status']=='acked' for f in result['commits'])
     assert result['budgets']['output_rows']==2
     assert lance.dataset(str(target)).to_table().to_pylist()==[{'id':'a','value':1},{'id':'b','value':2}]
-    from demiflow.execution.sealed_plans import load_sealed_plan
+    from demiflow.execution.seal.sealed_plans import load_sealed_plan
     journal=RunJournal(root/'run')
     with journal._connection() as db:
         action=db.execute('SELECT action_id FROM runtime_actions').fetchone()[0]
@@ -233,7 +233,7 @@ def test_single_worker_native_adapter_recovery_preserves_microbatch_identity(tmp
 
 
 def test_replayed_old_ack_never_regresses_stage_projection():
-    from demiflow.execution.dataflow_stream_lance import NativeStreamLanceService
+    from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
     service=object.__new__(NativeStreamLanceService)
     service._last_acked={};service._acked_ordinals={}
     service._remember_ack('n','latest','c9',9)
@@ -300,8 +300,8 @@ if mode=='supervise':
     subprocess.Popen=launch
     worker.supervise(Path(root),run_id,int(sys.argv[4]),int(sys.argv[5]))
 else:
-    from demiflow.execution import commit
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.checkpoint import commit
+    from demiflow.execution.journal.run_journal import RunJournal
     def fault(name,commit_id):
         if name!='after_sink_commit_before_receipt':return
         journal=RunJournal(target)
@@ -333,8 +333,8 @@ else:
     stage=next(o for o in stopped['outputs'] if o['name']=='stage')
     assert stage['result'] is None and lance.dataset(stage['uri']).version==1
     if not foreign:
-        from demiflow.execution.dataflow_stream_lance import _BatchSink
-        from demiflow.execution.recovery_contract import UnresolvedCommit
+        from demiflow.execution.outputs.lance_sink import _BatchSink
+        from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
         def unknown_inspection(*args, **kwargs):
             raise UnresolvedCommit('native inspection is indeterminate')
         # Real prepared scope, fixed table, bridge and managed control path;

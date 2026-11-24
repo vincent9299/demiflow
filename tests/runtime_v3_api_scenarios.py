@@ -127,7 +127,7 @@ def _fixtures(root):
 def _cases(source):
     from demiflow import data
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     import pyarrow as pa
     import numpy as np
     import pandas as pd
@@ -357,7 +357,7 @@ NA_NEGATIVE={
 
 
 def _run_case(fx,case,index,source):
-    from demiflow.execution.run_context import RunContext
+    from demiflow.execution.pipeline.run_context import RunContext
     from runtime_v3_support import _ExecuteActionRecorder, _RayDataBlocker
     root=fx.root/'api-runs'/('%03d-'%index+case.name)
     root.mkdir(parents=True)
@@ -387,7 +387,7 @@ def _run_case(fx,case,index,source):
     if observed is not None:
         # The RunContext has closed its scoped connection pool. Inspect through
         # a new unpooled read-only view rather than resurrecting that pool.
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         with RunJournal(observed.directory)._connection() as db:
             outcome['native_actions']=[{'action_id':a,'complete':result is not None} for a,result in db.execute('SELECT action_id,result FROM runtime_actions ORDER BY action_id')]
             outcome['native_commits']=[{'commit_id':cid,'status':s} for cid,s in db.execute('SELECT commit_id,status FROM runtime_commits ORDER BY sequence')]
@@ -395,7 +395,7 @@ def _run_case(fx,case,index,source):
             if not outcome['native_commits'] or any(c['status']!='acked' for c in outcome['native_commits']):
                 outcome['status']='failed'; outcome['unconfirmed_native_commit']=True
     if case.self_managed and outcome['status']=='passed':
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         scopes=outcome['result'].get('native_scopes', [])
         outcome['native_commits']=[]
         for scope in scopes:
@@ -642,7 +642,7 @@ def _object(root,family):
 def _integration_cases(source):
     from demiflow import data
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.recovery_contract import RecoveryContractError
+    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
     from demiflow.operator_llm.parser import parse_prompt_pack
     from test_prompt_packing_contract import definition,arguments
     cases=[]
@@ -669,7 +669,7 @@ def _integration_cases(source):
             'queue',lambda r,e=explicit:_queue(r,e),True)
     pos('legacy-queue-archive','read_legacy_queue_records','queue',_legacy)
     neg('legacy-wrong-hash','read_legacy_queue_records','queue',lambda r:_legacy(r,True),'SHA256')
-    from demiflow.execution.queue import QueueConfig
+    from demiflow.execution.native_queue.queue import QueueConfig
     def config(root): return QueueConfig(backend='sqlite',queue_id='owned',path=str(root/'queue.sqlite'))
     neg('enqueue-invalid-depth','Dataset.enqueue','queue',lambda r:_ds().enqueue(config(r),producer=None,queue_depth=0),'queue_depth|producer')
     neg('queue-zero-tasks','read_queue','queue',lambda r:data.read_queue(config(r),pool='p',max_tasks=0),'max_tasks')
@@ -762,9 +762,9 @@ def _search(root):
 
 def _queue(root,explicit):
     from demiflow import data
-    from demiflow.execution.run_context import RunContext
-    from demiflow.execution.queue import QueueChannel,QueueConfig,ProducerSourceSpec,task_message
-    from demiflow.execution.queue_sinks import QueueResultSink
+    from demiflow.execution.pipeline.run_context import RunContext
+    from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
+    from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore,ObjectRef
     from test_raw_fetch import origin_server,BODY
