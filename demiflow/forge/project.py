@@ -224,6 +224,97 @@ def save_project(root, value, *, expected=None, create=False):
     publish_bytes(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=create)
 
 
+def _referenced_location_ids(root, value):
+    """Collect location_id keys still referenced by active parameter files or tables/*.json."""
+    used = set()
+
+    def visit(item, depth=0):
+        if depth > 16:
+            return
+        if isinstance(item, dict):
+            loc_id = item.get('location_id')
+            if isinstance(loc_id, str) and loc_id:
+                used.add(loc_id)
+            for child in item.values():
+                visit(child, depth + 1)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child, depth + 1)
+
+    for paths in (value.get('entries') or {}).values():
+        for rel in paths:
+            try:
+                visit(read_control(validate_parameter_path(root, rel), 65536))
+            except Exception:
+                continue
+    tables_dir = Path(root) / 'tables'
+    if tables_dir.is_dir() and not tables_dir.is_symlink():
+        try:
+            for child in sorted(tables_dir.iterdir()):
+                if child.is_file() and not child.is_symlink() and child.suffix == '.json':
+                    try:
+                        visit(read_control(child, 16384))
+                    except Exception:
+                        continue
+        except OSError:
+            pass
+    return used
+
+
+def slim_project_manifest(root):
+    """Migrate a legacy workspace.json into slim workspace.json + .forge/state.json and drop unused locations."""
+    root = Path(root).absolute()
+    manifest = root / "workspace.json"
+    state_file = root / STATE_PATH
+    with control_lock(root):
+        raw_ws = read_control(manifest)
+        _, value = load_project(root)
+        if value['format'] != FORMAT_V3:
+            raise ForgeError('slim_manifest requires a modern v3 project', code='invalid_request')
+        used_locs = _referenced_location_ids(root, value)
+        kept_locations = {k: v for k, v in (value.get('locations') or {}).items() if k in used_locs}
+        removed_locations = sorted(set(value.get('locations') or {}) - set(kept_locations))
+        ws_doc = {"name": value["name"], "entries": value.get("entries", {})}
+        if "budgets" in value:
+            ws_doc["budgets"] = value["budgets"]
+        if kept_locations:
+            ws_doc["locations"] = kept_locations
+        state_doc = {
+            "format": value["format"],
+            "id": value["id"],
+            "platform": value["platform"],
+        }
+        audit_val = value.get("audit")
+        if isinstance(audit_val, dict) and (audit_val.get("reports") or audit_val.get("change_scope") is not None):
+            state_doc["audit"] = audit_val
+        already_slim = (
+            is_slim_manifest(raw_ws)
+            and no_symlinks(state_file).exists()
+            and raw_ws == ws_doc
+        )
+        if already_slim:
+            return dict(
+                status='unchanged',
+                manifest_path='workspace.json',
+                state_path=STATE_PATH,
+                removed_fields=[],
+                removed_locations=[],
+                kept_locations=sorted(kept_locations),
+            )
+        removed_fields = sorted(set(raw_ws) - set(ws_doc))
+        ensure_directory(root / ".forge")
+        publish_bytes(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=False)
+        publish_bytes(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=False)
+        return dict(
+            status='slimmed',
+            manifest_path='workspace.json',
+            state_path=STATE_PATH,
+            removed_fields=removed_fields,
+            removed_locations=removed_locations,
+            kept_locations=sorted(kept_locations),
+        )
+
+
 def load_project_snapshot(root):
     root, value = load_project(root)
     snap_path = relative_path(root, value["platform"]["path"])

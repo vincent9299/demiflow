@@ -446,8 +446,13 @@ def _group_unreferenced_under(prefix: str, all_files: list[str], unreferenced: l
 
 
 def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, parameter_digests: dict,
-                          exclude=()):
-    """Audit full-project DF-02 structural cleanliness without mutating or inspecting business data."""
+                          exclude=(), structural_only: bool = False):
+    """Audit DF-02 structural & protocol cleanliness without mutating or inspecting business data.
+
+    When ``structural_only=True`` (used by incremental post-turn hooks), skips corpus-dependent
+    orphan checks on operators/configs/prompts so partial ``checked_sources`` never causes false
+    positives, while still enforcing all directory, manifest, config protocol, SDK and secret rules.
+    """
     root = Path(root).absolute()
     entries = (control or {}).get('entries') or {}
     if not entries:
@@ -462,32 +467,34 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         inspected.add(path)
         by_category.setdefault(category, []).append(diagnostic('DF-02', path, detail))
 
-    # Build bounded text corpus from active checked sources, bound parameters, and
-    # declared operators/data_tools so prompts/configs used on alternate branches are
-    # never falsely flagged as unused.
-    corpus_sources = set(active_sources)
-    for rel in _iter_tree_files(root, 'operators', exclude=exclude):
-        if rel.endswith('.py') and Path(rel).name != '__init__.py':
-            if rel in checked_sources or _has_declared_export(root / rel, '__demiflow_operators__'):
+    corpus = ''
+    if not structural_only:
+        # Build bounded text corpus from active checked sources, bound parameters, and
+        # declared operators/data_tools so prompts/configs used on alternate branches are
+        # never falsely flagged as unused.
+        corpus_sources = set(active_sources)
+        for rel in _iter_tree_files(root, 'operators', exclude=exclude):
+            if rel.endswith('.py') and Path(rel).name != '__init__.py':
+                if rel in checked_sources or _has_declared_export(root / rel, '__demiflow_operators__'):
+                    corpus_sources.add(rel)
+        for rel in _iter_tree_files(root, 'data_tools', exclude=exclude):
+            if rel.endswith('.py') and Path(rel).name != '__init__.py':
                 corpus_sources.add(rel)
-    for rel in _iter_tree_files(root, 'data_tools', exclude=exclude):
-        if rel.endswith('.py') and Path(rel).name != '__init__.py':
-            corpus_sources.add(rel)
-    corpus_chunks = []
-    corpus_budget = 4 * 1024 * 1024
-    for rel in sorted(corpus_sources):
-        if corpus_budget <= 0:
-            break
-        fp = root / rel
-        if not fp.is_file() or fp.is_symlink():
-            continue
-        try:
-            raw = read_bounded(fp, min(512 * 1024, corpus_budget))
-        except Exception:
-            continue
-        corpus_budget -= len(raw)
-        corpus_chunks.append(raw.decode('utf-8', errors='ignore'))
-    corpus = '\n'.join(corpus_chunks)
+        corpus_chunks = []
+        corpus_budget = 4 * 1024 * 1024
+        for rel in sorted(corpus_sources):
+            if corpus_budget <= 0:
+                break
+            fp = root / rel
+            if not fp.is_file() or fp.is_symlink():
+                continue
+            try:
+                raw = read_bounded(fp, min(512 * 1024, corpus_budget))
+            except Exception:
+                continue
+            corpus_budget -= len(raw)
+            corpus_chunks.append(raw.decode('utf-8', errors='ignore'))
+        corpus = '\n'.join(corpus_chunks)
 
     # 1. Root-level clutter: no stray notebooks, configs, or scripts outside standard directories.
     try:
@@ -548,7 +555,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         if _imports_notebook_ui(root / rel):
             add('notebook_tool_in_operators', rel, 'operators/ 模块导入了 Notebook 交互库（IPython/ipywidgets），属于 Notebook 查看/分析/标注工具；按 DF-02 规范请迁入 data_tools/。')
             continue
-        if rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
+        if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
             add('orphan_operators', rel, 'operators/ 模块未被已登记 Flow 使用且未声明 __demiflow_operators__；若为 Notebook 查看/分析/标注工具请迁入 data_tools/，若为废弃代码请清理。')
 
     # 5. data_tools/*.py automatically exposes top-level public callables as 'tool';
@@ -599,25 +606,27 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
 
     # 6. Unreferenced orphan files in configs/.
     config_files = _iter_tree_files(root, 'configs', exclude=exclude)
-    unref_configs = []
-    for rel in config_files:
-        sub_rel = rel[len('configs/'):]
-        if rel in active_sources or rel in corpus or sub_rel in corpus:
-            continue
-        unref_configs.append(rel)
-    for target in _group_unreferenced_under('configs', config_files, unref_configs):
-        add('orphan_configs', target, 'configs/ 中存在未被已登记入口、参数或活跃代码引用的孤立配置；请绑定到入口或清理废弃实验配置。')
+    if not structural_only:
+        unref_configs = []
+        for rel in config_files:
+            sub_rel = rel[len('configs/'):]
+            if rel in active_sources or rel in corpus or sub_rel in corpus:
+                continue
+            unref_configs.append(rel)
+        for target in _group_unreferenced_under('configs', config_files, unref_configs):
+            add('orphan_configs', target, 'configs/ 中存在未被已登记入口、参数或活跃代码引用的孤立配置；请绑定到入口或清理废弃实验配置。')
 
     # 7. Unreferenced obsolete files in prompts/.
     prompt_files = _iter_tree_files(root, 'prompts', exclude=exclude)
-    unref_prompts = []
-    for rel in prompt_files:
-        sub_rel = rel[len('prompts/'):]
-        if rel in active_sources or rel in corpus or sub_rel in corpus:
-            continue
-        unref_prompts.append(rel)
-    for target in _group_unreferenced_under('prompts', prompt_files, unref_prompts):
-        add('orphan_prompts', target, 'prompts/ 中存在未被任何活跃 Flow、算子或配置引用的废弃 Prompt；请清理以保持目录整洁。')
+    if not structural_only:
+        unref_prompts = []
+        for rel in prompt_files:
+            sub_rel = rel[len('prompts/'):]
+            if rel in active_sources or rel in corpus or sub_rel in corpus:
+                continue
+            unref_prompts.append(rel)
+        for target in _group_unreferenced_under('prompts', prompt_files, unref_prompts):
+            add('orphan_prompts', target, 'prompts/ 中存在未被任何活跃 Flow、算子或配置引用的废弃 Prompt；请清理以保持目录整洁。')
 
     # 8. docs/ is for documentation and verification evidence, never a dumping ground or archive for obsolete code/configs/prompts.
     docs_files = _iter_tree_files(root, 'docs', exclude=exclude)
@@ -651,8 +660,25 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         add('code_in_docs', target,
             'docs/ 仅用于项目文档与验收证据，不应存放废弃代码、压缩归档包（.tar.gz/.zip）或迁入的旧 configs/parameters/prompts/flows/operators 目录；废弃的非数据文件请直接清理（使用 manage_project_layout remove_path），切勿打包或转存到 docs/。')
 
-    # 9. Active configs/*.json output paths should target data/, not legacy runs/.
+    # 9. Active configs/*.json output paths & simplified flat URI protocol.
     from .project_bindings import extract_arguments
+
+    def _has_legacy_param_indirection(obj, depth=0):
+        if depth > 16:
+            return False
+        if isinstance(obj, dict):
+            kind = obj.get('kind')
+            if kind == 'table' and 'alias' in obj:
+                return True
+            if kind == 'output' and ('location_id' in obj or 'relative_uri' in obj):
+                return True
+            if kind == 'location' and 'location_id' in obj:
+                return True
+            return any(_has_legacy_param_indirection(v, depth + 1) for v in obj.values())
+        if isinstance(obj, list):
+            return any(_has_legacy_param_indirection(v, depth + 1) for v in obj)
+        return False
+
     for param_rel in sorted(bound_params):
         if not param_rel.startswith('configs/'):
             continue
@@ -661,9 +687,12 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             continue
         try:
             doc = json.loads(read_bounded(fp, 65536).decode('utf-8'))
-            args, _ = extract_arguments(doc)
+            args, param_fmt = extract_arguments(doc)
         except Exception:
             continue
+        if param_fmt != 'flat' or _has_legacy_param_indirection(args):
+            add('legacy_param_format', param_rel,
+                '参数文件仍使用历史包装格式（format/arguments）或表别名/location_id 拆分；按 DF-02 规范请改为扁平 JSON，输入表直接写 {"uri": "...", "version": 1}（version 可选），输出表直接写 {"kind": "output", "uri": "data/out.lance"}。')
         if not isinstance(args, dict):
             continue
         for key, value in args.items():
@@ -671,6 +700,20 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                 add('legacy_output_dir', param_rel,
                     f'活跃参数 {key} 仍指向历史 runs/ 目录；按 DF-02 规范默认产物应输出到 data/ 目录（历史 runs/ 仅作只读保留）。')
                 break
+
+    # 9b. Legacy bloated workspace.json (internal Forge state should live in .forge/state.json).
+    ws_file = root / 'workspace.json'
+    if ws_file.is_file() and not ws_file.is_symlink():
+        try:
+            from .project import is_slim_manifest, _referenced_location_ids
+            raw_ws = json.loads(read_bounded(ws_file, 1024 * 1024).decode('utf-8'))
+            used_locs = _referenced_location_ids(root, control)
+            extra_locs = set((raw_ws.get('locations') or {}).keys()) - used_locs if isinstance(raw_ws, dict) else set()
+            if not is_slim_manifest(raw_ws) or extra_locs:
+                add('legacy_manifest', 'workspace.json',
+                    'workspace.json 仍包含平台内部状态（format/id/platform/audit）或冗余 locations；按 DF-02 规范请先完成参数直连 uri 迁移并清理 tables/，再调用 manage_project_layout(action="slim_manifest") 将内部态收进 .forge/state.json 并瘦身 workspace.json。')
+        except Exception:
+            pass
 
     # 10. Project-owned runtime env template (.env.example) & plaintext secret guard.
     from .project_env import (

@@ -270,3 +270,77 @@ def test_legacy_workspace_v3_and_wrapped_params_remain_compatible(tmp_path, refe
     assert args_flat == {'k': 1} and fmt_flat == 'flat'
     with pytest.raises(ForgeError):
         extract_arguments({'format': 'unknown_format', 'arguments': {}})
+
+
+def test_post_turn_hygiene_hook_and_slim_manifest_migration(tmp_path, reference):
+    proj = tmp_path / 'migrate-proj'
+    initialize_project(proj, name='Migrate Project')
+    (proj / 'flows').mkdir()
+    (proj / 'operators').mkdir()
+    (proj / 'configs').mkdir()
+    (proj / 'data').mkdir()
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow.data import range\n'
+        'from operators.helper import add_one\n'
+        'def run(n: int = 2):\n'
+        '    return range(n).map(add_one, inputs={"x": "id"}, output="y").count()\n',
+        encoding='utf-8',
+    )
+    (proj / 'flows' / 'other.py').write_text(
+        'from demiflow.data import range\n'
+        'from operators.other_op import double\n'
+        'def run():\n'
+        '    return range(2).map(double, inputs={"x": "id"}, output="y").count()\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'helper.py').write_text('def add_one(x: int) -> int:\n    return x + 1\n', encoding='utf-8')
+    (proj / 'operators' / 'other_op.py').write_text('def double(x: int) -> int:\n    return x * 2\n', encoding='utf-8')
+    # Legacy wrapped config & legacy bloated workspace.json + unused location
+    (proj / 'configs' / 'demo.json').write_text(
+        json.dumps({'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {'n': 3}}),
+        encoding='utf-8',
+    )
+    (proj / 'configs' / 'other.json').write_text('{}', encoding='utf-8')
+    register_flow(proj, 'flows/demo.py:run', params='configs/demo.json')
+    register_flow(proj, 'flows/other.py:run', params='configs/other.json')
+
+    # Rewrite workspace.json into legacy monolithic v3 with an unused location
+    _, merged = load_project(proj)
+    merged['locations']['unused_in'] = {'root': str(proj / 'data'), 'writable': False}
+    (proj / STATE_PATH).unlink()
+    (proj / 'workspace.json').write_text(json.dumps(merged, indent=2), encoding='utf-8')
+    (proj / 'tables').mkdir()
+
+    # Post-turn incremental hook (paths + include_hygiene=True) catches tables/, legacy config,
+    # and bloated workspace.json WITHOUT falsely flagging unrelated operators/other_op.py!
+    hook_res = check_project(proj, paths=['flows/demo.py'], reference=reference, include_hygiene=True)
+    assert hook_res['status'] == 'failed', hook_res
+    diag_paths = {d['path'] for d in hook_res['diagnostics'] if d['rule'] == 'DF-02'}
+    assert 'tables' in diag_paths
+    assert 'configs/demo.json' in diag_paths
+    assert 'workspace.json' in diag_paths
+    assert 'operators/other_op.py' not in diag_paths
+
+    # Migrate: flatten configs/demo.json, remove tables/, and slim workspace.json via manage_project_layout
+    (proj / 'configs' / 'demo.json').write_text(json.dumps({'n': 3}), encoding='utf-8')
+    rm = _run_project_layout(proj, {'action': 'remove_path', 'paths': ['tables']})
+    assert rm['status'] == 'removed'
+    slim = _run_project_layout(proj, {'action': 'slim_manifest'})
+    assert slim['status'] == 'slimmed'
+    assert 'unused_in' in slim['removed_locations']
+    assert json.loads((proj / 'workspace.json').read_text(encoding='utf-8')) == {
+        'name': 'Migrate Project',
+        'entries': {
+            'flows/demo.py:run': ['configs/demo.json'],
+            'flows/other.py:run': ['configs/other.json'],
+        },
+    }
+    assert (proj / STATE_PATH).is_file()
+
+    # Now post-turn hook passes cleanly (0 diagnostics -> no rework message emitted, 0 extra tokens)
+    clean_hook = check_project(proj, paths=['flows/demo.py'], reference=reference, include_hygiene=True)
+    assert clean_hook['status'] == 'passed', clean_hook
+    assert clean_hook['diagnostic_count'] == 0
+    full_clean = check_project(proj, reference=reference)
+    assert full_clean['status'] == 'passed', full_clean
+    assert full_clean['diagnostic_count'] == 0

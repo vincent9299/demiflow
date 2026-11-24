@@ -291,7 +291,7 @@ def _definition(root, path, deadline, exclude, sources, published):
 def check_project(root, *, paths=(), entry=None, params=None, reference=None, table_resolver=None,
                   table_describer=describe_fixed_table,
                   exclude=(), publish=None, max_variants=MAX_VARIANTS, seconds=CHECK_SECONDS,
-                  max_bytes=MAX_SOURCE_BYTES):
+                  max_bytes=MAX_SOURCE_BYTES, include_hygiene=False):
     """Check without importing candidate code. A product may publish each exact inspected report."""
     if paths and entry is not None or params is not None and entry is None:
         raise ForgeError('Choose paths or one entry and its parameters', code='invalid_request')
@@ -312,10 +312,10 @@ def check_project(root, *, paths=(), entry=None, params=None, reference=None, ta
             raise ForgeError('SDK catalogue differs from its supplied identity', code='inputs_changed')
         view = discover_project_sources(root, exclude=exclude, include_roles=bool(paths))
         return _check(root, view, paths, entry, params, reference, table_resolver, table_describer,
-                      exclude, deadline, publish, max_variants, max_bytes)
+                      exclude, deadline, publish, max_variants, max_bytes, include_hygiene=include_hygiene)
 
 
-def _check(root, view, paths, entry, params, reference, table_resolver, table_describer, exclude, deadline, publish, max_variants, max_bytes):
+def _check(root, view, paths, entry, params, reference, table_resolver, table_describer, exclude, deadline, publish, max_variants, max_bytes, *, include_hygiene=False):
     native, layout, checked, rows, definitions = [], [], [], [], []
     sources, parameter_digests, table_files = {}, {}, {}
     layout_paths = set()
@@ -430,9 +430,10 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
     if pipeline_paths and not checked and not definitions and not native:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
-    if scope['kind'] == 'project' and control.get('entries'):
+    if (scope['kind'] == 'project' or include_hygiene) and control.get('entries'):
         hygiene_paths, hygiene_issues = check_project_hygiene(
-            root, control, checked_sources=sources, parameter_digests=parameter_digests, exclude=exclude)
+            root, control, checked_sources=sources, parameter_digests=parameter_digests,
+            exclude=exclude, structural_only=(scope['kind'] != 'project'))
         layout_paths.update(hygiene_paths)
         layout.extend(hygiene_issues)
     basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
