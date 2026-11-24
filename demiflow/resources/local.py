@@ -113,15 +113,15 @@ class LocalResourceProvider:
             state = _unit_state(record, here)
             if state == "gone":
                 try:
-                    # The ledger rechecks the record under its lock. An owner that
-                    # released first keeps its evidence; nothing is refunded twice.
                     self.pool.release(record["allocation_id"], {
                         "confirmed": True, "identity": record["identity"],
                         "evidence_ref": observed_exit_reference(self.pool.root, record)})
                     released += 1
-                    continue
                 except ResourceError:
-                    state = "orphaned"
+                    # Its owner released it first, under the ledger lock, with its
+                    # own evidence. That release stands and nothing is refunded twice.
+                    pass
+                continue
             held[state][0] += 1
             held[state][1] += record["effective"]["cpu_millis"]
         # For a caller that keeps waiting: who still holds the domain, as record
@@ -215,6 +215,26 @@ class LocalResourceProvider:
         if type(reference) is str and reference.startswith(OBSERVED_EXIT):
             return self._observed_exit(allocation_id, reference)
         return self.unit.resolve_evidence(scope_id, allocation_id, reference)
+
+    def _accept_observed_exit(self, scope_id, allocation_id):
+        """Confirm cleanup from the ledger's own release of this unit, if there is one.
+
+        The ledger released it on its proof of physical exit. That stands for the
+        unit this run spawned only when the identities agree; the unit lock is not
+        consulted again and may be gone by now.
+        """
+        observed = self._observed_exit(allocation_id)
+        if observed is None:
+            return None
+        spawned = self.unit.resolve_evidence(
+            scope_id, allocation_id, self.unit.evidence_ref(scope_id, allocation_id, "process.json"))
+        if spawned is None or spawned["identity"] != observed["identity"]:
+            raise ResourceError("ARTIFACT_MISMATCH", "ledger-observed release names another physical unit",
+                                allocation_id=allocation_id)
+        self._spawned.pop(allocation_id, None)
+        self._close_confirmed_control(allocation_id)
+        return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
+                "evidence_ref": observed["release_evidence"], "observed_at_ms": _now_ms()}
 
     def _observed_exit(self, allocation_id, reference=None):
         """The ledger's own release record of this allocation, verified, or None.
@@ -409,20 +429,9 @@ class LocalResourceProvider:
         identifier(scope_id)
         identifier(allocation_id)
         process = self._spawned.get(allocation_id)
-        observed = self._observed_exit(allocation_id)
-        if observed is not None:
-            # The ledger already released this unit on its own proof of exit. It
-            # stands for the unit this run spawned only if the identities agree;
-            # the unit's lock is not consulted again and may be gone by now.
-            spawned = self.unit.resolve_evidence(
-                scope_id, allocation_id, self.unit.evidence_ref(scope_id, allocation_id, "process.json"))
-            if spawned is None or spawned["identity"] != observed["identity"]:
-                raise ResourceError("ARTIFACT_MISMATCH", "ledger-observed release names another physical unit",
-                                    allocation_id=allocation_id)
-            self._spawned.pop(allocation_id, None)
-            self._close_confirmed_control(allocation_id)
-            return {"allocation_id": allocation_id, "cleanup": "CONFIRMED",
-                    "evidence_ref": observed["release_evidence"], "observed_at_ms": _now_ms()}
+        accepted = self._accept_observed_exit(scope_id, allocation_id)
+        if accepted is not None:
+            return accepted
         found = self.unit.inspect(scope_id, allocation_id, process=process)
         if found["phase"] == "REQUESTED":
             # A capacity-pending request may never have reserved anything.
@@ -443,7 +452,15 @@ class LocalResourceProvider:
         if evidence["confirmed"]:
             prior = self.pool.reservation_view(allocation_id)
             if prior is None or prior['state'] != 'RELEASED':
-                self.pool.release(allocation_id, evidence)
+                try:
+                    self.pool.release(allocation_id, evidence)
+                except ResourceError:
+                    # Another run's observation released the unit between the two
+                    # ledger calls. Its release stands if it names this very unit.
+                    accepted = self._accept_observed_exit(scope_id, allocation_id)
+                    if accepted is None:
+                        raise
+                    return accepted
             self._release_devices(allocation_id, evidence["evidence_ref"])
             self._spawned.pop(allocation_id, None)
             self._close_confirmed_control(allocation_id)

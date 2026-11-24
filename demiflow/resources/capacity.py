@@ -415,13 +415,8 @@ class LocalCapacityPool(AllocationRecords):
             if record is None:
                 raise ResourceError("INVALID_SPEC", "release needs a known reservation", allocation_id=allocation_id)
             if record["state"] == "RELEASED":
-                # The first durable release stands. A later confirmed exit of the
-                # same physical identity is that same exit; it refunds nothing.
-                same_exit = record["identity"] is not None and cleanup_evidence["identity"] == record["identity"]
-                if cleanup_evidence["confirmed"] and (
-                        same_exit or record.get("release_evidence") == cleanup_evidence["evidence_ref"]):
-                    return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": True,
-                            "release_evidence": record["release_evidence"]}
+                if cleanup_evidence["confirmed"] and record.get("release_evidence") == cleanup_evidence["evidence_ref"]:
+                    return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": True}
                 raise ResourceError("CLEANUP_UNCONFIRMED", "released allocation lacks matching evidence",
                                     allocation_id=allocation_id)
             if not cleanup_evidence["confirmed"] or not cleanup_evidence["evidence_ref"]:
@@ -434,8 +429,7 @@ class LocalCapacityPool(AllocationRecords):
             record["release_evidence"] = cleanup_evidence["evidence_ref"]
             record["released_ms"] = int(time.time() * 1000)
             _save_atomic(self._records / (allocation_id + ".json"), record)
-            return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": False,
-                    "release_evidence": record["release_evidence"]}
+            return {"allocation_id": allocation_id, "state": "RELEASED", "idempotent": False}
         finally:
             os.close(fd)
 

@@ -358,23 +358,36 @@ def test_concurrent_observers_release_once_and_admit_within_capacity(unit, tmp_p
 
 
 @pytest.mark.parametrize('first', ['ledger', 'owner'])
-def test_the_first_durable_release_stands_for_the_owner_and_for_the_ledger(unit, first):
+def test_a_second_release_with_other_evidence_is_refused_and_refunds_nothing(unit, first):
     unit.exit()
     observed = {'confirmed': True, 'identity': unit.identity,
                 'evidence_ref': observed_exit_reference(unit.root, unit.pool.record('held'))}
     owner = {'confirmed': True, 'identity': unit.identity, 'evidence_ref': 'owner-cleanup-evidence'}
     order = [observed, owner] if first == 'ledger' else [owner, observed]
-    assert unit.pool.release('held', order[0]) == {
-        'allocation_id': 'held', 'state': 'RELEASED', 'idempotent': False, 'release_evidence': order[0]['evidence_ref']}
+    assert unit.pool.release('held', order[0]) == {'allocation_id': 'held', 'state': 'RELEASED', 'idempotent': False}
     stored = (unit.root / 'allocations' / 'held.json').read_bytes()
-    assert unit.pool.release('held', order[1]) == {
-        'allocation_id': 'held', 'state': 'RELEASED', 'idempotent': True, 'release_evidence': order[0]['evidence_ref']}
+    assert unit.pool.release('held', order[0])['idempotent']
+    with pytest.raises(ResourceError) as error:
+        unit.pool.release('held', order[1])
+    assert error.value.code == 'CLEANUP_UNCONFIRMED'
     assert (unit.root / 'allocations' / 'held.json').read_bytes() == stored
-    for evidence in ({**order[1], 'identity': {**unit.identity, 'start': 'another-birth'}},
-                     {**order[1], 'confirmed': False}):
-        with pytest.raises(ResourceError) as error:
-            unit.pool.release('held', evidence)
-        assert error.value.code == 'CLEANUP_UNCONFIRMED'
+
+
+def test_an_owner_that_loses_the_race_confirms_from_the_ledger_release(unit, monkeypatch):
+    # The owner read a bound record, then another run's observation released it.
+    unit.exit()
+    owner = LocalResourceProvider(unit.pool, unit.units)
+    view = unit.pool.reservation_view
+    def bound_then_observed(allocation_id):
+        seen = view(allocation_id)
+        _admit(unit.observer)
+        return seen
+    monkeypatch.setattr(unit.pool, 'reservation_view', bound_then_observed)
+    result = owner.ensure_absent({'scope_id': 'scope', 'allocation_id': 'held'}, 1000)
+    released = unit.pool.record('held')
+    assert result['cleanup'] == 'CONFIRMED' and result['evidence_ref'] == released['release_evidence']
+    assert released['release_evidence'] == observed_exit_reference(unit.root, released)
+    assert owner.ensure_absent({'scope_id': 'scope', 'allocation_id': 'held'}, 1000)['evidence_ref'] == result['evidence_ref']
 
 
 def test_an_admission_timeout_says_who_holds_the_domain(tmp_path, monkeypatch):

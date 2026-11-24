@@ -252,15 +252,17 @@ def test_real_provider_cleanup_retries_preserve_legacy_ledger(tmp_path, released
         assert evidence["confirmed"] and process.poll() is not None
         historical = dict(evidence, evidence_ref=str(cleanup_path))
         historical_device = dict(historical, identity=None)
-        cpu_record = pool.root / "allocations" / (ALLOCATION + ".json")
-        device_record = devices.root / "allocations" / (ALLOCATION + ".json")
+        def record(ledger):
+            # A released record is the same file wherever a scan has left it: live or history.
+            live = ledger.root / "allocations" / (ALLOCATION + ".json")
+            return live if live.exists() else ledger._released_path(ALLOCATION)
         persisted = {}
         if released_before_retry != "none":
             pool.release(ALLOCATION, historical)
-            persisted[cpu_record] = cpu_record.read_bytes()
+            persisted[pool] = record(pool).read_bytes()
         if released_before_retry == "cpu-and-device":
             devices.release(ALLOCATION, historical_device)
-            persisted[device_record] = device_record.read_bytes()
+            persisted[devices] = record(devices).read_bytes()
         recovered = LocalResourceProvider(pool, ManagedProcessUnit(unit.root), device_pool=devices)
         exact = {"scope_id": SCOPE, "allocation_id": ALLOCATION}
         confirmed_bytes = cleanup_path.read_bytes()
@@ -276,16 +278,16 @@ def test_real_provider_cleanup_retries_preserve_legacy_ledger(tmp_path, released
             assert result["evidence_ref"] == new_release_reference
             assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
             assert devices.snapshot()["charged"] == {}
-            for path, original in persisted.items():
-                assert path.read_bytes() == original
-            for path in (cpu_record, device_record):
-                expected = str(cleanup_path) if path in persisted else new_release_reference
-                assert json.loads(path.read_text())["release_evidence"] == expected
+            for ledger, original in persisted.items():
+                assert record(ledger).read_bytes() == original
+            for ledger in (pool, devices):
+                expected = str(cleanup_path) if ledger in persisted else new_release_reference
+                assert json.loads(record(ledger).read_text())["release_evidence"] == expected
         # Each ledger retries its own original proof. A new release need not
         # fabricate an old path; a prior old-path release must never be changed.
-        cpu_evidence = dict(evidence, evidence_ref=json.loads(cpu_record.read_text())["release_evidence"])
+        cpu_evidence = dict(evidence, evidence_ref=json.loads(record(pool).read_text())["release_evidence"])
         device_evidence = dict(cpu_evidence, identity=None,
-            evidence_ref=json.loads(device_record.read_text())["release_evidence"])
+            evidence_ref=json.loads(record(devices).read_text())["release_evidence"])
         assert pool.release(ALLOCATION, cpu_evidence)["idempotent"]
         assert devices.release(ALLOCATION, device_evidence)["idempotent"]
         # Preserving compatibility must not disable the ledger's exact check.
