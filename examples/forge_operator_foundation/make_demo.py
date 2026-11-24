@@ -22,10 +22,10 @@ def create(root):
     initialize_project(root, name='native-operator-demo')
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
-    control = workspace.read_control(root / 'workspace.json')
+    _, control = workspace.load_workspace_control(root)
     expected = workspace.content_digest(control)
     control['locations']['local'] = {'root': 'data', 'writable': True}
-    workspace.write_control(root / 'workspace.json', control, expected=expected)
+    workspace.save_workspace_control(root, control, expected=expected)
     example = Path(__file__).parent
     for directory in ('flows', 'operators'):
         for path in (example / directory).iterdir():

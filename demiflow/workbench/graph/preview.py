@@ -26,15 +26,17 @@ def _parameters(root, control, entry, path, *, table_resolver):
     raw = read_bounded(target, 65536)
     from demiflow.workbench.projects.discovery import _json
     document = _json(raw)
-    if type(document) is not dict or type(document.get('arguments')) is not dict:
-        raise ForgeError('解析配置需要 JSON arguments 对象；不会执行配置中的命令。', code='invalid_request')
+    if type(document) is not dict:
+        raise ForgeError('解析配置需要 JSON 对象；不会执行配置中的命令。', code='invalid_request')
     if document.get('format') in {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}:
         # Preserve the same declared resource binding as native run preparation.
         arguments, _, _, _ = resolve_arguments(root, control, document, table_resolver=table_resolver)
-    elif set(document) <= {'arguments', 'run_directory'}:
+    elif 'format' in document:
+        raise ForgeError('Unsupported plan parameter document', code='invalid_request')
+    elif set(document) <= {'arguments', 'run_directory'} and type(document.get('arguments')) is dict:
         arguments = document['arguments']
     else:
-        raise ForgeError('Unsupported plan parameter document', code='invalid_request')
+        arguments, _, _, _ = resolve_arguments(root, control, document, table_resolver=table_resolver)
     count = 0
     def visit(value, depth=0):
         nonlocal count

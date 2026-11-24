@@ -243,10 +243,13 @@ def discover(root, control=None):
                 if row['format'] is not None and (type(row['format']) is not str or len(row['format']) > 128):
                     row['format'] = None
                     issue('configuration_format_unknown', path, '未识别为版本化参数协议；仅展示原配置和明确的数据引用，不校验其业务语义。')
-                row['status'] = 'native_parameters' if row['format'] in PARAMETERS else 'original_configuration'
-                row['plan_preview_parameters'] = (type(data) is dict and type(data.get('arguments')) is dict
-                    and (set(data) <= {'arguments', 'run_directory'} or
-                         row['format'] in PARAMETERS and set(data) == {'format', 'arguments'}))
+                flat_registered = type(data) is dict and row['format'] is None and origin == 'workspace.json'
+                row['status'] = 'native_parameters' if (row['format'] in PARAMETERS or flat_registered) else 'original_configuration'
+                row['plan_preview_parameters'] = (type(data) is dict and (
+                    (type(data.get('arguments')) is dict and (set(data) <= {'arguments', 'run_directory'} or
+                     row['format'] in PARAMETERS and set(data) == {'format', 'arguments'}))
+                    or flat_registered
+                ))
                 pending, visits = [(data, '', 0)], 0
                 while pending:
                     obj, pointer, depth = pending.pop();visits += 1
@@ -255,6 +258,10 @@ def discover(root, control=None):
                     if type(obj) is dict:
                         if set(obj) == {'uri', 'version'}:
                             add_table(obj['uri'], obj['version'], path + '#' + pointer, fixed=True)
+                        elif set(obj) == {'uri'} and isinstance(obj.get('uri'), str) and obj['uri'].endswith('.lance'):
+                            add_table(obj['uri'], None, path + '#' + pointer, fixed=False)
+                        elif obj.get('kind') == 'table' and 'uri' in obj and set(obj) <= {'kind', 'uri', 'version'}:
+                            add_table(obj['uri'], obj.get('version'), path + '#' + pointer, fixed=obj.get('version') is not None)
                         elif len(obj) <= 256:
                             pending.extend((v, pointer + '/' + str(k), depth + 1) for k, v in obj.items())
                         else:

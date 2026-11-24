@@ -28,7 +28,7 @@ from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform_environment import read_bounded, regular_file_chunks
 from demiflow.forge.platform_environment import platform_declaration
 from demiflow.forge.platform_environment import environment_inventory
-from demiflow.forge.project_bindings import resolve_arguments
+from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_arguments, resolve_output_uri
 from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
 from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
@@ -349,14 +349,19 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     # Existing resolver validates the closed parameter format before modifications.
     resolve_arguments(root, workspace, original, table_resolver=_table_resolver())
     effective = copy.deepcopy(original)
+    eff_args, _ = extract_arguments(effective)
     if inputs is not None:
         if type(inputs) is not dict or len(inputs) > 32:
             raise ForgeError('Input overrides must map entry arguments to fixed table references')
         for name, alias in inputs.items():
-            arg = effective['arguments'].get(name)
-            if type(alias) is not str or type(arg) is not dict or arg.get('kind') != 'table':
+            arg = eff_args.get(name)
+            is_tbl = type(arg) is dict and (arg.get('kind') == 'table' or is_direct_table_ref(arg))
+            if type(alias) is not str or not is_tbl:
                 raise ForgeError('Input override must name an existing table argument')
-            effective['arguments'][name] = {'kind': 'table', 'alias': alias}
+            if alias.endswith('.lance'):
+                eff_args[name] = {'uri': alias}
+            else:
+                eff_args[name] = {'kind': 'table', 'alias': alias}
         resolve_arguments(root, workspace, effective, table_resolver=_table_resolver())
     run_id = reserved_run_id or 'r' + uuid.uuid4().hex[:24]
     directory(root, run_id)
@@ -380,23 +385,42 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 if not isinstance(item, str) or not item or item != item.strip() or len(item) > 128:
                     raise ForgeError('Output metadata requires normalized text of at most 128 characters')
             mode, expected_version = value.get('mode', 'create'), value.get('expected_version')
-            base = ws.location_root(root, workspace['locations'][value['location_id']])
-            if new_outputs and mode in {'create', 'checkpoint'}:
-                prefix = '' if base.name == 'data' else 'data/'
-                candidate = f'{prefix}{name}.lance'
-                suffix = 2
-                while ws.relative_path(base, candidate).exists():
-                    candidate = f'{prefix}{name}-{suffix}.lance'
-                    suffix += 1
-                value['relative_uri'] = candidate
-            uri = ws.relative_path(base, value['relative_uri'])
+            if 'uri' in value and 'location_id' not in value:
+                if new_outputs and mode in {'create', 'checkpoint'}:
+                    candidate = f'data/{name}.lance'
+                    suffix = 2
+                    while ws.relative_path(root, candidate).exists():
+                        candidate = f'data/{name}-{suffix}.lance'
+                        suffix += 1
+                    value['uri'] = candidate
+                uri = resolve_output_uri(root, value['uri'])
+                data_root = (root / 'data').absolute()
+                if mode in {'create', 'checkpoint'} and not data_root.exists():
+                    data_root.mkdir(exist_ok=True)
+                extra_spec = {
+                    'location_id': 'data',
+                    'location_root': str(data_root),
+                    'relative_uri': uri.relative_to(data_root).as_posix(),
+                }
+            else:
+                base = ws.location_root(root, workspace['locations'][value['location_id']])
+                if new_outputs and mode in {'create', 'checkpoint'}:
+                    prefix = '' if base.name == 'data' else 'data/'
+                    candidate = f'{prefix}{name}.lance'
+                    suffix = 2
+                    while ws.relative_path(base, candidate).exists():
+                        candidate = f'{prefix}{name}-{suffix}.lance'
+                        suffix += 1
+                    value['relative_uri'] = candidate
+                uri = ws.relative_path(base, value['relative_uri'])
+                extra_spec = {}
             if mode in {'create', 'checkpoint'} and uri.exists():
                 raise ForgeError('Create target already exists: ' + str(uri))
             if mode == 'overwrite':
                 from demiflow.lance.storage import inspect_lance
                 if inspect_lance(str(uri)).resolved_version != expected_version:
                     raise ForgeError('Overwrite CAS baseline changed')
-            output_specs[name] = {**info, **value, 'uri': str(uri), 'mode': mode, 'expected_version': expected_version}
+            output_specs[name] = {**info, **value, **extra_spec, 'uri': str(uri), 'mode': mode, 'expected_version': expected_version}
         elif type(value) is dict:
             for key, child in value.items():
                 visit(child, (*names, key))
@@ -404,7 +428,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             for i, child in enumerate(value):
                 visit(child, (*names, str(i)))
 
-    visit(effective['arguments'])
+    visit(eff_args)
     from demiflow.workbench.runs import native_submission
     native_flow = not output_specs
     if native_flow:
@@ -1201,7 +1225,7 @@ def result_table(root, run_id, name, *, attempt=None):
             or ref.relative_uri != item['relative_uri'] or ref.store_id != item['location_id']):
         raise ForgeError('Run result reference differs from its verified native publication')
     root, workspace, _ = ws.load_workspace(root)
-    if value['manifest'].get('native_submission'):
+    if value['manifest'].get('native_submission') or item.get('location_root'):
         base = ws.no_symlinks(Path(item['location_root']))
     else:
         if ref.store_id not in workspace['locations']:

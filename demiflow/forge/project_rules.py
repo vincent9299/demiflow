@@ -13,6 +13,10 @@ from .schema import ForgeError
 
 
 ROLE_DIRS = ('flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks')
+ALLOWED_ROOT_DIRS = frozenset({
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks',
+    'data', 'logs', 'docs', 'tests', 'runs',
+})
 TOPICS = ('flow', 'operator', 'prompt')
 GUIDE_RESOURCE = 'standards/pipeline-authoring.md'
 _IGNORED_NAMES = frozenset({
@@ -506,6 +510,11 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                 add('root_script', name, '根目录散落 Python 脚本；请按职责迁入 flows/、operators/、data_tools/ 或清理废弃脚本。')
             elif suffix in _ARCHIVE_SUFFIXES:
                 add('root_archive', name, '根目录存在压缩归档包；废弃代码或旧配置请直接清理，不要在项目内保留源码/配置打包归档。')
+        elif item.is_dir():
+            if name == 'tables':
+                add('legacy_tables', 'tables', 'tables/ 为历史兼容目录，输入表路径请直接写在 configs/*.json 中（如 {"uri": "data/in.lance", "version": 1}），迁移后请清理 tables/ 目录。')
+            elif name != 'parameters' and name not in ALLOWED_ROOT_DIRS:
+                add('root_dir', name, f'根目录存在非规范顶层目录 {name}/；按 DF-02 规范请按职责迁入标准目录（flows/、operators/、prompts/、configs/、data_tools/、notebooks/、data/、logs/、docs/、tests/）或清理废弃目录。')
 
     # 2. Deprecated parameters/ directory: unbound legacy files or empty leftover directory.
     param_dir = root / 'parameters'
@@ -537,17 +546,13 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             add('orphan_operators', rel, 'operators/ 仅存放 Python 算子模块；查看器模板请随工具迁入 data_tools/，配置请迁入 configs/。')
             continue
         if _imports_notebook_ui(root / rel):
-            add('notebook_tool_in_operators', rel, 'operators/ 模块导入了 Notebook 交互库（IPython/ipywidgets），属于 Notebook 查看/分析/标注工具；按 DF-02 规范请迁入 data_tools/ 并声明 __demiflow_data_tools__。')
+            add('notebook_tool_in_operators', rel, 'operators/ 模块导入了 Notebook 交互库（IPython/ipywidgets），属于 Notebook 查看/分析/标注工具；按 DF-02 规范请迁入 data_tools/。')
             continue
         if rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
-            add('orphan_operators', rel, 'operators/ 模块未被已登记 Flow 使用且未声明 __demiflow_operators__；若为 Notebook 查看/分析/标注工具请迁入 data_tools/ 并声明 __demiflow_data_tools__，若为废弃代码请清理。')
+            add('orphan_operators', rel, 'operators/ 模块未被已登记 Flow 使用且未声明 __demiflow_operators__；若为 Notebook 查看/分析/标注工具请迁入 data_tools/，若为废弃代码请清理。')
 
-    # 5. data_tools/*.py must declare __demiflow_data_tools__.
-    for rel in _iter_tree_files(root, 'data_tools', exclude=exclude):
-        p = Path(rel)
-        if p.suffix == '.py' and p.name != '__init__.py':
-            if not _has_declared_export(root / rel, '__demiflow_data_tools__'):
-                add('data_tools_export', rel, 'data_tools/ 模块需在顶层声明 __demiflow_data_tools__ 映射（如 {"review": "annotation"}）以便工作台「工具」面板发现。')
+    # 5. data_tools/*.py automatically exposes top-level public callables as 'tool';
+    # explicit __demiflow_data_tools__ is optional (used for finer role tags).
 
     # 5b. Public DemiFlow SDK & project self-containment boundary across code dirs.
     for code_dir in ('flows', 'operators', 'data_tools', 'tests'):
@@ -647,6 +652,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             'docs/ 仅用于项目文档与验收证据，不应存放废弃代码、压缩归档包（.tar.gz/.zip）或迁入的旧 configs/parameters/prompts/flows/operators 目录；废弃的非数据文件请直接清理（使用 manage_project_layout remove_path），切勿打包或转存到 docs/。')
 
     # 9. Active configs/*.json output paths should target data/, not legacy runs/.
+    from .project_bindings import extract_arguments
     for param_rel in sorted(bound_params):
         if not param_rel.startswith('configs/'):
             continue
@@ -655,9 +661,9 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             continue
         try:
             doc = json.loads(read_bounded(fp, 65536).decode('utf-8'))
+            args, _ = extract_arguments(doc)
         except Exception:
             continue
-        args = doc.get('arguments') if isinstance(doc, dict) else None
         if not isinstance(args, dict):
             continue
         for key, value in args.items():

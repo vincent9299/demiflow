@@ -202,7 +202,7 @@ def resolve_workspace(value, workspace_id):
     if item is None:
         raise ForgeError('Workspace is not registered', code='not_found')
     root = ws.no_symlinks(Path(item['root']))
-    workspace = ws.read_control(root / 'workspace.json')
+    _, workspace = ws.load_workspace_control(root)
     if ws.workspace_id(root, workspace) != workspace_id:
         raise ForgeError('Registered workspace identity changed')
     return root, permissions(item)['run_submit']

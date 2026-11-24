@@ -104,21 +104,20 @@ _STANDARD_PROJECT_DIRS = frozenset({
 _MOVE_DEST_DIRS = frozenset({
     'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'tests', 'docs',
 })
-_PROTECTED_TOP_DIRS = frozenset({'.forge', '.git', '.venv', 'runs', 'data', 'logs', 'tables'})
+_PROTECTED_TOP_DIRS = frozenset({'.forge', '.git', '.venv', 'runs', 'data', 'logs'})
 _PROTECTED_ROOT_FILES = frozenset({'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'README.md'})
 _PROTECTED_DATA_SUFFIXES = frozenset({'.lance', '.parquet', '.arrow', '.db', '.sqlite', '.sqlite3'})
 
 PROJECT_LAYOUT_TOOL = dict(
     name='manage_project_layout',
     description=(
-        'Safely manage controlled project structure, file organization, table bindings and workspace.json registrations on the host: '
+        'Safely manage controlled project structure, file organization and workspace.json registrations on the host: '
         'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/data/logs/tests/docs); '
         'register_flow checks and registers a flow entry in workspace.json (defaulting to configs/<flow>.json); '
         'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
-        'bind_table registers a read-only input location in workspace.json (if needed) and pins a Lance table control under tables/<alias>.json for {"kind":"table","alias":"..."} parameters; '
         'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
-        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
-        'sync_env_example generates/updates root .env.example (empty-value template ONLY, never real secrets) from prompts/*.yaml api_key_env/base_url_env declarations (plus optional extra variable names) and ensures .gitignore ignores .env.'
+        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, legacy tables/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
+        'sync_env_example generates/updates root .env.example (empty-value template ONLY, never real secrets) from prompts/*.yaml api_key_env/base_url_env declarations (plus optional extra variable names) and ensures .gitignore ignores .env and .forge/.'
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
         'action': dict(type='string', enum=[
@@ -250,7 +249,7 @@ def _run_project_layout(project_root, arguments):
             else:
                 bound = [params]
             value['entries'][entry] = bound
-            write_control(root / 'workspace.json', value, expected=expected)
+            forge_project.save_project(root, value, expected=expected)
         return dict(status='updated', entry=entry, params=bound)
     if action == 'bind_table':
         from demiflow.forge.project_bindings import bind_table

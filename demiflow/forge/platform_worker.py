@@ -177,8 +177,8 @@ def main():
     if set(request) == {'fixed_table', 'version'}:
         import resource
         from demiflow.lance.preview import describe_table
-        if type(request['version']) is not int or request['version'] < 1:
-            raise ValueError('Metadata inspection requires a fixed table version')
+        if request['version'] is not None and (type(request['version']) is not int or request['version'] < 1):
+            raise ValueError('Metadata inspection requires a positive integer or omitted table version')
         maximum = 4 * 1024**3
         soft, hard = resource.getrlimit(resource.RLIMIT_AS)
         ceiling = min(n for n in (soft, hard, maximum) if n != resource.RLIM_INFINITY)

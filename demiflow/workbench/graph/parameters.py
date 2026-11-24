@@ -18,6 +18,7 @@ from demiflow.forge.io import fsync_directory
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
+from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_output_uri, resolve_table_uri
 from demiflow.forge.schema import ForgeError
 
 MAX_BYTES = 65536
@@ -58,10 +59,10 @@ def _decode(raw):
         elif type(item) is list:
             for child in item:visit(child,depth+1)
     visit(value)
-    if (type(value) is not dict or set(value)!={'format','arguments'}
-            or value['format'] not in {'demiflow_forge_flow_parameters_v1','demiflow_forge_flow_parameters_v2'}
-            or type(value['arguments']) is not dict):
-        raise ValueError('Unsupported parameter document')
+    try:
+        extract_arguments(value)
+    except ForgeError as exc:
+        raise ValueError('Unsupported parameter document') from exc
     return value
 
 
@@ -125,11 +126,13 @@ def public_model(root,control,entry,path,nodes,*,readonly=False,sealed=None,expe
     if expected_document is not None and content_digest(document)!=content_digest(expected_document):
         raise ForgeError('Parameters changed after report verification',code='conflict')
     result['available']=True
+    doc_arguments, doc_format = extract_arguments(document)
+    arg_prefix = ['arguments'] if doc_format != 'flat' else []
     argument_names=None
     if not result['readonly']:
         from demiflow.workbench.worker import operation
         try:
-            argument_names=set(operation('workbench_entry_arguments',root,entry=entry,names=list(document['arguments'])))
+            argument_names=set(operation('workbench_entry_arguments',root,entry=entry,names=list(doc_arguments)))
         except (ValueError,OSError,ForgeError):
             result['readonly']=True
             result['reason']='entry_signature_unavailable'
@@ -146,7 +149,9 @@ def public_model(root,control,entry,path,nodes,*,readonly=False,sealed=None,expe
         if full or len(result['fields'])>=256:
             result['truncated']=True
             return
-        editable=(writable and not result['readonly'] and str(parts[1]) in (argument_names or set()) and value is not None
+        arg_idx = len(arg_prefix)
+        arg_name = str(parts[arg_idx])
+        editable=(writable and not result['readonly'] and arg_name in (argument_names or set()) and value is not None
                   and (type(value) is not str or len(value.encode())<=16384)
                   and (type(value) is not int or abs(value)<=2**53-1))
         public_value=str(value) if type(value) is int and abs(value)>2**53-1 else value
@@ -155,11 +160,11 @@ def public_model(root,control,entry,path,nodes,*,readonly=False,sealed=None,expe
             public_value={'kind':resource_kind if resource_kind in {'config','file','location'} else 'unsupported'}
             if resource_kind in {'config','file','location'}:
                 public_value.update({key:item for key,item in value.items() if key in {'path','location_id','relative_uri'} and type(item) is str and len(item.encode())<=4096})
-        affected=set();field_path=tuple(parts[2:])
-        for path,identities in uses.get(str(parts[1]),{}).items():
+        affected=set();field_path=tuple(parts[arg_idx + 1:])
+        for path,identities in uses.get(arg_name,{}).items():
             # Aliases/output paths resolve to native uri/version members. A
             # literal child is correlated only with its proven container path.
-            if (kind in {'table_alias','output_path'} or path==field_path[:len(path)]
+            if (kind in {'table_alias','table_uri','output_path','output_uri'} or path==field_path[:len(path)]
                     or field_path==path[:len(field_path)]):
                 affected.update(identities)
         affected=sorted(affected)
@@ -181,17 +186,27 @@ def public_model(root,control,entry,path,nodes,*,readonly=False,sealed=None,expe
             if 'kind' in value:
                 if value['kind']=='table' and set(value)=={'kind','alias'}:
                     field(parts+['alias'],value['alias'],'table_alias')
+                elif value['kind']=='table' and 'uri' in value and set(value)<={'kind','uri','version'}:
+                    field(parts+['uri'],value['uri'],'table_uri')
+                    if 'version' in value and value['version'] is not None:
+                        field(parts+['version'],value['version'],'literal')
+                elif value['kind']=='output' and 'uri' in value and 'location_id' not in value:
+                    field(parts+['uri'],value['uri'],'output_uri')
                 elif value['kind']=='output' and 'relative_uri' in value:
                     field(parts+['relative_uri'],value['relative_uri'],'output_path')
                 else:
                     field(parts,value,'resource_reference',False)
+            elif is_direct_table_ref(value):
+                field(parts+['uri'],value['uri'],'table_uri')
+                if 'version' in value and value['version'] is not None:
+                    field(parts+['version'],value['version'],'literal')
             else:
                 for key,child in value.items():visit(parts+[key],child,depth+1)
         elif type(value) is list:
             for index,child in enumerate(value):visit(parts+[index],child,depth+1)
         else:field(parts,value)
-    for name,value in document.get('arguments',{}).items():
-        visit(['arguments',name],value)
+    for name,value in doc_arguments.items():
+        visit(arg_prefix + [name],value)
     return result
 
 
@@ -235,6 +250,10 @@ def _candidate(root,*, table_resolver,path,expected_sha256,graph_binding,replace
             raise ForgeError('Parameter type must match the registered field',code='invalid_request')
         if field['kind']=='table_alias':
             table_resolver(root,control,candidate)
+        if field['kind']=='table_uri':
+            resolve_table_uri(root,candidate)
+        if field['kind']=='output_uri':
+            resolve_output_uri(root,candidate)
         if field['kind']=='output_path':
             owner=document
             for part in field['parts'][:-1]:owner=owner[part]

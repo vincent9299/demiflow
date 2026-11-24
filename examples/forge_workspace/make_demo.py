@@ -22,12 +22,12 @@ def create(root):
     initialize_project(root, name="question-experiments")
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
-    control = workspace.read_control(root / 'workspace.json')
+    _, control = workspace.load_workspace_control(root)
     expected = workspace.content_digest(control)
     # This fixture represents an existing project with two published configurations.
     control['entries'] = {'flows/questions.py:select': ['flows/select_a.json', 'flows/select_b.json']}
     control['locations']['local'] = {'root': 'data', 'writable': True}
-    workspace.write_control(root / 'workspace.json', control, expected=expected)
+    workspace.save_workspace_control(root, control, expected=expected)
     source = Path(__file__).parent
     for directory in ("flows", "operators"):
         for path in (source / directory).iterdir():

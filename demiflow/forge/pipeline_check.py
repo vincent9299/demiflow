@@ -15,7 +15,7 @@ from .operator_check import OperatorChecker
 from .platform import content_digest
 from .platform_environment import read_bounded
 from .platform_worker import describe_fixed_table
-from .project import discover_project_sources, inspect_prompt_source, validate_entry, validate_parameter_path
+from .project import discover_project_sources, inspect_prompt_source, load_project, validate_entry, validate_parameter_path
 from .project_bindings import resolve_arguments, resolve_flow_resources, table_binding, table_identity
 from .project_io import decode_control, relative_path
 from .project_rules import ROLE_DIRS, RULES_ID, check_layout, check_project_hygiene, diagnostic
@@ -324,7 +324,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     manifest_hash = None
     if control is not None:
         raw = read_bounded(relative_path(root, manifest), 1024**2)
-        if decode_control(raw) != control:
+        if load_project(root)[1] != control:
             raise ForgeError('Project declaration changed during discovery', code='inputs_changed')
         manifest_hash = sha256(raw).hexdigest()
     elif not paths and not entry:
