@@ -315,3 +315,59 @@ def test_replay_anchors_user_message_on_long_turn(tmp_path):
     # Upward pagination into Turn 3's middle events must ALSO anchor its message.user
     older_page = store.replay('w1', sess['id'], limit=10, before_sequence=active_tail['first_sequence'])
     assert any(ev['type'] == 'message.user' and ev['data']['text'] == '第三轮：测试分页锚定' for ev in older_page['events'])
+
+
+def test_hygiene_flags_internal_demiflow_and_cross_project_imports(tmp_path):
+    # Create a monorepo-like layout with a sibling project beside our project
+    monorepo = tmp_path / 'repo'
+    (monorepo / 'other_domain' / 'sub' / 'operators').mkdir(parents=True)
+    (monorepo / 'other_domain' / 'sub' / 'operators' / 'helper.py').write_text('def f():\n    return 1\n')
+    (monorepo / 'pipelines' / 'sibling_proj').mkdir(parents=True)
+
+    root = _make_clean_project(monorepo / 'pipelines' / 'my_proj')
+    (root / 'tests').mkdir(exist_ok=True)
+
+    # Public SDK imports + stdlib + own-project imports must pass cleanly
+    (root / 'operators' / 'clean_sdk.py').write_text(
+        'from demiflow import data\n'
+        'from demiflow.execution import current_run\n'
+        'from demiflow.objects import ObjectRef\n'
+        'from pipelines.my_proj.operators import ops\n'
+        '__demiflow_operators__ = ["ok"]\n'
+        'def ok(row):\n'
+        '    return (data, current_run, ObjectRef, ops, row)\n'
+    )
+    assert check_project(root)['status'] == 'passed'
+
+    # 1. Internal/removed demiflow.execution.* import in operator & tests must fail DF-02
+    (root / 'operators' / 'bad_sdk.py').write_text(
+        'from demiflow.execution.artifacts import digest\n'
+        '__demiflow_operators__ = ["bad"]\n'
+        'def bad(row):\n'
+        '    return digest(row)\n'
+    )
+    (root / 'tests' / 'test_bad_sdk.py').write_text(
+        'from demiflow.execution.plan_capture import capture_pipeline\n'
+    )
+    # 2. Cross-project sibling imports (both other_domain.*.operators.* and pipelines.sibling_proj.*) must fail DF-02
+    (root / 'operators' / 'cross_op.py').write_text(
+        'from other_domain.sub.operators.helper import f\n'
+        '__demiflow_operators__ = ["wrap"]\n'
+        'def wrap(row):\n'
+        '    return f()\n'
+    )
+    (root / 'data_tools' / 'cross_tool.py').write_text(
+        'from pipelines.sibling_proj.operators import x\n'
+        '__demiflow_data_tools__ = {"view": "view"}\n'
+        'def view():\n'
+        '    return x\n'
+    )
+
+    report = check_project(root)
+    assert report['status'] == 'failed'
+    flagged = {d['path']: d['detail'] for d in report['diagnostics'] if d['rule'] == 'DF-02'}
+    assert 'operators/bad_sdk.py' in flagged and 'demiflow.execution.artifacts' in flagged['operators/bad_sdk.py']
+    assert 'tests/test_bad_sdk.py' in flagged and 'demiflow.execution.plan_capture' in flagged['tests/test_bad_sdk.py']
+    assert 'operators/cross_op.py' in flagged and 'other_domain.sub.operators.helper' in flagged['operators/cross_op.py']
+    assert 'data_tools/cross_tool.py' in flagged and 'pipelines.sibling_proj.operators' in flagged['data_tools/cross_tool.py']
+    assert 'operators/clean_sdk.py' not in flagged
