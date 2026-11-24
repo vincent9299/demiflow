@@ -1150,6 +1150,29 @@
         rows:[['流程',working.entry],['业务参数',working.params||'未绑定'],['累计时长上限',(getDraft().timeout??ctx.run_limits.timeout_s)+' 秒']],confirmLabel:'确认运行',
         cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;runConfirmation.hidden=true;await submit();}});
     }
+    async function startPrepared(targetIntent,{navigate=true}={}){
+      let started=null,startErr=null;
+      try{started=await commands.start(targetIntent);}catch(error){startErr=error;}
+      if(disposed)return started;
+      if(started){
+        paintPending();
+        if(navigate){
+          await openRun(started.run_id,started.attempt);
+          if(!disposed){message('运行已启动：'+started.run_id);await observer.refresh();}
+        }
+        return started;
+      }
+      let settled=null;
+      try{const checked=await commands.inspect(targetIntent);if(checked?.run&&checked.run.status!=='prepared')settled=checked.run;}catch{/* Keep pending intent when server status is uncertain. */}
+      if(navigate&&!disposed){
+        await openRun(targetIntent.run_id,targetIntent.attempt);
+        if(!disposed){
+          if(settled){run={...run,...settled};paintRunBar();paintRunFacts();paintPending();message('运行启动失败：'+(settled.state?.error?.message||settled.state?.error||startErr.message),'error-box');}
+          else{paintPending();message('运行已准备（'+targetIntent.run_id+'），启动未确认：'+startErr.message,'error-box');}
+        }
+      }else paintPending();
+      return null;
+    }
     async function submit(){
       if(busy||run)return;
       if(working&&Object.keys(getDraft().values).length)throw new Error('先保存当前配置草稿，再提交运行。');
@@ -1166,24 +1189,22 @@
         intent=await commands.identity(body);
         if(!current(ticket))return;
         if(intent.phase==='start'){
-          const known=await commands.inspect(intent);if(current(ticket)){await openRun(known.run.run_id,known.run.attempt);message('已定位原提交，请在这次运行上继续核对。');}return;
-        }
-        message('正在检查实际配置并封存本次运行…');
-        intent=await commands.prepare(intent);
-        if(!current(ticket))return;
-        runButton.textContent='正在提交…';
-        await openRun(intent.run_id,intent.attempt);
-        if(disposed||!run||data().run!==intent.run_id||data().attempt!==intent.attempt)return;
-        const startTicket=state.capture();
-        try{await commands.start(intent);if(current(startTicket)){message('运行已提交：'+intent.run_id);await observer.refresh();}}
-        catch(error){
-          let settled=null;
-          try{const checked=await commands.inspect(intent);if(checked?.run&&checked.run.status!=='prepared')settled=checked.run;}catch{/* Keep pending intent when server status is uncertain. */}
-          if(current(startTicket)){
-            if(settled){run={...run,...settled};paintRunBar();paintRunFacts();paintPending();message('运行启动失败：'+(settled.state?.error?.message||settled.state?.error||error.message),'error-box',startTicket);}
-            else message('已固定运行 '+intent.run_id+'；启动结果待核对。请查看这次运行，勿另建提交。 '+error.message,'error-box',startTicket);
+          const known=await commands.inspect(intent);
+          if(known.run?.status==='prepared'){
+            runButton.textContent='正在启动…';
+            await startPrepared(known.intent,{navigate:current(ticket)});
+          }else if(current(ticket)&&known.run){
+            await openRun(known.run.run_id,known.run.attempt);message('已定位原运行。');
           }
+          paintPending();return;
         }
+        message('正在检查配置、封存并启动本次运行…');
+        intent=await commands.prepare(intent);
+        if(disposed)return;
+        // Always complete run-start once prepare succeeds so view switches during sealing never strand a prepared run.
+        const stayOnFlow=current(ticket);
+        if(stayOnFlow)runButton.textContent='正在启动…';
+        await startPrepared(intent,{navigate:stayOnFlow});
       }catch(error){if(current(ticket)){message('提交结果待核对，原请求身份已保留。 '+error.message,'error-box',ticket);paintPending();}throw error;}
       finally{busy=false;runButton.textContent='运行';updateActions();if(root.isConnected&&run)paintRunBar();paintPending();}
     }
@@ -1492,10 +1513,13 @@
       for(const intent of items){
         const line=$('div',undefined,'wb-pending-row');
         const flowLabel=intent.body?.entry?runUI.flowName(ctx,intent.body.entry):'';
-        const detail=(flowLabel?flowLabel+' · ':'')+(intent.run_id?'已创建，启动结果待确认':'准备结果待确认');
+        const detail=(flowLabel?flowLabel+' · ':'')+(intent.run_id?'已封存待启动':'准备结果待确认');
         const caption=$('span',detail,'wb-caption');caption.title=intent.request_id;
-        line.append($('strong','提交待核对'),caption);pendingBox.append(line);
-        if(intent.run_id)button('查看原运行',()=>openRun(intent.run_id,intent.attempt),line);
+        line.append($('strong',intent.run_id?'运行待启动':'提交待核对'),caption);pendingBox.append(line);
+        if(intent.run_id){
+          button('立即启动',()=>startPrepared(intent,{navigate:true}),line,{disabled:!can('run_submit'),cls:'primary'});
+          button('查看原运行',()=>openRun(intent.run_id,intent.attempt),line);
+        }
         button('核对原请求',async()=>{
           const ticket=state.capture(),value=await commands.inspect(intent);if(!current(ticket))return;
           if(value.run){await openRun(value.run.run_id,value.run.attempt);message(value.run.status==='prepared'?'原运行已准备，可在同一次运行上开始。':'已定位原运行，未创建另一条记录。');paintPending();}
