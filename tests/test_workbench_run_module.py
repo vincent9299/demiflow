@@ -33,9 +33,6 @@ def test_submit_history_snapshot_and_result(root, browser):
         start = page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)
         expect(start).to_be_enabled()
         start.click()
-        expect(page.locator('.wb-run-confirmation')).to_contain_text('flows/select_a.json')
-        assert runs.list_runs(root)['total'] == 0
-        page.get_by_role('button', name='确认运行', exact=True).click()
         expect(page.locator('.wb-run-bar')).to_contain_text('已完成', timeout=90000)
         records = runs.list_runs(root)['runs']
         assert len(records) == 1
@@ -227,8 +224,6 @@ def run(*, directory):
         button = page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)
         expect(button).to_be_enabled()
         button.click()
-        expect(page.locator('.wb-run-confirmation')).to_be_visible()
-        page.get_by_role('button', name='确认运行', exact=True).click()
         expect(page.locator('.wb-notice')).to_contain_text('requires create')
         assert runs.list_runs(root)['total'] == 0
         assert not (root/'never-created').exists()

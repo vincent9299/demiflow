@@ -61,7 +61,7 @@
       if(intent.run_id) {
         const run=await call('run',{run_id:intent.run_id,attempt:intent.attempt,compact:'1'});
         if(run.run_id!==intent.run_id||run.attempt!==intent.attempt)throw new Error('核对响应身份不一致');
-        if(run.status!=='prepared')finish(intent);
+        if(run.status!=='prepared'||(run.state?.execution_stopped===true&&run.state?.cleanup==='complete'))finish(intent);
         return {intent,run};
       }
       const receipt=await call('run-request',{request_id:intent.request_id});
