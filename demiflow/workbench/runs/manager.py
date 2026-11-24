@@ -872,7 +872,8 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                                                      native_execution=value['manifest'].get('native_execution'),
                                                      training_deployment=value['manifest'].get('training_deployment'),
                                                      capacity_domain=value['manifest'].get('capacity_domain'),
-                                                     executable_dirs=value['manifest'].get('executable_dirs', []))
+                                                     executable_dirs=value['manifest'].get('executable_dirs', []),
+                                                     project_root=root)
                             env['DEMIFLOW_EXECUTION_UNIT_FD'] = str(unit)
                             operation_budget.check()
                             spawn_attempted = True
@@ -1102,7 +1103,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
     return show(root, run_id)
 
 
-def worker_environment(target, limits=None, credential_names=(), *, native_execution=None, capacity_domain=None, executable_dirs=(), training_deployment=None):
+def worker_environment(target, limits=None, credential_names=(), *, native_execution=None, capacity_domain=None, executable_dirs=(), training_deployment=None, project_root=None):
     limits = limits or DEFAULT_LIMITS
     result = dict(PATH=os.path.dirname(sys.executable) + ':/usr/bin:/bin', LANG='C.UTF-8',
         PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1',
@@ -1127,12 +1128,26 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
         if result.get('DEMIFLOW_RESOURCE_ROOT', root) != root:
             raise ForgeError('Native deployment and capacity domain differ')
         result['DEMIFLOW_RESOURCE_ROOT'] = root
+    project_env: dict[str, str] = {}
+    if credential_names:
+        env_root = Path(project_root).absolute() if project_root is not None else None
+        if env_root is None and target is not None:
+            abs_target = Path(target).absolute()
+            if len(abs_target.parents) >= 3 and abs_target.parent.name == 'runs' and abs_target.parents[1].name == '.forge':
+                env_root = abs_target.parents[2]
+        if env_root is not None:
+            from demiflow.forge.project_env import load_project_env
+            project_env = load_project_env(env_root)
     for name in credential_names:
         if not re.fullmatch(r'[A-Z_][A-Z0-9_]{0,127}', name) or name in result or name in {'HOME', 'LD_PRELOAD', 'LD_LIBRARY_PATH'} or name.startswith(('PYTHON', 'DEMIFLOW_', 'CUDA_')):
             raise ForgeError('Credential name conflicts with worker control environment')
-        value = os.environ.get(name)
+        # Forge project-space .env takes precedence over host os.environ; only declared names are forwarded.
+        value = project_env.get(name) or os.environ.get(name)
         if not value or len(value.encode()) > 16384:
-            raise ForgeError('Declared credential is unavailable or exceeds budget: ' + name)
+            raise ForgeError(
+                'Declared credential is unavailable or exceeds budget: ' + name
+                + '（请在项目根目录 .env 中配置，变量清单见 .env.example）'
+            )
         result[name] = value
     return operation_budget.clear_worker_environment(result)
 

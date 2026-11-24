@@ -666,6 +666,60 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                     f'活跃参数 {key} 仍指向历史 runs/ 目录；按 DF-02 规范默认产物应输出到 data/ 目录（历史 runs/ 仅作只读保留）。')
                 break
 
+    # 10. Project-owned runtime env template (.env.example) & plaintext secret guard.
+    from .project_env import (
+        declared_prompt_env_names,
+        find_hardcoded_secret_line,
+        is_placeholder_or_empty,
+        load_project_env,
+    )
+    declared_envs = declared_prompt_env_names(root, exclude=exclude)
+    env_example = root / '.env.example'
+    if declared_envs:
+        if not env_example.exists() and not env_example.is_symlink():
+            names_text = ', '.join(sorted(declared_envs))
+            add('env_example_missing', '.env.example',
+                f'项目 Prompt 声明了运行环境变量 {names_text}，但项目根目录缺少 .env.example 模板；请创建 .env.example（仅列变量名、值为空；沙箱内可使用 manage_project_layout sync_env_example）以便独立运行与工作台按规范加载 .env。')
+        else:
+            try:
+                example_entries = load_project_env(root, filename='.env.example', allow_empty=True)
+            except Exception:
+                example_entries = {}
+            missing_envs = sorted(declared_envs - set(example_entries))
+            if missing_envs:
+                add('env_example_incomplete', '.env.example',
+                    f'.env.example 缺少项目 Prompt 声明的运行环境变量：{", ".join(missing_envs)}；请补充空值模板项（沙箱内可使用 manage_project_layout sync_env_example）。')
+            non_empty_secrets = [k for k, v in example_entries.items() if not is_placeholder_or_empty(v)]
+            if non_empty_secrets:
+                add('hardcoded_secret', '.env.example',
+                    f'.env.example 为入库模板文件，变量 {", ".join(sorted(non_empty_secrets))} 不应填写实际密钥值；请置空并仅在本地 .env（不入 Git）中填写。')
+    elif env_example.is_file() and not env_example.is_symlink():
+        try:
+            example_entries = load_project_env(root, filename='.env.example', allow_empty=True)
+        except Exception:
+            example_entries = {}
+        non_empty_secrets = [k for k, v in example_entries.items() if not is_placeholder_or_empty(v)]
+        if non_empty_secrets:
+            add('hardcoded_secret', '.env.example',
+                f'.env.example 为入库模板文件，变量 {", ".join(sorted(non_empty_secrets))} 不应填写实际密钥值；请置空并仅在本地 .env（不入 Git）中填写。')
+
+    for scan_rel in (*config_files, *prompt_files):
+        fp = root / scan_rel
+        if not fp.is_file() or fp.is_symlink():
+            continue
+        try:
+            txt = read_bounded(fp, 256 * 1024).decode('utf-8', errors='ignore')
+        except Exception:
+            continue
+        secret_line = find_hardcoded_secret_line(txt)
+        if secret_line is not None:
+            inspected.add(scan_rel)
+            by_category.setdefault('hardcoded_secret', []).append(
+                diagnostic('DF-02', scan_rel,
+                           '检测到疑似硬编码明文密钥；严禁将密钥写入配置或 Prompt 文件，请改为 api_key_env 声明并在项目本地 .env 中配置。',
+                           line=secret_line)
+            )
+
     # Interleave categories round-robin so truncated summaries still show every violation type.
     ordered: list[dict] = []
     queues = [list(items) for _, items in sorted(by_category.items())]

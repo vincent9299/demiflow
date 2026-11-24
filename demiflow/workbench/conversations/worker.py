@@ -210,7 +210,15 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                 active_cred = cred_path
                 read.append(cred_path)
     writes = [] if readonly else [root / name for name in project['writes'] if (root / name).exists()]
-    protected = [] if notebook_op else [root / name for name in ('.git', '.forge', '.venv', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
+    protected = [] if notebook_op else [root / name for name in ('.git', '.forge', '.venv', '.env', '.env.local', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
+    if not notebook_op and root.is_dir():
+        try:
+            with os.scandir(root) as root_entries:
+                for entry in root_entries:
+                    if entry.name.startswith('.env.') and entry.name not in {'.env.example', '.env.sample'}:
+                        protected.append(root / entry.name)
+        except OSError:
+            pass
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     if not notebook_op:
         protected.extend(root / name for name in project.get('protected', []))
