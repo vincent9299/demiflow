@@ -1,12 +1,12 @@
 """E package: real business acceptance from public entry points (upgrade 20261113).
 
 Proves observable business results through the genuine engine, persistence and
-workers. Production classes are reused, never mocked: PromptActor, RunPromptJournal
-(its check_recovery is the native recovery gate), StreamLanceWriter (native keyed
-commit reconciliation), QueueHistoryDatasource and the workbench runs manager
-(prepare/start/show/cancel/resume). The only fake is the external model transport (a
-loopback HTTP server) and a local origin object server; no real PromptActor / effect
-journal / queue settlement / writer / recovery check is replaced. The standalone
+workers. Production classes are reused, never mocked: RunPromptJournal (its
+check_recovery is the native recovery gate), StreamLanceWriter (native keyed commit
+reconciliation), QueueHistoryDatasource and the workbench runs manager
+(prepare/start/show/cancel/resume). The only fake is a local origin object server; no
+real effect journal / queue settlement / writer / recovery check is replaced. Prompt
+process loss through the real actor is covered by tests/test_prompt_stream_recovery.py. The standalone
 StreamCheckpoint orchestration is retired on current disk, so keyed recovery is proven
 through the writer's own commit reconciliation (the public delivery-only save_lance
 resume needs its P3 native sink adapter — reported separately as a C integration gap).
@@ -14,8 +14,8 @@ resume needs its P3 native sink adapter — reported separately as a C integrati
 Scenarios: workbench normal flow; function-dependency recovery (module helper /
 closure / default args); model calls and unknown effects (known_completed / unknown /
 confirmed-unsent); keyed save_lance interrupt recovery (append/overwrite contract,
-conflict refusal); queue publish/consume/settle/fixed-prefix history; static graph
-(multi-consumer, tuple/bytes, slow consumer, small budget, failure recovery).
+conflict refusal); queue publish/consume/settle/fixed-prefix history. The static
+graph adapter is covered by tests/test_u3_graph_*.py.
 
 Resource/perf evidence records result consistency, elapsed time, allocated budget
 occupancy and temporary disk file counts under identical inputs/budgets. Only
@@ -36,13 +36,10 @@ import importlib.util
 import json
 import os
 import signal
-import sqlite3
-import subprocess
 import sys
 import time
 import uuid
 from collections import Counter
-from contextlib import contextmanager
 from pathlib import Path
 
 import lance
@@ -50,40 +47,28 @@ import pyarrow as pa
 import pytest
 
 import demiflow.data as data
-from demiflow.data.plan import CallableSpec, LogicalPlan, MapOp, MapStreamOptions
-from demiflow.data.sources import ItemsSource
-from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.checkpoint.commit import CommitCoordinator
-from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
 from demiflow.execution.native_queue.queue_commit import producer_action
 from demiflow.execution.contracts.queue_contract import HistoryReadLimit, HistoryReadLimits
 from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink
-from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, identity
-from demiflow.execution.pipeline.run_context import RunAction, RunContext
+from demiflow.execution.contracts.recovery_contract import SourcePosition, identity
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
 from demiflow.execution.journal.prompt import RunPromptJournal
 from demiflow.resources.capacity import LocalCapacityPool
-from demiflow.resources.process_unit import ManagedProcessUnit
 from demiflow.workbench.graph import model as graph_model
-from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import facts, manager as runs
 
-from test_map_prompt_async import PACK, server  # loopback fake model transport
-from test_raw_fetch import BODY, origin_server  # loopback fake origin object server
+from test_raw_fetch import origin_server
 
 LIMITS = {"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}
-GRAPH_LIMITS = {"checkpoint_rows": 8, "checkpoint_unconfirmed_rows": 8,
-                "checkpoint_interval_ms": 60000}
 ENTRY = 'flows/questions.py:select'
 PARAMS = 'flows/select_a.json'
 KEYED_SCHEMA = pa.schema([('id', pa.string()), ('value', pa.string())])
-
-_CHAIN_CAPACITY = {"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3}
-_GRAPH_CAPACITY = {"cpu_millis": 16000, "memory_bytes": 16 * 1024 ** 3}
 
 
 @pytest.fixture(autouse=True)
@@ -154,15 +139,14 @@ def assert_semantics_equal(expected, actual, *, ordering='declared'):
         _assert_value_semantics(e, a, 'row[' + str(index) + ']')
 
 
-def _resource_evidence(run_dir, *, capacity, started=None):
+def _resource_evidence(run_dir, *, started=None):
     """Observe real allocated quotas / disk after a return; never claim RSS."""
+    from demiflow.execution.hosts.capacity import local_capacity
     run_dir = Path(run_dir)
-    resources = run_dir.with_name(run_dir.name + '-resources')
+    domain, capacity = local_capacity()
     files = [p for p in run_dir.rglob('*') if p.is_file()] if run_dir.exists() else []
     sqlite_files = sorted(p.name for p in run_dir.rglob('*.sqlite')) if run_dir.exists() else []
-    charged = None
-    if (resources / 'capacity').exists():
-        charged = LocalCapacityPool(resources / 'capacity', capacity=capacity).snapshot()['charged']
+    charged = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
     requests_budget = None
     if (run_dir / 'run.sqlite').exists():
         try:
@@ -172,27 +156,6 @@ def _resource_evidence(run_dir, *, capacity, started=None):
     return dict(elapsed_s=None if started is None else round(time.monotonic() - started, 3),
                 file_count=len(files), sqlite_files=sqlite_files,
                 capacity_charged=charged, requests_budget=requests_budget)
-
-
-def _release_orphans(run_dir, *, capacity):
-    """Reconcile capacity for allocations whose driver died, using real exit evidence."""
-    resources = Path(run_dir).with_name(Path(run_dir).name + '-resources')
-    if not (resources / 'capacity').exists():
-        return
-    pool = LocalCapacityPool(resources / 'capacity', capacity=capacity)
-    unit = ManagedProcessUnit(resources / 'units')
-    for record in pool.snapshot()['active']:
-        allocation_id = record['allocation_id']
-        process_json = next((resources / 'units').glob('*/' + allocation_id + '/process.json'))
-        scope_id = process_json.parent.parent.name
-        evidence = unit.stop(scope_id, allocation_id, terminate_deadline_ms=2000)
-        assert evidence['confirmed'] is True
-        pool.release(allocation_id, evidence)
-        try:
-            os.waitpid(evidence['identity']['pid'], os.WNOHANG)
-        except (ChildProcessError, OSError):
-            pass
-    assert pool.snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
 
 
 def _chain_child_id(run):
@@ -214,11 +177,6 @@ def _crash_hook(root):
         return row
 
     return hook, marker
-
-
-def _stream_map(fn):
-    return LogicalPlan((MapOp(CallableSpec.create(fn),
-                              stream_options=MapStreamOptions(concurrency=1)),))
 
 
 def _load_business_modules(tmp_path, monkeypatch, sources, entry):
@@ -284,13 +242,6 @@ def build_owned_fixture(tmp_path, *, scenario, monkeypatch=None, **options):
         root.mkdir()
         return dict(scenario=scenario, root=root)
 
-    if scenario == 'prompt':
-        root = tmp_path / 'prompt'
-        root.mkdir()
-        _prompt_setup(root, options.get('rows', 40))
-        return dict(scenario=scenario, root=root,
-                    rows=[{'id': i, 'item': str(i)} for i in range(options.get('rows', 40))])
-
     if scenario == 'keyed_lance':
         root = tmp_path / 'keyed'
         root.mkdir()
@@ -304,11 +255,6 @@ def build_owned_fixture(tmp_path, *, scenario, monkeypatch=None, **options):
         root.mkdir(parents=True)
         config = QueueConfig(backend='sqlite', queue_id='e-queue', path=str(root / 'q.sqlite'))
         return dict(scenario=scenario, root=root, config=config, pool='p')
-
-    if scenario == 'graph':
-        root = tmp_path / 'graph'
-        root.mkdir()
-        return dict(scenario=scenario, root=root, n=options.get('n', 24))
 
     raise ValueError('unknown scenario ' + repr(scenario))
 
@@ -345,7 +291,7 @@ def run_workbench_scenario(root, *, entry, params):
     return dict(run_id=run_id, attempt=value['attempt'], status=value['status'],
                 execution_status=status, outputs=outputs, rows=rows, sealed=sealed,
                 graph=graph, target=target,
-                evidence=_resource_evidence(target, capacity=_CHAIN_CAPACITY, started=started))
+                evidence=_resource_evidence(target, started=started))
 
 
 def run_recovery_scenario(fixture, *, fault):
@@ -356,12 +302,10 @@ def run_recovery_scenario(fixture, *, fault):
     scenario = fixture['scenario']
     if scenario == 'chain':
         return _chain_recovery(fixture, fault=fault)
-    if scenario in ('prompt', 'prompt_journal'):
+    if scenario == 'prompt_journal':
         return _prompt_journal_recovery(fixture, fault=fault)
     if scenario == 'keyed_lance':
         return _keyed_recovery(fixture, fault=fault)
-    if scenario == 'graph':
-        return _graph_recovery(fixture, fault=fault)
     raise ValueError('recovery not defined for scenario ' + repr(scenario))
 
 
@@ -411,14 +355,7 @@ def _chain_recovery(fixture, *, fault):
     assert killed['pid'] != os.getpid() and killed['row'] == 5
     prefix = RunJournal(run_dir).execution_commits('action-1')
     assert prefix and all(f['status'] == 'acked' for f in prefix), 'crash must retain a genuine ACK prefix'
-    def resource_evidence():
-        value = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
-        # v3 uses the selected deployment capacity domain, not run-resources.
-        from demiflow.execution.hosts.capacity import local_capacity
-        domain, capacity = local_capacity()
-        value['capacity_charged'] = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
-        return value
-    before = resource_evidence()
+    before = _resource_evidence(run_dir, started=started)
     assert before['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
 
 
@@ -439,8 +376,7 @@ def _chain_recovery(fixture, *, fault):
         with RunContext.resume(reference) as run2:
             rows = execute()
             commits = run2.journal.execution_commits(_chain_child_id(run2))
-    after = resource_evidence()
-    _release_orphans(run_dir, capacity=_CHAIN_CAPACITY)
+    after = _resource_evidence(run_dir, started=started)
     return dict(before=before, after=after, rows=rows, commits=commits,
                 refused=refused, reference=reference)
 
@@ -469,7 +405,7 @@ def _prompt_journal_recovery(fixture, *, fault):
                 journal.failed(request, error, .01)
             journal.close()  # flush the batched native journal before the loss
             raise _SimulatedPromptLoss('transport loss after effect reservation')
-    before = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+    before = _resource_evidence(run_dir, started=started)
 
     reused, raised = None, False
     with RunContext.resume(reference) as run2:
@@ -484,7 +420,7 @@ def _prompt_journal_recovery(fixture, *, fault):
             reused = journal2.reserve(request)
         budget = run2.journal.budget_consumed('requests')
         journal2.close()
-    after = _resource_evidence(run_dir, capacity=_CHAIN_CAPACITY, started=started)
+    after = _resource_evidence(run_dir, started=started)
     return dict(before=before, after=after, reused=reused, refused=raised,
                 requests_budget=budget, reference=reference)
 
@@ -524,7 +460,7 @@ def _keyed_recovery(fixture, *, fault):
     before = dict(commits=commits[0], version=writer.version,
                   committed_rows=lance.dataset(str(target)).count_rows(),
                   forwarded=forwarded,
-                  evidence=_resource_evidence(root, capacity=_CHAIN_CAPACITY, started=started))
+                  evidence=_resource_evidence(root, started=started))
     assert commits[0] == 1, 'an ambiguous commit must be reconciled, not resent'
     # A fresh writer replays the same logical keys/content: append stays idempotent.
     replay = StreamLanceWriter(target, schema, key='id', mode='append')
@@ -532,155 +468,13 @@ def _keyed_recovery(fixture, *, fault):
     asyncio.run(replay(rows))
     final_rows = lance.dataset(str(target)).to_table().to_pylist()
     after = dict(ref=replay.reference(), final_rows=final_rows, commits=commits[0],
-                 evidence=_resource_evidence(root, capacity=_CHAIN_CAPACITY, started=started))
+                 evidence=_resource_evidence(root, started=started))
     return dict(before=before, after=after)
-
-
-def _graph_spec(fixture, *, target_fns, mode='memory_incremental', cut_rows=None,
-                credit_rows=8, n=None):
-    n = fixture['n'] if n is None else n
-
-    def shared_double(row):
-        return {**row, 'x': row['x'] * 2}
-
-    items = tuple({'x': i} for i in range(n))
-    readers = list(target_fns)
-    targets = [{'plan': _stream_map(target_fns[rid]), 'logical_node_id': 'node-' + rid,
-                'occurrence_id': rid + '-p0', 'reader_id': rid} for rid in readers]
-    spec = {'source': ItemsSource(items), 'source_id': 'e-graph-source',
-            'ancestor': {'plan': _stream_map(shared_double),
-                         'logical_node_id': 'shared', 'occurrence_id': 'shared-p0'},
-            'targets': targets, 'routing': 'broadcast', 'exchange_mode': mode,
-            'credit_budget': {'rows': credit_rows, 'bytes': 8 * 1024 ** 2},
-            'queue_depth': 4096}
-    if cut_rows is not None:
-        spec['cut_rows'] = cut_rows
-    return spec, readers, n
-
-
-def _graph_committed_rows(run, action_id, rid, facts):
-    sink = BlockSink(RunAction(run, action_id + '-graph-' + rid, {'kind': 'graph-node'}), rid)
-    rows = []
-    for fact in facts:
-        rows.extend(sink.iter_rows(fact['receipts'][rid]['data']))
-    return rows
-
-
-def _graph_recovery(fixture, *, fault):
-    root = fixture['root']
-    crash_marker = root / 'target-crashed-once'
-
-    def crashing_target(row):
-        if row['x'] == 16:
-            try:
-                fd = os.open(crash_marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(fd)
-            except FileExistsError:
-                return row
-            os.kill(os.getpid(), signal.SIGKILL)
-        return row
-
-    def passthrough(row):
-        return row
-
-    spec, readers, n = _graph_spec(fixture, target_fns={'c0': crashing_target, 'c1': passthrough},
-                                   mode='durable_incremental', cut_rows=8)
-    executor = LocalDatasetExecutor(workers=1)
-    run_dir = root / 'run'
-    started = time.monotonic()
-    with pytest.raises((RecoveryContractError, OSError)):
-        with RunContext.start(run_dir, limits=GRAPH_LIMITS) as run:
-            reference = run.ref
-            with run.action({'kind': 'materialize', 'source': {'fixture': 'e-graph-fault'}}) as execution:
-                executor.materialize_graph(spec)
-                execution.complete(dict(kind='graph-materialized'))
-    assert crash_marker.exists(), 'the consumer crash window did not fire'
-    before = _resource_evidence(run_dir, capacity=_GRAPH_CAPACITY, started=started)
-
-    with RunContext.resume(reference, limits=GRAPH_LIMITS) as run2:
-        with run2.action({'kind': 'materialize', 'source': {'fixture': 'e-graph-fault'}}) as execution:
-            result = executor.materialize_graph(spec)
-            action_id = execution.action_id
-            execution.complete(dict(kind='graph-materialized', egress=result['egress_rows']))
-        facts = run2.journal.execution_commits(action_id + '-graph-result')
-        committed = {rid: _graph_committed_rows(run2, action_id, rid, facts) for rid in readers}
-    after = _resource_evidence(run_dir, capacity=_GRAPH_CAPACITY, started=started)
-    _release_orphans(run_dir, capacity=_GRAPH_CAPACITY)
-    return dict(before=before, after=after, result=result, commits=facts,
-                committed=committed, readers=readers, n=n, reference=reference)
 
 
 # ---------------------------------------------------------------------------
 # Prompt end-to-end setup (real PromptActor through map_prompt_async + fake transport).
 # ---------------------------------------------------------------------------
-
-def _prompt_load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _prompt_setup(root, count):
-    from demiflow.data.flow_contract import arrow_fields
-    from demiflow.forge.flow_check import FlowChecker
-    from demiflow.forge.platform import LIMITS as PLATFORM_LIMITS, inspect_modules
-    from demiflow.forge.project_bindings import resolve_flow_resources
-    (root / 'flows').mkdir()
-    (root / 'operators').mkdir()
-    (root / 'flows/prompt.yaml').write_text(PACK.replace(
-        'base_url_env: TEST_PROMPT_URL', 'base_url: ' + os.environ['TEST_PROMPT_URL']))
-    (root / 'operators/capture.py').write_text(
-        'from typing import TypedDict\n'
-        'class Input(TypedDict):\n    id: int | None\n    answer: str\n'
-        'class Output(TypedDict):\n    id: int | None\n    value: str\n'
-        'def finish(row: Input) -> Output:\n'
-        "    return {'id': row['id'], 'value': row['answer'] + ' transformed'}\n")
-    (root / 'flows/recovery.py').write_text(
-        'from demiflow import data\n'
-        'from operators.capture import finish\n'
-        'def run(*, source, target):\n'
-        "    rows = data.read_lance(source, version=1).map_prompt_async('enrich', config='flows/prompt.yaml',\n"
-        "        inputs={'payload':'item'}, output='answer', concurrency=8, queue_depth=16,\n"
-        "        max_requests=2048, options={'trust_env':False, 'timeout_s':5,\n"
-        "            'max_request_bytes':1048576, 'max_response_bytes':1048576}).map(finish).materialize()\n"
-        "    return rows.write_lance(target, mode='create', return_receipt=True)\n")
-    rows = [{'id': i, 'item': str(i)} for i in range(count)]
-    table = pa.Table.from_pylist(rows)
-    source, target = str(root / 'input.lance'), str(root / 'out.lance')
-    lance.write_dataset(table, source)
-    catalog = inspect_modules(['demiflow.data'], Path(data.__file__).resolve().parents[1], PLATFORM_LIMITS)
-    report = FlowChecker(root, catalog,
-                         {'input': {'uri': source, 'version': 1, 'fields': arrow_fields(table.schema)}},
-                         [target],
-                         resource_resolver=lambda tree, refs, bindings: resolve_flow_resources(root, tree, refs, bindings)
-                         ).inspect('flows/recovery.py:run', {'source': source, 'target': target})
-    assert report['status'] == 'checked', report['diagnostics']
-    (root / 'report.json').write_text(json.dumps(report))
-
-
-def _prompt_execute(root):
-    from demiflow.execution.pipeline.checked import CheckedExecution
-    from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
-    root = Path(root)
-    os.chdir(root)
-    _prompt_load('operators.capture', root / 'operators/capture.py')
-    flow = _prompt_load('flows.recovery', root / 'flows/recovery.py')
-    report = json.loads((root / 'report.json').read_text())
-    checked = CheckedExecution(**{k: report[k] for k in ('nodes', 'edges', 'actions', 'operators')},
-                               source_root=root, resource_root=root / 'runtime',
-                               limits={**DEFAULT_LIMITS, 'memory_bytes': 1024 ** 3},
-                               record=lambda *args: None, check_stop=lambda: None)
-    directory = root / 'runtime'
-    prior = RunJournal(directory).recovery_identity()
-    scope = (RunContext.resume(RunRef(str(directory), prior['run_id'])) if prior
-             else RunContext.start(directory, limits={'memory_bytes': 1024 ** 3}))
-    with scope, data.local_execution(workers=1, worker_mode='thread', partitions=1,
-                                     memory_bytes=128 * 1024 ** 2) as session:
-        session._executor.resource_root = root
-        with checked.bind_context():
-            flow.run(source=str(root / 'input.lance'), target=str(root / 'out.lance'))
 
 
 # ---------------------------------------------------------------------------
@@ -717,7 +511,7 @@ def _queue_seed(fixture, url, *, count=3):
     return channel
 
 
-def _queue_settle(fixture, root, *, url, unified, max_tasks=10000):
+def _queue_settle(fixture, root, *, url, max_tasks=10000):
     cfg = fixture['config']
 
     class PureAnnotation:
@@ -762,7 +556,7 @@ def test_workbench_normal_flow_real_worker(tmp_path, pidfds):
     assert any(o['status'] == 'committed' for o in observed['outputs'].values())
     # A real independent worker process executed the run (pid differs from the test).
     worker = observed['execution_status'].get('worker')
-    assert worker is None or worker.get('pid') != os.getpid()
+    assert worker['pid'] != os.getpid()
     # The display graph is readable from the checked report and bound to this run.
     assert observed['graph'] is not None
     assert observed['graph']['binding']['run_id'] == observed['run_id']
@@ -793,7 +587,7 @@ def test_workbench_normal_flow_real_worker(tmp_path, pidfds):
         assert len(docs) >= len(bridge['entries'])
         assert all(d['rows_output'] is not None and d['state'] == 'succeeded' for d in docs)
     # Real resource state after success: capacity released, single control database.
-    assert observed['evidence']['capacity_charged'] in (None, {'cpu_millis': 0, 'memory_bytes': 0})
+    assert observed['evidence']['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
 
 
 def test_workbench_cancel_releases_resources(tmp_path, pidfds):
@@ -830,18 +624,18 @@ def test_workbench_cancel_releases_resources(tmp_path, pidfds):
             break
         time.sleep(0.02)
         value = runs.show(root, run_id)
-    if value['status'] == 'running':
-        runs.cancel(root, run_id, expected_attempt=value['attempt'])
+    assert value['status'] == 'running', value['status']
+    runs.cancel(root, run_id, expected_attempt=value['attempt'])
     deadline = time.monotonic() + 60
     value = runs.show(root, run_id)
     while value['status'] not in runs.TERMINAL:
         assert time.monotonic() < deadline, 'cancel did not terminate the run'
         time.sleep(0.05)
         value = runs.show(root, run_id)
-    assert value['status'] in {'cancelled', 'succeeded'}
+    assert value['status'] == 'cancelled'
     target = runs.directory(root, run_id)
-    evidence = _resource_evidence(target, capacity=_CHAIN_CAPACITY)
-    assert evidence['capacity_charged'] in (None, {'cpu_millis': 0, 'memory_bytes': 0})
+    evidence = _resource_evidence(target)
+    assert evidence['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
 
 
 # ===========================================================================
@@ -889,48 +683,6 @@ def test_prompt_journal_recovery_three_states(tmp_path, fault):
         assert observed['refused'] is False
         assert observed['reused'] is True, 'confirmed-unsent may re-dispatch under the original rule'
         assert observed['requests_budget'] == 2, 're-dispatch consumes budget again'
-
-
-def test_prompt_end_to_end_crash_resume_no_blind_resend(server, tmp_path):
-    fixture = build_owned_fixture(tmp_path, scenario='prompt', rows=40)
-    root = fixture['root']
-    repo = Path(__file__).resolve().parents[1]
-    script = (
-        'import os, sys\n'
-        'from test_upgrade_business_acceptance import _prompt_execute\n'
-        'from demiflow.operator_llm.runtime import PromptActor\n'
-        'original = PromptActor.__call__\n'
-        'calls = [0]\n'
-        'async def fail(self, row):\n'
-        '    result = await original(self, row)\n'
-        '    calls[0] += 1\n'
-        '    if calls[0] == 20:\n'
-        '        os._exit(37)\n'
-        '    return result\n'
-        'PromptActor.__call__ = fail\n'
-        '_prompt_execute(sys.argv[1])\n')
-    env = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(repo), str(repo / 'tests')]),
-           'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1'}
-    child = subprocess.run([sys.executable, '-B', '-c', script, str(root)], env=env,
-                           capture_output=True, text=True, timeout=180)
-    assert child.returncode == 37, child.stdout + child.stderr
-    assert not (root / 'out.lance').exists()
-    old_calls = len(server['requests'])
-    with sqlite3.connect(root / 'runtime/run.sqlite') as db:
-        uncertain = db.execute('SELECT count(*) FROM calls WHERE response_json IS NULL').fetchone()[0]
-    if uncertain:
-        with pytest.raises(UncertainPromptCall, match='automatic regeneration is forbidden'):
-            _prompt_execute(root)
-        assert len(server['requests']) == old_calls, 'unknown effects must not be resent'
-        assert not (root / 'out.lance').exists()
-        assert RunJournal(root / 'runtime').execution_status()['status'] == 'failed'
-    else:
-        _prompt_execute(root)
-        result = lance.dataset(str(root / 'out.lance')).to_table().to_pylist()
-        assert sorted(r['id'] for r in result) == sorted(r['id'] for r in fixture['rows'])
-        assert all(r['value'] == 'ok transformed' for r in result)
-        assert len(server['requests']) == len(fixture['rows']), 'known_completed must not add requests'
-        assert RunJournal(root / 'runtime').execution_status()['status'] == 'succeeded'
 
 
 # ===========================================================================
@@ -1008,7 +760,7 @@ def test_queue_settle_and_fixed_prefix_history(tmp_path, pidfds):
     fixture = build_owned_fixture(tmp_path, scenario='queue')
     with origin_server() as (url, calls):
         channel = _queue_seed(fixture, url, count=3)
-        _queue_settle(fixture, fixture['root'] / 'settle', url=url, unified=True)
+        _queue_settle(fixture, fixture['root'] / 'settle', url=url)
         fetches = calls['/file']
     assert fetches == 3, 'each task acquired exactly once'
     assert channel.state(fixture['pool'])['queue_drained']
@@ -1037,7 +789,7 @@ def test_queue_history_unknown_effect_excluded_from_prefix(tmp_path, pidfds):
     with origin_server() as (url, calls):
         channel = _queue_seed(fixture, url, count=3)
         # Settle only one task; the other two remain claimed/unfinished (unknown effect).
-        _queue_settle(fixture, fixture['root'] / 'partial', url=url, unified=True, max_tasks=1)
+        _queue_settle(fixture, fixture['root'] / 'partial', url=url, max_tasks=1)
     snapshot = channel.snapshot(fixture['pool'])
     assert snapshot.cursor == 1, 'unsettled tasks must stay outside the results prefix'
     rows = data.read_queue_records(fixture['config'], pool=fixture['pool'],
@@ -1051,7 +803,7 @@ def test_queue_history_budget_cursor_resumes(tmp_path, pidfds):
     fixture = build_owned_fixture(tmp_path, scenario='queue')
     with origin_server() as (url, calls):
         channel = _queue_seed(fixture, url, count=3)
-        _queue_settle(fixture, fixture['root'] / 'settle', url=url, unified=True)
+        _queue_settle(fixture, fixture['root'] / 'settle', url=url)
     snapshot = channel.snapshot(fixture['pool'])
     with pytest.raises(HistoryReadLimit) as caught:
         data.read_queue_records(fixture['config'], pool=fixture['pool'], through=snapshot,
@@ -1060,113 +812,3 @@ def test_queue_history_budget_cursor_resumes(tmp_path, pidfds):
                                       results=True, after=caught.value.next_cursor).take_all()
     assert len(resumed) == 1
     assert resumed[0]['queue_record']['ordinal'] == 3
-
-
-def test_queue_unified_carrier_matches_legacy(tmp_path, pidfds):
-    fixture = build_owned_fixture(tmp_path, scenario='queue')
-    # A second independent queue for the unified carrier, served by the SAME
-    # loopback origin so the endpoint identity is identical and the comparison
-    # isolates the carrier, not an ephemeral port.
-    fixture2 = build_owned_fixture(tmp_path / 'u', scenario='queue')
-    with origin_server() as (url, calls):
-        channel = _queue_seed(fixture, url, count=2)
-        _queue_settle(fixture, fixture['root'] / 'legacy', url=url, unified=False)
-        legacy_fetches = calls['/file']
-        channel2 = _queue_seed(fixture2, url, count=2)
-        _queue_settle(fixture2, fixture2['root'] / 'unified', url=url, unified=True)
-        unified_fetches = calls['/file'] - legacy_fetches
-    legacy_rows = data.read_queue_records(fixture['config'], pool=fixture['pool'],
-                                          through=channel.snapshot(fixture['pool']), results=True).take_all()
-    unified_rows = data.read_queue_records(fixture2['config'], pool=fixture2['pool'],
-                                           through=channel2.snapshot(fixture2['pool']), results=True).take_all()
-
-    def business(row):
-        result = {k: v for k, v in row['result'].items()
-                  if k not in {'retrieved_at', 'acquisition_ref', 'storage_domain'}}
-        if result.get('raw_ref'):
-            result['raw_ref'] = {'sha256': result['raw_ref']['sha256']}
-        return dict(result=result, business_accepted=row['business_accepted'], label=row['label'])
-
-    assert [business(r) for r in legacy_rows] == [business(r) for r in unified_rows]
-    assert legacy_fetches == unified_fetches == 2, 'each carrier fetches each object once'
-    # The unified carrier supervised a genuine independent managed worker process.
-    units = fixture2['root'] / 'unified-resources' / 'units'
-    pids = {json.loads(p.read_text())['identity']['pid'] for p in units.glob('*/*/process.json')}
-    assert pids and os.getpid() not in pids
-
-
-# ===========================================================================
-# Scenario 6: static graph (explicit entry, real independent workers).
-# ===========================================================================
-
-def test_graph_broadcast_multi_consumer_tuple_bytes(tmp_path, pidfds):
-    fixture = build_owned_fixture(tmp_path, scenario='graph', n=12)
-
-    def ancestor(row):
-        return {**row, 'x': row['x'] * 2, 't': (row['x'], row['x'] + 1),
-                'b': bytes([row['x'] % 256])}
-
-    def passthrough(row):
-        return row
-
-    spec, readers, n = _graph_spec(fixture, target_fns={'c0': passthrough, 'c1': passthrough},
-                                   credit_rows=4)
-    # Override the ancestor to emit tuple/bytes fidelity payloads.
-    spec['ancestor']['plan'] = _stream_map(ancestor)
-    executor = LocalDatasetExecutor(workers=1)
-    with RunContext.start(fixture['root'] / 'run', limits=GRAPH_LIMITS) as run:
-        with run.action({'kind': 'materialize', 'source': {'fixture': 'e-graph-types'}}) as execution:
-            result = executor.materialize_graph(spec)
-            action_id = execution.action_id
-            execution.complete(dict(kind='graph-materialized', egress=result['egress_rows']))
-        facts = run.journal.execution_commits(action_id + '-graph-result')
-        committed = {rid: _graph_committed_rows(run, action_id, rid, facts) for rid in readers}
-    assert result['egress_rows'] == n, 'shared ancestor must expand each record once'
-    assert result['workers'] == 3
-    for rid in readers:
-        rows = committed[rid]
-        assert len(rows) == n
-        for row in rows:
-            assert type(row['t']) is tuple and len(row['t']) == 2
-            assert type(row['b']) is bytes
-            assert row['t'] == (row['x'] // 2, row['x'] // 2 + 1)
-
-
-def test_graph_slow_consumer_small_budget_no_loss(tmp_path, pidfds):
-    fixture = build_owned_fixture(tmp_path, scenario='graph', n=24)
-
-    def passthrough(row):
-        return row
-
-    def slow(row):
-        time.sleep(0.005)
-        return row
-
-    spec, readers, n = _graph_spec(fixture, target_fns={'fast': passthrough, 'slow': slow},
-                                   credit_rows=4)
-    executor = LocalDatasetExecutor(workers=1)
-    started = time.monotonic()
-    with RunContext.start(fixture['root'] / 'run', limits=GRAPH_LIMITS) as run:
-        with run.action({'kind': 'materialize', 'source': {'fixture': 'e-graph-slow'}}) as execution:
-            result = executor.materialize_graph(spec)
-            execution.complete(dict(kind='graph-materialized', egress=result['egress_rows']))
-    assert result['egress_rows'] == n
-    for rid in readers:
-        assert result['target_rows'][rid] == n, (rid, result['target_rows'][rid])
-    arrival = result['final_arrival']
-    assert arrival['fast'] <= arrival['slow'], 'slow consumer must not block the fast target'
-    evidence = _resource_evidence(fixture['root'] / 'run', capacity=_GRAPH_CAPACITY, started=started)
-    assert evidence['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
-
-
-def test_graph_consumer_crash_recovers_exactly_once(tmp_path, pidfds):
-    fixture = build_owned_fixture(tmp_path, scenario='graph', n=24)
-    observed = run_recovery_scenario(fixture, fault='crash_target')
-    assert [f['sequence'] for f in observed['commits']] == [1, 2, 3]
-    assert all(f['status'] == 'acked' for f in observed['commits'])
-    assert len({f['commit_id'] for f in observed['commits']}) == len(observed['commits'])
-    for rid in observed['readers']:
-        rows = observed['committed'][rid]
-        assert [r['x'] for r in rows] == [i * 2 for i in range(observed['n'])], rid
-    assert observed['result']['egress_rows'] == observed['n']
-    assert observed['after']['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
