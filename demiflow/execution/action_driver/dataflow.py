@@ -1745,9 +1745,8 @@ class DataflowExecution:
         self._confirmed_rows = rows
         self._source_exhausted = image.cut.final and all(c.end_of_input
             for contribution in image.contributions for c in contribution.sources)
-        write = None
+        receipt = None
         if self._request.kind in ("write_lance", "write_datasink", "write_file"):
-            from ...data.datasink import WriteResult
             fact = self._action.context.journal.execution_commit(image.commit_id)
             receipt_data = fact["receipts"][self._request.kind]["data"]
             if getattr(self._action, "object_sinks", None):
@@ -1755,12 +1754,11 @@ class DataflowExecution:
             receipt = receipt_data.get("native_receipt")
             if self._fit and self._request.kind == 'write_lance' and receipt:
                 self._fit.retain_table(receipt['data']['uri'], receipt=receipt)
-            write = WriteResult(written_rows=rows, blocks_written=len(publication["manifest"]["partitions"]),
-                                metadata={"native_receipt": receipt, "queue_settled": self._acquisition is not None and self._acquisition.binding.mode == "sink"})
-        self._terminal_result = TerminalResult(kind=self._request.kind, rows=rows,
-            scalar=rows if self._request.kind == "count" else publication["manifest"]["partitions"][0].get("scalar"),
-            result_ref=image.confirmed_sinks[self._request.kind], write_result=write, complete=True,
-            completion="source_exhausted" if self._source_exhausted else "terminal_satisfied")
+        from demiflow.execution.outputs.terminals import published_result
+        self._terminal_result = published_result(self._request.kind, publication,
+            result_ref=image.confirmed_sinks[self._request.kind], source_exhausted=self._source_exhausted,
+            native_receipt=receipt,
+            queue_settled=self._acquisition is not None and self._acquisition.binding.mode == "sink")
         self._state = "succeeded"
 
     # -- E006 finish ------------------------------------------------------
@@ -1866,17 +1864,8 @@ class DataflowExecution:
     def _defer_live_thread_cleanup(self):
         if self._policy.provider != 'local' or self._policy.worker_mode != 'thread':
             return False
-        connector = self._services.resources.provider._control
-        units = tuple(connector.units.values())
-        if not units:
-            return False
-        # A requested stop, closed mailbox or cancelled Future is not physical
-        # exit evidence. The original provider owns the real thread membership.
-        live = False
-        for unit in units:
-            with unit.owned_lock:
-                owned = tuple(unit.owned)
-            live |= unit.thread.is_alive() or any(thread.is_alive() for thread in owned)
+        from demiflow.execution.hosts.thread import live_thread_units
+        live = live_thread_units(self._services.resources.provider)
         if not live:
             return False
         from contextvars import copy_context

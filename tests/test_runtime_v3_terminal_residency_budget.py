@@ -39,7 +39,7 @@ def test_terminal_metadata_uses_only_room_after_control_and_payload(tmp_path):
 
 
 def test_terminal_accounts_live_index_and_payload_in_one_worker_grant(tmp_path, monkeypatch):
-    from demiflow.execution.scheduler.dataflow_publication_budget import TERMINAL_WORKSPACE
+    from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
     from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
 
     limits = {**LIMITS, 'memory_bytes': 30 * 1024}

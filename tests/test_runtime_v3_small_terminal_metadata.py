@@ -8,7 +8,7 @@ import pytest
 
 from demiflow.execution.contracts.dataflow import BlockPartition
 from demiflow.execution.contracts.dataflow_errors import DataflowError
-from demiflow.execution.scheduler.dataflow_publication_budget import TERMINAL_WORKSPACE
+from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
 from demiflow.execution.contracts.record_codec import frame_parts
 from demiflow.execution.contracts.dataflow_codec import MANIFEST_MEDIA
 from demiflow.execution.contracts.recovery_contract import document, identity

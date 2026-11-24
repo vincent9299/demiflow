@@ -153,3 +153,52 @@ def finish_typed_batch(batch, *, columns, encoded_operations, schema):
     operations = cloudpickle.loads(encoded_operations)
     rows = ({c.name: row[c.value] for c in columns if row[c.present]} for row in batch.to_pylist())
     return pa.RecordBatch.from_pylist(list(_apply(rows, operations)), schema=schema)
+
+
+def validate_prediction_input(rows, schema, required, *, keyed):
+    import pyarrow as pa
+    from demiflow.data.training_schema import PREDICTION_ROW_ID, validate_columns
+    if schema is not None:
+        validate_columns(schema, required)
+    else:
+        for row in rows:
+            validate_columns(pa.RecordBatch.from_pylist([row]).schema, required)
+    if keyed and any(PREDICTION_ROW_ID in row for row in rows):
+        raise DataflowError('INVALID_CONTRACT', 'Predictor input contains the reserved correlation column')
+
+
+def correlate_prediction_input(rows, schema, identities):
+    import pyarrow as pa
+    from demiflow.data.training_schema import PREDICTION_ROW_ID
+    rows = [{**row, PREDICTION_ROW_ID: key} for row, key in zip(rows, identities)]
+    if schema is not None:
+        schema = schema.append(pa.field(PREDICTION_ROW_ID, pa.string()))
+    return rows, schema
+
+
+def prediction_output_schema(value, expected, *, keyed):
+    from demiflow.data.training_schema import PREDICTION_ROW_ID, validate_columns
+    validate_columns(value, expected)
+    if keyed:
+        validate_columns(value, {PREDICTION_ROW_ID: 'string'})
+        value = value.remove(value.get_field_index(PREDICTION_ROW_ID))
+    return value
+
+
+def validate_prediction_row(row, index, input_count, *, identities=None):
+    from demiflow.data.training_schema import PREDICTION_ROW_ID
+    if index >= input_count:
+        raise DataflowError('INVALID_CONTRACT', 'Predictor returned more rows than its input batch')
+    if identities is not None and row.pop(PREDICTION_ROW_ID, None) != identities[index]:
+        raise DataflowError('INVALID_CONTRACT', 'Predictor changed the input occurrence order')
+
+
+def validate_prediction_row_schema(row, expected):
+    import pyarrow as pa
+    from demiflow.data.training_schema import validate_columns
+    validate_columns(pa.RecordBatch.from_pylist([row]).schema, expected)
+
+
+def validate_prediction_count(count, input_count):
+    if count != input_count:
+        raise DataflowError('INVALID_CONTRACT', 'Predictor must return one result row for every input')

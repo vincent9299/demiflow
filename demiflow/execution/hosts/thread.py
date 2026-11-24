@@ -249,3 +249,18 @@ class ThreadHostEndpoint(_EndpointBase):
 
     def deliver_reply(self, reply):
         self._connector.deliver_control_reply(self._allocation_id, reply)
+
+
+def live_thread_units(provider):
+    connector = provider._control
+    units = tuple(connector.units.values())
+    if not units:
+        return False
+    # A requested stop, closed mailbox or cancelled Future is not physical
+    # exit evidence. The original provider owns the real thread membership.
+    live = False
+    for unit in units:
+        with unit.owned_lock:
+            owned = tuple(unit.owned)
+        live |= unit.thread.is_alive() or any(thread.is_alive() for thread in owned)
+    return live

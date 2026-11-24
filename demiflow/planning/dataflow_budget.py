@@ -160,7 +160,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     reference carrier is selected the producer node in ``nodes`` is rewritten in place.
     """
     from .dataflow_compile import _plain
-    from demiflow.execution.scheduler.dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE
+    from demiflow.execution.contracts.dataflow import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE
     # The first terminal block and its first forest root occupy 3 KiB
     # while the input/output payload is still resident. Seal both windows
     # into the original profile; do not borrow half of that payload grant.
@@ -222,7 +222,8 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         and all(n.kernel.kind in {'items', 'range', 'materialized'}
                 for n in nodes if n.kind == 'source'))
     if compact:
-        from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA, REF_CARRIER
+        from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA
+        from demiflow.execution.contracts.dataflow import REF_CARRIER
         metadata = min(bounds.max_state_bytes, max(MIN_TERMINAL_INDEX, bounds.max_resident_bytes // 128))
         payload = min(128 * 1024, max(4096, bounds.max_resident_bytes // 64))
         configuration['terminal_memory'] = {'payload_bytes': payload, 'metadata_bytes': metadata,
@@ -255,7 +256,8 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
         legacy_floor = 2 * (bounds.max_batch_bytes + bounds.max_row_bytes) + metadata
         if (legacy_floor > bounds.max_resident_bytes - control
                 and MIN_TERMINAL_WORKSPACE <= terminal_space < profile.requests['memory_bytes']):
-            from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA, TERMINAL_WORKSPACE
+            from demiflow.execution.scheduler.dataflow_publication_budget import PHASE_SCHEMA
+            from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
             bounded_workspace = True
             configuration[FIELD]['schema'] = PHASE_SCHEMA
             configuration['terminal_memory'] = {'schema': TERMINAL_WORKSPACE,
@@ -264,7 +266,7 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     elif not native_publication and payload + metadata > bounds.max_resident_bytes - control:
         # Keep the original row contract. The terminal already measures codec,
         # index and flush peaks against one worker grant on each real append.
-        from demiflow.execution.scheduler.dataflow_publication_budget import TERMINAL_WORKSPACE
+        from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
         available = bounds.max_resident_bytes - control
         if available < MIN_TERMINAL_WORKSPACE:
             raise DataflowError('RESOURCE_INFEASIBLE',

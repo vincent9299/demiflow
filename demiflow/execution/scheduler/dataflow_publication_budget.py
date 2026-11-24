@@ -12,9 +12,9 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 FIELD = 'publication_workspace'
 SCHEMA = 'demiflow.native_publication_workspace.v1'
 PHASE_SCHEMA = 'demiflow.native_publication_workspace.v2'
-REF_CARRIER = 'stored_typed_row.v1'
-MIN_TERMINAL_WORKSPACE = 8192
-MIN_TERMINAL_INDEX = 3072  # First block and its first forest root.
+
+
+  # First block and its first forest root.
 
 
 def workspace_bytes(configuration):

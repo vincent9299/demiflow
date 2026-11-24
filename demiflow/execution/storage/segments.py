@@ -257,7 +257,8 @@ class RecordBlocks:
         self.columns = None
         stages = getattr(assignment, 'stages', ())
         granted = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in stages) if stages else self.bounds.max_resident_bytes
-        from demiflow.execution.scheduler.dataflow_publication_budget import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE, TERMINAL_WORKSPACE
+        from demiflow.execution.contracts.dataflow import MIN_TERMINAL_INDEX, MIN_TERMINAL_WORKSPACE
+        from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
         if isinstance(budget, Mapping) and budget.get('schema') == TERMINAL_WORKSPACE:
             if (set(budget) != {'schema', 'resident_bytes'}
                     or type(budget['resident_bytes']) is not int
@@ -270,7 +271,7 @@ class RecordBlocks:
             # original window; a new compiler never rewrites their grants.
             self._metadata_limit = min(self.bounds.max_state_bytes, granted // 2)
         else:
-            from demiflow.execution.scheduler.dataflow_publication_budget import REF_CARRIER
+            from demiflow.execution.contracts.dataflow import REF_CARRIER
             self._reference_only = isinstance(budget, Mapping) and budget.get('carrier') == REF_CARRIER
             fields = {'payload_bytes', 'metadata_bytes'} | ({'carrier'} if self._reference_only else set())
             if (not isinstance(budget, Mapping) or set(budget) != fields

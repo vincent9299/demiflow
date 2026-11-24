@@ -359,18 +359,14 @@ def invoke_unary(
         if _input_row_bytes(record) + extra > services.bounds.max_batch_bytes:
             raise _err("BUDGET_EXCEEDED", "add_column batch coexistence exceeds budget")
         values = _batch_values(instance(batch))
-        if len(values) != 1:
-            raise _err("INVALID_CONTRACT", "add_column result length must match batch")
-        yield output_record(
-            record.record_id, position, {**row, column: values[0]}, sequence, services
-        )
+        from demiflow.operators.relational import add_column_row
+        result = add_column_row(row, column, values)
+        yield output_record(record.record_id, position, result, sequence, services)
     elif kind == "RandomSampleOp":
-        fraction = float(_cfg(spec, "fraction"))
-        if not 0.0 <= fraction <= 1.0:
-            raise _err("INVALID_CONTRACT", "sample fraction must be in [0, 1]")
+        from demiflow.operators.ordering import sample_fraction, sample_record
+        fraction = sample_fraction(_cfg(spec, "fraction"))
         seed = _seed(spec, services)
-        key = _shuffle_key_bytes(record.record_id, seed=seed, occurrence_id=_occurrence(spec))
-        if int.from_bytes(key[:8], "big") / float(1 << 64) < fraction:
+        if sample_record(record.record_id, fraction, seed=seed, occurrence_id=_occurrence(spec)):
             yield record
     else:
         raise _err("INVALID_CONTRACT", "kind is not a unary kernel", kind=kind)
@@ -532,17 +528,13 @@ def invoke_batch(
     else:
         rows = [_materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None)) for record in records]
     if expected is not None:
-        import pyarrow as pa
-        from demiflow.data.training_schema import PREDICTION_ROW_ID, validate_columns
+        from demiflow.data.training_schema import PREDICTION_ROW_ID
+        from demiflow.operators.arrow_batches import (validate_prediction_input, correlate_prediction_input,
+            prediction_output_schema, validate_prediction_row, validate_prediction_row_schema,
+            validate_prediction_count)
         required = cfg['predict_input_schema']
-        if schema is not None:
-            validate_columns(schema, required)
-        else:
-            for row in rows:
-                validate_columns(pa.RecordBatch.from_pylist([row]).schema, required)
+        validate_prediction_input(rows, schema, required, keyed=keyed)
         if keyed:
-            if any(PREDICTION_ROW_ID in row for row in rows):
-                raise _err('INVALID_CONTRACT', 'Predictor input contains the reserved correlation column')
             input_bytes += sum(len(record.record_id) + len(PREDICTION_ROW_ID) + 64 for record in records)
             if input_bytes > services.bounds.max_batch_bytes:
                 raise _err('BUDGET_EXCEEDED', 'Prediction input identities exceed the batch budget')
@@ -550,16 +542,11 @@ def invoke_batch(
             # Include its position in this call so both results have to echo
             # their own occurrence even when their source identities match.
             prediction_ids = tuple(_hash_id([rec.record_id, i]) for i, rec in enumerate(records))
-            rows = [{**row, PREDICTION_ROW_ID: key} for row, key in zip(rows, prediction_ids)]
-            if schema is not None:
-                schema = schema.append(pa.field(PREDICTION_ROW_ID, pa.string()))
+            rows, schema = correlate_prediction_input(rows, schema, prediction_ids)
 
     def output_schema(value):
         if expected is not None and value is not None:
-            validate_columns(value, expected)
-            if keyed:
-                validate_columns(value, {PREDICTION_ROW_ID: 'string'})
-                value = value.remove(value.get_field_index(PREDICTION_ROW_ID))
+            value = prediction_output_schema(value, expected, keyed=keyed)
         output_ref[0] = schemas.put(value)
 
     if kind == "MapBatchesOp":
@@ -586,15 +573,9 @@ def invoke_batch(
             if input_bytes + extra > services.bounds.max_batch_bytes:
                 raise _err("BUDGET_EXCEEDED", "add_column coexistence exceeds budget")
             values = _batch_values(instance(batch))
-            if len(values) != len(rows):
-                raise _err("INVALID_CONTRACT", "add_column result length must match batch")
+            from demiflow.operators.relational import add_column_rows
             column = _cfg(spec, "column")
-            if schema is not None:
-                import pyarrow as pa
-                fields = [field for field in schema if field.name != column]
-                fields.append(pa.field(column, pa.array(values).type))
-                output_schema(pa.schema(fields, metadata=schema.metadata))
-            out_rows = [{**row, column: value} for row, value in zip(rows, values)]
+            out_rows = add_column_rows(rows, column, values, schema=schema, on_schema=output_schema)
         else:
             if kind == "SaveLanceOp":
                 from demiflow.lance.flow_contract import stream_lance_output_schema
@@ -629,20 +610,18 @@ def invoke_batch(
         for index, out_row in enumerate(out_rows):
             _check_stop(services)
             if expected is not None:
-                if index >= len(records):
-                    raise _err('INVALID_CONTRACT', 'Predictor returned more rows than its input batch')
-                if keyed and out_row.pop(PREDICTION_ROW_ID, None) != prediction_ids[index]:
-                    raise _err('INVALID_CONTRACT', 'Predictor changed the input occurrence order')
+                validate_prediction_row(out_row, index, len(records),
+                    identities=prediction_ids if keyed else None)
                 count += 1
             record_id, source = binding(index)
             if expected is not None and output_ref[0] is None:
-                validate_columns(pa.RecordBatch.from_pylist([out_row]).schema, expected)
+                validate_prediction_row_schema(out_row, expected)
             out = _output_record(record_id, source.source_position, out_row, source.sequence, services,
                                  schema_ref=output_ref[0], retained=retained)
             budget.charge(out)
             yield out
-        if expected is not None and count != len(records):
-            raise _err('INVALID_CONTRACT', 'Predictor must return one result row for every input')
+        if expected is not None:
+            validate_prediction_count(count, len(records))
     finally:
         close = getattr(out_rows, 'close', None)
         if close is not None:

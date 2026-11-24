@@ -43,3 +43,31 @@ def group_batches_facts(operation):
     return {'contract': 'demiflow.stream_group_batches',
                     'arguments': {name: getattr(operation, name) for name in
                                   ('on', 'output', 'chunk_bytes', 'max_groups', 'buffer_bytes')}}
+
+
+def group_evictions(key, size, *, groups, sizes, chunk_bytes, buffer_bytes, buffered_bytes, max_groups):
+    """Choose evictions against the same live group state after each yielded flush."""
+    if key in groups and sizes[key] + size > chunk_bytes:
+        yield key
+    while groups and buffered_bytes() + size > buffer_bytes:
+        yield next(iter(groups))
+    if key not in groups and len(groups) >= max_groups:
+        yield next(iter(groups))
+
+
+def append_group(row, key, size, *, groups, sizes, bases, on, max_batch):
+    if key not in groups:
+        groups[key] = []
+        sizes[key] = 0
+        bases[key] = {field: row[field] for field in on}
+    groups[key].append(row)
+    sizes[key] += size
+    return size, len(groups[key]) >= max_batch
+
+
+def pop_group(key, *, groups, sizes, bases, output):
+    batch = groups.pop(key, [])
+    base = bases.pop(key, {})
+    released = sizes.pop(key, 0)
+    # An online microbatch cannot assert a final complete group.
+    return ({**base, output: batch} if batch else None), released

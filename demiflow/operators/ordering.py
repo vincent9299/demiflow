@@ -1,6 +1,8 @@
 """Ordering implementation."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 from contextlib import closing
 
 import hashlib
@@ -487,3 +489,15 @@ def measured_merge_window(window, largest):
     per_reader = 4 * largest + 4 * window.read_chunk_bytes + 1024
     fan = max(2, (window.merge_reader_bytes - 4096) // per_reader)
     return replace(window, merge_fan_in=min(window.merge_fan_in, fan))
+
+
+def sample_fraction(value):
+    fraction = float(value)
+    if not 0.0 <= fraction <= 1.0:
+        raise DataflowError('INVALID_CONTRACT', 'sample fraction must be in [0, 1]')
+    return fraction
+
+
+def sample_record(record_id, fraction, *, seed, occurrence_id):
+    key = shuffle_key_bytes(record_id, seed=seed, occurrence_id=occurrence_id)
+    return int.from_bytes(key[:8], 'big') / float(1 << 64) < fraction

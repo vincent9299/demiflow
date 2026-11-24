@@ -1,6 +1,8 @@
 """Join key membership, matching, row combination and native offset queries."""
 from __future__ import annotations
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 import json
 import copy
 import pickle
@@ -383,3 +385,20 @@ def rename_columns(row, names):
         if len(row) != len(targets):
             raise DataflowError("INVALID_CONTRACT", "rename list length must match schema")
         return dict(zip(targets, row.values()))
+
+
+def add_column_row(row, column, values):
+    if len(values) != 1:
+        raise DataflowError('INVALID_CONTRACT', 'add_column result length must match batch')
+    return {**row, column: values[0]}
+
+
+def add_column_rows(rows, column, values, *, schema, on_schema):
+    if len(values) != len(rows):
+        raise DataflowError('INVALID_CONTRACT', 'add_column result length must match batch')
+    if schema is not None:
+        import pyarrow as pa
+        fields = [field for field in schema if field.name != column]
+        fields.append(pa.field(column, pa.array(values).type))
+        on_schema(pa.schema(fields, metadata=schema.metadata))
+    return [{**row, column: value} for row, value in zip(rows, values)]

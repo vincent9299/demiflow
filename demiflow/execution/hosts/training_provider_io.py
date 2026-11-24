@@ -1,5 +1,8 @@
 """Deadline-aware transport calls; only the driver may mutate durable fit state."""
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.recovery_contract import identity
+
 from importlib import import_module
 from concurrent.futures import Future
 import inspect
@@ -73,3 +76,47 @@ def instantiate_provider(factory, binding):
     if not separator or not all(part.isidentifier() for part in module.split('.')) or not name.isidentifier():
         raise ValueError("Invalid deployment provider factory")
     return getattr(import_module(module), name)(binding)
+
+
+def verify_job_authority(manager, scope, run, key):
+    binding = scope['document']['provider_binding']
+    if (scope['run_id'] != run.ref.run_id or binding.get('provider') != 'local'
+            or binding.get('worker_mode') != 'process'
+            or binding.get('capacity_root') != str(manager.provider.pool.root)
+            or binding.get('job_authority') != run.journal.source_binding('fit-resource-' + key)):
+        raise DataflowError('INCOMPATIBLE_HISTORY', 'Original training resource domain changed')
+    if 'device_authority' in binding:
+        if binding['device_authority'] != identity(manager.provider.device_authority()):
+            raise DataflowError('INCOMPATIBLE_HISTORY', 'Original training device authority changed')
+    elif manager.state.read_allocation(scope['scope_id'], key):
+        record = manager.state.read_cleanup_allocation(scope['scope_id'], key)
+        if record['effective'].get('accelerators'):
+            raise DataflowError('UNKNOWN_EFFECT', 'Original training device authority has no receipt')
+
+
+def job_provider_binding(manager, profile, authority):
+    binding = dict(provider='local', worker_mode='process', capacity_root=str(manager.provider.pool.root),
+                   job_authority=authority)
+    if profile.requests.get('accelerators'):
+        grant = manager.provider.device_authority()
+        if grant is None:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'Managed job requires a device authority')
+        binding['device_authority'] = identity(grant)
+    return binding
+
+
+def released_gpu_seconds(provider, key, spec_hash):
+    seconds = provider.released_device_seconds(key, spec_hash, 'gpu')
+    if seconds is None:
+        raise DataflowError('UNKNOWN_EFFECT', 'Original GPU reservation lacks a confirmed release receipt')
+    return seconds
+
+
+def observe_job_phase(provider, scope_id, key, status):
+    observations = provider.inspect(scope_id, None)['allocations']
+    if observations:
+        item, = observations
+        if item['allocation_id'] != key or item['observation'] != 'FRESH':
+            return 'unknown'
+        return item['phase'].lower()
+    return status['phase'].lower() if status else 'unknown'

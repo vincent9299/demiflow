@@ -2209,3 +2209,10 @@ PAYLOAD_FIELDS = ('memory_bytes', 'max_rss_bytes', 'max_row_bytes', 'max_batch_b
 
 
 NATIVE_STREAM_LANCE_SCHEMA = 'demiflow.stream_lance.v3'
+
+
+REF_CARRIER = 'stored_typed_row.v1'
+
+MIN_TERMINAL_WORKSPACE = 8192
+
+MIN_TERMINAL_INDEX = 3072  # First block and its first forest root.

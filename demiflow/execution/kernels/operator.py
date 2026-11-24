@@ -1094,23 +1094,17 @@ class OperatorKernel:
         key=_group_key(row,on)
         size=self._group_row_bytes(row)
         chunk,buffer=self._group_limits()
-        if key in self._groups and self._group_bytes[key]+size>chunk:
-            yield from self._emit_group(key,last=False)
-        while self._groups and self._group_buffer_bytes+size>buffer:
-            yield from self._flush_oldest_group()
-        if key not in self._groups:
-            max_groups=int(_cfg(self._spec,'max_groups'))
-            if len(self._groups)>=max_groups:
-                yield from self._flush_oldest_group()
-            self._groups[key]=[]
-            self._group_bytes[key]=0
-            self._group_base[key]={field:row[field] for field in on}
-        self._groups[key].append(row)
-        self._group_bytes[key]+=size
-        self._group_buffer_bytes+=size
+        from demiflow.operators.grouping import group_evictions, append_group
+        for evicted in group_evictions(key, size, groups=self._groups, sizes=self._group_bytes,
+                chunk_bytes=chunk, buffer_bytes=buffer, buffered_bytes=lambda: self._group_buffer_bytes,
+                max_groups=int(_cfg(self._spec, 'max_groups'))):
+            yield from self._emit_group(evicted, last=False)
+        added, full = append_group(row, key, size, groups=self._groups, sizes=self._group_bytes,
+            bases=self._group_base, on=on, max_batch=max_batch)
+        self._group_buffer_bytes += added
         self._reset_timer()
-        if len(self._groups[key])>=max_batch:
-            yield from self._emit_group(key,last=False)
+        if full:
+            yield from self._emit_group(key, last=False)
         yield from self._flush_expired_groups()
 
     def _reset_timer(self) -> None:
@@ -1133,16 +1127,14 @@ class OperatorKernel:
     def _emit_group(self, key: str, *, last: bool) -> Iterator[Record]:
         from demiflow.execution.kernels.dataflow import _output_record, _OutputBudget
 
-        batch = self._groups.pop(key, [])
-        base = self._group_base.pop(key, {})
-        self._group_buffer_bytes -= self._group_bytes.pop(key,0)
+        from demiflow.operators.grouping import pop_group
+        row, released = pop_group(key, groups=self._groups, sizes=self._group_bytes,
+            bases=self._group_base, output=self._spec.configuration.get("output", "items"))
+        self._group_buffer_bytes -= released
         if not self._groups:
             self._timer_deadline = None
-        if not batch:
+        if row is None:
             return
-        output = self._spec.configuration.get("output", "items")
-        # An online microbatch cannot assert a final complete group.
-        row = {**base, output: batch}
         record_id = _hash_id(["dataflow-record-v3", self._occurrence, "stream-group", self._emitted])
         out = _output_record(record_id, {"group_key": key}, row, self._emitted, self._services)
         _OutputBudget(self._spec, self._services, streaming=True).charge(out)

@@ -171,7 +171,8 @@ def partition_stages(
         # below the full pair of maximum business rows.
         if 'codec_min_bytes' in kernel.configuration and kernel.state == 'none':
             resident = min(resident, kernel.profile.requests['memory_bytes'])
-        from demiflow.execution.scheduler.dataflow_publication_budget import REF_CARRIER, TERMINAL_WORKSPACE
+        from demiflow.execution.contracts.dataflow import REF_CARRIER
+        from demiflow.execution.contracts.dataflow import TERMINAL_WORKSPACE
         memory = kernel.configuration.get('terminal_memory', {})
         if node.kind == 'terminal' and (kernel.configuration.get('input_carrier') == REF_CARRIER
                 or memory.get('schema') == TERMINAL_WORKSPACE):

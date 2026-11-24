@@ -598,3 +598,18 @@ def result_schema_ref(result, *, services):
     if ref is not None:
         RecordSchemas(services).read(ref)
     return ref
+
+
+def published_result(kind, publication, *, result_ref, source_exhausted, native_receipt, queue_settled):
+    """Deliver the public result from an already confirmed original publication."""
+    from demiflow.execution.contracts.dataflow import TerminalResult
+    from demiflow.data.datasink import WriteResult
+    rows = publication['manifest']['total_rows']
+    write = None
+    if kind in ('write_lance', 'write_datasink', 'write_file'):
+        write = WriteResult(written_rows=rows, blocks_written=len(publication['manifest']['partitions']),
+            metadata={'native_receipt': native_receipt, 'queue_settled': queue_settled})
+    return TerminalResult(kind=kind, rows=rows,
+        scalar=rows if kind == 'count' else publication['manifest']['partitions'][0].get('scalar'),
+        result_ref=result_ref, write_result=write, complete=True,
+        completion='source_exhausted' if source_exhausted else 'terminal_satisfied')
