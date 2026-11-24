@@ -254,11 +254,30 @@
     const treeTitle = node('span', 'dev-section-title', '项目目录');
     treeToggle.append(chevronIcon(), treeTitle);
     const treeHeaderActions = node('div', 'dev-section-actions');
+    const treeCreateToggle = iconButton('新建文件', 'M12 5v14M5 12h14');
+    treeCreateToggle.setAttribute('aria-expanded', 'false');
     const treeSearchToggle = iconButton('搜索项目目录', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
     treeSearchToggle.setAttribute('aria-expanded', 'false');
     const treeRefresh = iconButton('刷新项目目录', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    treeHeaderActions.append(treeSearchToggle, treeRefresh);
+    treeHeaderActions.append(treeCreateToggle, treeSearchToggle, treeRefresh);
     treeHeader.append(treeToggle, treeHeaderActions);
+    const treeCreateWrap = node('div', 'dev-tree-create-wrap');
+    treeCreateWrap.hidden = true;
+    const treeCreateBar = node('div', 'dev-tree-search');
+    const treeCreateInput = document.createElement('input');
+    treeCreateInput.type = 'text';
+    treeCreateInput.className = 'dev-tree-search-input';
+    treeCreateInput.placeholder = '新建文件，如 .env 或 configs/a.json';
+    treeCreateInput.setAttribute('aria-label', '新建文件路径');
+    const treeCreateSubmit = node('button', 'dev-tree-create-submit', '创建');
+    treeCreateSubmit.type = 'button';
+    const treeCreateCancel = node('button', 'dev-tree-search-clear', '×');
+    treeCreateCancel.type = 'button';
+    treeCreateCancel.setAttribute('aria-label', '取消新建文件');
+    treeCreateBar.append(treeCreateInput, treeCreateSubmit, treeCreateCancel);
+    const treeCreateError = node('div', 'dev-tree-create-error');
+    treeCreateError.hidden = true;
+    treeCreateWrap.append(treeCreateBar, treeCreateError);
     const treeSearchBar = node('div', 'dev-tree-search');
     treeSearchBar.hidden = true;
     const treeSearchInput = document.createElement('input');
@@ -276,16 +295,18 @@
     treeSearchResults.hidden = true;
     const treeHost = node('ul', files.level);
     treeBody.append(treeSearchResults, treeHost);
-    treeSection.append(treeHeader, treeSearchBar, treeBody);
+    treeSection.append(treeHeader, treeCreateWrap, treeSearchBar, treeBody);
     explorer.append(changedSection, splitHandle, treeSection);
     if (filesHost) filesHost.append(explorer);
 
+    let treeCreateOpen = false, creatingFile = false;
     function applyExplorerSplit() {
       const hasChanges = !changedSection.hidden;
       changedToggle.setAttribute('aria-expanded', String(changedOpen));
       treeToggle.setAttribute('aria-expanded', String(treeOpen));
       changedList.hidden = !changedOpen;
       historyWrap.hidden = !changedOpen || approvedHistory.length === 0;
+      treeCreateWrap.hidden = !treeOpen || !treeCreateOpen;
       treeSearchBar.hidden = !treeOpen || !treeSearchOpen;
       treeBody.hidden = !treeOpen;
       changedSection.classList.toggle('is-collapsed', !changedOpen);
@@ -385,10 +406,6 @@
     approveFileBtn.type = 'button';
     approveFileBtn.title = '标记当前文件改动已审核通过（保留修改历史）';
     approveFileBtn.hidden = true;
-    const envInitBtn = node('button', 'dev-action-btn dev-action-approve', '创建 .env');
-    envInitBtn.type = 'button';
-    envInitBtn.title = '从 .env.example 复制创建本地 .env（不入 Git）';
-    envInitBtn.hidden = true;
     const saveBtn = node('button', 'dev-action-btn dev-action-save', '保存');
     saveBtn.type = 'button';
     saveBtn.title = '保存修改 (Ctrl/⌘+S)';
@@ -403,7 +420,7 @@
     const copyBtn = node('button', 'dev-action-btn', '复制');
     copyBtn.type = 'button';
     const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    toolActions.append(modeSwitch, envInitBtn, saveBtn, revertBtn, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
+    toolActions.append(modeSwitch, saveBtn, revertBtn, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
@@ -732,13 +749,7 @@
       const st = entry.status && entry.status !== 'clean' ? entry.status : ch?.status;
       const canEdit = Boolean(viewMode === 'source' && entry.writable);
       const dirty = hasUnsavedDraft(activePath);
-      const showEnvInit = activePath === '.env.example' && entry.writable;
 
-      envInitBtn.hidden = !showEnvInit;
-      if (showEnvInit) {
-        envInitBtn.textContent = entry.envExists ? '打开 .env' : '创建 .env';
-        envInitBtn.title = entry.envExists ? '打开项目本地 .env 进行编辑' : '从 .env.example 复制创建本地 .env（不入 Git）';
-      }
       saveBtn.hidden = !canEdit;
       saveBtn.disabled = savingFile || !dirty;
       saveBtn.textContent = savingFile ? '保存中…' : '保存';
@@ -830,29 +841,6 @@
       entry.saveError = '';
       if (viewerHandle?.setText) viewerHandle.setText(entry.modified ?? '');
       syncEditControls();
-    }
-
-    async function initOrOpenEnvFile() {
-      const entry = activePath ? fileCache.get(activePath) : null;
-      if (!entry || !entry.writable) return;
-      if (entry.envExists) {
-        openFile('.env', 'source');
-        return;
-      }
-      envInitBtn.disabled = true;
-      try {
-        await api('project-env-init', {}, {});
-        if (disposed) return;
-        entry.envExists = true;
-        resetTree();
-        openFile('.env', 'source');
-      } catch (err) {
-        if (disposed) return;
-        entry.saveError = err?.message || '创建 .env 失败';
-        syncEditControls();
-      } finally {
-        envInitBtn.disabled = false;
-      }
     }
 
     function paintActiveCode() {
@@ -952,7 +940,6 @@
           unifiedDiff: obs?.diff || null,
           writable: data.writable === true,
           readonlyReason: data.readonly_reason || '',
-          envExists: data.env_exists === true,
           draft: keepDraft,
           justSaved: false,
           saveError: '',
@@ -1204,11 +1191,72 @@
       else treeSearchTimer = setTimeout(run, 140);
     }
 
+    function setTreeCreateOpen(open) {
+      treeCreateOpen = Boolean(open);
+      treeCreateToggle.setAttribute('aria-expanded', String(treeCreateOpen));
+      treeCreateToggle.classList.toggle('is-active', treeCreateOpen);
+      if (treeCreateOpen) {
+        if (!treeOpen) treeOpen = true;
+        if (treeSearchOpen) setTreeSearchOpen(false);
+      } else {
+        treeCreateInput.value = '';
+        treeCreateError.textContent = '';
+        treeCreateError.hidden = true;
+      }
+      applyExplorerSplit();
+      if (treeCreateOpen) treeCreateInput.focus();
+    }
+
+    async function submitCreateFile() {
+      if (creatingFile) return;
+      const raw = (treeCreateInput.value || '').trim().replace(/^\/+/, '');
+      if (!raw) {
+        treeCreateError.textContent = '请输入相对路径，如 .env 或 configs/a.json';
+        treeCreateError.hidden = false;
+        treeCreateInput.focus();
+        return;
+      }
+      creatingFile = true;
+      treeCreateSubmit.disabled = true;
+      treeCreateError.hidden = true;
+      try {
+        const res = await api('project-file-create', {}, {path: raw});
+        if (disposed) return;
+        const createdPath = res?.path || raw;
+        setTreeCreateOpen(false);
+        resetTree();
+        // Auto-expand parent directories so the newly created file is visible in the tree.
+        const parts = createdPath.split('/');
+        if (parts.length > 1) {
+          let acc = '';
+          for (let i = 0; i < parts.length - 1; i++) {
+            acc += '/' + parts[i];
+            if (!expanded.includes(acc)) {
+              expanded.push(acc);
+              list(acc);
+            }
+          }
+        }
+        openFile(createdPath, 'source');
+        refreshChanges();
+      } catch (err) {
+        if (disposed) return;
+        treeCreateError.textContent = err?.message || '创建文件失败';
+        treeCreateError.hidden = false;
+      } finally {
+        creatingFile = false;
+        treeCreateSubmit.disabled = false;
+      }
+    }
+
     function setTreeSearchOpen(open) {
       treeSearchOpen = Boolean(open);
       treeSearchToggle.setAttribute('aria-expanded', String(treeSearchOpen));
       treeSearchToggle.classList.toggle('is-active', treeSearchOpen);
-      if (treeSearchOpen && !treeOpen) treeOpen = true;
+      if (treeSearchOpen) {
+        if (!treeOpen) treeOpen = true;
+        if (treeCreateOpen) setTreeCreateOpen(false);
+      }
       applyExplorerSplit();
       if (treeSearchOpen) {
         treeSearchInput.focus();
@@ -1218,6 +1266,13 @@
       }
     }
 
+    treeCreateToggle.onclick = () => setTreeCreateOpen(!treeCreateOpen);
+    treeCreateSubmit.onclick = () => submitCreateFile();
+    treeCreateCancel.onclick = () => setTreeCreateOpen(false);
+    treeCreateInput.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); submitCreateFile(); }
+      else if (e.key === 'Escape') { e.preventDefault(); setTreeCreateOpen(false); }
+    };
     treeSearchToggle.onclick = () => setTreeSearchOpen(!treeSearchOpen);
     treeSearchInput.oninput = () => scheduleTreeSearch();
     treeSearchInput.onkeydown = e => {
@@ -1789,7 +1844,6 @@
 
     diffModeBtn.onclick = () => { if (!diffModeBtn.disabled) { viewMode = 'diff'; paintActiveCode(); } };
     sourceModeBtn.onclick = () => { viewMode = 'source'; paintActiveCode(); };
-    envInitBtn.onclick = () => { initOrOpenEnvFile(); };
     saveBtn.onclick = () => { saveActiveFile(); };
     revertBtn.onclick = () => { revertActiveFile(); };
     approveFileBtn.onclick = () => {
