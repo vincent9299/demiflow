@@ -148,3 +148,49 @@ if (fs.promises && typeof fs.promises.rename === 'function') {
     }
   };
 }
+
+// On distributed filesystems where cross-directory hardlink returns EXDEV,
+// fall back ONLY on EXDEV to exclusive file creation ('wx') so atomic
+// create-if-not-exists semantics (EEXIST) are preserved.
+if (typeof fs.linkSync === 'function') {
+  const origLinkSync = fs.linkSync.bind(fs);
+  fs.linkSync = function (existingPath, newPath) {
+    try { return origLinkSync(existingPath, newPath); }
+    catch (err) {
+      if (err && err.code === 'EXDEV') {
+        const data = fs.readFileSync(existingPath);
+        fs.writeFileSync(newPath, data, { flag: 'wx' });
+        return undefined;
+      }
+      throw err;
+    }
+  };
+}
+if (typeof fs.link === 'function') {
+  const origLink = fs.link.bind(fs);
+  fs.link = function (existingPath, newPath, cb) {
+    return origLink(existingPath, newPath, (err) => {
+      if (err && err.code === 'EXDEV') {
+        return fs.readFile(existingPath, (readErr, data) => {
+          if (readErr) return cb(readErr);
+          return fs.writeFile(newPath, data, { flag: 'wx' }, cb);
+        });
+      }
+      return cb(err);
+    });
+  };
+}
+if (fs.promises && typeof fs.promises.link === 'function') {
+  const origPromiseLink = fs.promises.link.bind(fs.promises);
+  fs.promises.link = async function (existingPath, newPath) {
+    try { return await origPromiseLink(existingPath, newPath); }
+    catch (err) {
+      if (err && err.code === 'EXDEV') {
+        const data = await fs.promises.readFile(existingPath);
+        await fs.promises.writeFile(newPath, data, { flag: 'wx' });
+        return undefined;
+      }
+      throw err;
+    }
+  };
+}

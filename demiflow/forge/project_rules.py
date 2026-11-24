@@ -22,6 +22,8 @@ _OUTPUT_ARG_KEYS = frozenset({
     'output_directory', 'output_dir', 'output_path', 'output_root',
     'output', 'target_dir', 'target', 'destination', 'destinations',
 })
+_NOTEBOOK_UI_MODULES = frozenset({'IPython', 'ipywidgets'})
+_LOCAL_CODE_PACKAGES = frozenset({'flows', 'operators', 'data_tools', 'tests'})
 
 
 def _read_guide():
@@ -122,6 +124,112 @@ def _has_declared_export(path: Path, field: str) -> bool:
         return bool(names)
     except Exception:
         return False
+
+
+def _imports_notebook_ui(path: Path) -> bool:
+    try:
+        raw = read_bounded(path, 512 * 1024)
+        tree = ast.parse(raw, filename=str(path))
+    except Exception:
+        return False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any(alias.name.split('.', 1)[0] in _NOTEBOOK_UI_MODULES for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            if node.module.split('.', 1)[0] in _NOTEBOOK_UI_MODULES:
+                return True
+    return False
+
+
+def _project_import_prefixes(root: Path) -> list[tuple[str, ...]]:
+    """Derive possible package import prefixes for this project (e.g. ('pipelines', '<name>') or ('<name>',))."""
+    prefixes: list[tuple[str, ...]] = []
+    name = root.name
+    if name and name.isidentifier():
+        prefixes.append((name,))
+        parent = root.parent.name
+        if parent and parent.isidentifier():
+            prefixes.append((parent, name))
+    return prefixes
+
+
+def _module_exists(root: Path, rel_parts: tuple[str, ...]) -> bool:
+    if not rel_parts:
+        return True
+    base = root.joinpath(*rel_parts)
+    if base.with_suffix('.py').is_file():
+        return True
+    if base.is_dir():
+        return True
+    return False
+
+
+def _dangling_local_imports(root: Path, path: Path) -> list[tuple[int, str]]:
+    """Return [(lineno, module_spec)] for project-local imports whose target module does not exist."""
+    try:
+        raw = read_bounded(path, 512 * 1024)
+        tree = ast.parse(raw, filename=str(path))
+    except Exception:
+        return []
+    prefixes = _project_import_prefixes(root)
+    missing: list[tuple[int, str]] = []
+    seen: set[str] = set()
+
+    def strip_project_prefix(parts: tuple[str, ...]) -> tuple[str, ...] | None:
+        if not parts:
+            return None
+        if parts[0] in _LOCAL_CODE_PACKAGES:
+            return parts
+        for pref in prefixes:
+            if len(parts) > len(pref) and parts[:len(pref)] == pref:
+                return parts[len(pref):]
+        return None
+
+    def check_target(lineno: int, full_name: str, rel_parts: tuple[str, ...]):
+        if not rel_parts:
+            return
+        if not _module_exists(root, rel_parts):
+            if full_name not in seen:
+                seen.add(full_name)
+                missing.append((lineno, full_name))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = tuple(alias.name.split('.'))
+                rel = strip_project_prefix(parts)
+                if rel:
+                    check_target(node.lineno, alias.name, rel)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            parts = tuple(node.module.split('.'))
+            rel = strip_project_prefix(parts)
+            if rel is None:
+                # Also handle `from pipelines.<proj> import foo`
+                for pref in prefixes:
+                    if parts == pref:
+                        for alias in node.names:
+                            if alias.name == '*':
+                                continue
+                            check_target(node.lineno, f'{node.module}.{alias.name}', (alias.name,))
+                continue
+            if len(rel) == 1 and rel[0] in _LOCAL_CODE_PACKAGES:
+                # e.g. `from pipelines.<proj>.operators import moved_mod`
+                init_file = root / rel[0] / '__init__.py'
+                init_text = ''
+                if init_file.is_file():
+                    try:
+                        init_text = read_bounded(init_file, 65536).decode('utf-8', errors='ignore')
+                    except Exception:
+                        pass
+                for alias in node.names:
+                    if alias.name == '*':
+                        continue
+                    if not _module_exists(root, (*rel, alias.name)) and alias.name not in init_text:
+                        check_target(node.lineno, f'{node.module}.{alias.name}', (*rel, alias.name))
+            else:
+                check_target(node.lineno, node.module, rel)
+    return missing
 
 
 def _points_to_runs(root: Path, value) -> bool:
@@ -239,13 +347,16 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         else:
             add('orphan_flows', rel, 'flows/ 仅存放已登记的 Python Flow 入口文件；配置或辅助文件请迁入对应标准目录。')
 
-    # 4. Unreferenced / non-operator files in operators/.
+    # 4. Unreferenced / non-operator / Notebook-UI files in operators/.
     for rel in _iter_tree_files(root, 'operators', exclude=exclude):
         p = Path(rel)
         if p.name == '__init__.py' or p.suffix == '.pyc':
             continue
         if p.suffix != '.py':
             add('orphan_operators', rel, 'operators/ 仅存放 Python 算子模块；查看器模板请随工具迁入 data_tools/，配置请迁入 configs/。')
+            continue
+        if _imports_notebook_ui(root / rel):
+            add('notebook_tool_in_operators', rel, 'operators/ 模块导入了 Notebook 交互库（IPython/ipywidgets），属于 Notebook 查看/分析/标注工具；按 DF-02 规范请迁入 data_tools/ 并声明 __demiflow_data_tools__。')
             continue
         if rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
             add('orphan_operators', rel, 'operators/ 模块未被已登记 Flow 使用且未声明 __demiflow_operators__；若为 Notebook 查看/分析/标注工具请迁入 data_tools/ 并声明 __demiflow_data_tools__，若为废弃代码请清理。')
@@ -256,6 +367,22 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         if p.suffix == '.py' and p.name != '__init__.py':
             if not _has_declared_export(root / rel, '__demiflow_data_tools__'):
                 add('data_tools_export', rel, 'data_tools/ 模块需在顶层声明 __demiflow_data_tools__ 映射（如 {"review": "annotation"}）以便工作台「工具」面板发现。')
+
+    # 5b. Dangling project-local imports in tests/*.py (catches broken tests after cleanup/moves).
+    for rel in _iter_tree_files(root, 'tests', exclude=exclude):
+        p = Path(rel)
+        if p.suffix != '.py' or p.name == '__init__.py':
+            continue
+        dangling = _dangling_local_imports(root, root / rel)
+        if dangling:
+            first_line, first_mod = dangling[0]
+            extra = f' 等 {len(dangling)} 处' if len(dangling) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('broken_test_imports', []).append(
+                diagnostic('DF-02', rel,
+                           f'测试文件引用了不存在的项目模块 {first_mod}{extra}；删除或迁移模块后请同步更新或清理对应测试。',
+                           line=first_line)
+            )
 
     # 6. Unreferenced orphan files in configs/.
     config_files = _iter_tree_files(root, 'configs', exclude=exclude)
