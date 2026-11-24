@@ -386,6 +386,35 @@ def sqlite(work):
         'categories': ({'query_str': main, 'result_type': 'MainResult', 'categories': ['images']}, DEFAULT_QUERY),
         'nopaging': ({'query_str': main, 'result_type': 'MainResult', 'paging': False}, [('oak', {'pageno': 2})]),
         'badsql': ({'query_str': 'select nothing from nowhere where x = :query'}, DEFAULT_QUERY),
+        # the same rows whatever the columns of the query are called and however its text ends
+        'samename': ({'query_str': 'select label as a, n as a, link as b from docs where label like :wildcard '
+                                   'order by n'}, DEFAULT_QUERY),
+        'mainsamename': ({'query_str': 'select link as url, body as title, label as title from docs '
+                                       'where label = :query', 'result_type': 'MainResult'}, DEFAULT_QUERY),
+        'truename': ({'query_str': 'select label, true, n > 2 from docs where label like :wildcard order by n'},
+                     DEFAULT_QUERY),
+        'exprnames': ({'query_str': "select label || '!', n + 1, upper(link) from docs where label like :wildcard "
+                                    "order by n"}, DEFAULT_QUERY),
+        'quotednames': ({'query_str': 'select label as "x y", n as "a`b", link as "q""r", body as "" from docs '
+                                      'where label like :wildcard order by n'}, DEFAULT_QUERY),
+        'takennames': ({'query_str': 'select label as demiflow_n0, n as DEMIFLOW_N1, link as demiflow_taken from docs '
+                                     'where label like :wildcard order by n'}, DEFAULT_QUERY),
+        'star': ({'query_str': 'select * from docs where label like :wildcard order by n'}, DEFAULT_QUERY),
+        'types': ({'query_str': 'select label, cast(body as blob) as raw, n * 1.5 as real, null as missing, n '
+                                'from docs where label like :wildcard order by n'}, DEFAULT_QUERY),
+        'linecomment': ({'query_str': 'select label, n from docs where label like :wildcard order by n -- by n',
+                         'limit': 2}, [('oak', {}), ('oak', {'pageno': 2})]),
+        'blockcomment': ({'query_str': 'select label, n from docs where label like :wildcard order by n /* by n',
+                          'limit': 2}, [('oak', {}), ('oak', {'pageno': 2})]),
+        'compound': ({'query_str': 'select label, n from docs where n < 3 union all select label, n from docs '
+                                   'where n > 4 order by n', 'limit': 2}, [('oak', {}), ('oak', {'pageno': 2})]),
+        'aggregate': ({'query_str': 'select label, count(*) as c, group_concat(n) as ns from docs '
+                                    'where label like :wildcard group by label order by label'}, DEFAULT_QUERY),
+        'joined': ({'query_str': 'select d.label, s.c from docs d join (select label, count(*) as c from docs '
+                                 'group by label) s on s.label = d.label where d.label like :wildcard order by d.n',
+                    'limit': 2}, [('oak', {}), ('oak', {'pageno': 2})]),
+        'distinct': ({'query_str': 'select distinct label, n from docs where label like :wildcard order by n desc'},
+                     DEFAULT_QUERY),
     }
     items = [({'name': 'xq' + name, **base, **settings}, queries) for name, (settings, queries) in cases.items()]
     return items, dict(CONFIG)

@@ -449,3 +449,231 @@ def test_max_results_may_be_any_integer(tmp_path):
  w.send(values)
 ''', engines=({'name': 'one', 'engine': 'sqlite', 'database': str(database), 'query_str': 'select label from docs'},))
     assert result == [['ok', 1], ['ok', 1]]
+
+
+# Counts what the SQLite source reads into Python: the bytes of every text value as it is made (``made``) and the
+# rows a cursor hands over (``handed``); the database's own encoding name, which every search reads, is left out.
+COUNTING = '''
+ import sqlite3
+ made=[]; handed=[]; reading=['']
+ def text(raw):
+  if not reading[0].startswith('PRAGMA'): made.append(len(raw))
+  return raw.decode()
+ class Rows(sqlite3.Cursor):
+  def execute(self,sql,*args):
+   reading[0]=sql
+   return super().execute(sql,*args)
+  def __next__(self):
+   row=super().__next__()
+   handed.append(row)
+   return row
+ class Counted(sqlite3.Connection):
+  def __init__(self,*args,**kwargs):
+   super().__init__(*args,**kwargs)
+   self.text_factory=text
+  def cursor(self,factory=Rows): return super().cursor(factory)
+  def execute(self,*args): return self.cursor().execute(*args)
+ connect=sqlite3.connect
+ sqlite3.connect=lambda *args,**kwargs: connect(*args,**{**kwargs,'factory':Counted})
+ spec={'language':'en','pageno':1,'safesearch':0,'time_range':None,'engine_data':{}}
+ def run(name,query='x'):
+  made.clear(); handed.clear()
+  reply=w.run_search({'engine':name,'query':query,'parameters':spec},loaded,errors,set(),settings)
+  blobs=sum(len(value) for row in handed for value in row if isinstance(value,bytes))
+  return [reply['status'],reply.get('reason'),sum(made),blobs,len(reply['results'])]
+'''
+
+
+def test_sqlite_source_hands_over_no_more_than_a_reply_however_wide_the_row(tmp_path):
+    """SQLite adds up a row's text and blob bytes itself: what would pass the reply limit never enters Python."""
+    import sqlite3
+    database = tmp_path / 'wide.sqlite'
+    with sqlite3.connect(database) as db:
+        db.execute('create table docs (label text, body text, raw blob)')
+        db.execute("insert into docs values ('wide', ?, ?)", ('b' * 5000, b'\x01' * 5000))
+        db.executemany('insert into docs values (?, ?, ?)',
+                       [(f'row {i}', 'g' * 1000, b'\x02' * 1000) for i in range(8)])
+        db.execute("insert into docs values ('edge', ?, x'')", ('e' * 8192,))
+        db.execute("insert into docs values ('over', ?, x'')", ('o' * 8193,))
+        db.execute("insert into docs values ('many', ?, x'')", ('m' * 300,))
+        db.execute("insert into docs values ('few', ?, x'')", ('f' * 100,))
+
+    def source(name, query):
+        return {'name': name, 'engine': 'sqlite', 'database': str(database), 'limit': 100, 'query_str': query}
+
+    def columns(column, count):
+        return ', '.join(f'{column} as c{i}' for i in range(count))
+
+    result = probe(COUNTING + '''
+ settings['max_bytes']=1024; settings['max_results']=1000  # a reply may have 8 KiB
+ values={name: run(name) for name in loaded}
+ reply=w.run_search({'engine':'fortyfit','query':'x','parameters':spec},loaded,errors,set(),settings)
+ values['fields']=len(w.unpack(reply['results'][0])['kvmap'])
+ w.send(values)
+''', engines=(
+        source('text', f"select {columns('body', 8)} from docs where label = 'wide'"),  # 40,000 bytes in one row
+        source('blob', f"select {columns('raw', 8)} from docs where label = 'wide'"),
+        source('rows', f"select {columns('body', 3)} from docs where label like 'row %' order by label"),
+        source('blobrows', f"select {columns('raw', 3)} from docs where label like 'row %' order by label"),
+        source('edge', "select body from docs where label = 'edge'"),
+        source('over', "select body from docs where label = 'over'"),
+        source('forty', f"select {columns('body', 40)} from docs where label = 'many'"),  # 12,000 bytes in 40 columns
+        source('fortyfit', f"select {columns('body', 40)} from docs where label = 'few'"),
+        source('fits', "select label, body from docs where label = 'wide'")))
+    too_large = ['response_too_large', 'ResponseTooLarge']
+    assert result['text'] == [*too_large, 0, 0, 0] and result['blob'] == [*too_large, 0, 0, 0]
+    # rows of 3,000 bytes: two fit in 8,192, the third is not handed over
+    assert result['rows'] == [*too_large, 6000, 0, 0]
+    assert result['blobrows'][:2] == too_large and result['blobrows'][3] <= 6000
+    assert result['edge'] == [*too_large, 8192, 0, 0]  # exactly a reply: handed over, too large once encoded
+    assert result['over'] == [*too_large, 0, 0, 0]  # one byte more: not handed over
+    assert result['forty'] == [*too_large, 0, 0, 0]
+    assert result['fortyfit'] == ['ok', '', 4000, 0, 1] and result['fields'] == 40
+    assert result['fits'] == ['ok', '', 5004, 0, 1]
+
+
+def test_sqlite_reply_limit_does_not_bound_what_a_query_reads(tmp_path):
+    """Sort keys, measured values, the schema and the search text may be longer than a reply; so may UTF-16 text."""
+    import sqlite3
+    database, wide = tmp_path / 'long.sqlite', tmp_path / 'utf16.sqlite'
+    with sqlite3.connect(database) as db:
+        db.execute('create table docs (id integer primary key, url text, title text, body text)')
+        db.executemany('insert into docs values (?, ?, ?, ?)', [
+            (1, 'https://example.org/a', 'oak a', 'k' * 12000), (2, 'https://example.org/b', 'oak b', 'j' * 12000)])
+        db.execute("create view unrelated as select '%s' as x" % ('v' * 12000))
+    with sqlite3.connect(wide) as db:
+        db.execute("pragma encoding = 'UTF-16'")
+        db.execute('create table docs (title text, body text)')
+        db.executemany('insert into docs values (?, ?)', [
+            ('fits', 'u' * 6000), ('over', 'u' * 9000), ('wide', '橡' * 3000)])
+
+    def source(name, query, path=database):
+        return {'name': name, 'engine': 'sqlite', 'database': str(path), 'limit': 100, 'query_str': query}
+
+    result = probe(COUNTING + '''
+ settings['max_bytes']=1024; settings['max_results']=1000  # a reply may have 8 KiB
+ values={name: run(name) for name in loaded if name!='searched'}
+ values['searched']=run('searched','q'*9000)
+ w.send(values)
+''', engines=(
+        source('schema', 'select url, title from docs'),  # the view of 12,000 characters is none of its business
+        source('sorted', 'select id from docs order by body'),
+        source('measured', 'select length(body) as n from docs'),
+        source('head', 'select substr(body, 1, 10) as head from docs'),
+        source('searched', 'select url, title from docs where title = :query or id = 1'),
+        source('fits', "select title, body from docs where title = 'fits'", wide),
+        source('over', "select title, body from docs where title = 'over'", wide),
+        source('wide', "select body from docs where title = 'wide'", wide)))
+    assert result['schema'] == ['ok', '', 52, 0, 2]
+    assert result['sorted'] == ['ok', '', 0, 0, 2] and result['measured'] == ['ok', '', 0, 0, 2]
+    assert result['head'] == ['ok', '', 20, 0, 2]
+    assert result['searched'] == ['ok', '', 26, 0, 1]
+    # UTF-16 text counts at half its stored size: 6,000 characters fit, 9,000 do not and are not handed over
+    assert result['fits'] == ['ok', '', 6004, 0, 1]
+    assert result['over'] == ['response_too_large', 'ResponseTooLarge', 0, 0, 0]
+    # 3,000 CJK characters are 6,000 bytes there and 9,000 in UTF-8: read (within three times a reply), then too large
+    assert result['wide'] == ['response_too_large', 'ResponseTooLarge', 9000, 0, 0]
+
+
+def test_sqlite_value_limit_is_separate_from_the_reply_limit(tmp_path):
+    """What SQLite may handle while it runs the query has a limit of its own and a status of its own."""
+    import sqlite3
+    from demiflow.collect.native_search.engines import sqlite as engine
+    assert engine.VALUE_LIMIT == 32 * 1024 * 1024 and engine.ValueTooLarge.status == 'resource_limit'
+    database = tmp_path / 'values.sqlite'
+    with sqlite3.connect(database) as db:
+        db.execute('create table docs (label text, body text)')
+        db.executemany('insert into docs values (?, ?)', [
+            ('small', 's' * 6000), ('medium', 'm' * 12000), ('large', 'l' * 20000)])
+
+    def source(name, query):
+        return {'name': name, 'engine': 'sqlite', 'database': str(database), 'limit': 100, 'query_str': query}
+
+    result = probe(COUNTING + '''
+ settings['max_bytes']=1024; settings['max_results']=1000  # a reply may have 8 KiB
+ for module in loaded.values(): module.VALUE_LIMIT=16384
+ values={name: run(name) for name in loaded}
+ for module in loaded.values(): module.VALUE_LIMIT=1  # never under one reply, nor under the search text
+ values['floor']=[run('returnedsmall'), run('sortedsmall','q'*9000)]
+ w.send(values)
+''', engines=(
+        source('sortedmedium', "select label from docs where label != 'large' order by body"),
+        source('sortedlarge', 'select label from docs order by body'),
+        source('measuredlarge', "select length(body) as n from docs where label = 'large'"),
+        source('returnedlarge', "select body from docs where label = 'large'"),
+        source('returnedmedium', "select body from docs where label = 'medium'"),
+        source('returnedsmall', "select body from docs where label = 'small'"),
+        source('sortedsmall', "select label from docs where label = 'small' or label = :query order by body")))
+    assert result['sortedmedium'] == ['ok', '', 11, 0, 2]  # a sort key of 12,000 bytes, more than a reply
+    over = ['resource_limit', 'ValueTooLarge', 0, 0, 0]  # 20,000 bytes: more than SQLite may handle here
+    assert result['sortedlarge'] == over and result['measuredlarge'] == over and result['returnedlarge'] == over
+    # inside that limit, a value longer than a reply is still not handed over
+    assert result['returnedmedium'] == ['response_too_large', 'ResponseTooLarge', 0, 0, 0]
+    assert result['returnedsmall'] == ['ok', '', 6000, 0, 1]
+    assert result['floor'] == [['ok', '', 6000, 0, 1], ['ok', '', 5, 0, 1]]
+
+
+def test_what_a_source_returns_is_closed_once(monkeypatch):
+    """The object an adapter returned is closed however the search ends, and so is the iterator made from it."""
+    from demiflow.collect.native_search import worker, worker_network as wn
+    monkeypatch.setattr(wn._State, 'config', {'max_bytes': 100})  # a reply may have 800 bytes
+    rows = [{'url': f'https://example.org/{index}', 'title': 'x' * 10} for index in range(3)]
+    closed = []
+
+    class Owner:
+        """Owns something to release; iterating it goes through another object."""
+
+        def __init__(self, iterate):
+            self.iterate = iterate
+
+        def __iter__(self):
+            return self.iterate()
+
+        def close(self):
+            closed.append('owner')
+
+    class Reader:
+        """Its own iterator, with a ``close`` of its own."""
+
+        def __init__(self):
+            self.rows = iter(rows)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self.rows)
+
+        def close(self):
+            closed.append('reader')
+
+    def produced():
+        try:
+            yield from rows
+        finally:
+            closed.append('generator')
+
+    def failing():
+        yield rows[0]
+        raise RuntimeError('iteration failed')
+
+    def run(results, limit=5, error=None):
+        closed.clear()
+        if error is None:
+            assert len(worker.within_budget(results, limit)) == 3
+        else:
+            with pytest.raises(error):
+                worker.within_budget(results, limit)
+        return list(closed)
+
+    assert run(Owner(lambda: iter(rows))) == ['owner']  # the list iterator has nothing to close
+    assert run(Owner(lambda: iter(rows)), limit=2, error=wn.ResponseTooLarge) == ['owner']
+    assert run(Owner(failing), error=RuntimeError) == ['owner']
+    assert run(Owner(produced)) == ['generator', 'owner']  # the iterator first, then what it came from
+    assert run(Owner(produced), limit=2, error=wn.ResponseTooLarge) == ['generator', 'owner']
+    assert run(Owner(lambda: None), error=TypeError) == ['owner']  # it cannot even be iterated
+    assert run(Reader()) == ['reader'] and run(Reader(), limit=2, error=wn.ResponseTooLarge) == ['reader']
+    assert run(produced()) == ['generator'] and run(produced(), limit=2, error=wn.ResponseTooLarge) == ['generator']
+    assert run(list(rows)) == []
+    wide = [{'url': 'https://example.org/wide', 'title': 'x' * 1000}]
+    assert run(Owner(lambda: iter(wide)), error=wn.ResponseTooLarge) == ['owner']  # past the bytes of a reply

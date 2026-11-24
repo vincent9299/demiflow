@@ -12,8 +12,10 @@ request: they share the source's admission, budgets and receipts.
 An offline adapter's ``search`` may return a list or yield its results one at a
 time. The worker counts them as they come and stops at ``max_results`` or at
 ``output_limit()`` encoded bytes (``ResponseTooLarge``); an adapter that reads
-from a store should read no more than that, and raise ``ResponseTooLarge`` for a
-single value it cannot take.
+from a store should hand over no more than that, and raise ``ResponseTooLarge``
+before it reads a result that cannot fit. However the search ends, the worker
+closes what ``search`` returned: its ``close()`` when it has one, and that of the
+iterator made from it.
 """
 import re
 from html.parser import HTMLParser

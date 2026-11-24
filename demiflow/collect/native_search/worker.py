@@ -227,14 +227,17 @@ def within_budget(results, limit):
     Records are taken one at a time and counted: the first one past ``limit`` records, or past the bytes
     one reply may have (``worker_network.output_limit``, counted on the packed and encoded records), ends
     the search as response_too_large. A source that produces its results one by one (the SQLite source
-    reading rows) is asked for nothing beyond that and is closed.
+    reading rows) is asked for nothing beyond that.
+
+    However this ends, what the adapter returned is closed, once: the object itself when it has ``close``, and
+    the iterator made from it when that is another object with a ``close`` (first the iterator).
     """
     from . import worker_network
     limit = min(limit, sys.maxsize)  # a count no list could reach is no limit
-    room, packed = worker_network.output_limit(), []
-    results = iter(results)
+    room, packed, records = worker_network.output_limit(), [], None
     try:
-        for record in results:
+        records = iter(results)
+        for record in records:
             if len(packed) >= limit:
                 raise worker_network.ResponseTooLarge()
             item = pack(record)
@@ -243,9 +246,14 @@ def within_budget(results, limit):
                 raise worker_network.ResponseTooLarge()
             packed.append(item)
     finally:
-        close = getattr(results, 'close', None)
-        if close is not None:
-            close()
+        try:
+            close = None if records is results else getattr(records, 'close', None)
+            if close is not None:
+                close()
+        finally:
+            close = getattr(results, 'close', None)
+            if close is not None:
+                close()
     return packed
 
 

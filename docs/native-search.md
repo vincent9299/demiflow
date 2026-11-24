@@ -62,6 +62,8 @@
   - `SearxEngineAPIException`（baidu、quark、qwant、pexels）、`SearxEngineException`（public domain image archive）、`SearxEngineResponseException`（wikisearch）→ `SourceError`。
   - 其他解析异常仍记录原异常类名（如 `KeyError`）。
 - 一次搜索的结果字节超过回复上限时，回执记录的 `reason` 由 `Worker output limit` 改为 `ResponseTooLarge`（与结果数超限相同，`status` 都是 `response_too_large`）：结果现在逐条计字节，在越过上限的那一条处停止。原来对整份回复的检查仍在，只在回复因结果以外的内容超限时触发。
+- 只读 SQLite 来源：查询执行中需要的单个值或单条记录超过 32 MiB（一次回复可以更大时取回复的字节数）时，以 `resource_limit` 结束，`reason` 为 `ValueTooLarge`；此前会把它读进内存，只受 SQLite 自己的 1 GB 上限约束。返回的行在交给 worker 之前按字节计数，此前是读出之后才检查（见“只读 SQLite 来源”一段）。
+- 离线来源的 `search` 返回的对象有 `close()` 时，检索结束后会被调用一次；此前不会调用。
 - 旧回执里的 `searx.result_types.*` 结果仍可解码、合并。
 - 由带类型结果产生的 `response_json` 字段集合保持不变（`adapter.main_result`、`image_result`、`key_value`）。
 - 自定义适配器声明的 `language_support` 按声明记录。旧实现对没有内置语言表的来源一律记为 False，于是回执把 `language` 列为被忽略；内置来源的取值与此前相同。
@@ -264,12 +266,16 @@ JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSes
 
 目录里有三个来源默认写了网络名：yandex images 走 yandex 的网络，brave.images、qwant images 走 `brave`、`qwant` 网络。所以同时声明 yandex 和 yandex images 时，给 yandex 配的代理对 yandex images 同样生效；要让图片来源单独走别的出口，给它写 `network` 映射，只写 `proxies` 等单个选项不起作用。这些都与此前相同。
 
-只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。行随着 worker 取结果逐行从数据库读出，读取受会话预算限制：
+只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。它有两种互相独立的限制。
 
-- **行数**：一页比 `max_results` 大时，读到上限再多一行就停下；`limit` 为负数时 SQLite 当作不限页长，同样受这个上限约束。
-- **字节**：累计的编码字节超过一次回复可以有的字节数（`max_bytes` 的 8 倍，适配器里是 `adapter.output_limit()`）时，读到越过上限的那一行就停下；一个值或一条存储的行比这个字节数还大时，SQLite 在把它读入内存之前就拒绝（查询里拼出来的值也一样）。
-
-两种情况都以 `response_too_large` 结束并关闭游标。刚好在上限以内的值仍会整个读入，内存峰值是上限的几倍；查询把多列拼成一行时，整行在读出之后才计入累计预算。
+- **查询返回的数据受会话预算约束。** 行逐条交给 worker：
+  - **行数**：一页比 `max_results` 大时，读到上限再多一行就停下；`limit` 为负数时 SQLite 当作不限页长，同样受这个上限约束。
+  - **字节**：每一行在离开 SQLite 之前，先由 SQLite 把这一行的文本和二进制字节加起来。会使累计字节超过一次回复可以有的字节数（`max_bytes` 的 8 倍，适配器里是 `adapter.output_limit()`）的那一行不会交出来，不管它有多少列。所以读进 Python 的文本和二进制字节不超过一次回复的字节数。worker 另按编码后的字节数计数，规则相同。
+  - 两种情况都以 `response_too_large` 结束。
+  - UTF-16 编码的数据库里，文本按存储字节数的一半计（不会多于它的 UTF-8 字节数），较长的二进制值也按一半计，所以那里最多可能读进上限的 3 倍。
+- **查询执行过程中读到的数据不受回复预算约束。** 排序键、只用来量长度或过滤的值、数据库的 schema，都可以比一次回复大。
+  - 这部分另有一个执行限制：SQLite 处理的单个值或单条记录不超过 32 MiB（一次回复可以更大时，取回复的字节数）。查询需要更大的值时，SQLite 在把它读入内存之前就拒绝，以 `resource_limit` 结束，回执的 `reason` 是 `ValueTooLarge`。
+  - 在这个限制以内，SQLite 自己持有正在计算的那一行，量某个值的大小时再多一份该值的副本。它计算一行所用的内存可以达到“执行限制 × 查询的列数”，与回复的大小无关；排序可能用到 SQLite 的临时文件。
 
 ## 返回值、缓存与资源归属
 
@@ -314,7 +320,7 @@ max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_
 自定义来源是随应用安装的 Python 模块，以 `module=` 声明，形式与内置适配器相同：
 
 - **在线来源**：提供 `request(query, params)` 和 `response(resp)`。
-- **离线来源**：设 `engine_type = 'offline'`，提供 `search(query, params)`。它可以返回列表，也可以逐条产出结果（generator）：worker 逐条取、逐条计数和计字节，越过 `max_results` 或回复字节上限（`output_limit()`）的那一条处停止，关闭 generator，以 `response_too_large` 结束。从存储里读大量数据的来源应逐条产出，并用 `output_limit()` 限制单个值的读取，读不了时抛出 `ResponseTooLarge`（只读 SQLite 来源就是这样做的）。
+- **离线来源**：设 `engine_type = 'offline'`，提供 `search(query, params)`。它可以返回列表，也可以逐条产出结果（generator）：worker 逐条取、逐条计数和计字节，越过 `max_results` 或回复字节上限（`output_limit()`）的那一条处停止，以 `response_too_large` 结束。不管怎样结束，worker 都会关闭 `search` 返回的东西：返回的对象有 `close()` 就调用一次；由它得到的迭代器（例如 generator）是另一个对象并且也有 `close()` 时，同样调用一次。从存储里读数据的来源应逐条产出，并在把一条结果读进 Python 之前用 `output_limit()` 判断它放不放得下，放不下时抛出 `ResponseTooLarge`（只读 SQLite 来源让 SQLite 先算出每一行的字节数）。
 - **可选**：`setup(settings)` 做配置检查：不返回值或返回真值表示接受，返回其他假值或抛出异常表示拒绝；`init(settings)` 在首次搜索前运行，返回 `False` 表示拒绝。
 - **模块属性**：`categories`、`paging`、`max_page`、`time_range_support`、`safesearch`、`language_support`、`about` 等声明能力。来源配置字典中的同名字段会覆盖它们。值为 `None` 的公开属性表示必填选项。
 
