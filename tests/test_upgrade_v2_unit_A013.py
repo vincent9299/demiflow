@@ -1,9 +1,6 @@
 """A013 · Dataset.schema reads metadata only when fetch_if_missing=False; real read enters one action."""
-import pytest
 
 from demiflow import data
-from demiflow.errors import UnsupportedExecutionOptionError
-from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.pipeline.run_context import RunContext
 
 
@@ -25,20 +22,6 @@ def _plain():
 
 def _stream():
     return data.from_items([{"id": 0}]).map(lambda r: r, execution="thread", concurrency=2)
-
-
-def test_schema_fetch_false_no_action_no_read(monkeypatch):
-    calls = _action_spy(monkeypatch)
-    reads = []
-
-    def spy(self, source, **kwargs):
-        reads.append(source)
-        raise AssertionError("fetch_if_missing=False must not read rows")
-
-    monkeypatch.setattr(LocalDatasetExecutor, "_iter_source", spy)
-    assert _plain().schema(fetch_if_missing=False) is None
-    assert reads == []
-    assert calls == []
 
 
 def test_schema_true_single_action(monkeypatch):

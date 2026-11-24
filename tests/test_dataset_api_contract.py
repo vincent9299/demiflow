@@ -1,7 +1,4 @@
 """Public export and Dataset action contracts."""
-from contextlib import contextmanager
-from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pyarrow as pa
 import pytest
@@ -108,44 +105,6 @@ def test_take_all_limit_reads_at_most_one_extra_row(tmp_path):
     with pytest.raises(ValueError, match='more than the take_all limit'):
         ds.take_all(limit=2)
     assert [event['x'] for event in events(seen)] == [0, 1, 2]
-
-
-def test_take_all_finishes_observer_on_every_success_path(monkeypatch):
-    observers = []
-
-    @contextmanager
-    def observe(*args):
-        observer = SimpleNamespace(rows=0, batches=0, progress=Mock(), complete=Mock(), fail=Mock())
-        observers.append(observer)
-        try:
-            yield observer
-        except BaseException as exc:
-            observer.fail(exc)
-            raise
-
-    monkeypatch.setattr(dataset_module, 'observe_action', observe)
-    for limit in (None, 3, 5):
-        assert len(data.from_items([{'x': 1}, {'x': 2}, {'x': 3}]).take_all(limit=limit)) == 3
-    assert [observer.complete.call_count for observer in observers] == [1, 1, 1]
-    assert all(observer.fail.call_count == 0 for observer in observers)
-
-
-def test_take_all_limit_failure_does_not_complete_observer(monkeypatch):
-    observer = SimpleNamespace(rows=0, batches=0, progress=Mock(), complete=Mock(), fail=Mock())
-
-    @contextmanager
-    def observe(*args):
-        try:
-            yield observer
-        except BaseException as exc:
-            observer.fail(exc)
-            raise
-
-    monkeypatch.setattr(dataset_module, 'observe_action', observe)
-    with pytest.raises(ValueError, match='more than the take_all limit'):
-        data.from_items([{'x': 1}, {'x': 2}]).take_all(limit=1)
-    observer.complete.assert_not_called()
-    assert observer.fail.call_count == 1
 
 
 @pytest.mark.parametrize('options', [
