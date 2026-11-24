@@ -415,6 +415,28 @@ def sqlite(work):
                     'limit': 2}, [('oak', {}), ('oak', {'pageno': 2})]),
         'distinct': ({'query_str': 'select distinct label, n from docs where label like :wildcard order by n desc'},
                      DEFAULT_QUERY),
+        # names SQLite makes up for the columns of a subquery, and queries that page or end by themselves
+        'sixnames': ({'query_str': 'select label as a, n as a, link as a, body as a, n + 1 as a, upper(label) as a, '
+                                   'n as b from docs where label like :wildcard order by n'}, DEFAULT_QUERY),
+        'sixjoin': ({'query_str': 'select a.n, b.n, c.n, d.n, e.n, f.n from docs a join docs b on b.rowid = a.rowid '
+                                  'join docs c on c.rowid = a.rowid join docs d on d.rowid = a.rowid '
+                                  'join docs e on e.rowid = a.rowid join docs f on f.rowid = a.rowid '
+                                  'where a.label like :wildcard order by a.n, a.rowid'}, DEFAULT_QUERY),
+        'ownpaging': ({'query_str': 'select label, n from docs where label like :wildcard order by n, rowid '
+                                    'LIMIT :limit OFFSET :offset -- own page', 'limit': 1},
+                      [('oak', {}), ('oak', {'pageno': 2}), ('oak', {'pageno': 3})]),
+        'ownpagingblock': ({'query_str': 'select label, n from docs where label like :wildcard order by n, rowid '
+                                         'LIMIT :limit OFFSET :offset /* own page', 'limit': 1},
+                           [('oak', {}), ('oak', {'pageno': 2})]),
+        'ownlimit': ({'query_str': 'select label, n from docs where label like :wildcard order by n, rowid limit 3 '
+                                   '-- three'}, [('oak', {}), ('oak', {'pageno': 2})]),
+        'semicolon': ({'query_str': 'select label, n from docs where label like :wildcard order by n, rowid; -- all',
+                       'limit': 2}, [('oak', {}), ('oak', {'pageno': 2})]),
+        'semicolonpaging': ({'query_str': "select label || ';' as l, n from docs where label like :wildcard "
+                                          "order by n, rowid LIMIT :limit OFFSET :offset; -- a; b", 'limit': 2},
+                            [('oak', {}), ('oak', {'pageno': 2})]),
+        'ourname': ({'query_str': 'with demiflow_rows as (select label, n from docs) select label, n as c0 '
+                                  'from demiflow_rows where label like :wildcard order by n, label'}, DEFAULT_QUERY),
     }
     items = [({'name': 'xq' + name, **base, **settings}, queries) for name, (settings, queries) in cases.items()]
     return items, dict(CONFIG)

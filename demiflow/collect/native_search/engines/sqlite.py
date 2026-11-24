@@ -2,7 +2,8 @@
 
 Options: ``database`` (file path), ``query_str`` (a ``SELECT`` with the named
 parameters ``:query`` and/or ``:wildcard``; paging is appended as
-``LIMIT :limit OFFSET :offset``), ``limit`` (rows per page) and
+``LIMIT :limit OFFSET :offset``; a statement that cannot stand as a subquery,
+such as ``EXPLAIN``, is no query of a source), ``limit`` (rows per page) and
 ``result_type``: ``KeyValue`` (default) returns each row as a key/value table,
 ``MainResult`` turns the row's columns into result fields (``url``, ``title``,
 ``content`` ...; a column that is no result field is an error).
@@ -13,12 +14,16 @@ What the query returns is bounded by the session. Rows are handed to the worker
 one at a time. SQLite adds up the text and blob bytes of each row before the row
 leaves it; the row that would take the search past the bytes one reply may have
 (``output_limit()``) is not handed over, however many columns it has, and the
-search ends as ``response_too_large``. So no more text and blob bytes than one
-reply may have are read into Python. The worker counts the encoded results the
+search ends as ``response_too_large``. The worker counts the encoded results the
 same way and stops one row past ``max_results`` (a negative ``limit`` is no page
-size to SQLite, so these budgets are the only bound then). In a UTF-16 database
-text is counted at half its stored size, which is never more than its UTF-8 size,
-and so is a long blob: up to three times the limit can be read there.
+size to SQLite, so these budgets are the only bound then).
+
+How exact that count is depends on the encoding of the database. In a UTF-8
+database (the default) it is exact: no more text and blob bytes than one reply
+may have are read into Python. In a UTF-16 database text is counted at half its
+stored size, which is never more than its UTF-8 size, and so is a long blob: text
+of up to three times the limit, or a blob of twice the limit, can be read into
+Python there before the worker's own count refuses it.
 
 What the query reads on the way is not bounded by the reply: sort keys, values it
 only measures or filters on and the schema may be longer than a reply. For this
@@ -66,38 +71,48 @@ def _sum(terms):
     return terms[0]
 
 
-def _row_bytes(columns, taken_names, scale):
-    """SQL for the text and blob bytes of ``columns`` (quoted names) of the current row, as reply bytes.
+def _row_bytes(indexes, scale):
+    """SQL for the text and blob bytes of the columns ``c<index>`` of the current row, as reply bytes.
 
     Every value is measured once, one after the other, in one subquery of its own (``LIMIT -1 OFFSET 0`` keeps
     SQLite from merging it and measuring twice): SQLite then holds one copy of one value at a time besides
     the row itself. Only text and blobs count; a short value is checked for its type (numbers are short), a
     longer one is text or a blob. ``scale`` is 2 for UTF-16 text; a long blob is halved there as well.
     """
-    prefix = 'demiflow_n'
-    while any(name.lower().startswith(prefix) for name in taken_names):
-        prefix += '_'
-    sizes = [prefix + str(index) for index in range(len(columns))]
-    measured = ', '.join(f'length(CAST({column} AS BLOB)) AS {size}' for column, size in zip(columns, sizes))
-    counted = _sum([f"CASE WHEN {size} > {32 * scale} THEN {size} / {scale}"
-                    f" WHEN typeof({column}) = 'text' THEN {size} / {scale}"
-                    f" WHEN typeof({column}) = 'blob' THEN {size} ELSE 0 END" for column, size in zip(columns, sizes)])
+    measured = ', '.join(f'length(CAST(c{index} AS BLOB)) AS n{index}' for index in indexes)
+    counted = _sum([f"CASE WHEN n{index} > {32 * scale} THEN n{index} / {scale}"
+                    f" WHEN typeof(c{index}) = 'text' THEN n{index} / {scale}"
+                    f" WHEN typeof(c{index}) = 'blob' THEN n{index} ELSE 0 END" for index in indexes])
     return f'(SELECT {counted} FROM (SELECT {measured} LIMIT -1 OFFSET 0))'
+
+
+def _statement(text):
+    """``text`` without the semicolon that ends its statement and what follows it (SQLite tells where that is)."""
+    end = text.find(';')
+    while end >= 0 and not sqlite3.complete_statement(text[:end + 1]):
+        end = text.find(';', end + 1)
+    return text if end < 0 else text[:end]
 
 
 def _guarded(connection, values, scale):
     """The fields of the query's rows, and the statement that gives every row's text and blob bytes to
     ``demiflow_taken`` before the row leaves SQLite (the query runs inside it as it would by itself)."""
-    # The column names the query gives, and the unique names SQLite gives the same columns of a subquery.
-    names = [column[0] for column in connection.execute(query_str + ENDING + ' LIMIT 0', values).description]
-    inner = [column[0] for column in
-             connection.execute(f'SELECT * FROM ({query_str}{ENDING}) LIMIT 0', values).description]
+    asked = query_str + ' LIMIT :limit OFFSET :offset'  # the text a search of this source has always run
+    # Its column names, read from that very text with a page of no rows: nothing is added to it, nothing runs.
+    probe = connection.execute(asked, {**values, 'limit': 0})
+    names = [column[0] for column in probe.description]
+    probe.close()
     fields = list(dict.fromkeys(names))  # a name given twice is one field: in its first place, with its last column
-    last = {name: '`' + inner[index].replace('`', '``') + '`' for index, name in enumerate(names)}
-    columns = [last[name] for name in fields]
-    first = f'CASE WHEN demiflow_taken({_row_bytes(columns, inner, scale)}) >= 0 THEN {columns[0]} END'
-    return fields, (f"SELECT {', '.join([first, *columns[1:]])} "
-                    f"FROM ({query_str} LIMIT :limit OFFSET :offset{ENDING})")
+    last = {name: index for index, name in enumerate(names)}
+    indexes = [last[name] for name in fields]
+    # The query's columns get names of ours by position, so no name SQLite or the query chose is referred to.
+    rows = 'demiflow_rows'
+    while rows in asked.lower():
+        rows += '_'
+    first = f'CASE WHEN demiflow_taken({_row_bytes(indexes, scale)}) >= 0 THEN c{indexes[0]} END'
+    return fields, (f"WITH {rows}({', '.join(f'c{index}' for index in range(len(names)))}) "
+                    f"AS ({_statement(asked)}{ENDING}) "
+                    f"SELECT {', '.join([first, *(f'c{index}' for index in indexes[1:])])} FROM {rows}")
 
 
 def search(query, params):
@@ -122,8 +137,8 @@ def search(query, params):
         longest = sqlite3.SQLITE_LIMIT_LENGTH
         needed = scale * max(output_limit(), len(values['wildcard'].encode()))  # a reply and the search text fit
         connection.setlimit(longest, min(max(VALUE_LIMIT, needed), connection.getlimit(longest)))
-        connection.create_function('demiflow_taken', 1, taken)
         fields, statement = _guarded(connection, values, scale)
+        connection.create_function('demiflow_taken', 1, taken)
         for record in connection.execute(statement, values):
             row = dict(zip(fields, map(str, record)))
             yield main_result(row.pop('url', None), **row) if result_type == 'MainResult' else key_value(row)
