@@ -42,7 +42,7 @@ def _items(path, raw, kind):
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) or node.name.startswith('_'):
                 continue
-            if kind == 'data_tool' and node.name not in (public or ()):
+            if kind == 'data_tool' and public is not None and node.name not in public:
                 continue
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             body = ''.join(lines[start - 1:node.end_lineno])
@@ -50,7 +50,7 @@ def _items(path, raw, kind):
                        export_status=('legacy' if public is None else 'declared' if node.name in public else 'internal'),
                        definition_type=('class' if isinstance(node, ast.ClassDef) else
                                         'async_function' if isinstance(node, ast.AsyncFunctionDef) else 'function'),
-                       **({'tool_kind': public[node.name]} if kind == 'data_tool' else {}),
+                       **({'tool_kind': (public[node.name] if public is not None else 'tool')} if kind == 'data_tool' else {}),
                        module_summary=module_summary, line=start, end_line=node.end_lineno)
     else:
         value = yaml.safe_load(text)

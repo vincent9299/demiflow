@@ -269,7 +269,8 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
                     for k, v in sorted(control['locations'].items())[:32]
                 }
             raw = read_bounded(root / 'workspace.json', 1024**2)
-            if json.loads(raw) != control:
+            from .project import load_project
+            if load_project(root)[1] != control:
                 raise ForgeError('Project declaration changed during discovery', code='conflict')
             result['sources'].append(dict(origin='project', path='workspace.json',
                                           sha256=sha256(raw).hexdigest()))

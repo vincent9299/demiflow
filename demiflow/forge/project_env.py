@@ -112,7 +112,7 @@ def find_hardcoded_secret_line(text: str) -> int | None:
 
 
 def ensure_gitignore_env(root: Path) -> bool:
-    """Ensure <root>/.gitignore ignores local .env files without clobbering existing rules."""
+    """Ensure <root>/.gitignore ignores local .env files and .forge/ state without clobbering existing rules."""
     root = Path(root).absolute()
     gi = root / '.gitignore'
     if gi.is_symlink():
@@ -124,10 +124,10 @@ def ensure_gitignore_env(root: Path) -> bool:
         except Exception:
             return False
     lines = {line.strip() for line in existing.splitlines() if line.strip() and not line.strip().startswith('#')}
-    needed = [entry for entry in ('.env', '.env.local') if entry not in lines]
+    needed = [entry for entry in ('.env', '.env.local', '.forge/') if entry not in lines and entry.rstrip('/') not in lines]
     if not needed:
         return False
     prefix = '' if (not existing or existing.endswith('\n')) else '\n'
-    header = '' if existing else '# Project local runtime environment (never commit real secrets)\n'
+    header = '' if existing else '# Project local runtime environment & Forge internal state\n'
     gi.write_text(existing + prefix + header + '\n'.join(needed) + '\n', encoding='utf-8')
     return True

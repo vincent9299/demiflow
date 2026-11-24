@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .platform import bounded_json, content_digest
 from .platform_environment import read_bounded
-from .project import load_project, location_root
+from .project import load_project, location_root, save_project
 from .project_io import identifier, relative_path, read_control
 from .schema import ForgeError
 
@@ -61,7 +61,7 @@ def bind_table(root, alias, raw_path, *, location_id=None, version=None):
             if len(locations) >= 16:
                 raise ForgeError('Location budget exhausted (max 16)', code='resource_limit')
             locations[chosen_loc] = {'root': str(parent_dir), 'writable': False}
-            write_control(root / 'workspace.json', value, expected=expected_ws)
+            save_project(root, value, expected=expected_ws)
             rel_uri = target.name
         ensure_directory(root / 'tables')
         ref = DatasetRef(
@@ -125,16 +125,125 @@ def table_identity(control):
             for key in ('format', 'alias', 'location_id', 'ref')}
 
 
+_WRAPPED_PARAM_FORMATS = frozenset({
+    "demiflow_forge_flow_parameters_v1",
+    "demiflow_forge_flow_parameters_v2",
+})
+_FORBIDDEN_ABS_ROOTS = (Path('/etc'), Path('/proc'), Path('/sys'), Path('/dev'), Path('/root'))
+
+
+def extract_arguments(parameters):
+    """Extract raw flow arguments from flat JSON or legacy wrapped v1/v2 parameter documents.
+
+    Returns ``(arguments_dict, format_tag)`` where ``format_tag`` is ``'flat'`` or one of
+    the legacy wrapped format strings.
+    """
+    if not isinstance(parameters, dict):
+        raise ForgeError("Invalid flow parameter format", code='invalid_request')
+    if "format" in parameters:
+        fmt = parameters.get("format")
+        if (
+            fmt not in _WRAPPED_PARAM_FORMATS
+            or set(parameters) != {"format", "arguments"}
+            or not isinstance(parameters["arguments"], dict)
+        ):
+            raise ForgeError("Invalid flow parameter format", code='invalid_request')
+        return parameters["arguments"], fmt
+    if (
+        "arguments" in parameters
+        and isinstance(parameters["arguments"], dict)
+        and set(parameters) <= {"arguments", "run_directory"}
+    ):
+        raise ForgeError("Invalid flow parameter format", code='invalid_request')
+    return parameters, "flat"
+
+
+def is_direct_table_ref(item):
+    """True for direct URI Lance input references without tables/<alias>.json."""
+    if not isinstance(item, dict):
+        return False
+    if item.get("kind") == "table" and "uri" in item:
+        return True
+    if (
+        "kind" not in item
+        and set(item) in ({"uri"}, {"uri", "version"})
+        and isinstance(item.get("uri"), str)
+        and item["uri"].endswith(".lance")
+        and ("version" not in item or item["version"] is None or type(item["version"]) is int)
+    ):
+        return True
+    return False
+
+
+def resolve_table_uri(root, raw_uri, version=None):
+    from .io import no_symlinks
+
+    if not isinstance(raw_uri, str) or not raw_uri or len(raw_uri.encode('utf-8')) > 4096:
+        raise ForgeError("Invalid table URI", code='invalid_request')
+    if version is not None and (type(version) is not int or not 1 <= version < 2**64):
+        raise ForgeError("Table version must be a positive integer", code='invalid_request')
+    candidate = Path(raw_uri)
+    if candidate.is_absolute():
+        target = candidate.absolute()
+        no_symlinks(target)
+        if (
+            any(p.startswith('.') for p in target.parts[1:])
+            or any(target == fb or fb in target.parents for fb in _FORBIDDEN_ABS_ROOTS)
+        ):
+            raise ForgeError("Table URI points to a forbidden or hidden path", code='operation_rejected')
+    else:
+        if any(p.startswith('.') for p in candidate.parts):
+            raise ForgeError("Table URI must not use hidden path segments", code='invalid_request')
+        target = relative_path(root, raw_uri)
+    if target.suffix != ".lance":
+        raise ForgeError("Input table URI must name a .lance directory", code='invalid_request')
+    return target, version
+
+
+def resolve_output_uri(root, raw_uri):
+    if not isinstance(raw_uri, str) or not raw_uri or len(raw_uri.encode('utf-8')) > 4096:
+        raise ForgeError("Invalid output URI", code='invalid_request')
+    if any(p.startswith('.') for p in Path(raw_uri).parts):
+        raise ForgeError("Output URI must not use hidden path segments", code='invalid_request')
+    target = relative_path(root, raw_uri)
+    data_root = Path(root).absolute() / "data"
+    if not target.is_relative_to(data_root) or target == data_root:
+        raise ForgeError("Output URI must stay inside project data/ directory", code='invalid_request')
+    if target.suffix != ".lance":
+        raise ForgeError("Output must name a .lance table", code='invalid_request')
+    return target
+
+
+def declared_table_uris(parameters):
+    """Yield ``(pointer, uri, version)`` for every direct Lance table reference in parameters."""
+    try:
+        arguments, _ = extract_arguments(parameters)
+    except ForgeError:
+        return
+    pending = [(arguments, '', 0)]
+    visits = 0
+    while pending:
+        obj, pointer, depth = pending.pop()
+        visits += 1
+        if visits > 4096 or depth > 16:
+            raise ForgeError("Parameter structure exceeds budget", code='resource_limit')
+        if type(obj) is dict:
+            if is_direct_table_ref(obj):
+                yield pointer, obj["uri"], obj.get("version")
+            elif len(obj) <= 256:
+                pending.extend((v, pointer + '/' + str(k), depth + 1) for k, v in obj.items())
+            else:
+                raise ForgeError("Parameter member budget exceeded", code='resource_limit')
+        elif type(obj) is list:
+            if len(obj) > 256:
+                raise ForgeError("Parameter item budget exceeded", code='resource_limit')
+            pending.extend((v, pointer + '/' + str(k), depth + 1) for k, v in enumerate(obj))
+
+
 def resolve_arguments(root, value, parameters, *, table_resolver, table_describer=None):
     from demiflow.lance.preview import describe_table
 
-    if (
-        not isinstance(parameters, dict)
-        or parameters.get("format") not in {"demiflow_forge_flow_parameters_v1", "demiflow_forge_flow_parameters_v2"}
-        or set(parameters) != {"format", "arguments"}
-        or not isinstance(parameters["arguments"], dict)
-    ):
-        raise ForgeError("Invalid flow parameter format", code='invalid_request')
+    arguments, param_format = extract_arguments(parameters)
     tables = {}
     targets = {}
     controls = {}
@@ -144,31 +253,78 @@ def resolve_arguments(root, value, parameters, *, table_resolver, table_describe
             raise ForgeError("Parameter nesting exceeds budget", code='resource_limit')
         if isinstance(item, dict):
             if item.get('kind') == 'location':
-                if parameters['format'] != 'demiflow_forge_flow_parameters_v2' or set(item) != {'kind', 'location_id'}:
+                if param_format not in {'demiflow_forge_flow_parameters_v2', 'flat'} or set(item) != {'kind', 'location_id'}:
                     raise ForgeError('Location arguments require v2 and an explicit location_id', code='invalid_request')
                 location = value['locations'].get(item['location_id'])
                 if location is None:
                     raise ForgeError('Unknown declared location', code='invalid_request')
                 return str(location_root(root, location))
             if item.get("kind") == "table":
-                if set(item) != {"kind", "alias"}:
-                    raise ForgeError("Invalid table argument", code='invalid_request')
-                alias = item["alias"]
-                control, ref, uri = table_resolver(root, value, alias)
-                description = (table_describer or describe_table)(uri, ref.lance_version)
-                if (
-                    description["schema_hash"] != ref.schema_hash
-                    or description["row_count"] != ref.row_count
-                ):
-                    raise ForgeError("Pinned table metadata changed", code='invalid_request')
-                tables[alias] = {**description, "uri": str(uri), "reference": table_identity(control)}
-                if not alias.startswith("run:"):
-                    controls["tables/" + alias + ".json"] = content_digest(table_identity(control))
-                return {"uri": str(uri), "version": ref.lance_version}
+                if set(item) == {"kind", "alias"}:
+                    alias = item["alias"]
+                    control, ref, uri = table_resolver(root, value, alias)
+                    description = (table_describer or describe_table)(uri, ref.lance_version)
+                    if (
+                        description["schema_hash"] != ref.schema_hash
+                        or description["row_count"] != ref.row_count
+                    ):
+                        raise ForgeError("Pinned table metadata changed", code='invalid_request')
+                    tables[alias] = {**description, "uri": str(uri), "reference": table_identity(control)}
+                    if not alias.startswith("run:"):
+                        controls["tables/" + alias + ".json"] = content_digest(table_identity(control))
+                    return {"uri": str(uri), "version": ref.lance_version}
+                if "uri" in item and set(item) <= {"kind", "uri", "version"}:
+                    target, version = resolve_table_uri(root, item["uri"], item.get("version"))
+                    description = (table_describer or describe_table)(target, version)
+                    table_key = "uri:" + hashlib.sha256(str(target).encode()).hexdigest()[:16]
+                    tables[table_key] = {
+                        **description,
+                        "uri": str(target),
+                        "reference": {
+                            "format": "demiflow_forge_table_uri_v1",
+                            "uri": str(target),
+                            "version": description["version"],
+                            "schema_hash": description["schema_hash"],
+                            "row_count": description["row_count"],
+                        },
+                    }
+                    return {"uri": str(target), "version": description["version"]}
+                raise ForgeError("Invalid table argument", code='invalid_request')
+            if is_direct_table_ref(item):
+                target, version = resolve_table_uri(root, item["uri"], item.get("version"))
+                description = (table_describer or describe_table)(target, version)
+                table_key = "uri:" + hashlib.sha256(str(target).encode()).hexdigest()[:16]
+                tables[table_key] = {
+                    **description,
+                    "uri": str(target),
+                    "reference": {
+                        "format": "demiflow_forge_table_uri_v1",
+                        "uri": str(target),
+                        "version": description["version"],
+                        "schema_hash": description["schema_hash"],
+                        "row_count": description["row_count"],
+                    },
+                }
+                return {"uri": str(target), "version": description["version"]}
             if item.get("kind") == "output":
-                modern = parameters['format'] == 'demiflow_forge_flow_parameters_v2'
-                required = {'kind', 'location_id', 'relative_uri'} | ({'mode', 'expected_version'} if modern else set())
-                if set(item) != required:
+                if "uri" in item and "location_id" not in item and set(item) <= {"kind", "uri", "mode", "expected_version"}:
+                    path = resolve_output_uri(root, item["uri"])
+                    mode = item.get("mode", "create")
+                    expected = item.get("expected_version")
+                    if (
+                        mode not in {'create', 'overwrite', 'checkpoint'}
+                        or mode in {'create', 'checkpoint'} and expected is not None
+                        or mode == 'overwrite' and (type(expected) is not int or expected < 1)
+                    ):
+                        raise ForgeError('Output mode requires create/checkpoint or overwrite with a valid fixed CAS baseline', code='invalid_request')
+                    if str(path) in targets:
+                        raise ForgeError('Each output target must have one declaration', code='invalid_request')
+                    targets[str(path)] = {'mode': mode, 'expected_version': expected}
+                    return {'uri': str(path), 'mode': mode, 'expected_version': expected}
+                modern = param_format in {'demiflow_forge_flow_parameters_v2', 'flat'}
+                required = {'kind', 'location_id', 'relative_uri'} | ({'mode', 'expected_version'} if param_format == 'demiflow_forge_flow_parameters_v2' else set())
+                allowed = {'kind', 'location_id', 'relative_uri', 'mode', 'expected_version'} if modern else required
+                if not (required <= set(item) <= allowed):
                     raise ForgeError("Invalid output argument", code='invalid_request')
                 location = value["locations"].get(item["location_id"])
                 if not location or not location["writable"]:
@@ -195,7 +351,7 @@ def resolve_arguments(root, value, parameters, *, table_resolver, table_describe
             return item
         raise ForgeError("Only finite JSON parameters are accepted", code='invalid_request')
 
-    args = visit(parameters["arguments"])
+    args = visit(arguments)
     bounded_json(args, 1024**2)
     return args, tables, targets, controls
 

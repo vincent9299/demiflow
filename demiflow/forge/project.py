@@ -21,6 +21,9 @@ FORMAT = "demiflow_forge_workspace_v1"
 FORMAT_V2 = "demiflow_forge_workspace_v2"
 FORMAT_V3 = "demiflow_forge_workspace_v3"
 MODERN_FORMATS = {FORMAT_V2, FORMAT_V3}
+STATE_PATH = ".forge/state.json"
+_SLIM_MANIFEST_FIELDS = frozenset({"name", "entries", "budgets", "locations"})
+_DEFAULT_AUDIT = {"reports": [], "change_scope": None}
 
 def project_name(value):
     if (type(value) is not str or not value.strip() or value != value.strip()
@@ -65,11 +68,71 @@ def validate_budget_declaration(values, *, label='Workspace'):
         raise ForgeError(label + ' budgets must be positive integers')
 
 
+def is_slim_manifest(value):
+    return (
+        type(value) is dict
+        and "format" not in value
+        and "name" in value
+        and set(value) <= _SLIM_MANIFEST_FIELDS
+    )
+
+
+def _default_audit():
+    return {"reports": [], "change_scope": None}
+
+
+def _bootstrap_state(root):
+    """Lazily initialize .forge/state.json and platform snapshot when absent (e.g. after git clone)."""
+    snapshot = build_snapshot(MODULES, extras=())
+    if not snapshot_complete(snapshot):
+        raise ForgeError('Cannot initialize from an incomplete SDK snapshot', code='inspection_incomplete')
+    digest = snapshot['digests']['snapshot']
+    relative = '.forge/platform/' + digest + '.json'
+    state = dict(format=FORMAT_V3, id='w' + uuid.uuid4().hex, platform=dict(path=relative, digest=digest))
+    try:
+        ensure_directory(root / '.forge')
+        with control_lock(root):
+            state_file = root / STATE_PATH
+            if no_symlinks(state_file).exists():
+                return read_control(state_file)
+            snap_path = relative_path(root, relative)
+            ensure_directory(snap_path.parent)
+            if not snap_path.exists():
+                write_snapshot(snap_path, snapshot)
+            write_control(state_file, state, create=True)
+    except OSError:
+        # Read-only mount/sandbox: return in-memory state without failing read operations.
+        pass
+    return state
+
+
 def load_project(root):
-    """Validate local project declarations without opening platform provenance."""
+    """Validate local project declarations (slim workspace.json + .forge/state.json or legacy v1/v2/v3)."""
     root = Path(root).absolute()
     no_symlinks(root)
-    value = read_control(root / "workspace.json")
+    raw = read_control(root / "workspace.json")
+    if is_slim_manifest(raw):
+        state_file = root / STATE_PATH
+        state = read_control(state_file) if no_symlinks(state_file).exists() else _bootstrap_state(root)
+        if (
+            type(state) is not dict
+            or state.get("format") != FORMAT_V3
+            or set(state) - {"audit"} != {"format", "id", "platform"}
+        ):
+            raise ForgeError("Unsupported Forge state format")
+        value = {
+            "format": state["format"],
+            "id": state["id"],
+            "name": raw["name"],
+            "entries": raw.get("entries", {}),
+            "locations": raw.get("locations", {}),
+            "platform": state["platform"],
+            "audit": state.get("audit", _default_audit()),
+        }
+        if "budgets" in raw:
+            value["budgets"] = raw["budgets"]
+    else:
+        value = raw
     modern = type(value) is dict and value.get('format') in (FORMAT_V2, FORMAT_V3)
     audit_fields = {'audit'} if type(value) is dict and value.get('format') == FORMAT_V3 else set()
     if (type(value) is not dict or value.get('format') not in (FORMAT, FORMAT_V2, FORMAT_V3)
@@ -119,9 +182,55 @@ def load_project(root):
     return root, value
 
 
+def save_project(root, value, *, expected=None, create=False):
+    """Persist workspace declaration, splitting Forge internal state to .forge/state.json for slim projects."""
+    root = Path(root).absolute()
+    manifest = root / "workspace.json"
+    state_file = root / STATE_PATH
+    slim = (
+        create
+        or no_symlinks(state_file).exists()
+        or (no_symlinks(manifest).exists() and is_slim_manifest(read_control(manifest)))
+    )
+    if not slim:
+        write_control(manifest, value, expected=expected, create=create)
+        return
+    if expected is not None:
+        if create:
+            raise ForgeError('Cannot create with a previous control digest', code='conflict')
+        try:
+            _, current = load_project(root)
+        except ForgeError as exc:
+            if exc.code == 'not_found':
+                raise ForgeError('Expected control no longer exists', code='conflict') from exc
+            raise
+        if content_digest(current) != expected:
+            raise ForgeError('Control changed; refresh before replacing', code='conflict')
+    ws_doc = {"name": value["name"], "entries": value.get("entries", {})}
+    if "budgets" in value:
+        ws_doc["budgets"] = value["budgets"]
+    if value.get("locations"):
+        ws_doc["locations"] = value["locations"]
+    state_doc = {
+        "format": value["format"],
+        "id": value["id"],
+        "platform": value["platform"],
+    }
+    audit_val = value.get("audit")
+    if isinstance(audit_val, dict) and (audit_val.get("reports") or audit_val.get("change_scope") is not None):
+        state_doc["audit"] = audit_val
+    ensure_directory(root / ".forge")
+    publish_bytes(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=create)
+    publish_bytes(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=create)
+
+
 def load_project_snapshot(root):
     root, value = load_project(root)
-    snapshot = load_snapshot(relative_path(root, value["platform"]["path"]))
+    snap_path = relative_path(root, value["platform"]["path"])
+    if snap_path.exists():
+        snapshot = load_snapshot(snap_path)
+    else:
+        snapshot = build_snapshot(MODULES, extras=())
     if (
         snapshot["digests"]["snapshot"] != value["platform"]["digest"]
         or snapshot["scope"]["discovery_version"] not in (2, 3)
@@ -130,7 +239,8 @@ def load_project_snapshot(root):
     return root, value, snapshot
 
 
-_EMPTY_PARAMS = {'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {}}
+_EMPTY_PARAMS = {}
+_LEGACY_EMPTY_PARAMS = {'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {}}
 _PROMPT_BYTES = 1024**2
 
 
@@ -237,9 +347,10 @@ def initialize_project(root, *, name=None, existing=False, extras=None, modules=
         else:
             write_snapshot(path, snapshot)
             created.append(relative)
-        value = dict(format=FORMAT_V3, audit={'reports': [], 'change_scope': None}, id='w'+uuid.uuid4().hex,
+        value = dict(format=FORMAT_V3, audit=_default_audit(), id='w'+uuid.uuid4().hex,
                      name=title, entries={}, locations={}, platform=dict(path=relative, digest=digest))
-        write_control(manifest, value, create=True)
+        save_project(root, value, create=True)
+        created.append(STATE_PATH)
         if not existing:
             from .project_env import ensure_gitignore_env
             if ensure_gitignore_env(root):
@@ -379,7 +490,7 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
         if authorize is not None:
             authorize()
         verify_check_inputs(root, check['basis'])
-        if read_control(manifest) != value:
+        if load_project(root)[1] != value:
             raise ForgeError('Project declaration changed before registration', code='inputs_changed')
         created = []
         if not bound:
@@ -388,7 +499,7 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
             bounded_json(value, 1024**2)
             if params is None:
                 if no_symlinks(parameter_file).exists():
-                    if read_control(parameter_file, 65536) != _EMPTY_PARAMS:
+                    if read_control(parameter_file, 65536) not in (_EMPTY_PARAMS, _LEGACY_EMPTY_PARAMS):
                         raise ForgeError('Default parameter file has different contents', code='conflict')
                 else:
                     ensure_directory(parameter_file.parent)
@@ -397,9 +508,9 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
                 # Publishing the default may involve a durable write. Confirm its bytes
                 # and all checked inputs before recording the binding.
                 verify_check_inputs(root, check['basis'])
-                if read_control(parameter_file, 65536) != _EMPTY_PARAMS:
+                if read_control(parameter_file, 65536) not in (_EMPTY_PARAMS, _LEGACY_EMPTY_PARAMS):
                     raise ForgeError('Default parameter file changed during registration', code='inputs_changed')
-            write_control(manifest, value, expected=expected)
+            save_project(root, value, expected=expected)
         return dict(status='unchanged' if bound else 'registered', role='flow', root=str(root),
                     path=source.relative_to(root).as_posix(), entry=entry, params=selected,
                     registered=True, created_paths=created, check_digest=check['check_digest'],

@@ -16,12 +16,12 @@ def create(root):
     initialize_project(root, name='inventory-reconciliation')
     for directory in ('flows', 'operators', 'tables', 'data'):
         (root / directory).mkdir()
-    control = ws.read_control(root / 'workspace.json')
+    _, control = ws.load_workspace_control(root)
     expected = ws.content_digest(control)
     # Import the two published configurations of this comparison fixture.
     control['entries'] = {'flows/inventory.py:run': ['flows/strict.json', 'flows/tolerant.json']}
     control['locations']['local'] = {'root': 'data', 'writable': True}
-    ws.write_control(root / 'workspace.json', control, expected=expected)
+    ws.save_workspace_control(root, control, expected=expected)
     source = Path(__file__).resolve().parent
     for folder in ['flows', 'operators']:
         for path in (source / folder).glob('*.py'):

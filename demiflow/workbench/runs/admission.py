@@ -2,7 +2,7 @@
 
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench.pipeline_policy import limits_with
-from demiflow.forge.project_bindings import resolve_arguments
+from demiflow.forge.project_bindings import extract_arguments, resolve_arguments
 from demiflow.forge.schema import ForgeError
 
 
@@ -39,7 +39,8 @@ def _describe(root, entry, *, table_resolver, params, limits=None):
     admitted, path = inputs(root, workspace, entry, params, limits)
     parameters = ws.read_control(path) if path else params
     arguments = resolve_arguments(root, workspace, parameters, table_resolver=table_resolver)
-    pending = [parameters.get('arguments', {})]
+    raw_args, _ = extract_arguments(parameters)
+    pending = [raw_args]
     outputs = 0
     while pending:
         value = pending.pop()

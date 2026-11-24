@@ -17,7 +17,7 @@ import uuid
 from demiflow.workbench.projects.io import workspace_id
 from demiflow.forge.project import (
     FORMAT, FORMAT_V2, FORMAT_V3, MODERN_FORMATS, load_project as load_workspace_control, load_project_snapshot as load_workspace,
-    location_root, project_name, validate_entry, validate_parameter_path,
+    location_root, project_name, save_project as save_workspace_control, validate_entry, validate_parameter_path,
 )
 from demiflow.forge.project_io import identifier
 from demiflow.forge.project_io import relative_path
@@ -52,7 +52,7 @@ def _publish_audit_policy(root, value, expected, **details):
     from demiflow.forge.audit import validate_policy
     validate_policy(value['audit'])
     with control_lock(root):
-        write_control(root / 'workspace.json', value, expected=expected)
+        save_workspace_control(root, value, expected=expected)
     return dict(status='updated', workspace_digest=content_digest(value), audit=value['audit'], **details)
 
 
@@ -113,7 +113,7 @@ def _capture_change_baseline(root, *, watch_roots, expected, limits=None):
                     entries=audit.inventory(root, names, limits),
                     workspace_policy_sha256=audit.workspace_digest(value), created_at=time.time())
     baseline['digest'] = content_digest(baseline)
-    if content_digest(read_control(root / 'workspace.json')) != expected:
+    if content_digest(load_workspace_control(root)[1]) != expected:
         raise ForgeError('Workspace changed during baseline capture', code='conflict')
     return audit.validate_baseline(baseline)
 
@@ -131,7 +131,7 @@ def _store_scope(root, value, baseline, writes, expected):
     size = len(bounded_json(baseline, audit.BASELINE_BYTES))
     directory = no_symlinks(root / '.forge/audit/baselines')
     with control_lock(root):
-        if content_digest(read_control(root / 'workspace.json')) != expected:
+        if content_digest(load_workspace_control(root)[1]) != expected:
             raise ForgeError('Workspace control changed', code='conflict')
         directory.mkdir(parents=True, exist_ok=True)
         count = total = 0
@@ -152,7 +152,7 @@ def _store_scope(root, value, baseline, writes, expected):
         elif read_control(target, audit.BASELINE_BYTES) != baseline:
             raise ForgeError('Stored baseline differs', code='conflict')
         value['audit']['change_scope'] = dict(baseline=baseline['digest'], writes=allowed)
-        write_control(root / 'workspace.json', value, expected=expected)
+        save_workspace_control(root, value, expected=expected)
     return dict(status='updated', workspace_digest=content_digest(value), audit=value['audit'])
 
 
@@ -193,7 +193,7 @@ def _check_change_scope(root):
     if baseline is None:
         return dict(status='unconfigured', complete=False, scope=None)
     current = audit.inventory(root, baseline['watch_roots'], baseline['limits'])
-    if read_control(root / 'workspace.json') != value:
+    if load_workspace_control(root)[1] != value:
         raise ForgeError('Workspace changed during scope check', code='conflict')
     result = audit.compare(baseline, current, scope['writes'], workspace_policy_sha256=audit.workspace_digest(value))
     return dict(result, scope=scope, scope_digest=audit.scope_digest(scope))
@@ -336,7 +336,7 @@ def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_pol
                       verification=checked['verification'])
     else:
         raise ForgeError('Audit requires scope or one currently tracked report', code='invalid_request')
-    if content_digest(read_control(root / 'workspace.json')) != expected_policy:
+    if content_digest(load_workspace_control(root)[1]) != expected_policy:
         raise ForgeError('Audit policy changed during verification', code='conflict')
     return result
 
@@ -360,7 +360,7 @@ def _audit_hint(root, *, expected_policy):
         except FileNotFoundError:
             state = None
         stamps.append([str(path.relative_to(root)), state])
-    if content_digest(read_control(root / 'workspace.json')) != expected_policy:
+    if content_digest(load_workspace_control(root)[1]) != expected_policy:
         raise ForgeError('Audit policy changed during observation', code='conflict')
     return content_digest(dict(sources=source, controls=stamps, policy=expected_policy))
 
@@ -373,7 +373,7 @@ def set_budgets(root, limits, *, expected):
     effective = limits_with(policy=limits)
     value['budgets'] = dict(limits)
     with control_lock(root):
-        write_control(root / 'workspace.json', value, expected=expected)
+        save_workspace_control(root, value, expected=expected)
     return {'status': 'updated', 'workspace_digest': content_digest(value), 'limits': effective}
 
 
@@ -405,7 +405,7 @@ def unregister_flow(root, entry, *, expected):
         raise ForgeError('Workspace changed; refresh before removing entry')
     del value['entries'][entry]
     with control_lock(root):
-        write_control(root / 'workspace.json', value, expected=expected)
+        save_workspace_control(root, value, expected=expected)
     return dict(status='unregistered', entry=entry)
 
 
@@ -429,7 +429,7 @@ def add_location(root, name, path, *, writable=False, write_modes=None):
             raise ForgeError('Write modes require an explicit writable location and create/overwrite/checkpoint permissions')
         value['locations'][name]['write_modes'] = sorted(write_modes)
     with control_lock(root):
-        write_control(root / "workspace.json", value, expected=expected)
+        save_workspace_control(root, value, expected=expected)
     return {"status": "created", "location": name, "root": str(path), "writable": writable}
 
 
@@ -447,7 +447,7 @@ def bind_platform(root, *, expected, extras=None):
         if not (root / path).exists():
             write_snapshot(root / path, snapshot)
         value["platform"] = {"path": path, "digest": snapshot["digests"]["snapshot"]}
-        write_control(root / "workspace.json", value, expected=digest)
+        save_workspace_control(root, value, expected=digest)
     return {
         "status": "bound",
         "platform": value["platform"],
@@ -457,7 +457,7 @@ def bind_platform(root, *, expected, extras=None):
 
 def table_files(root):
     directory = Path(root) / "tables"
-    if not read_control(Path(root) / 'workspace.json').get('locations'):
+    if not load_workspace_control(root)[1].get('locations'):
         return []
     no_symlinks(directory)
     if not directory.exists():
@@ -607,7 +607,7 @@ def _publish_inspection(root, value, snapshot, report, *, save=True):
     report['binding']['workspace_policy'] = workspace_policy(value, report['binding'])
     report['binding']['workspace'] = content_digest(report['binding']['workspace_policy'])
     if (
-        read_control(root / "workspace.json") != value
+        load_workspace_control(root)[1] != value
         or any(
             content_digest(table_identity(read_control(root / p))) != digest
             for p, digest in controls.items()
@@ -627,7 +627,7 @@ def _publish_inspection(root, value, snapshot, report, *, save=True):
             ],
         }
     if (
-        read_control(root / "workspace.json") != value
+        load_workspace_control(root)[1] != value
         or any(
             content_digest(table_identity(read_control(root / p))) != digest
             for p, digest in controls.items()
@@ -746,7 +746,7 @@ def workspace_policy(value, binding):
 
     def visit(item):
         if type(item) is dict:
-            if item.get('kind') in {'output', 'location'}:
+            if item.get('kind') in {'output', 'location'} and 'location_id' in item:
                 used.add(item['location_id'])
             for child in item.values():
                 visit(child)
@@ -756,7 +756,9 @@ def workspace_policy(value, binding):
 
     visit(binding['parameters'])
     for table in binding['tables'].values():
-        used.add(table['reference']['location_id'])
+        ref = table.get('reference')
+        if isinstance(ref, dict) and 'location_id' in ref:
+            used.add(ref['location_id'])
     for resource in binding.get('resources', {}).values():
         if 'location_id' in resource:
             used.add(resource['location_id'])
@@ -818,10 +820,15 @@ def _report_status(root, digest, *, table_resolver, platform_check=True):
             return content_digest(table_identity(control) if p.startswith('tables/') else control)
         check('table_binding', path, read_binding, sha, 'table_binding_changed:' + path)
     for alias, table in binding['tables'].items():
-        def read_table(a=alias):
-            _, ref, uri = table_resolver(root, value, a)
-            metadata = describe_table(uri, ref.lance_version)
-            return [str(uri), metadata['schema_hash'], metadata['version']]
+        if isinstance(table.get('reference'), dict) and table['reference'].get('format') == 'demiflow_forge_table_uri_v1':
+            def read_table(t=table):
+                metadata = describe_table(Path(t['uri']), t['version'])
+                return [t['uri'], metadata['schema_hash'], metadata['version']]
+        else:
+            def read_table(a=alias):
+                _, ref, uri = table_resolver(root, value, a)
+                metadata = describe_table(uri, ref.lance_version)
+                return [str(uri), metadata['schema_hash'], metadata['version']]
         check('table', alias, read_table, [table['uri'], table['schema_hash'], table['version']],
               'table_identity_changed:' + alias, 'table_unavailable:' + alias)
     path = binding['parameter_path']
@@ -1028,7 +1035,7 @@ def project_change_hints(root):
                            info.st_size, info.st_mtime_ns, info.st_ctime_ns))
         return content_digest(values)
 
-    value = read_control(root / 'workspace.json')
+    _, value = load_workspace_control(root)
     from demiflow.workbench.projects.discovery import discover
     project = discover(root, value)
     source_paths, source_diagnostics = source_inventory(root, value, project)
@@ -1036,7 +1043,7 @@ def project_change_hints(root):
                 discovery=project['digest'],
                 audit=stamp([root / '.forge/audit/status.json']),
                 project_check=stamp([root / '.forge/project-check.json']),
-                workspace_stamp=stamp([root / 'workspace.json', root / 'README.md']),
+                workspace_stamp=stamp([root / 'workspace.json', root / '.forge/state.json', root / 'README.md']),
                 sources=content_digest(dict(files=stamp(source_paths), diagnostics=source_diagnostics)),
                 source_diagnostics=source_diagnostics,
                 tables=stamp(table_files(root)))

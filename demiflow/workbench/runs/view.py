@@ -66,7 +66,7 @@ def observations(root, run_id, *, attempt, node_id=None, action_id=None, cursor=
                 or type(identity['digest']) is not str or len(identity['digest']) != 64):
             if cursor:raise ObservationResetRequired('sealed_identity_changed')
             raise ForgeError('Run observation seal belongs to a different project',code='conflict')
-        control=runs.ws.read_control(runs.Path(root)/'workspace.json')
+        _,control=runs.ws.load_workspace_control(root)
         binding=dict(workspace_id=runs.ws.workspace_id(root,control),project_root_digest=content_digest(str(runs.Path(root).absolute())),
                      run_id=run_id,attempt=attempt,seal_digest=identity['digest'],node_id=node_id,action_id=action_id)
         if decoded is not None and decoded['binding']!=binding:
