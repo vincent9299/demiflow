@@ -83,13 +83,18 @@ def submission_contract(request, compiled, *, bounds):
         config = node.kernel.configuration
         options = config.get('options', {})
         model = config.get('model', {})
-        if not any(name in options for name in ('codex_exec', 'codex_agent')):
+        if not any(name in options for name in ('codex_exec', 'codex_agent', 'cli')):
             for name in ('api_key_env', 'base_url_env'):
                 if model.get(name):
                     credentials.add(model[name])
+        from collections.abc import Mapping
+        if isinstance(options.get('cli'), Mapping):
+            for env_name in options['cli'].get('env_passthrough') or ():
+                if isinstance(env_name, str) and env_name:
+                    credentials.add(env_name)
         if options.get('object_store'):
             object_roots.add(options['object_store'])
-        for name in ('codex_exec', 'codex_agent'):
+        for name in ('codex_exec', 'codex_agent', 'cli'):
             root = options.get(name, {}).get('artifact_store', {}).get('directory')
             if root:
                 object_roots.add(root)

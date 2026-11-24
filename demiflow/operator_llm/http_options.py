@@ -86,7 +86,39 @@ def validate_http_options(options):
         raise ValueError('The litellm adapter owns retry/fallback settings')
     if set(request) & {'api_key', 'extra_headers'}:
         raise ValueError('Gateway credentials must not be placed in recorded request_options')
+    if 'temperature' in request:
+        validate_temperature(request['temperature'])
     return options
+
+
+def validate_temperature(value):
+    if value is None:
+        return None
+    if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+        raise ValueError('temperature must be a finite nonnegative number or None')
+    return value
+
+
+_ALTERNATE_TRANSPORTS = ('offline_dir', 'offline_store', 'codex_exec', 'codex_agent', 'cli')
+
+
+def merge_temperature_option(options, temperature):
+    """Merge an explicit operator-level temperature into options['request_options']."""
+    if temperature is None:
+        return options
+    validate_temperature(temperature)
+    if options and any(key in options for key in _ALTERNATE_TRANSPORTS):
+        raise ValueError('temperature is only supported for HTTP prompt transports')
+    merged = dict(options or {})
+    request = merged.get('request_options')
+    if request is not None and not isinstance(request, dict):
+        raise ValueError('request_options must be a mapping')
+    request = dict(request or {})
+    if 'temperature' in request and request['temperature'] is not None and request['temperature'] != temperature:
+        raise ValueError('Conflicting temperature in operator argument and options.request_options')
+    request['temperature'] = temperature
+    merged['request_options'] = request
+    return merged
 
 
 def gateway_credentials(options):
@@ -119,17 +151,24 @@ def gateway_credentials(options):
 def validate_prompt_options(options):
     if options is None:
         return
-    alternate = set(options) & {'offline_dir', 'offline_store', 'codex_exec', 'codex_agent'}
+    alternate = set(options) & set(_ALTERNATE_TRANSPORTS)
+    if len(alternate) > 1:
+        raise ValueError(f'Conflicting prompt transports: {sorted(alternate)}')
     if alternate:
         transport_keys = HTTP_OPTIONS - {'model_revision', 'timeout_s', 'journal_dir', 'sqlite_journal'}
         if set(options) & transport_keys:
-            raise ValueError('HTTP transport options cannot be used with offline/codex execution')
+            raise ValueError('HTTP transport options cannot be used with offline/CLI execution')
+        if 'cli' in options:
+            from .cli_exec import validate_cli_options
+            validate_cli_options(options)
     else:
         validate_http_options(options)
 
 
 def request_options(options):
     result = dict(options.get('request_options', {}))
+    if 'temperature' in result and result['temperature'] is None:
+        result.pop('temperature')
     if options.get('stream', False):
         result['stream'] = True
         if options.get('stream_include_usage', True):
