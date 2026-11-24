@@ -71,7 +71,7 @@ def test_missing_target_does_not_fall_back_or_escape(tmp_path):
 
 def test_unreadable_ancestor_relocation_manifest_is_skipped(tmp_path, monkeypatch):
     import os
-    from demiflow.execution import artifacts, location_index
+    from demiflow.execution.storage import artifacts, location_index
     lance_manifest = tmp_path / '_demiflow/lance_locations.json'
     lance_manifest.parent.mkdir()
     lance_manifest.write_text(json.dumps({'version': 1, 'tables': {'sub/a.lance': 'sub/b.lance'}}))
