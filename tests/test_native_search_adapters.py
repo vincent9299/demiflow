@@ -337,3 +337,114 @@ def test_options_an_adapter_no_longer_has_are_rejected_when_declared():
         SearchConfig(engines=({'name': 'other', 'engine': 'yandex', 'search_type': 'web',
                                'results_xpath': '//li'},)).source_configs()
     assert SearchConfig(engines=({'name': 'wikipedia', 'lang_map': {}},)).source_configs()[0]['lang_map'] == {}
+
+
+@pytest.mark.parametrize('first, second, same', [
+    ('http://localhost:8080/a', 'http://LOCALHOST:8080/b?x=1', True),
+    ('http://example.org/a', 'http://example.org:80/b', True),
+    ('https://example.org:443/a', 'https://EXAMPLE.org/b', True),
+    ('http://example.org:8080/a', 'http://Example.org:8080/a', True),
+    ('http://example.org/a', 'https://example.org/a', False),  # an upgrade to https is another origin
+    ('http://example.org:8080/a', 'http://example.org:8081/a', False),
+    ('http://example.org/a', 'http://example.org:8080/a', False),
+    ('http://example.org/a', 'http://other.example.org/a', False),
+    ('http://example.org/a', 'http://example.org.evil.test/a', False),
+    ('http://example.org/a', 'http://user:secret@example.org/a', False),  # credentials of its own
+    ('http://example.org/a', 'http://user@example.org/a', False),
+    ('http://example.org/a', 'http://example.org:abc/a', False),  # a port that is no number
+])
+def test_same_origin_is_scheme_host_and_effective_port(first, second, same):
+    from demiflow.collect.native_search import worker_network as wn
+    assert wn.same_origin(urlsplit(first), urlsplit(second)) is same
+
+
+def test_results_are_read_up_to_the_count_and_byte_limits(monkeypatch):
+    """Records are taken one at a time; the first past a limit stops the source, which is then closed."""
+    import json as jsonlib
+    import sys
+    from demiflow.collect.native_search import worker, worker_network as wn
+    monkeypatch.setattr(wn._State, 'config', {'max_bytes': 100})  # a reply may have 800 bytes
+    assert wn.output_limit() == 800
+    produced, closed = [], []
+
+    def produce(count, size):
+        try:
+            for index in range(count):
+                produced.append(index)
+                yield {'url': f'https://example.org/{index}', 'title': 'x' * size}
+        finally:
+            closed.append(True)
+
+    def run(count, size, limit):
+        produced.clear(), closed.clear()
+        try:
+            return worker.within_budget(produce(count, size), limit)
+        finally:
+            assert closed == [True]
+
+    assert len(run(3, 10, 5)) == 3  # within both limits
+    assert len(worker.within_budget([{'url': 'https://example.org/', 'title': 'list'}], 5)) == 1
+    with pytest.raises(wn.ResponseTooLarge):
+        run(10, 10, 3)  # the count limit
+    assert produced == [0, 1, 2, 3]  # one past the limit, no further
+    one = worker.pack({'url': 'https://example.org/0', 'title': 'x' * 100})
+    size = len(jsonlib.dumps(one, ensure_ascii=False).encode())
+    with pytest.raises(wn.ResponseTooLarge):
+        run(50, 100, 1000)  # the byte limit
+    assert len(produced) == 800 // size + 1
+    for limit in (sys.maxsize, 10 ** 30):  # no count a list could reach is a limit
+        assert len(run(2, 10, limit)) == 2
+
+
+def test_sqlite_source_reads_no_more_bytes_than_a_reply_may_have(tmp_path):
+    """A wide value is refused before it is read, a page over the byte limit stops early, a normal page passes."""
+    import sqlite3
+    database = tmp_path / 'bytes.sqlite'
+    with sqlite3.connect(database) as db:
+        db.execute('create table docs (label text, body text)')
+        db.execute("insert into docs values ('wide', ?)", ('w' * 24576,))
+        db.executemany('insert into docs values (?, ?)', [(f'row {i:02d}', 'g' * 1024) for i in range(24)])
+        db.execute("insert into docs values ('small', 'tiny')")
+
+    def source(name, pattern):
+        return {'name': name, 'engine': 'sqlite', 'database': str(database), 'limit': 100,
+                'query_str': f"select label, body from docs where label like '{pattern}' order by label"}
+
+    result = probe('''
+ settings['max_bytes']=1024; settings['max_results']=1000  # a reply may have 8 KiB
+ spec={'language':'en','pageno':1,'safesearch':0,'time_range':None,'engine_data':{}}
+ values={}
+ for name in ('wide','group','small'):
+  engine=loaded[name]
+  made=[]
+  engine.key_value=lambda row,made=made,build=engine.key_value: made.append(len(row['body'])) or build(row)
+  reply=w.run_search({'engine':name,'query':'x','parameters':spec},loaded,errors,set(),settings)
+  values[name]=[reply['status'],reply.get('reason'),len(made),sum(made),len(reply['results'])]
+ one=w.pack(engine.key_value({'label':'row 00','body':'g'*1024}))
+ values['row_bytes']=len(json.dumps(one,ensure_ascii=False).encode())
+ w.send(values)
+''', engines=(source('wide', 'wide'), source('group', 'row %'), source('small', 'small')))
+    rows = 8192 // result['row_bytes'] + 1  # the row that crosses the limit is the last one read
+    assert result['wide'] == ['response_too_large', 'ResponseTooLarge', 0, 0, 0]  # refused before it was read
+    assert result['group'] == ['response_too_large', 'ResponseTooLarge', rows, rows * 1024, 0]
+    assert result['small'] == ['ok', '', 1, 4, 1]
+    assert rows < 24
+
+
+def test_max_results_may_be_any_integer(tmp_path):
+    import sqlite3
+    import sys
+    database = tmp_path / 'one.sqlite'
+    with sqlite3.connect(database) as db:
+        db.execute('create table docs (label text)')
+        db.execute("insert into docs values ('one')")
+    result = probe(f'''
+ spec={{'language':'en','pageno':1,'safesearch':0,'time_range':None,'engine_data':{{}}}}
+ values=[]
+ for limit in ({sys.maxsize}, {10 ** 30}):
+  settings['max_results']=limit
+  reply=w.run_search({{'engine':'one','query':'x','parameters':spec}},loaded,errors,set(),settings)
+  values.append([reply['status'],len(reply['results'])])
+ w.send(values)
+''', engines=({'name': 'one', 'engine': 'sqlite', 'database': str(database), 'query_str': 'select label from docs'},))
+    assert result == [['ok', 1], ['ok', 1]]

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime
-import itertools
 import json
 import logging
 from pathlib import Path
@@ -223,21 +222,31 @@ def online_search(engine, query, params):
 
 
 def within_budget(results, limit):
-    """The results as a list of at most ``limit`` items.
+    """The results as a list of packed records, read only as far as the session allows.
 
-    Reading stops at the first result beyond the limit, so a source that produces its results one by one
-    (the SQLite source reading rows) does no work past the session budget; the source is then closed.
+    Records are taken one at a time and counted: the first one past ``limit`` records, or past the bytes
+    one reply may have (``worker_network.output_limit``, counted on the packed and encoded records), ends
+    the search as response_too_large. A source that produces its results one by one (the SQLite source
+    reading rows) is asked for nothing beyond that and is closed.
     """
     from . import worker_network
+    limit = min(limit, sys.maxsize)  # a count no list could reach is no limit
+    room, packed = worker_network.output_limit(), []
+    results = iter(results)
     try:
-        found = list(itertools.islice(results, limit + 1))
+        for record in results:
+            if len(packed) >= limit:
+                raise worker_network.ResponseTooLarge()
+            item = pack(record)
+            room -= len(json.dumps(item, ensure_ascii=False).encode())
+            if room < 0:
+                raise worker_network.ResponseTooLarge()
+            packed.append(item)
     finally:
         close = getattr(results, 'close', None)
         if close is not None:
             close()
-    if len(found) > limit:
-        raise worker_network.ResponseTooLarge()
-    return found
+    return packed
 
 
 def run_search(message, loaded, errors, initialized, config):
@@ -278,8 +287,7 @@ def run_search(message, loaded, errors, initialized, config):
             results = online_search(engine, message['query'], params)
         if results is None:
             return {'status': 'unsupported_parameters', 'reason': 'Adapter declined the request', 'results': []}
-        results = within_budget(results, config['max_results'])
-        encoded = [pack(r) for r in results]
+        encoded = within_budget(results, config['max_results'])
         # Validate with the merge rules before persisting a success.
         merging.validate(name, [unpack(r) for r in encoded])
         ignored = []
@@ -287,7 +295,7 @@ def run_search(message, loaded, errors, initialized, config):
             ignored.append('safesearch')
         if spec['language'] != 'all' and not engine.language_support:
             ignored.append('language')
-        return {'status': 'ok' if results else 'no_results', 'reason': '', 'results': encoded,
+        return {'status': 'ok' if encoded else 'no_results', 'reason': '', 'results': encoded,
                 'ignored_parameters': ignored,
                 'capabilities': capability, 'http': list(worker_network.http_receipts)}
     except Exception as exc:
@@ -313,6 +321,7 @@ def inspect(loaded, errors):
 
 
 def main():
+    from . import worker_network
     config = receive()
     loaded, errors = bootstrap(config)
     initialized = set()
@@ -328,7 +337,7 @@ def main():
         else:
             raise ValueError('Unknown worker operation')
         encoded = json.dumps(result, ensure_ascii=False)
-        if len(encoded.encode()) > config['max_bytes'] * 8:
+        if len(encoded.encode()) > worker_network.output_limit():
             result = {'status': 'response_too_large', 'reason': 'Worker output limit', 'results': []}
         send({'event': 'result', 'value': result})
 

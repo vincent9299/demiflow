@@ -7,10 +7,13 @@ pacing, global concurrency and attempt records stay with the parent.
 Rules:
 
 * one exchange at a time per worker and no hidden retries;
-* redirects are followed hop by hop within the session limit; a cross-origin
-  hop drops credentials, cookies, host headers and the query parameters given
-  with the request (the target's own query string is all the new origin
-  gets); 303 (and 301/302 after a POST) continue as GET without a body;
+* redirects are followed hop by hop within the session limit; a hop to
+  another origin drops credentials, cookies, host headers and the query
+  parameters given with the request (the target's own query string is all
+  the new origin gets); 303 (and 301/302 after a POST) continue as GET
+  without a body. Origin means scheme, host and port: the host is compared
+  without regard to case, a default port written out equals one left out, and
+  a target that carries credentials of its own is another origin;
 * the response body is capped at ``max_bytes`` across all hops;
 * userinfo in a URL becomes basic authentication and is removed from the URL;
 * only http(s) URLs, plain http only when the source network enables it;
@@ -28,7 +31,9 @@ never sent as per-request arguments.
 Bounds: local addresses are taken from their declaration one request at a
 time, so a network of any size (an IPv6 /64) costs nothing to declare; a
 network keeps at most ``CLIENT_LIMIT`` HTTP clients for reuse and closes the
-least recently used one beyond that.
+least recently used one beyond that. The encoded reply of one search may have
+``output_limit()`` bytes: ``worker.within_budget`` stops reading results at
+that size, and adapters that read from a store bound what they take by it.
 """
 from collections import OrderedDict
 import ipaddress
@@ -55,10 +60,13 @@ PROXY_SCHEMES = ('http', 'https', 'socks4', 'socks5', 'socks5h')
 CLIENT_OPTIONS = ('verify', 'impersonate', 'curl_options', 'enable_http3')
 # HTTP clients one network keeps for reuse (one per combination of local address, proxies and client options).
 CLIENT_LIMIT = 32
+DEFAULT_PORTS = {'http': 80, 'https': 443}
+# The encoded reply of one search (results, receipts and the rest) may be this many times ``max_bytes``.
+OUTPUT_FACTOR = 8
 
 
 class ResponseTooLarge(Exception):
-    """The response exceeded the session byte limit."""
+    """The response or the results exceeded the session limits."""
 
 
 class _State:
@@ -70,6 +78,13 @@ class _State:
     source = None
     deadline = None
     response_class = None
+
+
+def output_limit():
+    """Bytes the encoded reply of one search may have."""
+    if _State.config is None:
+        raise RuntimeError('Worker budgets are not installed')
+    return _State.config['max_bytes'] * OUTPUT_FACTOR
 
 
 def install(config, send, receive, networks):
@@ -108,6 +123,24 @@ def network_options(outgoing, declared=None, attributes=None):
     elif attributes is not None:
         options.update({k: attributes[k] for k in NETWORK_KEYS if k in attributes})
     return options
+
+
+def _origin(parts):
+    """Scheme, host and port of a split URL (``urlsplit`` result), or None when it names credentials of its own
+    or a port that is no number: such a URL is no origin that anything given for another one may go to."""
+    if parts.username is not None or parts.password is not None:
+        return None
+    try:
+        port = parts.port
+    except ValueError:
+        return None
+    return parts.scheme, parts.hostname, port or DEFAULT_PORTS.get(parts.scheme)
+
+
+def same_origin(first, second):
+    """True when two split URLs have the same scheme, host (any case) and effective port."""
+    origin = _origin(first)
+    return origin is not None and origin == _origin(second)
 
 
 def _local_addresses(declared):
@@ -275,8 +308,8 @@ def request(method, url, *, raise_for_httperror=True, allow_redirects=True, max_
 
     ``verify``, ``impersonate``, ``curl_options`` and ``enable_http3`` choose the HTTP client; the other
     arguments (``headers``, ``cookies``, ``auth``, ``params``, ``data``, ``json``, ``content`` ...) go to
-    curl_cffi with every hop on the same origin. A hop to another origin gets neither credentials nor
-    ``params``: only the query string of the redirect target itself.
+    curl_cffi with every hop on the same origin (scheme, host and port; see the module docstring). A hop to
+    another origin gets neither credentials nor ``params``: only the query string of the redirect target itself.
     """
     config = _State.config
     if config is None:
@@ -349,7 +382,7 @@ def request(method, url, *, raise_for_httperror=True, allow_redirects=True, max_
             raise ValueError('Adapter redirect limit exceeded')
         target = urljoin(str(url), location)
         nxt = urlsplit(target)
-        if (nxt.scheme, nxt.netloc) != (parts.scheme, parts.netloc):
+        if not same_origin(parts, nxt):
             arguments.pop('auth', None)
             arguments.pop('cookies', None)
             arguments.pop('params', None)

@@ -8,16 +8,22 @@ overridden per source in ``SearchConfig.engines``.
 
 Inside ``request``/``response`` use the helpers below for any additional HTTP
 request: they share the source's admission, budgets and receipts.
+
+An offline adapter's ``search`` may return a list or yield its results one at a
+time. The worker counts them as they come and stops at ``max_results`` or at
+``output_limit()`` encoded bytes (``ResponseTooLarge``); an adapter that reads
+from a store should read no more than that, and raise ``ResponseTooLarge`` for a
+single value it cannot take.
 """
 import re
 from html.parser import HTMLParser
 
 from .errors import SourceAccessDenied, SourceCaptcha, SourceError, SourceRateLimited
-from .worker_network import Request, get, head, multi_requests, post, request
+from .worker_network import Request, ResponseTooLarge, get, head, multi_requests, output_limit, post, request
 
-__all__ = ['Request', 'SourceAccessDenied', 'SourceCaptcha', 'SourceError', 'SourceRateLimited',
+__all__ = ['Request', 'ResponseTooLarge', 'SourceAccessDenied', 'SourceCaptcha', 'SourceError', 'SourceRateLimited',
            'browser_user_agent', 'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text',
-           'image_result', 'key_value', 'legacy_record', 'main_result', 'multi_requests', 'post',
+           'image_result', 'key_value', 'legacy_record', 'main_result', 'multi_requests', 'output_limit', 'post',
            'request', 'size_text', 'user_agent']
 
 _UNICODE_ESCAPE = re.compile(r'%u([0-9a-fA-F]{4})')

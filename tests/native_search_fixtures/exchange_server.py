@@ -19,6 +19,8 @@ def answer(tag, method, raw_path, headers, body):
     path, query = split.path, parse_qs(split.query)
     if path.startswith('/__h/'):  # sent here instead of another host: /__h/<host>/<path>
         path = '/' + path.split('/', 3)[3]
+    if path == '/case-redirect':  # the same host and port, the host name in capitals
+        return 302, [('Location', 'http://' + str(headers.get('Host', '')).upper() + '/echo?after=case')], b'moved'
     if path == '/echo':
         return 200, [('Content-Type', 'text/plain')], ('echo:' + tag + ':' + method + ':' + raw_path).encode()
     if path == '/setcookie':
@@ -111,8 +113,9 @@ class Servers:
     def normalize(self, text):
         """Replace this run's port numbers by server tags."""
         for tag in self.items:
-            text = text.replace('127.0.0.1:' + str(self.port(tag)), 'HOST_' + tag)
-            text = text.replace('127.0.0.1%3A' + str(self.port(tag)), 'HOST_' + tag)
+            for host in ('127.0.0.1', 'localhost', 'LOCALHOST'):
+                text = text.replace(host + ':' + str(self.port(tag)), 'HOST_' + tag)
+                text = text.replace(host + '%3A' + str(self.port(tag)), 'HOST_' + tag)
         return text
 
     def take(self):

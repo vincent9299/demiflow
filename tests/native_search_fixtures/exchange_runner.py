@@ -91,6 +91,13 @@ def essentials(output):
 
 # ---------------------------------------------------------------------------- scenarios
 
+def resolves_to_loopback(name):
+    try:
+        return socket.gethostbyname(name) == '127.0.0.1'
+    except OSError:
+        return False
+
+
 def can_bind(address):
     try:
         with socket.socket() as probe:
@@ -151,6 +158,9 @@ def transport(urls):
         net('xnetretries', 'plain', {'retries': 2, 'enable_http': True}),
         net('xnetshared', 'plain', 'xnetlocal'),
         probe('xparamscross', 'paramscross'),
+        # The redirect answers with the same host and port, the host name in capitals: the same origin.
+        probe('xparamscase', 'paramscase', base_url=A.replace('127.0.0.1', 'localhost')),
+        probe('xcredcase', 'credcase', base_url=A.replace('127.0.0.1', 'localhost')),
     ]
     return items, dict(CONFIG)
 
@@ -593,6 +603,10 @@ def main(suite):
                 local = {s['name'] for s, _ in items}
             skipped = sorted(local)
             items = [(s, q) for s, q in items if s['name'] not in local]
+        if not resolves_to_loopback('localhost'):
+            # The scenario that writes the host as ``localhost`` needs the name to reach this machine.
+            skipped = sorted({*skipped, 'xparamscase', 'xcredcase'})
+            items = [(s, q) for s, q in items if s['name'] not in ('xparamscase', 'xcredcase')]
     from demiflow.collect.native_search import results, worker
     from demiflow.collect.native_search.config import SearchConfig
     events = []

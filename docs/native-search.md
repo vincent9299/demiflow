@@ -34,7 +34,7 @@
   - 请求参数 `locale` 取代 `searxng_locale`；
   - 失败用 `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError` 表示；
   - `about` 里的未知键不再导致加载失败；
-  - 辅助函数的 `params`（查询参数）在同源重定向时每一跳都带上，与此前相同；重定向到另一个源时不再带过去，新站点只收到重定向目标自带的查询串。旧实现会把这些参数一并发给新站点，尽管它在跨源时已经去掉了认证信息和 Cookie。
+  - 重定向的“同源”指协议、主机和端口都相同：主机不分大小写，写出默认端口（http 80、https 443）与省略等价；换协议（包括 http 升级到 https）、换主机、换端口，以及目标自带登录信息，都算另一个源。同源时，认证信息、Cookie 和辅助函数的 `params`（查询参数）每一跳都带上；到另一个源时都不带过去，新站点只收到重定向目标自带的查询串。与此前有两点差别：旧实现把 `params` 一并发给了新站点，尽管它已去掉认证信息和 Cookie；旧实现只比较网址里的 `host:port` 文本，同一个源写法不同（主机大小写、默认端口）时会丢掉认证信息和 Cookie 而保留 `params`，现在这几项一起按同源处理。
   - 其余约定不变，例如 `setup(settings)` 不返回值即表示接受，请求级的 `impersonate`、`curl_options`、`verify`，响应的 `url.host`、`url.path`。
 - **`services.searxng.SearxNGService`**：
   - 不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`。名单里的来源是否可用由外部部署决定；DemiFlow 自己的 wikisearch 只作为原生来源提供。
@@ -61,6 +61,7 @@
   - `SearxEngineAccessDeniedException` → `SourceAccessDenied`；
   - `SearxEngineAPIException`（baidu、quark、qwant、pexels）、`SearxEngineException`（public domain image archive）、`SearxEngineResponseException`（wikisearch）→ `SourceError`。
   - 其他解析异常仍记录原异常类名（如 `KeyError`）。
+- 一次搜索的结果字节超过回复上限时，回执记录的 `reason` 由 `Worker output limit` 改为 `ResponseTooLarge`（与结果数超限相同，`status` 都是 `response_too_large`）：结果现在逐条计字节，在越过上限的那一条处停止。原来对整份回复的检查仍在，只在回复因结果以外的内容超限时触发。
 - 旧回执里的 `searx.result_types.*` 结果仍可解码、合并。
 - 由带类型结果产生的 `response_json` 字段集合保持不变（`adapter.main_result`、`image_result`、`key_value`）。
 - 自定义适配器声明的 `language_support` 按声明记录。旧实现对没有内置语言表的来源一律记为 False，于是回执把 `language` 列为被忽略；内置来源的取值与此前相同。
@@ -102,8 +103,8 @@
   - 响应解析：21 个来源的合成响应。
 - 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
 - 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
-- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 14 组 1,423 个场景：
-  - HTTP 层 93 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
+- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 14 组 1,424 个场景：
+  - HTTP 层 94 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
   - 超时、会话级出口配置、TLS 与自定义 CA 共 13 个；
   - 网络名 25 个：引用已声明的来源、未声明的目录来源、`ipv4`/`ipv6`、会话级具名网络，以及 yandex images、brave.images、qwant images 默认的网络名；
   - 适配器加载 59 个，SQLite 来源 27 个；
@@ -111,7 +112,7 @@
   - 选项覆盖 142 个：36 个来源的 71 个选项（端点、数值、开关）逐个改值后搜索；
   - 异常应答 836 个：38 个来源各遇到 11 种应答（HTML、空内容、空对象、空列表、`null`、纯文本、403、429、500、404、跳转到验证页），分“只替换搜索应答”和“替换全部应答”两种范围；回执状态全部相同。
   - 另有四项逐项比对：目录默认设置与旧实现的默认设置逐键相同（20 个来源，wikisearch 是 DemiFlow 自己的适配器）；运行时读取的来源属性 609 个全部相同；20 个来源各用另一个名称声明后按两种语言搜索共 80 次，74 次相同，其余 6 次是“持久格式”一节声明的三个适配器；旧适配器里除端点和页长以外的 25 个名字，在用到它们的来源上逐个改值（36 个组合，各 8 种查询）：6 个名字的效果新旧相同，11 个名字（分布在 6 个适配器上，共 12 处）在声明时被拒绝，其余 8 个两边都不起作用。
-  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 579 个场景固化在 `tests/test_native_search_exchange.py`。
+  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 580 个场景固化在 `tests/test_native_search_exchange.py`。
 - 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用
@@ -263,7 +264,12 @@ JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSes
 
 目录里有三个来源默认写了网络名：yandex images 走 yandex 的网络，brave.images、qwant images 走 `brave`、`qwant` 网络。所以同时声明 yandex 和 yandex images 时，给 yandex 配的代理对 yandex images 同样生效；要让图片来源单独走别的出口，给它写 `network` 映射，只写 `proxies` 等单个选项不起作用。这些都与此前相同。
 
-只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。行随着 worker 取结果逐行从数据库读出：一页比会话的 `max_results` 大时，读到上限再多一行就停下并报 `response_too_large`，不会先把整页读进内存；`limit` 为负数时 SQLite 当作不限页长，同样受这个上限约束。这个上限按行数计：单独一行是整行读入的，它的大小只受 SQLite 自身长度上限的约束，不受会话预算约束；结果总量超出 worker 输出上限时，整次搜索在读完之后以 `response_too_large` 结束。
+只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。行随着 worker 取结果逐行从数据库读出，读取受会话预算限制：
+
+- **行数**：一页比 `max_results` 大时，读到上限再多一行就停下；`limit` 为负数时 SQLite 当作不限页长，同样受这个上限约束。
+- **字节**：累计的编码字节超过一次回复可以有的字节数（`max_bytes` 的 8 倍，适配器里是 `adapter.output_limit()`）时，读到越过上限的那一行就停下；一个值或一条存储的行比这个字节数还大时，SQLite 在把它读入内存之前就拒绝（查询里拼出来的值也一样）。
+
+两种情况都以 `response_too_large` 结束并关闭游标。刚好在上限以内的值仍会整个读入，内存峰值是上限的几倍；查询把多列拼成一行时，整行在读出之后才计入累计预算。
 
 ## 返回值、缓存与资源归属
 
@@ -301,14 +307,14 @@ JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSes
 
 最后一个等待者取消时才中止共享请求；另一个等待者仍在使用时继续执行。进程硬杀意味着自定义适配器的 finally 不保证运行，因此外部有副作用的连接器必须自行提供幂等性；平台保留不确定回执而不自动重发。
 
-max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_results 限制每来源结果数，管道输出有字节限制。它们不是整个 Python 进程 RSS 的硬上限；原始结果总内存仍随所选来源和接受的结果量变化。
+max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_results 限制每来源结果数（可以是任意正整数），一次搜索回复的编码字节不得超过 max_bytes 的 8 倍：结果逐条取、逐条计数和计字节，在越过上限的那一条处停止，不会先收齐再检查。它们不是整个 Python 进程 RSS 的硬上限；原始结果总内存仍随所选来源和接受的结果量变化。
 
 ## 自定义来源
 
 自定义来源是随应用安装的 Python 模块，以 `module=` 声明，形式与内置适配器相同：
 
 - **在线来源**：提供 `request(query, params)` 和 `response(resp)`。
-- **离线来源**：设 `engine_type = 'offline'`，提供 `search(query, params)`。
+- **离线来源**：设 `engine_type = 'offline'`，提供 `search(query, params)`。它可以返回列表，也可以逐条产出结果（generator）：worker 逐条取、逐条计数和计字节，越过 `max_results` 或回复字节上限（`output_limit()`）的那一条处停止，关闭 generator，以 `response_too_large` 结束。从存储里读大量数据的来源应逐条产出，并用 `output_limit()` 限制单个值的读取，读不了时抛出 `ResponseTooLarge`（只读 SQLite 来源就是这样做的）。
 - **可选**：`setup(settings)` 做配置检查：不返回值或返回真值表示接受，返回其他假值或抛出异常表示拒绝；`init(settings)` 在首次搜索前运行，返回 `False` 表示拒绝。
 - **模块属性**：`categories`、`paging`、`max_page`、`time_range_support`、`safesearch`、`language_support`、`about` 等声明能力。来源配置字典中的同名字段会覆盖它们。值为 `None` 的公开属性表示必填选项。
 
@@ -324,8 +330,9 @@ HTTP 客户端不保存 Cookie：服务器设置的 Cookie 只出现在那一次
 
 `demiflow.collect.native_search.adapter` 提供适配器可用的全部辅助：
 
-- HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。重定向到另一个源时，认证信息、Cookie 和调用时给的 `params` 都不带过去。
-- 异常：`SourceError`、`SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`。
+- HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。重定向到另一个源（协议、主机、端口任一不同）时，认证信息、Cookie 和调用时给的 `params` 都不带过去。
+- 异常：`SourceError`、`SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`ResponseTooLarge`（来源的数据超出会话预算，回执为 `response_too_large`）。
+- 预算：`output_limit()`（一次搜索的回复最多有这么多编码字节）。
 - 文本：`html_to_text`、`extract_text`、`ecma_unescape`、`size_text`。
 - User-Agent：`user_agent`（DemiFlow 标识）、`browser_user_agent`（随机的当前桌面浏览器）。
 - 结果：`main_result`、`image_result`、`key_value`、`legacy_record`。

@@ -37,6 +37,7 @@ DIFFERENT_BY_DESIGN = {
     'xlnotlist': 'a search that returns text fails under another exception name',
     'xlyessafe': 'language_support declared by a custom adapter is recorded as declared',
     'xparamscross': 'a redirect to another origin does not get the query parameters given with the request',
+    'xcredcase': 'credentials go to the same origin in another spelling (the host in capitals)',
 }
 PROXY_VARIABLES = ('no_proxy', 'http_proxy', 'https_proxy', 'all_proxy')
 
@@ -78,6 +79,28 @@ def test_exchanges_match_recorded_reference(suite):
     differences = {key: {'expected': expected[key], 'actual': actual.get(key)}
                    for key in expected if actual.get(key) != expected[key]}
     assert not differences, json.dumps(dict(list(differences.items())[:3]), indent=1, ensure_ascii=False)[:4000]
+
+
+def test_redirect_to_the_same_origin_in_other_spelling_keeps_the_request_parameters():
+    """The same host and port with the host name in capitals is the same origin: the parameters go along."""
+    run = next((run for run in exchanges('transport')['runs'] if run['source'] == 'xparamscase'), None)
+    if run is None:
+        pytest.skip('localhost does not reach this machine')
+    assert run['status'] == 'ok'
+    received = [(record['server'], record['path']) for record in run['server']][1:]  # after the search request
+    assert received == [('A', '/case-redirect?p=one'), ('A', '/echo?after=case&p=one')]
+
+
+def test_redirect_to_the_same_origin_in_other_spelling_keeps_the_credentials():
+    """The previous runtime compared the host:port text and dropped credentials when only the case differed."""
+    run = next((run for run in exchanges('transport')['runs'] if run['source'] == 'xcredcase'), None)
+    if run is None:
+        pytest.skip('localhost does not reach this machine')
+    assert run['status'] == 'ok'
+    first, second = (dict((k.lower(), v) for k, v in record['headers']) for record in run['server'][1:])
+    for headers in (first, second):  # the request itself, then the redirect target spelled with capitals
+        assert headers.get('authorization') == 'Bearer t' and headers.get('cookie') == 'session=abc'
+        assert headers.get('x-keep') == '1'
 
 
 def test_redirect_to_another_origin_gets_no_request_parameters():

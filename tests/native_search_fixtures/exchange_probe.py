@@ -206,6 +206,7 @@ REQUESTS = {
     'verifyfalse': _path('/echo?q=verify', verify=False),
     'decline': _decline,
     'helpers': None, 'helpersredirect': None, 'multi': None, 'paramscross': None,
+    'paramscase': None, 'credcase': None,
 }
 RESPONSES = {
     'helpers': _helper_response([
@@ -233,6 +234,16 @@ RESPONSES = {
     ]),
     'multi': _helper_response([('multi', _requests_list)]),
     # Query parameters given with a helper call: kept on a redirect within the origin, not sent to another one.
+    # The same host and port spelled differently is still the same origin: parameters stay.
+    'paramscase': _helper_response([
+        ('same-origin-capitals', lambda net: net.get(base_url + '/case-redirect', params={'p': 'one'})),
+    ]),
+    # Credentials go to the same origin spelled differently as they do to the spelling they were given for. They are
+    # written as headers: the HTTP client sends no ``cookies`` argument to a host named ``localhost``.
+    'credcase': _helper_response([
+        ('same-origin-capitals', lambda net: net.get(base_url + '/case-redirect', headers={
+            'Authorization': 'Bearer t', 'Cookie': 'session=abc', 'X-Keep': '1'})),
+    ]),
     'paramscross': _helper_response([
         ('same-origin', lambda net: net.get(base_url + '/redirect/302/1', params={'p': 'one'})),
         ('cross-origin', lambda net: net.get(base_url + '/cross?' + urlencode({'to': other_url + '/echo?from=cross'}),
