@@ -222,3 +222,42 @@ def test_forge_auto_review_and_rework_helpers():
     assert '[Forge 自动返工 1/1]' in prompt
     assert 'FL-03' in prompt and 'flows/a.py:12' in prompt
     assert 'operators/b.py:8' in prompt and 'guard None' in prompt
+
+
+def test_forge_auto_rework_deduplicates_and_respects_python_config(tmp_path):
+    from demiflow.workbench.conversations.worker import _build_rework_prompt
+    proj = tmp_path / 'proj_no_py'
+    proj.mkdir()
+    (proj / 'workspace.json').write_text('{"entries": {}}\n')
+
+    # Repeated diagnostics across flows must collapse to one line with count,
+    # allowing later distinct diagnostics to surface within the 6-item cap.
+    repeated = [
+        {'rule': 'FL-02', 'path': 'operators/bindings.py', 'line': 33, 'detail': 'bad call'},
+        {'rule': 'FL-02', 'path': 'operators/bindings.py', 'line': 33, 'detail': 'bad call'},
+        {'rule': 'FL-02', 'path': 'operators/bindings.py', 'line': 33, 'detail': 'bad call'},
+        {'rule': 'FL-02', 'path': 'operators/bindings.py', 'line': 33, 'detail': 'bad call'},
+        {'rule': 'FL-07', 'path': 'operators/bindings.py', 'line': 47, 'detail': 'With'},
+        {'rule': 'FL-07', 'path': 'operators/bindings.py', 'line': 47, 'detail': 'With'},
+        {'rule': 'FL-07', 'path': 'operators/other.py', 'line': 9, 'detail': 'distinct issue'},
+    ]
+    prompt = _build_rework_prompt(
+        {'native_flow': {'status': 'failed', 'diagnostics': repeated}},
+        None,
+        project_root=proj,
+    )
+    assert prompt.count('operators/bindings.py:33') == 1
+    assert '（共 4 处）' in prompt
+    assert '（共 2 处）' in prompt
+    assert 'operators/other.py:9' in prompt
+    assert '未配置业务 Python' in prompt
+
+    # With a configured business Python, prompt asks to run project tests.
+    (proj / 'workspace.json').write_text('{"entries": {}, "python": "/opt/venv/bin/python"}\n')
+    prompt_with_py = _build_rework_prompt(
+        {'native_flow': {'status': 'failed', 'diagnostics': repeated[:1]}},
+        None,
+        project_root=proj,
+    )
+    assert '项目测试验证' in prompt_with_py
+    assert '未配置业务 Python' not in prompt_with_py
