@@ -122,12 +122,3 @@ def declaration(operation, actor):
     value['schema'] = encode_schema(actor.schema,bounds=_PREFLIGHT_BOUNDS).hex()
     value['max_batch'] = operation.max_batch
     return value
-
-
-
-
-
-
-
-
-

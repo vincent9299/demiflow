@@ -15,4 +15,3 @@ def fixed_checkpoint_source(ref, declared, columns):
         batch_readahead=1, fragment_readahead=1,
     )
     return source
-

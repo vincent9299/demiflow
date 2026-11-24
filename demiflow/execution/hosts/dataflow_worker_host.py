@@ -87,7 +87,7 @@ class HostedDataflowWorker:
         self._runtime = WorkerRuntime(launch_spec, control=control, manifest_loader=manifest_loader)
         self._runtime.register()
 
-    
+
 
     def identity(self) -> dict:
         result = {"spec_hash": self._spec_hash, "boot_id": self._boot_id}
@@ -100,9 +100,9 @@ class HostedDataflowWorker:
         self._runtime.activate_assignment(assignment)
         self._activated = True
 
-    
 
-    
+
+
 
     def _bind_resource_envelope(self, value):
         """Project the existing allocation; this grants no new resources."""

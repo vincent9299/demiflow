@@ -77,4 +77,3 @@ class TypedShuffleKey:
 
     def clear(self):
         self.previous = None
-

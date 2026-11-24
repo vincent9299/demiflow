@@ -97,5 +97,3 @@ class DurableResidency:
             completed=self.completed, value_inputs=self._value_inputs, sources=self._sources,
             finite_seals=self._exchange.finite_seals, edge_eoi=self._exchange.edge_eoi,
             waiting_for=self._exchange.waiting_for)
-
-

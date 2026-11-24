@@ -231,4 +231,3 @@ class ScratchStream:
         if self._file is not None:
             self._file.close_local()
         self.closed = True
-
