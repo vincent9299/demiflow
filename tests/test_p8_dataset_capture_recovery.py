@@ -1,4 +1,4 @@
-"""The retired private method only invalidates resumes which captured the entire Dataset class."""
+"""Current-program resumes, early cross-version rejection, and published-data cold reads."""
 from collections import Counter
 import json
 import os
@@ -66,26 +66,33 @@ class CountingMap:
 @pytest.fixture(scope='module')
 def published(tmp_path_factory):
     checkout, _ = _extract_original(tmp_path_factory.mktemp('p8-dataset-capture'), PUBLISHED)
+    # The old writer must import its actual original sink fixture, not today's
+    # fixture whose imports correctly name today's module owners.
+    fixtures = checkout / 'tests'
+    fixtures.mkdir()
+    (fixtures / 'test_execution_recovery_entrypoints.py').write_bytes(subprocess.check_output(
+        ['git', 'show', PUBLISHED + ':tests/test_execution_recovery_entrypoints.py'], cwd=REPO))
     return checkout
 
 
 def _invoke(checkout, root, script, args=(), log=None):
     return subprocess.run(
         [sys.executable, '-B', '-c', script, *args], cwd=root,
-        env=dict(os.environ, PYTHONPATH=os.pathsep.join(map(str, (checkout, REPO/'tests', root))),
+        env=dict(os.environ, PYTHONPATH=os.pathsep.join(map(str, (checkout, checkout/'tests', REPO/'tests', root))),
                  P8_TEST_EFFECTS=str(log or root/'effects'), DEMIFLOW_RESOURCE_ROOT=str(root/'resources'),
                  DEMIFLOW_RESOURCE_HOME=str(root/'home')),
         text=True, capture_output=True, timeout=180,
     )
 
 
+@pytest.mark.parametrize('writer_version', ['published', 'current'])
 @pytest.mark.parametrize(('capture', 'operation', 'rejection'), [
-    ('Dataset', 'resume', 'Action semantic/source identity differs on resume'),
+    ('Dataset', 'resume', None),
     ('Dataset.join', 'resume', None),
     ('Dataset.checkpoint', 'resume', None),
     ('Dataset.join', 'reject-at-seal', 'test rejection inside sealed program verification'),
 ], ids=['captured-class', 'captured-public-method', 'unchanged-rejection', 'seal-validation'])
-def test_old_cut_and_sink_effects(published, tmp_path, capture, operation, rejection):
+def test_cut_and_sink_effects(published, tmp_path, capture, operation, rejection, writer_version):
     (tmp_path / 'historical_business.py').write_text(
         BUSINESS + f'\ndef observed():\n    return CountingMap({capture})\n'
     )
@@ -96,7 +103,7 @@ def test_old_cut_and_sink_effects(published, tmp_path, capture, operation, rejec
                       [str(checkout), str(tmp_path), 'nonfinal', step, 'capture'], log)
         return run, Counter(log.read_text().splitlines() if log.exists() else ())
 
-    interrupted, before = invoke(published, 'generate')
+    interrupted, before = invoke(published if writer_version == 'published' else REPO, 'generate')
     assert interrupted.returncode == 75, interrupted.stderr
     from demiflow.execution.journal.run_reader import _ReadonlyJournal
     from demiflow.execution.storage.state_artifacts import StateArtifacts
@@ -118,7 +125,15 @@ def test_old_cut_and_sink_effects(published, tmp_path, capture, operation, rejec
     # still publish every input exactly once.
     assert before['start'] == 1 and committed <= before['row'] <= 48
     resumed, after = invoke(REPO, operation)
-    if rejection:
+    if writer_version == 'published':
+        # A moved SDK identity is intentionally not remapped. The rejection
+        # must happen before starting the sink or calling business code.
+        assert resumed.returncode != 0, resumed.stdout
+        assert ('Action semantic/source identity differs on resume' in resumed.stderr
+                or 'Program payload failed to load' in resumed.stderr
+                or rejection and rejection in resumed.stderr), resumed.stderr
+        assert not after
+    elif rejection:
         assert resumed.returncode != 0 and rejection in resumed.stderr, resumed.stderr
         assert not after
     else:
