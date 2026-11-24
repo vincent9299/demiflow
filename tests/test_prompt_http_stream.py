@@ -15,7 +15,7 @@ from demiflow.operator_llm.http_stream import ChatCompletionStream
 from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPart
 from demiflow.operator_llm.call_ref import PromptRecordRef, journal_totals
 from demiflow.operator_llm.journal import UncertainPromptCall
-from demiflow.services.request_limits import RequestGate, ServiceStopped
+from demiflow.services.request_limits import ServiceStopped
 from demiflow.execution.pipeline.run_context import RunContext
 from test_map_prompt_async import PACK, prompt
 
@@ -100,28 +100,18 @@ def sse_server(monkeypatch):
     server.shutdown();server.server_close();thread.join()
 
 
-@pytest.mark.parametrize('adaptive',[False,True])
-def test_concurrent_rows_pool_reuse_gate_lifetime_and_replay(sse_server,tmp_path,adaptive):
-    if adaptive:
-        from demiflow.services.adaptive_requests import AdaptiveRequestGate
-        gate=AdaptiveRequestGate(dict(initial_concurrency=2,max_concurrency=2),state_path=tmp_path/'gate.json')
-    else:
-        gate=RequestGate(2)
+def test_concurrent_rows_reuse_the_pool_under_the_declared_request_policy(sse_server,tmp_path):
     options={'stream':True,'gateway':'litellm','trust_env':False}
     ds=prompt(DataAPI().from_items([{'item':i} for i in range(6)]),concurrency=3,
-              request_gate=gate, options=options,call_output='call')
+              request_policy={'initial_concurrency':2,'max_concurrency':2}, options=options,call_output='call')
     with RunContext.start(tmp_path/'run'):
         rows=ds.materialize().take_all()
     assert sorted(json.loads(r['answer']) for r in rows)==list(range(6))
-    assert 1<sse_server['peak']<=2 and gate.peak==2
+    assert sse_server['peak']==2  # the policy, not node concurrency 3, bounds requests in flight
     assert len(set(sse_server['ports']))<=2  # sockets survive successive requests
     assert all(r['call']['stream_complete'] and not r['call']['reused'] for r in rows)
     assert all(r['call']['usage']['completion_tokens']==7 for r in rows)
     assert all(b['num_retries']==b['max_retries']==0 and b['fallbacks']==[] for b in sse_server['requests'])
-    if adaptive:
-        assert gate.fresh_responses==6
-    # Repeat-action replay is execution-owned recovery now; see
-    # test_prompt_stream_recovery.py:133-145 (resume reuses, no re-billing).
     assert journal_totals(tmp_path/'run'/'run.sqlite')['input_tokens']==66
 
 

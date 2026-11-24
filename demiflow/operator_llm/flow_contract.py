@@ -45,7 +45,7 @@ def normalize_prompt(arguments):
         raise ValueError('Managed prompt requires a named prompt and sealed configuration file')
     if (result['output'] is None) == (result['outputs'] is None):
         raise ValueError('Prompt requires exactly one of output or outputs')
-    if any(result.get(k) is not None for k in ('service', 'request_gate', 'routes', 'route')) or result['isolate_route_failures']:
+    if any(result.get(k) is not None for k in ('service', 'routes', 'route')) or result['isolate_route_failures']:
         raise ValueError('This managed prompt contract requires a fixed external HTTP endpoint without routing or service construction')
     from ..inference import request_admission_config
     result['request_policy'] = request_admission_config(result.get('request_policy'), concurrency=result['concurrency'])

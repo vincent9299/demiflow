@@ -1404,7 +1404,7 @@ class Dataset:
         when=None, call_output: Optional[str] = None, error_output: Optional[str] = None,
         options: Mapping[str, Any] | None = None, temperature: float | None = None,
         max_requests: int | None = None,
-        service=None, request_gate=None, request_policy=None, token_budget=None,
+        service=None, request_policy=None, token_budget=None,
         routes=None, route=None, isolate_route_failures=False,
     ) -> "Dataset":
         """Native streaming prompt actor, sharing map_prompt's prompt-pack contract.
@@ -1417,7 +1417,7 @@ class Dataset:
         optional image_encoding/limits. Image concurrency is 1..8 (Diffusers 1),
         queue_depth defaults to 1 and is at most 8. Transport, ordered image
         inputs, exact request identity and service lifecycle are preserved.
-        Image output does not support routes, request gates, token budgets,
+        Image output does not support routes, request policies, token budgets,
         offline/Codex options or schema retries. See docs/image_generation.md.
         Adds map_async worker/queue/error policies. Execute with supported native
         terminals; materialize before later joins or lazy transforms. Recovery
@@ -1445,9 +1445,8 @@ class Dataset:
         sends zero-retry/no-fallback controls. Generic endpoints receive none.
         See docs/prompt_http.md for bounds, logs and recovery semantics.
 
-        ``request_gate`` shares admission/circuit state across nodes for new calls.
-        ``request_policy`` declares an operator-owned adaptive gate; supply one
-        of these two interfaces. Its maximum cannot exceed node concurrency.
+        ``request_policy`` declares an operator-owned adaptive gate. Its maximum
+        cannot exceed node concurrency.
         ``token_budget`` validates exact rendered messages, including schema, before
         journal lookup/reservation. Neither policy changes the request cache key.
 
@@ -1483,8 +1482,8 @@ class Dataset:
         if definition.response_format == 'image':
             from ..operator_llm.media import execution_options
             if (routes is not None or route is not None or isolate_route_failures
-                    or request_gate is not None or request_policy is not None or token_budget is not None):
-                raise ValueError('Image prompts do not support routing, request gates or token budgets')
+                    or request_policy is not None or token_budget is not None):
+                raise ValueError('Image prompts do not support routing, request policies or token budgets')
             if type(concurrency) is not int or not 1 <= concurrency <= 8:
                 raise ValueError('Image prompt concurrency must be in 1..8')
             if queue_depth is None:
@@ -1511,7 +1510,7 @@ class Dataset:
                 raise ValueError('isolate_route_failures must be boolean')
             actors, limits = {}, {}
             allowed = {'config', 'options', 'temperature', 'concurrency', 'max_requests', 'service',
-                       'request_gate', 'request_policy', 'token_budget'}
+                       'request_policy', 'token_budget'}
             for name, spec in routes.items():
                 if not isinstance(name, str) or not name or not isinstance(spec, dict) or set(spec)-allowed:
                     raise ValueError('Invalid prompt route declaration')
@@ -1519,7 +1518,7 @@ class Dataset:
                 if type(capacity) is not int or not 1 <= capacity <= 256:
                     raise ValueError('Prompt route concurrency must be 1..256')
                 params = dict(config=config, options=options, temperature=temperature, concurrency=concurrency,
-                    max_requests=max_requests, service=service, request_gate=request_gate,
+                    max_requests=max_requests, service=service,
                     request_policy=request_policy, token_budget=token_budget)
                 params.update(spec)
                 declared = self.map_prompt_async(prompt, **params, inputs=inputs, output=output,
@@ -1542,12 +1541,10 @@ class Dataset:
             raise ValueError('route/isolate_route_failures require routes')
         from demiflow.inference import resolve_request_gate as _resolve_request_gate, request_admission_config
         declared_request_policy = request_admission_config(request_policy, concurrency=concurrency)
-        request_gate = _resolve_request_gate(policy=request_policy, gate=request_gate, concurrency=concurrency)
+        request_gate = _resolve_request_gate(policy=request_policy, gate=None, concurrency=concurrency)
         if isinstance(token_budget, Mapping):
             from ..operator_llm.tokens import input_budget
             token_budget = input_budget(token_budget, resource_root=getattr(self._executor, 'resource_root', Path.cwd()))
-        if request_gate is not None and not callable(getattr(request_gate, 'enter', None)):
-            raise TypeError('request_gate must provide an async admission context')
         if token_budget is not None and not callable(getattr(token_budget, 'validate', None)):
             raise TypeError('token_budget must validate actual OperatorLLMRequest messages')
         if service is not None:
