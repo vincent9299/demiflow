@@ -346,7 +346,7 @@ class LocalHostEndpoint(_EndpointBase):
         self._argv = (sys.executable, "-B", "-m", 'demiflow.execution.hosts.worker_bootstrap')
 
     def activate(self, assignment: "WorkerAssignment") -> None:
-        
+
         from demiflow.execution.hosts.worker_bootstrap import ControlFrameReader
         from demiflow.execution.contracts.worker import make_worker_control_assignment
         if self._assignment != assignment:

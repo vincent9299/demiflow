@@ -94,7 +94,7 @@ def test_real_terminal_switch_and_restore_keep_row_index_and_two_chunks_in_one_w
     from demiflow.execution.storage.scratch import ScratchStream
     from demiflow.execution.storage.segments import block_chunks
     from demiflow.execution.contracts.record_codec import _encode_payload
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     limits=bounds(max_resident_bytes=14336,max_row_bytes=8192,max_batch_bytes=16384,

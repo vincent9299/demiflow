@@ -1239,7 +1239,7 @@ def test_h038():
 def test_h039():
     w = new_worker()
     w.activate(mkassignment())
-    assert w._activated and isinstance(w._executor, FakeExecutor)
+    assert w._activated and isinstance(w._runtime._v3_executor, FakeExecutor)
     assert w._runtime.plan_revision == 2
 
 
@@ -1262,14 +1262,14 @@ def test_h041():
     assert ei.value.code == 'FENCED'
     w.activate(mkassignment())
     w.request_cut(cut)
-    assert w._executor.cuts == [cut]
+    assert w._runtime._v3_executor.cuts == [cut]
 
 
 def test_h042():
     w = new_worker()
     w.activate(mkassignment())
     w.cancel('test', deadline_ms=100)
-    assert w._executor.cancelled == ('test', 100)
+    assert w._runtime._v3_executor.cancelled == ('test', 100)
     assert w._cancel_event.is_set()
 
 
@@ -1278,7 +1278,7 @@ def test_h043():
     assert w.closed() is False
     w.activate(mkassignment())
     assert w.closed() is False
-    w._executor._closed = True
+    w._runtime._v3_executor._closed = True
     assert w.closed() is True
 
 
@@ -1337,7 +1337,7 @@ def test_h052():
         w.deliver_receipt({'boot_id': 'other', 'commit_id': 'c', 'cut_id': 'cut-1'})
     assert ei.value.code == 'FENCED'
     w.deliver_receipt({'boot_id': 'boot-1', 'commit_id': 'commit-1', 'cut_id': 'cut-1'})
-    assert w._executor.receipts == [('commit-1', 'cut-1')]
+    assert w._runtime._v3_executor.receipts == [('commit-1', 'cut-1')]
 
 
 def test_h053():

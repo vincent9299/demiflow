@@ -232,7 +232,7 @@ class ThreadHostEndpoint(_EndpointBase):
 
     def send_business(self, command):
         host = self._connector._host(self._allocation_id)
-        if host is None or host._executor is None or not self._activated:
+        if host is None or not host.assigned() or not self._activated:
             raise DataflowError('FENCED', 'business command before thread activation')
         # receive enqueues the command; it never invokes user code here.
         command = self._activity_command(command)

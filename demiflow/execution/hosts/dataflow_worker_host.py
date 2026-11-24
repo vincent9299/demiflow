@@ -205,6 +205,9 @@ class HostedDataflowWorker:
         self._runtime.cancel_execution(reason, deadline_ms=deadline_ms)
         self._mailbox.close()
 
+    def assigned(self) -> bool:
+        return self._runtime.execution_assigned()
+
     def closed(self) -> bool:
         return self._runtime.execution_closed(default=self._closed)
 

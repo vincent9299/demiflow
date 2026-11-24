@@ -371,7 +371,7 @@
     "execution/operator_bindings/dataflow_models.py"
    ],
    "num_blocks": [
-    "execution/worker/terminal_blocks.py",
+    "execution/outputs/terminal_blocks.py",
     "operators/block_partition.py",
     "operators/ordering.py",
     "planning/dataflow_compile.py"

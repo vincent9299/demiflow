@@ -13,7 +13,7 @@ from demiflow.execution.contracts.record_codec import frame_parts
 from demiflow.execution.contracts.dataflow_codec import MANIFEST_MEDIA
 from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.execution.worker.dataflow_graph_runner import WorkerGraphRunner
-from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
 from test_runtime_v3_artifact_accounting import store_fixture
 from test_runtime_v3_c import bounds, make
 

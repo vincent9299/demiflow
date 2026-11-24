@@ -13,7 +13,7 @@ def test_real_block_switch_does_not_hold_extra_wire_during_old_tail_flush(tmp_pa
     read_trace = str(tmp_path / 'actual-read-residency.jsonl')
     def observe(row):
         import sys
-        from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+        from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
         from demiflow.execution.storage.objects import RunArtifactStore
         from demiflow.execution.storage.segments import RECORDS_MEDIA
         from demiflow.execution.storage.scratch import ScratchStream
@@ -119,7 +119,7 @@ def test_real_store_chunking_preserves_segment_hashes_and_restore(tmp_path, monk
     from demiflow.execution.contracts.dataflow import ArtifactRef, BlockPartition
     from demiflow.execution.storage.scratch import ScratchStream
     from demiflow.execution.storage.segments import block_chunks, segment_refs
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
 
@@ -164,7 +164,7 @@ def test_impossible_batch_rejects_before_scratch_read(tmp_path, monkeypatch, bat
     from types import SimpleNamespace
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.storage.scratch import ScratchStream
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     with store_fixture(tmp_path) as (_, store, _):
@@ -184,7 +184,7 @@ def test_exact_original_document_limit_plus_newline_remains_legal(tmp_path):
     from types import SimpleNamespace
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     from demiflow.execution.contracts.record_codec import encode_record as _encode_record
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     from test_runtime_v3_artifact_accounting import store_fixture
     from test_runtime_v3_c import bounds, make
     row = {'value': 'x'*32}

@@ -438,6 +438,9 @@ class WorkerRuntime:
         if self._v3_executor is not None:
             self._v3_executor.cancel(reason, deadline_ms=deadline_ms)
 
+    def execution_assigned(self):
+        return self._v3_executor is not None
+
     def execution_closed(self, *, default=False):
         if self._v3_executor is None:
             return default

@@ -139,7 +139,7 @@ def test_the_literal_tables_are_gone():
         'execution/kernels/operator.py': 'frozenset({"MapOp"',
         'execution/kernels/task_scope.py': "frozenset({'MapOp'",
         'execution/kernels/batch_membership.py': "frozenset({'embedding'",
-        'execution/worker/terminal_blocks.py': '_UNARY_KINDS | _BATCH_KINDS',
+        'execution/outputs/terminal_blocks.py': '_UNARY_KINDS | _BATCH_KINDS',
         'planning/dataflow_configuration.py': "frozenset({'MapOp'",
     }.items():
         assert gone not in (ROOT / 'demiflow' / relative).read_text(encoding='utf-8'), relative

@@ -28,7 +28,7 @@ def test_insufficient_terminal_state_fails_before_any_launch(tmp_path):
 
 
 def test_sealed_window_requires_original_grant_and_legacy_keeps_old_window():
-    from demiflow.execution.worker.terminal_blocks import TerminalBlocks
+    from demiflow.execution.outputs.terminal_blocks import TerminalBlocks
     bounds = SimpleNamespace(max_state_bytes=8192, max_resident_bytes=6144,
                              max_batch_bytes=4096, max_row_bytes=1024)
     services = SimpleNamespace(bounds=bounds, assignment=SimpleNamespace(stages=()))

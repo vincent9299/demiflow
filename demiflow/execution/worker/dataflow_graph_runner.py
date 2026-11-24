@@ -149,7 +149,7 @@ class WorkerGraphRunner:
         self._restored_terminal = False
         self._terminal_spec = next((n.kernel for n in executor._node_specs.values()
                                     if n.kind == 'terminal'), None)
-        from demiflow.execution.worker.terminal_blocks import TerminalBlocks, declared_blocks
+        from demiflow.execution.outputs.terminal_blocks import TerminalBlocks, declared_blocks
         occurrence = next((occ for occ, node in executor._node_specs.items() if node.kind == 'terminal'), None)
         declaration = declared_blocks(executor._graph, occurrence, self.bounds) if occurrence else None
         scalar = self._terminal_spec is not None and self._terminal_spec.kind in (
@@ -1638,19 +1638,16 @@ class WorkerGraphRunner:
                                    'producer_partition': self.partition})
 
     def _finite_buffer(self, spec):
-        if spec.channel_id not in self._finite:
-            if (len(self._finite) + 2) * 2 >= self.bounds.max_open_files:
-                raise DataflowError('BUDGET_EXCEEDED', 'finite spool exceeds open file budget')
-            from demiflow.execution.worker.terminal_blocks import TerminalBlocks
-            self._finite[spec.channel_id] = TerminalBlocks(self.services, self.partition, partitioned=False,
-                frame_call=self._frame_call,
-                coalesce_allowed=lambda: len(self._finite) <= 1 and not self._terminal_blocks.blocks)
-        return self._finite[spec.channel_id]
+        from demiflow.execution.exchange.segments import finite_buffer
+        return finite_buffer(self._finite, spec, store=self.services.store, bounds=self.bounds,
+            assignment=getattr(self.services, 'assignment', None), check_stop=self.services.check_stop,
+            partition=self.partition, frame_call=self._frame_call,
+            coalesce_allowed=lambda: len(self._finite) <= 1 and not self._terminal_blocks.blocks)
 
     def _seal_finite_producer(self, spec):
         stream = self._finite_buffer(spec)
-        part = stream.manifest_partitions()[0]
-        return ArtifactRef(**part['data_ref']), part['rows']
+        from demiflow.execution.exchange.segments import seal_finite_blocks
+        return seal_finite_blocks(stream)
 
     def _finite_frame_call(self, function, *args, **kwargs):
         return self._frame_call(function, *args,
