@@ -18,6 +18,12 @@ _IGNORED_NAMES = frozenset({
     '.ipynb_checkpoints', '.DS_Store',
 })
 _ROOT_CONFIG_SUFFIXES = frozenset({'.json', '.yaml', '.yml'})
+_ARCHIVE_SUFFIXES = frozenset({'.tar', '.gz', '.tgz', '.bz2', '.xz', '.zip', '.7z', '.rar'})
+_DOCS_DISALLOWED_SUFFIXES = frozenset({'.py', '.sh', '.yaml', '.yml'}) | _ARCHIVE_SUFFIXES
+_DOCS_DISALLOWED_SUBDIRS = frozenset({
+    'flows', 'operators', 'configs', 'parameters', 'prompts',
+    'data_tools', 'scripts', 'root-scripts',
+})
 _OUTPUT_ARG_KEYS = frozenset({
     'output_directory', 'output_dir', 'output_path', 'output_root',
     'output', 'target_dir', 'target', 'destination', 'destinations',
@@ -335,6 +341,8 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                 add('root_config', name, '根目录散落配置文件；按 DF-02 规范业务与部署配置应统一放入 configs/ 目录。')
             elif suffix == '.py' and name != '__init__.py' and name not in registered_flows and name not in checked_sources:
                 add('root_script', name, '根目录散落 Python 脚本；请按职责迁入 flows/、operators/、data_tools/ 或清理废弃脚本。')
+            elif suffix in _ARCHIVE_SUFFIXES:
+                add('root_archive', name, '根目录存在压缩归档包；废弃代码或旧配置请直接清理，不要在项目内保留源码/配置打包归档。')
 
     # 2. Deprecated parameters/ directory: unbound legacy files or empty leftover directory.
     param_dir = root / 'parameters'
@@ -416,12 +424,37 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
     for target in _group_unreferenced_under('prompts', prompt_files, unref_prompts):
         add('orphan_prompts', target, 'prompts/ 中存在未被任何活跃 Flow、算子或配置引用的废弃 Prompt；请清理以保持目录整洁。')
 
-    # 8. docs/ is for documentation, never a dumping ground for obsolete Python code.
+    # 8. docs/ is for documentation and verification evidence, never a dumping ground or archive for obsolete code/configs/prompts.
     docs_files = _iter_tree_files(root, 'docs', exclude=exclude)
-    docs_py = [rel for rel in docs_files if Path(rel).suffix.lower() == '.py']
-    if docs_py:
-        for target in _group_unreferenced_under('docs', docs_files, docs_py):
-            add('code_in_docs', target, 'docs/ 仅用于项目文档，不应存放 Python 源码或废弃代码归档；请按职责迁入标准目录或彻底清理废弃代码。')
+    docs_bad_targets: set[str] = set()
+    for rel in docs_files:
+        p = Path(rel)
+        sub_parts = p.parts[1:]  # relative inside docs/
+        dir_parts = sub_parts[:-1]
+        is_bad = (
+            p.suffix.lower() in _DOCS_DISALLOWED_SUFFIXES
+            or any(part in _DOCS_DISALLOWED_SUBDIRS for part in dir_parts)
+        )
+        if is_bad:
+            # Collapse offending archives/dumped subtrees to their top-level docs/<subdir> when nested.
+            docs_bad_targets.add(f'docs/{sub_parts[0]}' if len(sub_parts) >= 2 else rel)
+    docs_root = root / 'docs'
+    if docs_root.is_dir() and not docs_root.is_symlink():
+        for child in sorted(docs_root.iterdir(), key=lambda x: x.name):
+            if child.is_dir() and not child.is_symlink() and not child.name.startswith('.'):
+                if child.name in _DOCS_DISALLOWED_SUBDIRS:
+                    docs_bad_targets.add(f'docs/{child.name}')
+                else:
+                    try:
+                        for sub in child.iterdir():
+                            if sub.is_dir() and not sub.is_symlink() and sub.name in _DOCS_DISALLOWED_SUBDIRS:
+                                docs_bad_targets.add(f'docs/{child.name}')
+                                break
+                    except OSError:
+                        pass
+    for target in sorted(docs_bad_targets):
+        add('code_in_docs', target,
+            'docs/ 仅用于项目文档与验收证据，不应存放废弃代码、压缩归档包（.tar.gz/.zip）或迁入的旧 configs/parameters/prompts/flows/operators 目录；废弃的非数据文件请直接清理（使用 manage_project_layout remove_path），切勿打包或转存到 docs/。')
 
     # 9. Active configs/*.json output paths should target data/, not legacy runs/.
     for param_rel in sorted(bound_params):
