@@ -86,7 +86,7 @@ def native_model_declaration(operation):
     actor = getattr(target, '__self__', target)
     from demiflow.data.plan import SaveLanceOp
     if type(operation) is SaveLanceOp:
-        from demiflow.execution.dataflow_stream_lance import StreamLanceFactory, declaration
+        from demiflow.execution.native_queue.dataflow_stream_lance import StreamLanceFactory, declaration
         return CallableSpec.create(StreamLanceFactory, fn_constructor_args=(declaration(operation, actor), actor.when))
     # None and ordinary functions cannot be one of the exact native actor
     # classes below. Typed model operations retain their original fact guards,
@@ -111,7 +111,7 @@ def native_model_declaration(operation):
         return CallableSpec.create(VectorSearch, fn_constructor_kwargs=vector_search_declaration(actor))
     from demiflow.collect.search_contract import is_native_search_actor, search_facts
     if is_native_search_actor(actor):
-        from demiflow.execution.dataflow_search import NativeSearchCall
+        from demiflow.execution.operator_bindings.dataflow_search import NativeSearchCall
         from demiflow.execution.contracts.recovery_contract import identity
         search_facts(actor)
         if actor.started:
@@ -119,7 +119,7 @@ def native_model_declaration(operation):
         return CallableSpec.create(NativeSearchCall, fn_constructor_args=(identity(actor.recovery_identity()),))
     from demiflow.execution.native_queue.queue_producer import QueueProducer, producer_facts
     if type(actor) is QueueProducer:
-        from demiflow.execution.dataflow_producer import ProducerCall
+        from demiflow.execution.native_queue.dataflow_acquisition_call import ProducerCall
         producer_facts(actor)
         return CallableSpec.create(ProducerCall)
     from demiflow.execution.native_queue.raw_fetch import RawFetch, raw_fetch_facts

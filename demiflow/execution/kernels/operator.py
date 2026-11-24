@@ -658,14 +658,14 @@ class OperatorKernel:
             from demiflow.execution.operator_bindings.dataflow_models import bind_model_services
             instance = bind_model_services(instance, self._spec, services=self._services)
         from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
-        from demiflow.execution.dataflow_producer import ProducerCall
-        from demiflow.execution.dataflow_search import NativeSearchCall
+        from demiflow.execution.native_queue.dataflow_acquisition_call import ProducerCall
+        from demiflow.execution.operator_bindings.dataflow_search import NativeSearchCall
         # A real native writer declaration already imported its canonical
         # class while the sealed program was loaded. Merely recognizing an
         # ordinary callable must not initialize Lance and its driver stack.
         # Inspect only the known module table, never user class attributes.
         import sys
-        stream_lance = sys.modules.get('demiflow.execution.dataflow_stream_lance')
+        stream_lance = sys.modules.get('demiflow.execution.native_queue.dataflow_stream_lance')
         stream_lance_type = (vars(stream_lance).get('StreamLanceCall')
                              if stream_lance is not None else None)
         if any(type(instance) is native for native in

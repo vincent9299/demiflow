@@ -1188,7 +1188,7 @@ class QueueReader(_BaseReader):
         # lease remains held independently; pending/eoi must not reseal a row
         # already handed off before this pull.
         self._pending_record = None
-        from demiflow.execution.dataflow_queue import queue_service_request
+        from demiflow.execution.native_queue.dataflow_acquisition_call import queue_service_request
 
         operation_id = identity([
             self._binding.action_id, self._snapshot.source_id, self._record_index,

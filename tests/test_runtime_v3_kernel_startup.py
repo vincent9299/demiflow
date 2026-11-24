@@ -10,7 +10,7 @@ def _inspect_modules(row):
     import os
     import sys
     return {**row, 'pid': os.getpid(),
-            'native_writer_loaded': 'demiflow.execution.dataflow_stream_lance' in sys.modules,
+            'native_writer_loaded': 'demiflow.execution.native_queue.dataflow_stream_lance' in sys.modules,
             'lance_loaded': 'lance' in sys.modules}
 
 

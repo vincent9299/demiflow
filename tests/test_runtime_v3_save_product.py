@@ -233,7 +233,7 @@ def test_single_worker_native_adapter_recovery_preserves_microbatch_identity(tmp
 
 
 def test_replayed_old_ack_never_regresses_stage_projection():
-    from demiflow.execution.dataflow_stream_lance import NativeStreamLanceService
+    from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
     service=object.__new__(NativeStreamLanceService)
     service._last_acked={};service._acked_ordinals={}
     service._remember_ack('n','latest','c9',9)

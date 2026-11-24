@@ -120,7 +120,7 @@ def test_global_checkpoint_recovers_commit_before_manifest_publication(tmp_path,
 
 
 def test_global_checkpoint_never_publishes_downstream_without_upstream(tmp_path, monkeypatch):
-    from demiflow.execution.dataflow_stream_lance import NativeStreamLanceService
+    from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
     vectors = []
     original = NativeStreamLanceService.request
     def observe(self, command, record):

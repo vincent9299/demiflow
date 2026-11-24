@@ -111,7 +111,7 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "model_effect_recovery": (('demiflow.execution.operator_bindings.dataflow_models', "M"), ('demiflow.execution.operator_bindings.dataflow_model_journal', "M")),
     "actor_state_lifecycle": (("demiflow.execution.kernels.operator", "K"), ("demiflow.execution.worker.runtime", "B")),
     "cache_materialize": (('demiflow.execution.operator_bindings.dataflow_models', "M"), ('demiflow.execution.outputs.dataflow_handles', "T")),
-    "queue_full_business": (("demiflow.execution.dataflow_queue", "Q"), ('demiflow.execution.native_queue.queue_execution', "Q")),
+    "queue_full_business": (('demiflow.execution.native_queue.dataflow_queue', "Q"), ('demiflow.execution.native_queue.queue_execution', "Q")),
     "memory_peak": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.planning.dataflow_policy", "E")),
     "disk_gc": (("demiflow.execution.exchange.dataflow_channels", "X"), ("demiflow.execution.storage.objects", "H")),
     "remote_journal": (('demiflow.execution.journal.dataflow_authority', "H"), ("demiflow.execution.worker.dataflow_host", "H")),

@@ -6,6 +6,11 @@ worker ``queue`` RPC port: it never rewrites their protocol, opens a second
 SQLite ledger, or hands native journal/lock objects to a worker.
 """
 from __future__ import annotations
+from demiflow.execution.journal.run_telemetry import search_metrics
+
+from dataclasses import replace
+from demiflow.execution.contracts.dataflow import SourceSplit, thaw_record_value
+from demiflow.execution.native_queue.queue_commit import acquisition_fact, last_final_fact
 
 import asyncio
 import json
@@ -16,25 +21,17 @@ from collections import OrderedDict
 from dataclasses import asdict
 from typing import Mapping, Union
 
-from ..data.plan import AsyncMapOp, LogicalPlan
-from ..data.sources import DatasourceSource, SourcePlan
-from .contracts.dataflow import (
-    ArtifactRef,
-    DriverServices,
-    QueueBinding,
-    QueueCommand,
-    QueueReply,
-    RuntimeServices,
-    WorkerLease,
-)
-from .contracts.dataflow_errors import DataflowError, DataflowRecoveryError
+from demiflow.data.plan import AsyncMapOp, LogicalPlan
+from demiflow.data.sources import SourcePlan
+from demiflow.execution.contracts.dataflow import ArtifactRef, DriverServices, QueueBinding, QueueCommand, QueueReply, WorkerLease
+from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowRecoveryError
 from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
 from demiflow.execution.contracts.queue_contract import QueueIncomplete
 from demiflow.execution.native_queue.queue_execution import configure_explicit, finalize_task, queue_source, validate_topology
 from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.native_queue.queue_source import QueueDatasource
 from demiflow.execution.native_queue.raw_fetch import RawFetch
-from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
+from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, action_scope
 
@@ -79,7 +76,7 @@ class _Claim:
         self.descriptor = None
 
 
-from .dataflow_search import NativeSearchOperations
+from demiflow.execution.operator_bindings.dataflow_search import NativeSearchOperations
 
 
 class NativeAcquisitionService(NativeSearchOperations):
@@ -162,7 +159,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         native = queue_source(source)
         action_id = self._action.action_id
         if native is None and graph is not None:
-            from .dataflow_fetch import configure_fetch_graph
+            from demiflow.execution.native_queue.dataflow_fetch import configure_fetch_graph
             return configure_fetch_graph(self, source, plan, graph)
         if native is not None:
             if not isinstance(native, QueueDatasource):
@@ -393,7 +390,7 @@ class NativeAcquisitionService(NativeSearchOperations):
                     timeout_s=self._services.bounds.timeout_ms / 1000)
             finally:
                 self._release_io()
-            fact = self._acquisition_fact(receipt, fetch=fetch)
+            fact = acquisition_fact(receipt, output=fetch.output, channel=self._source.channel if self._source is not None else None, journal=self._action.context.journal)
             with self._lock:
                 self._raw_acquisition_count += 1
             return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
@@ -417,7 +414,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         # Flow provenance stays bound to the original sealed delivery ref;
         # only native lease operations see a renewed attempt's reserved epoch.
         receipt = {**receipt, '_queue_delivery': row['_queue_delivery']}
-        fact = self._acquisition_fact(receipt)
+        fact = acquisition_fact(receipt, output=self._fetch.output, channel=self._source.channel if self._source is not None else None, journal=self._action.context.journal)
         row_ref = self._put_json(receipt, media_type=_ROW_MEDIA,
                                  max_bytes=self._services.bounds.max_row_bytes)
         fact_ref = self._put_json(fact, media_type=_FACT_MEDIA,
@@ -470,7 +467,7 @@ class NativeAcquisitionService(NativeSearchOperations):
                                 timeout_s=self._services.bounds.timeout_ms / 1000)
         except QueueIncomplete:
             # Exhausted retryable observation is persisted without ACK; never success.
-            fact = self._last_final_fact(claim.delivery)
+            fact = last_final_fact(self._source.channel, claim.delivery)
             fact_ref = self._put_json(fact, media_type=_FACT_MEDIA,
                                       max_bytes=self._services.bounds.max_control_bytes) if fact else None
             with self._lock:
@@ -498,7 +495,7 @@ class NativeAcquisitionService(NativeSearchOperations):
     def finish(self) -> Mapping[str, Json]:
         self._check_started()
         if self._mode == 'native_search':
-            return {'resources': self.search_metrics()}
+            return {'resources': search_metrics(getattr(self, '_searches', {}))}
         timeout_s = self._services.bounds.timeout_ms / 1000
         if self._source is not None:
             if not self._drained.wait(timeout_s):
@@ -655,29 +652,7 @@ class NativeAcquisitionService(NativeSearchOperations):
                     worker_id=delivery.worker_id, lease_until=delivery.lease_until,
                     domain=delivery.domain)
 
-    def _acquisition_fact(self, receipt: dict, *, fetch=None) -> dict:
-        result = receipt[(fetch or self._fetch).output]
-        commit_id = result['acquisition_ref']['commit_id']
-        if self._source is not None:
-            from demiflow.execution.native_queue.queue_commit import QueueCommitStore
-            with self._source.channel.database.connection() as db:
-                fact = QueueCommitStore._fact(db, commit_id)
-        else:
-            fact = self._action.context.journal.execution_commit(commit_id)
-        if fact is None or fact['status'] != 'acked':
-            raise DataflowError('UNKNOWN_EFFECT', 'acquisition commit is not confirmed')
-        return fact
 
-    def _last_final_fact(self, delivery):
-        from demiflow.execution.native_queue.queue_commit import QueueCommitStore
-        with self._source.channel.database.connection() as db:
-            row = db.execute('SELECT final_scope FROM queue_tasks WHERE generation=? AND task_id=?',
-                             (delivery.generation, delivery.task_id)).fetchone()
-            if row is None or row[0] is None:
-                return None
-            run_id = identity([self._source.channel.database.queue_uuid, delivery.generation])
-            commit_id = identity([run_id, row[0], 1])
-            return QueueCommitStore._fact(db, commit_id)
 
     def _acquisition_reply(self, command: QueueCommand, claim: _Claim) -> QueueReply:
         # Replaying a pre-acquisition cut may repeat pure maps before fetch.
@@ -796,31 +771,172 @@ class NativeAcquisitionService(NativeSearchOperations):
         return json.loads(raw)
 
 
-def queue_service_request(command: QueueCommand, *, services: RuntimeServices) -> QueueReply:
-    """Worker-side typed ``queue`` RPC (Q009); refs only, no native objects.
+class NativeProducerService(NativeAcquisitionService):
+    def configure(self, source, plan, sink, *, graph):
+        from demiflow.execution.native_queue.queue_producer import producer_actor
+        found = producer_actor(plan)
+        if found is None or len(graph.sources) != 1 or sink is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Native producer requires one fixed source and one enqueue tail')
+        self._fetch = found[1]
+        self._fetch.configure(self._action, source, plan)
+        nodes = [node for node in graph.nodes if node.kernel.configuration.get('native_operation') == 'producer']
+        if len(nodes) != 1:
+            raise DataflowError('INVALID_CONTRACT', 'Producer has no unique sealed worker occurrence')
+        producer = self._fetch.producer
+        self._generation = producer.generation
+        self._binding = QueueBinding(self.action_id, graph.sources[0], 'producer',
+            self._fetch.contract, producer.generation, producer.pool,
+            graph.sources[0], nodes[0].occurrence_id, None)
+        key = self.action_id + '-producer-binding'
+        self._prior_binding = self._action.context.journal.source_binding(key)
+        self._action.context.journal.bind_source(self._action.context.fence, key, asdict(self._binding))
+        self._mode = 'producer'
+        self._unit = None
+        self._source_eoi = False
+        self._rows = None
+        self._state = 'configured'
+        return self._binding
 
-    QueueReader/fetch/ack kernels call this single entry. It forwards to the
-    driver through WorkerJournalPort.queue and never pickles a QueueDatasource,
-    native database or lock, nor writes a second queue state.
-    """
-    if not isinstance(services, RuntimeServices):
-        raise DataflowError('INVALID_CONTRACT', 'queue request requires worker RuntimeServices')
-    if not isinstance(command, QueueCommand):
-        raise DataflowError('INVALID_CONTRACT', 'queue request requires a QueueCommand')
-    if command.operation not in {'poll', 'acquire', 'finalize', 'status', 'search'}:
-        raise DataflowError('INVALID_CONTRACT', 'unknown queue operation')
-    if command.operation in {'acquire', 'finalize', 'search'}:
-        if command.delivery_ref is None or command.row_ref is None:
-            raise DataflowError('INVALID_CONTRACT', 'acquire/finalize require delivery_ref and row_ref')
-    elif command.row_ref is not None or command.delivery_ref is not None:
-        raise DataflowError('INVALID_CONTRACT', 'poll/status must not carry business payload refs')
-    services.check_stop()
-    reply = services.journal.queue(command)
-    if not isinstance(reply, QueueReply):
-        raise DataflowError('INTERNAL_PROTOCOL', 'queue port returned a non-QueueReply')
-    if reply.operation_id != command.operation_id:
-        raise DataflowError('INTERNAL_PROTOCOL', 'queue reply operation_id differs from its request')
-    if reply.status not in {'record', 'pending', 'eoi', 'confirmed', 'unknown'}:
-        raise DataflowError('INTERNAL_PROTOCOL', 'queue reply has an unknown status')
-    services.check_stop()
-    return reply
+    def source_layout(self, snapshot):
+        from demiflow.execution.contracts.dataflow_codec import _thaw_json
+        wrapped = replace(snapshot, kind='producer', replay='seek', finite=True,
+            immutable_identity={'original_kind': snapshot.kind,
+                'original_identity': _thaw_json(snapshot.immutable_identity),
+                'generation': self._binding.generation})
+        locator = {'kind': 'producer', 'generation': self._binding.generation}
+        split = SourceSplit(identity([snapshot.source_id, locator]), snapshot.source_id,
+                            locator, {}, None, self._services.policy.store_id)
+        return wrapped, (split,)
+
+    def can_recover_without_dataflow_cut(self):
+        return bool(self._action.context.resuming and self._prior_binding == asdict(self._binding)
+                    and not self._action.context.journal.execution_commits(self.action_id))
+
+    def start(self, *, recovery_image=None, residency=None, queue_state=None):
+        # Reconcile the native pending publications before comparing source frontiers.
+        super().start(recovery_image=recovery_image, queue_state=queue_state)
+        if self._action.context.resuming:
+            cursors = recovery_image.source_vector if recovery_image is not None else ()
+            if len(cursors) > 1:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Producer checkpoint has multiple source owners')
+            offset = thaw_record_value(cursors[0].offset) if cursors else {}
+            position = offset.get('producer_position', 0)
+            native_position = self._fetch.position
+            if type(position) is not int or position < 0 or position > native_position + 1:
+                raise DataflowError('INCOMPATIBLE_HISTORY', 'Dataset producer frontier is ahead of native progress')
+            descriptor = None
+            if cursors and cursors[0].lease_ref is not None:
+                descriptor = self._read_json(cursors[0].lease_ref,
+                    max_bytes=self._services.bounds.max_control_bytes)
+                if (type(descriptor) is not dict or set(descriptor) != {
+                        'generation', 'position', 'occurrence', 'next_cursor'}
+                        or descriptor['generation'] != self._binding.generation
+                        or type(descriptor['position']) is not int or descriptor['position'] < 0
+                        or descriptor['position'] != position - 1
+                        or descriptor['occurrence'] != identity([
+                            'producer-unit', self._binding.generation, descriptor['position']])
+                        or descriptor['next_cursor'] != offset.get('producer_cursor')):
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'Producer cursor lost its native unit ownership')
+            residency = residency or {}
+            pending = any(not entry['consumed'] for entry in residency.get('deliveries', {}).values())
+            if position > native_position or pending:
+                if descriptor is None or cursors[0].end_of_input:
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'In-flight producer unit lacks its sealed delivery')
+                if native_position not in (descriptor['position'], descriptor['position'] + 1):
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'Native producer moved beyond the in-flight unit')
+                self._unit = descriptor
+                position = descriptor['position']
+                self._fetch.next_cursor = descriptor['next_cursor']
+                self._fetch.begin_unit()
+                if position == native_position:
+                    self._fetch.chunk = self._fetch.offset
+            # The native unit may have committed just before the Dataset cut was
+            # lost. Replay that unit with stable native receipts, never skip it.
+            self._fetch.position = position
+            self._fetch.offset = 0
+            self._fetch.cursor = offset.get('producer_cursor')
+            self._fetch.eos = False
+        self._rows = iter(self._fetch.rows())
+
+    def poll(self, command, *, lease):
+        self._check_started()
+        self._check_lease(lease)
+        self._check_role(lease, 'poll')
+        self._validate_command(command, 'poll', require_refs=False)
+        self._validate_binding(command.binding)
+        return self._run_operation(command, lambda: self._poll_unit(command))
+
+    def _poll_unit(self, command):
+        if self._unit is not None:
+            return QueueReply(command.operation_id, 'pending', None, None, None, 5)
+        if self._source_eoi:
+            return QueueReply(command.operation_id, 'eoi', None, None, None, 0)
+        scoped = self._run_io(self._fetch.io.run(next, self._rows, None),
+                              timeout_s=self._services.bounds.timeout_ms / 1000)
+        if scoped is None:
+            self._source_eoi = True
+            return QueueReply(command.operation_id, 'eoi', None, None, None, 0)
+        self._fetch.begin_unit()
+        descriptor = {'generation': self._binding.generation, 'position': self._fetch.position,
+                      'occurrence': scoped.scope.occurrence, 'next_cursor': self._fetch.next_cursor}
+        self._unit = descriptor
+        delivery = self._put_json(descriptor, media_type='application/json',
+                                 max_bytes=self._services.bounds.max_control_bytes)
+        row = self._put_json(scoped.row, media_type='application/json',
+                            max_bytes=self._services.bounds.max_row_bytes)
+        return QueueReply(command.operation_id, 'record', delivery, row, None, 0)
+
+    def acquire(self, command, *, lease):
+        self._check_started()
+        self._check_lease(lease)
+        self._check_role(lease, 'acquire')
+        self._validate_command(command, 'acquire', require_refs=True)
+        self._validate_binding(command.binding)
+        return self._run_operation(command, lambda: self._publish_row(command))
+
+    def _publish_row(self, command):
+        result = self._call_native(command, self._fetch)
+        from demiflow.execution.native_queue.queue_commit import QueueCommitStore
+        with self._fetch.channel.database.connection() as db:
+            proofs = [QueueCommitStore._fact(db, cid) for cid in self._fetch.last_call_commits]
+        return self._confirmed(command, result, proofs)
+
+    def _call_native(self, command, actor):
+        descriptor = self._read_json(command.delivery_ref, max_bytes=self._services.bounds.max_control_bytes)
+        if self._unit is None or descriptor != self._unit:
+            raise DataflowError('FENCED', 'Publication does not belong to the active source unit')
+        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        async def publish():
+            with action_scope(self._action):
+                set_row_scope(RowScope(command.record_id))
+                try:
+                    return await actor(row)
+                finally:
+                    set_row_scope(None)
+        self._admit_io()
+        try:
+            result = self._run_io(publish(), timeout_s=self._services.bounds.timeout_ms / 1000)
+        finally:
+            self._release_io()
+        return result
+
+
+
+
+    def before_cut(self, *, unit_drained=True):
+        if self._unit is not None and unit_drained:
+            self._run_io(self._fetch.end_unit(), timeout_s=self._services.bounds.timeout_ms / 1000)
+            self._unit = None
+
+    def finish(self):
+        if not self._source_eoi or self._unit is not None:
+            raise DataflowError('INVALID_CONTRACT', 'Producer EOS requires drained native source units')
+        self._run_io(self._fetch.end_source(), timeout_s=self._services.bounds.timeout_ms / 1000)
+        return {'source_position': self._fetch.position, 'eos': True}
+
+    def close(self):
+        try:
+            super().close()
+        finally:
+            if getattr(self, '_rows', None) is not None:
+                self._rows.close()

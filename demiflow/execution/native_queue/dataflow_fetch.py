@@ -2,8 +2,8 @@
 from copy import copy
 from dataclasses import asdict
 
-from .contracts.dataflow import QueueBinding
-from .contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow import QueueBinding
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.native_queue.raw_fetch import RawFetch
 from demiflow.execution.contracts.recovery_contract import identity
 
@@ -21,28 +21,16 @@ def configure_fetch_graph(service, source, plan, graph):
     upstream. The compiler's occurrence is the execution identity; a declaration
     digest only finds the immutable constructor facts, never merges executions.
     """
-    from ..planning.dataflow_compile import expand_relational_inputs, expand_operation_inputs
-    pending, seen, actors = [(source, plan)], set(), {}
+    from demiflow.planning.dataflow_compile import iter_declared_operations
     bounds = service._services.bounds
-    while pending:
-        current_source, current_plan = pending.pop()
-        pair = (id(current_source), id(current_plan))
-        if pair in seen:
-            continue
-        seen.add(pair)
-        if len(seen) > bounds.max_nodes:
-            raise DataflowError('BUDGET_EXCEEDED', 'Fetch traversal exceeds the graph bound')
-        for operation in current_plan.operations:
-            target = getattr(getattr(operation, 'callable', None), 'target', None)
-            actor = getattr(target, '__self__', target)
-            if type(actor) is RawFetch:
-                if actor.io is not None or actor.queue_source is not None:
-                    raise DataflowError('INVALID_CONTRACT', 'Ordinary fetch requires an unstarted declaration')
-                actors[fetch_declaration_key(actor)] = actor
-            pending.extend((binding.source, binding.plan) for binding in
-                expand_operation_inputs(operation, path=(), bounds=bounds))
-        pending.extend((binding.source, binding.plan) for binding in
-            expand_relational_inputs(current_source, path=(), bounds=bounds))
+    actors = {}
+    for operation in iter_declared_operations(source, plan, bounds=bounds):
+        target = getattr(getattr(operation, 'callable', None), 'target', None)
+        actor = getattr(target, '__self__', target)
+        if type(actor) is RawFetch:
+            if actor.io is not None or actor.queue_source is not None:
+                raise DataflowError('INVALID_CONTRACT', 'Ordinary fetch requires an unstarted declaration')
+            actors[fetch_declaration_key(actor)] = actor
     nodes = [node for node in graph.nodes
              if node.kernel.configuration.get('native_operation') == 'acquire']
     if not nodes or len(nodes) > bounds.max_nodes:

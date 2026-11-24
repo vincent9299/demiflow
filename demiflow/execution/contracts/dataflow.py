@@ -2206,3 +2206,6 @@ class BoundImageWriter(ABC):
 BATCH_TARGET_BYTES = 8 * 1024**2
 MAX_NATIVE_ROW_BYTES = 128 * 1024**2
 PAYLOAD_FIELDS = ('memory_bytes', 'max_rss_bytes', 'max_row_bytes', 'max_batch_bytes', 'batch_rows')
+
+
+NATIVE_STREAM_LANCE_SCHEMA = 'demiflow.stream_lance.v3'

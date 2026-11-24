@@ -51,7 +51,7 @@ def restore_claims(service, value, *, has_cut):
             or value['schema'] != SCHEMA or value['binding'] != asdict(service.binding)
             or type(value['claims']) is not list or len(value['claims']) > service._max_inflight):
         raise DataflowError('INCOMPATIBLE_HISTORY', 'Native queue cut differs from sealed binding/window')
-    from demiflow.execution.dataflow_queue import _Claim
+    from demiflow.execution.native_queue.dataflow_queue import _Claim
     from demiflow.execution.native_queue.queue_commit import QueueCommitStore
     from demiflow.execution.sources.queue_history import inspect_result
     restored = {}

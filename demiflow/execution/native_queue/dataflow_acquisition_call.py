@@ -1,4 +1,6 @@
 """Worker-side native acquisition call; transactions stay in the driver service."""
+
+from demiflow.execution.contracts.dataflow import QueueReply, RuntimeServices
 import json
 from dataclasses import asdict, dataclass
 
@@ -47,7 +49,7 @@ class AcquisitionCall:
             raise DataflowError('INCOMPATIBLE_HISTORY', 'Native acquisition state belongs to the native journal')
 
     def __call__(self, row):
-        from demiflow.execution.dataflow_queue import queue_service_request
+
         services = self.services
         scope = current_row_scope()
         if scope is None:
@@ -81,3 +83,43 @@ class AcquisitionCall:
             return {'queue_completion': {'task_id': request['_queue_delivery']['task_id'],
                     'final_commit': fact['commit_id'], 'status': 'acked'}}
         return result
+
+
+def queue_service_request(command: QueueCommand, *, services: RuntimeServices) -> QueueReply:
+    """Worker-side typed ``queue`` RPC (Q009); refs only, no native objects.
+
+    QueueReader/fetch/ack kernels call this single entry. It forwards to the
+    driver through WorkerJournalPort.queue and never pickles a QueueDatasource,
+    native database or lock, nor writes a second queue state.
+    """
+    if not isinstance(services, RuntimeServices):
+        raise DataflowError('INVALID_CONTRACT', 'queue request requires worker RuntimeServices')
+    if not isinstance(command, QueueCommand):
+        raise DataflowError('INVALID_CONTRACT', 'queue request requires a QueueCommand')
+    if command.operation not in {'poll', 'acquire', 'finalize', 'status', 'search'}:
+        raise DataflowError('INVALID_CONTRACT', 'unknown queue operation')
+    if command.operation in {'acquire', 'finalize', 'search'}:
+        if command.delivery_ref is None or command.row_ref is None:
+            raise DataflowError('INVALID_CONTRACT', 'acquire/finalize require delivery_ref and row_ref')
+    elif command.row_ref is not None or command.delivery_ref is not None:
+        raise DataflowError('INVALID_CONTRACT', 'poll/status must not carry business payload refs')
+    services.check_stop()
+    reply = services.journal.queue(command)
+    if not isinstance(reply, QueueReply):
+        raise DataflowError('INTERNAL_PROTOCOL', 'queue port returned a non-QueueReply')
+    if reply.operation_id != command.operation_id:
+        raise DataflowError('INTERNAL_PROTOCOL', 'queue reply operation_id differs from its request')
+    if reply.status not in {'record', 'pending', 'eoi', 'confirmed', 'unknown'}:
+        raise DataflowError('INTERNAL_PROTOCOL', 'queue reply has an unknown status')
+    services.check_stop()
+    return reply
+
+
+class ProducerCall(AcquisitionCall):
+    def __init__(self):
+        super().__init__('acquire')
+
+    def bind(self, services, occurrence_id):
+        super().bind(services, occurrence_id)
+        if self.binding.mode != 'producer':
+            raise DataflowError('FENCED', 'Enqueue worker is not bound to a producer')

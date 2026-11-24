@@ -3,6 +3,8 @@
 The coordinator remains in commit.py. This module owns fenced SQL transitions,
 including the single transaction closing final checkpoint and source completion.
 """
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from contextlib import contextmanager
 import json
 from types import SimpleNamespace
@@ -325,3 +327,26 @@ def producer_action(parent,channel,producer,occurrence,contract,*,phase='produce
         attempt=producer.epoch,directory=parent.context.directory,limits=parent.context.limits,
         check_stop=parent.context.check_stop)
     return RunAction(context,scope_id,declaration)
+
+
+def acquisition_fact(receipt: dict, *, output, channel, journal) -> dict:
+    result = receipt[output]
+    commit_id = result['acquisition_ref']['commit_id']
+    if channel is not None:
+        with channel.database.connection() as db:
+            fact = QueueCommitStore._fact(db, commit_id)
+    else:
+        fact = journal.execution_commit(commit_id)
+    if fact is None or fact['status'] != 'acked':
+        raise DataflowError('UNKNOWN_EFFECT', 'acquisition commit is not confirmed')
+    return fact
+
+def last_final_fact(channel, delivery):
+    with channel.database.connection() as db:
+        row = db.execute('SELECT final_scope FROM queue_tasks WHERE generation=? AND task_id=?',
+                         (delivery.generation, delivery.task_id)).fetchone()
+        if row is None or row[0] is None:
+            return None
+        run_id = identity([channel.database.queue_uuid, delivery.generation])
+        commit_id = identity([run_id, row[0], 1])
+        return QueueCommitStore._fact(db, commit_id)

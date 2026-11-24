@@ -62,9 +62,9 @@ def test_native_prompt_admission_uses_only_the_actual_actor_class():
 
 def test_service_declarations_and_the_configuration_they_add():
     from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
-    from demiflow.execution.dataflow_producer import ProducerCall
-    from demiflow.execution.dataflow_search import NativeSearchCall
-    from demiflow.execution.dataflow_stream_lance import StreamLanceFactory
+    from demiflow.execution.native_queue.dataflow_acquisition_call import ProducerCall
+    from demiflow.execution.operator_bindings.dataflow_search import NativeSearchCall
+    from demiflow.execution.native_queue.dataflow_stream_lance import StreamLanceFactory
     assert native.native_variant(None, None) is None
     assert native.native_variant(None, _declare(AcquisitionCall, 'finalize', True)) == NativeVariant(
         'acquisition', {'native_operation': 'finalize'})
@@ -83,7 +83,7 @@ def test_service_declarations_and_the_configuration_they_add():
 
 def test_acquire_takes_its_key_from_the_declared_actor(tmp_path):
     from demiflow import data
-    from demiflow.execution.dataflow_fetch import fetch_declaration_key
+    from demiflow.execution.native_queue.dataflow_fetch import fetch_declaration_key
     from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
     from demiflow.objects import LocalObjectStore
     operation = data.from_items([{'request': 'r'}]).fetch(store=LocalObjectStore(str(tmp_path / 'objs')))._plan.operations[-1]
@@ -163,7 +163,7 @@ def test_importing_the_module_initialises_no_native_service():
         "native.model_variant(None); native.native_variant(None, None)\n"
         "from demiflow.operator_llm.native_actor import is_native_prompt_actor\n"
         "assert not is_native_prompt_actor(lambda row: row)\n"
-        "heavy = [name for name in ('demiflow.execution.native_queue.dataflow_acquisition_call', 'demiflow.execution.dataflow_producer',\n"
+        "heavy = [name for name in ('demiflow.execution.native_queue.dataflow_acquisition_call', 'demiflow.execution.dataflow_queue',\n"
         "    'demiflow.execution.dataflow_search', 'demiflow.execution.dataflow_stream_lance', 'demiflow.execution.dataflow_fetch',\n"
         "    'demiflow.execution.native_queue.queue_source', 'demiflow.execution.sources.queue_history', 'demiflow.execution.native_queue.queue_sinks',\n"
         "    'demiflow.execution.sources.lance_key_source', 'demiflow.operator_llm.runtime', 'demiflow.lance.search', 'lance', 'pyarrow')\n"

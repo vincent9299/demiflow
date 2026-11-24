@@ -1055,3 +1055,22 @@ def validate_stream_plan(plan, *, source=None):
         pending.extend((item.source, item.plan, item.path) for item in children)
     if not streaming:
         raise ValueError('run_stream requires map_async/batch_map or explicit map streaming options')
+
+
+def iter_declared_operations(source, plan, *, bounds):
+    """Walk structural input declarations without constructing native actors."""
+    pending, seen = [(source, plan)], set()
+    while pending:
+        source, plan = pending.pop()
+        key = (id(source), id(plan))
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(seen) > bounds.max_nodes:
+            raise DataflowError('BUDGET_EXCEEDED', 'Native declaration traversal exceeds graph bound')
+        for operation in plan.operations:
+            yield operation
+            pending.extend((binding.source, binding.plan) for binding in
+                expand_operation_inputs(operation, path=(), bounds=bounds))
+        pending.extend((binding.source, binding.plan) for binding in
+            expand_relational_inputs(source, path=(), bounds=bounds))

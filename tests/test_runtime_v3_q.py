@@ -149,7 +149,8 @@ from demiflow import data  # noqa: E402
 from demiflow.collect import FetchPolicy, HttpSource  # noqa: E402
 from demiflow.objects import LocalObjectStore  # noqa: E402
 from demiflow.execution.checkpoint.commit import CommitCoordinator  # noqa: E402
-from demiflow.execution.dataflow_queue import NativeAcquisitionService, queue_service_request  # noqa: E402
+from demiflow.execution.native_queue.dataflow_queue import NativeAcquisitionService
+from demiflow.execution.native_queue.dataflow_acquisition_call import queue_service_request  # noqa: E402
 from demiflow.execution.contracts.dataflow import (  # noqa: E402
     ArtifactRef, Bounds, DriverServices, QueueBinding, QueueCommand, QueueReply,
     RuntimeServices, WorkerLease,
@@ -179,7 +180,7 @@ def _assert_tree() -> None:
     import demiflow
     tree = _tree_root()
     assert Path(demiflow.__file__).resolve().is_relative_to(tree)
-    for name in ('demiflow.execution.dataflow_queue', 'demiflow.execution.native_queue.queue_source',
+    for name in ('demiflow.execution.native_queue.dataflow_queue', 'demiflow.execution.native_queue.queue_source',
                  'demiflow.execution.native_queue.raw_fetch', 'demiflow.execution.native_queue.queue_execution',
                  'demiflow.execution.native_queue.queue_sinks'):
         mod = sys.modules.get(name)

@@ -43,7 +43,7 @@ def submission_contract(request, compiled, *, bounds):
     from demiflow.execution.contracts.dataflow_codec import encode_wire
     from demiflow.lance.schema import schema_identity
     from demiflow.lance.model import LanceWriteSpec
-    from demiflow.execution.dataflow_stream_lance import StreamLanceFactory
+    from demiflow.execution.native_queue.dataflow_stream_lance import StreamLanceFactory
     import pyarrow as pa
     if request.provider != 'local' or request.kind != 'write_lance':
         raise DataflowError('UNSUPPORTED_CAPABILITY',

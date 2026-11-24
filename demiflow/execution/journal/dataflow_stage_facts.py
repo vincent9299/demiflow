@@ -4,6 +4,8 @@ No table-head lookup, reconciliation, publication or independent ledger occurs
 here. These facts are views of RunJournal's child scopes and CommitCoordinator
 receipts, suitable for the checked-product adapter and historical result reads.
 """
+
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 import json
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.storage.reading import read_plan_artifact
@@ -101,3 +103,38 @@ def iter_native_stage_commits(journal, directory, *, parents, report_digest):
                     commit_id=commit, report_digest=report_digest)
                 if fact is not None:
                     yield fact
+
+
+def stream_scopes(journal, fence, action_id, node, *, max_commits, max_control_bytes):
+    # The original table remains the authority. Its expression index orders
+    # bounded pages without materializing every saved request in Python.
+    with journal._connection() as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commit_scopes'").fetchone():return
+    ordinal="CAST(json_extract(declaration,'$.request.ordinal') AS INTEGER)"
+    owner="json_extract(declaration,'$.node_id')"
+    with journal.execution_guard(fence) as db:
+        db.execute('CREATE INDEX IF NOT EXISTS runtime_stream_lance_order ON runtime_commit_scopes '
+                   '(parent_action_id,'+owner+','+ordinal+',scope_id)')
+    previous=(-1,'');count=0
+    while True:
+        with journal._connection() as db:
+            row=db.execute('SELECT scope_id,declaration,'+ordinal+' FROM runtime_commit_scopes '
+                'WHERE parent_action_id=? AND '+owner+"=? AND json_extract(declaration,'$.schema')=? "
+                'AND ('+ordinal+'>? OR ('+ordinal+'=? AND scope_id>?)) '
+                'ORDER BY '+ordinal+',scope_id LIMIT 1',
+                (action_id,node,_NATIVE,previous[0],previous[0],previous[1])).fetchone()
+        if row is None:return
+        key,raw,current=row;count+=1
+        if (type(current) is not int or current<0 or count>max_commits
+                or len(raw.encode())>min(65536,max_control_bytes)):
+            raise DataflowError('CORRUPT_ARTIFACT','Native stream scope exceeds bounded recovery contract')
+        previous=(current,key)
+        yield key,json.loads(raw)
+
+def stream_scope(journal, action_id, key):
+    with journal._connection() as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_commit_scopes'").fetchone():return None
+        row=db.execute('SELECT parent_action_id,declaration FROM runtime_commit_scopes WHERE scope_id=?',(key,)).fetchone()
+    if row is None:return None
+    if row[0]!=action_id:raise DataflowError('FENCED','Stream scope belongs to another action')
+    return json.loads(row[1])

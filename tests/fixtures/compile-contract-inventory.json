@@ -355,17 +355,16 @@
     "planning/dataflow_relational_regions.py"
    ],
    "native_key": [
-    "execution/dataflow_fetch.py",
-    "execution/dataflow_search.py",
+    "execution/native_queue/dataflow_fetch.py",
+    "execution/operator_bindings/dataflow_search.py",
     "planning/dataflow_configuration.py"
    ],
    "native_operation": [
     "execution/action_driver/dataflow.py",
     "execution/compiler_support/dataflow_native.py",
-    "execution/dataflow_fetch.py",
-    "execution/dataflow_producer.py",
-    "execution/dataflow_queue.py",
-    "execution/dataflow_search.py",
+    "execution/native_queue/dataflow_fetch.py",
+    "execution/native_queue/dataflow_queue.py",
+    "execution/operator_bindings/dataflow_search.py",
     "planning/dataflow_configuration.py"
    ],
    "node_id": [

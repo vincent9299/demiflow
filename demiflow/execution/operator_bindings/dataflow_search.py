@@ -2,8 +2,8 @@
 from copy import copy
 from dataclasses import asdict
 
-from .contracts.dataflow import QueueBinding, QueueReply
-from .contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.dataflow import QueueBinding, QueueReply
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
 from demiflow.execution.operator_bindings.dataflow_search_runtime import SearchEffects, SearchRuntime
 from demiflow.execution.contracts.recovery_contract import identity
@@ -23,28 +23,16 @@ class NativeSearchCall(AcquisitionCall):
 
 
 def _search_actors(source, plan, bounds):
-    from ..collect.operators import SearchWeb
-    from ..planning.dataflow_compile import expand_relational_inputs, expand_operation_inputs
-    pending, seen, actors = [(source, plan)], set(), {}
-    while pending:
-        source, plan = pending.pop()
-        key = (id(source), id(plan))
-        if key in seen:
-            continue
-        seen.add(key)
-        if len(seen) > bounds.max_nodes:
-            raise DataflowError('BUDGET_EXCEEDED', 'Search declaration traversal exceeds graph bound')
-        for operation in plan.operations:
-            target = getattr(getattr(operation, 'callable', None), 'target', None)
-            actor = getattr(target, '__self__', target)
-            if type(actor) is SearchWeb:
-                if actor.started:
-                    raise DataflowError('INVALID_CONTRACT', 'Native search requires an unstarted actor')
-                actors[identity(actor.recovery_identity())] = actor
-            pending.extend((binding.source, binding.plan) for binding in
-                expand_operation_inputs(operation, path=(), bounds=bounds))
-        pending.extend((binding.source, binding.plan) for binding in
-            expand_relational_inputs(source, path=(), bounds=bounds))
+    from demiflow.collect.operators import SearchWeb
+    from demiflow.planning.dataflow_compile import iter_declared_operations
+    actors = {}
+    for operation in iter_declared_operations(source, plan, bounds=bounds):
+        target = getattr(getattr(operation, 'callable', None), 'target', None)
+        actor = getattr(target, '__self__', target)
+        if type(actor) is SearchWeb:
+            if actor.started:
+                raise DataflowError('INVALID_CONTRACT', 'Native search requires an unstarted actor')
+            actors[identity(actor.recovery_identity())] = actor
     return actors
 
 
@@ -118,7 +106,3 @@ class NativeSearchOperations:
                              max_bytes=self._services.bounds.max_control_bytes)
         return QueueReply(command.operation_id, 'confirmed', command.delivery_ref, ref, fact, 0)
 
-    def search_metrics(self):
-        sessions = {id(actor.session): actor.session for actor in getattr(self, '_searches', {}).values()}
-        return {'WebSession:' + str(index): session.snapshot_metrics()
-                for index, session in enumerate(sessions.values())}

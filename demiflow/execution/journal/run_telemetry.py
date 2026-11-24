@@ -606,3 +606,9 @@ def observe_stream_progress(execution, stats):
         rows_out = sum(value['rows_output'] for value in counters)
         total += rows_in + rows_out
     return total
+
+
+def search_metrics(actors):
+    sessions = {id(actor.session): actor.session for actor in actors.values()}
+    return {'WebSession:' + str(index): session.snapshot_metrics()
+            for index, session in enumerate(sessions.values())}

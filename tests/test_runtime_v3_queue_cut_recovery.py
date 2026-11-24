@@ -83,7 +83,7 @@ def test_native_restore_preserves_generation_deadline(tmp_path):
 @pytest.mark.parametrize('change_type', [False, True])
 def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, monkeypatch, worker_mode, change_type):
     from demiflow import data
-    from demiflow.execution.dataflow_queue import NativeAcquisitionService
+    from demiflow.execution.native_queue.dataflow_queue import NativeAcquisitionService
     from demiflow.execution.native_queue.queue_sinks import QueueResultSink
     from demiflow.execution.pipeline.run_context import RunContext
     from test_mvp2_queue_unified import _config, _seed_tasks, _make_builder, _records_by_task

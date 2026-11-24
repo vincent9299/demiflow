@@ -4,6 +4,16 @@ Overwrite starts a new snapshot; append keeps prior keys and verifies repeated
 content. A StreamCheckpoint can coordinate all sinks before downstream delivery.
 Used by batch_map (concurrency=1), without materializing the whole stream.
 """
+
+from dataclasses import asdict
+import threading
+from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactRef, NativeJournalReply, NATIVE_STREAM_LANCE_SCHEMA as SCHEMA
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.recovery_contract import identity, document, SourcePosition, UnresolvedCommit
+from demiflow.execution.outputs.lance_sink import LanceSink, _BatchSink
+from demiflow.execution.checkpoint.commit import CommitCoordinator
+from demiflow.execution.pipeline.run_context import RunAction
+from demiflow.execution.journal.dataflow_stage_facts import stream_scope, stream_scopes
 import asyncio
 import hashlib
 import json
@@ -307,3 +317,330 @@ class StreamLanceSink(StreamLanceWriter):
         if self._lock is not None:
             self._lock.__exit__(None, None, None)
             self._lock = None
+
+
+class _NativeWriter(StreamLanceWriter):
+    def __init__(self, declaration, *, action, store, bounds):
+        import pyarrow as pa
+        value = dict(declaration)
+        self.stage = value.pop('stage'); self.batch_size = value.pop('max_batch')
+        schema = pa.ipc.read_schema(pa.BufferReader(bytes.fromhex(value.pop('schema'))))
+        super().__init__(schema=schema, **value)
+        self.action, self.store, self.bounds = action, store, bounds
+        self._scratch = None
+        self._target_lock = None
+        self.baseline = None
+        self.last_ordinal = -1
+        self.finished = False
+        self.confirmed = False
+
+    def _open_index(self):
+        # The original store owns the physical inode/lease and the full SQLite
+        # page grant before SQLite is allowed to write a byte. No WAL/journal.
+        grant = min(self.max_index_bytes, self.bounds.max_spill_bytes // 4,
+                    self.max_rows * 128 + 65536)
+        if grant < 16384:
+            raise DataflowError('RESOURCE_INFEASIBLE', 'Native key index needs at least 16 KiB scratch')
+        self._scratch = self.store.scratch(max_bytes=grant, max_io_bytes=65536)
+        scratch = self._scratch.__enter__()
+        if grant > scratch.reserved:
+            scratch.store._journal.artifact(ArtifactCommand(identity([scratch.operation,'index-grant',grant]),
+                'grow_staging',None,scratch.operation,grant))
+            scratch.reserved = grant
+        self._index = sqlite3.connect(scratch.path, check_same_thread=False)
+        for pragma in ('journal_mode=OFF','synchronous=OFF','cache_size=-2048','mmap_size=0','temp_store=MEMORY'):
+            self._index.execute('PRAGMA '+pragma)
+        page = self._index.execute('PRAGMA page_size').fetchone()[0]
+        self._index.execute('PRAGMA max_page_count='+str(grant//page))
+        self._index.execute('CREATE TABLE keys (digest BLOB PRIMARY KEY) WITHOUT ROWID')
+        self._index_failed = False
+
+    def _close_index(self):
+        if self._index is not None:
+            self._index.close();self._index=None
+        if self._scratch is not None:
+            self._scratch.__exit__(None,None,None);self._scratch=None
+
+    def head(self):
+        from demiflow.lance.storage import inspect_lance
+        from demiflow.errors import LanceResourceNotFound
+        try: return inspect_lance(self.uri,None,None).resolved_version
+        except LanceResourceNotFound: return None
+
+    def start(self, node, *, latest=None, policy=None):
+        from demiflow.execution.storage.artifacts import run_lock
+        self._target_lock = run_lock(Path(self.uri).with_suffix('.stream-writer'))
+        self._target_lock.__enter__()
+        run = self.action.context
+        key = self.action.action_id+'-stream-target-'+node
+        baseline = run.journal.source_binding(key)
+        if baseline is None:
+            baseline = {'uri':self.uri,'version':self.head()}
+            if policy is not None and baseline['version'] != policy['expected_version']:
+                raise DataflowError('INVALID_CONTRACT','Stream target differs from sealed create/overwrite CAS permission')
+            run.journal.bind_source(run.fence,key,baseline)
+        if policy is not None and baseline['version'] != policy['expected_version']:
+            raise DataflowError('INCOMPATIBLE_HISTORY','Stream target original baseline differs from sealed permission')
+        if baseline['uri'] != self.uri:
+            raise DataflowError('INCOMPATIBLE_HISTORY','Stream target binding differs')
+        self.baseline = baseline['version']
+        self.permission_mode = policy['mode'] if policy is not None else None
+        self.version = latest if latest is not None else self.baseline if self.mode == 'append' else None
+        self._open_index()
+
+    def rebuild(self):
+        import lance
+        self.rows = 0
+        if self.version is None: return
+        table = lance.dataset(self.uri,version=self.version)
+        if not table.schema.equals(self.schema,check_metadata=True):
+            raise ValueError('stream append schema differs from saved table')
+        fields = tuple(self.key)
+        for batch in table.scanner(columns=list(fields),batch_size=128,
+                batch_readahead=1,fragment_readahead=1).to_batches():
+            if batch.nbytes > 128*self.max_key_bytes:
+                raise ValueError('saved keys exceed max_key_bytes')
+            digests=[]
+            for row in batch.to_pylist():
+                digest=self.key_digest(tuple(row[k] for k in fields))
+                if self._contains(digest) or digest in digests:
+                    raise ValueError('saved stream snapshot keys are not unique')
+                digests.append(digest);self.rows+=1
+                if self.rows > self.max_rows:raise ValueError('stream snapshot exceeds max_rows')
+            self._remember(digests)
+
+    def prepare_rows(self, rows, selected):
+        import pyarrow as pa
+        import lance
+        from demiflow.lance.read import scalar_equal
+        from demiflow.operators.grouping import row_size
+        input_bytes=sum(row_size(row,min(self.max_row_bytes,self.bounds.max_row_bytes)) for row in rows)
+        if input_bytes>self.bounds.max_batch_bytes:
+            raise DataflowError('BUDGET_EXCEEDED','Stream writer retained rows exceed native batch budget')
+        projected=[{key:rows[index].get(key) for key in self.schema.names} for index in selected]
+        keys=[tuple(row[k] for k in self.key) for row in projected]
+        digests=[self.key_digest(key) for key in keys]
+        known=[self._contains(digest) for digest in digests]
+        if len(set(digests))!=len(digests) or self.mode=='overwrite' and any(known):
+            raise ValueError('stream snapshot keys must be nonempty and unique')
+        fresh=[]; additions=[];indices=[]
+        for input_index,key,digest,row,seen in zip(selected,keys,digests,projected,known):
+            if seen:
+                predicate=' AND '.join(scalar_equal(name,value) for name,value in zip(self.key,key))
+                found=[]
+                for batch in lance.dataset(self.uri,version=self.version).scanner(filter=predicate,limit=2,
+                        batch_size=1,batch_readahead=1,fragment_readahead=1).to_batches():
+                    if batch.nbytes>self.max_row_bytes:raise ValueError('saved row exceeds max_row_bytes')
+                    found.extend(batch.to_pylist())
+                if _canonical(found)!=_canonical(pa.Table.from_pylist([row],schema=self.schema).to_pylist()):
+                    raise ValueError('stream append key has conflicting saved content')
+            else:fresh.append(row);additions.append(digest);indices.append(input_index)
+        if self.rows+len(fresh)>self.max_rows:raise ValueError('stream snapshot exceeds max_rows')
+        table=pa.Table.from_pylist(fresh,schema=self.schema)
+        if input_bytes+table.get_total_buffer_size()>self.bounds.max_batch_bytes:
+            raise DataflowError('BUDGET_EXCEEDED','Stream writer Python rows and Arrow coexistence exceed native batch budget')
+        self._remember(additions)  # Reserve derived index capacity before publication.
+        return table,indices
+
+    def close(self):
+        try:self._close_index()
+        finally:
+            if self._target_lock is not None:
+                self._target_lock.__exit__(None,None,None);self._target_lock=None
+
+class NativeStreamLanceService:
+    def __init__(self, execution):
+        from demiflow.execution.native_queue.dataflow_stream_lance import StreamLanceFactory
+        self.ex=execution;self.action=execution._action;self.run=self.action.context
+        self._last_acked = {}
+        self._acked_ordinals = {}
+        self._published = {}
+        self.store=execution._store;self.bounds=execution._bounds
+        self.writers={};self.partitions={};self.lock=threading.RLock();self.failed=False;self.started=False
+        from demiflow.execution.seal.plan import load_sealed_dataflow, verify_dataflow_program
+        from demiflow.data.plan import CallableSpec
+        _,_,pin=load_sealed_dataflow(execution._sealed,action_id=self.action.action_id,
+                                   store=self.store,bounds=self.bounds)
+        for node in execution._graph.nodes:
+            if node.kernel.kind!='SaveLanceOp':continue
+            stage=next(stage for stage in execution._physical.stages if node.occurrence_id in stage.occurrences)
+            if len(stage.partitions)!=1:
+                raise DataflowError('RESOURCE_INFEASIBLE','A stream target requires its original single writer')
+            program=verify_dataflow_program(node.program_ref,expected_pin=pin['programs'][node.occurrence_id],
+                                           store=self.store,bounds=self.bounds)
+            spec=program.value
+            if not isinstance(spec,CallableSpec) or spec.target is not StreamLanceFactory or len(spec.constructor_args)!=2:
+                raise DataflowError('INVALID_CONTRACT','Stream target has no original sealed factory')
+            declared,_=spec.constructor_args
+            if any(w.uri==declared['uri'] or w.stage==declared['stage'] for w in self.writers.values()):
+                raise DataflowError('INVALID_CONTRACT','Stream targets and stage names must be unique')
+            self.partitions[node.occurrence_id]=stage.partitions[0]
+            self.writers[node.occurrence_id]=_NativeWriter(declared,action=self.action,store=self.store,bounds=self.bounds)
+        if self.writers:
+            self.run.journal.bind_source(self.run.fence,self.action.action_id+'-stream-lance',
+                {'schema':SCHEMA,'nodes':sorted(self.writers)})
+
+
+
+    def _coordinator(self, key, declaration):
+        # A recovered scope must retain the target/schema from the original
+        # sealed writer. Validate before constructing a sink or opening ANY
+        # table, including reference-only invocations with no native publish.
+        from demiflow.lance.schema import schema_identity
+        from demiflow.execution.outputs.lance_sink import spec_from_identity
+        writer = self.writers.get(declaration['node_id'])
+        if writer is None or declaration['schema_identity'] != schema_identity(writer.schema):
+            raise DataflowError('CORRUPT_ARTIFACT','Stream scope differs from its declared writer schema')
+        reference = declaration['reference']
+        if reference is not None and (type(reference) is not dict or set(reference) != {'uri','version'}
+                or reference['uri'] != writer.uri or type(reference['version']) is not int
+                or reference['version'] < 1):
+            raise DataflowError('CORRUPT_ARTIFACT','Stream declared reference differs from its sealed writer')
+        if declaration['spec'] is not None:
+            spec = spec_from_identity(declaration['spec'])
+            if spec.uri != writer.uri or schema_identity(spec.schema) != schema_identity(writer.schema):
+                raise DataflowError('CORRUPT_ARTIFACT','Stream native spec differs from its sealed writer')
+        scope=RunAction(self.run,key,declaration)
+        return CommitCoordinator(scope),_BatchSink(scope,declaration)
+
+    def start(self):
+        if self.started:return
+        self.started=True
+        for node,writer in self.writers.items():
+            checked = getattr(self.ex, '_checked', None)
+            policy = checked.native_save_policy(self.ex, node, writer) if checked is not None else None
+            writer.start(node, policy=policy)
+            latest=None
+            for key,decl in stream_scopes(self.run.journal, self.run.fence, self.action.action_id, node, max_commits=self.run.limits['max_commits'], max_control_bytes=self.bounds.max_control_bytes):
+                coordinator,sink=self._coordinator(key,decl)
+                facts=coordinator.recover({'lance':sink})
+                for fact in facts:
+                    if fact['status']!='acked':continue
+                    self._remember_ack(node, key, fact['commit_id'], decl['request']['ordinal'])
+                    reference=fact['receipts']['lance']['data']['reference']
+                    if reference is not None:latest=reference['version'];writer.confirmed=True
+                    if decl['request']['finish']:writer.finished=True
+                    else:writer.last_ordinal=max(writer.last_ordinal,decl['request']['ordinal'])
+            expected=latest if latest is not None else writer.baseline
+            if writer.head()!=expected:
+                raise UnresolvedCommit('Stream target head differs from its original native receipts')
+            writer.version=latest if latest is not None else writer.baseline if writer.mode=='append' else None
+            writer.rebuild()
+
+    def can_recover_without_cut(self):
+        return bool(self.started and self.writers and self.action.replaying
+                    and not self.run.journal.execution_commits(self.action.action_id))
+
+    def request(self, command, record):
+        with self.lock:
+            self.run.check_stop()
+            if not self.started or self.failed:raise DataflowError('UNKNOWN_EFFECT','Stream writer requires native recovery')
+            if command.node_id not in self.writers or command.value_ref is not None or command.reservation is not None or command.options:
+                raise DataflowError('FENCED','Stream request differs from its sealed owner')
+            request=dict(record)
+            if (set(request)!={'schema','invocation','ordinal','partition','records','selected','batch','finish'}
+                    or request['schema']!=SCHEMA or type(request['ordinal']) is not int or request['ordinal']<0
+                    or type(request['finish']) is not bool):
+                raise DataflowError('INVALID_CONTRACT','Invalid stream batch membership')
+            operation=identity([SCHEMA,self.action.action_id,command.node_id,request['invocation']])
+            if command.operation_id!=operation:
+                raise DataflowError('INVALID_CONTRACT','Stream operation identity differs')
+            if request['partition'] != self.partitions[command.node_id]:
+                raise DataflowError('FENCED','Stream request belongs to another physical partition')
+            if type(request['invocation']) is not str or len(request['invocation']) != 64:
+                raise DataflowError('INVALID_CONTRACT','Stream invocation must be an original call identity')
+            writer=self.writers[command.node_id]
+            existing=stream_scope(self.run.journal, self.action.action_id, operation)
+            if existing is not None:
+                if existing['request_key']!=command.request_key or existing['request']!=request:
+                    raise DataflowError('INVALID_CONTRACT','Stream invocation changed payload or record membership')
+                declaration=existing
+                table=None
+            else:
+                if writer.finished or request['ordinal']!=writer.last_ordinal+1:
+                    raise DataflowError('INVALID_CONTRACT','Stream invocation order changed')
+                from demiflow.execution.contracts import state_codec
+                ref=ArtifactRef(**request['batch'])
+                rows=state_codec.loads(b''.join(self.store.read(ref,max_bytes=self.bounds.max_batch_bytes)),max_bytes=self.bounds.max_batch_bytes)
+                selected=request['selected'];ids=request['records']
+                if (type(rows) is not list or len(rows)>writer.batch_size or len(ids)!=len(rows)
+                        or any(type(x) is not str for x in ids) or type(selected) is not list
+                        or any(type(i) is not int or not 0<=i<len(rows) for i in selected)
+                        or selected!=sorted(set(selected)) or request['finish'] and rows):
+                    raise DataflowError('INVALID_CONTRACT','Stream batch exceeds sealed membership or size')
+                if writer.head() != (writer.version if writer.version is not None else writer.baseline):
+                    raise UnresolvedCommit('Stream target changed outside its confirmed native writer')
+                table,fresh=writer.prepare_rows(rows,selected)
+                publish=bool(table.num_rows or request['finish'] and writer.version is None)
+                from demiflow.lance.model import LanceWriteSpec
+                from demiflow.execution.seal.program_identity import describe
+                from demiflow.lance.schema import schema_identity
+                if publish:
+                    mode=('create' if writer.version is None and writer.permission_mode=='create' else
+                          'overwrite' if writer.version is None and writer.mode=='overwrite' else 'append')
+                    spec=LanceWriteSpec(uri=writer.uri,mode=mode,schema=writer.schema,
+                        expected_version=writer.baseline if writer.version is None else writer.version)
+                else:spec=None
+                declaration={'schema':SCHEMA,'node_id':command.node_id,'request':request,
+                    'request_key':command.request_key,'fresh':fresh,'spec':describe(spec) if spec is not None else None,
+                    'schema_identity':schema_identity(writer.schema),'reference':writer.reference() if writer.version is not None else None}
+                self.run.journal.bind_commit_scope(self.run.fence,operation,self.action.action_id,declaration)
+            coordinator,sink=self._coordinator(operation,declaration)
+            if table is None:
+                facts=coordinator.recover({'lance':sink})
+                if facts and facts[-1]['status']=='acked':
+                    self._remember_ack(command.node_id, operation, facts[-1]['commit_id'], request['ordinal'])
+                    if request['finish']:self._publish(command.node_id)
+                    return NativeJournalReply(command.operation_id,{'status':'acked',
+                        'reference':facts[-1]['receipts']['lance']['data']['reference']},None)
+                # A pending intent never published; reconstruct ONLY its original
+                # selected batch, not the new table head or a new computation.
+                from demiflow.execution.contracts import state_codec
+                import pyarrow as pa
+                ref=ArtifactRef(**request['batch'])
+                rows=state_codec.loads(b''.join(self.store.read(ref,max_bytes=self.bounds.max_batch_bytes)),max_bytes=self.bounds.max_batch_bytes)
+                table,_=writer.prepare_rows(rows,declaration['fresh'])
+            try:
+                fact=coordinator.commit(1,outputs={'lance':(sink,[table])},
+                    position=SourcePosition(identity([self.action.action_id,command.node_id]),request['ordinal']+1))
+            except BaseException:
+                self.failed=True
+                raise
+            self._remember_ack(command.node_id, operation, fact['commit_id'], request['ordinal'])
+            if request['finish']:self._publish(command.node_id)
+            reference=fact['receipts']['lance']['data']['reference']
+            if reference is not None:writer.version=reference['version'];writer.confirmed=True
+            if request['finish']:writer.finished=True
+            else:writer.last_ordinal=request['ordinal'];writer.rows+=table.num_rows
+            return NativeJournalReply(command.operation_id,{'status':'acked','reference':reference},None)
+
+    def _remember_ack(self, node, scope, commit, ordinal):
+        # A resumed worker may request its earlier already-confirmed batches.
+        # Such replay must not regress the result projected from native history.
+        if ordinal >= self._acked_ordinals.get(node, -1):
+            self._acked_ordinals[node] = ordinal
+            self._last_acked[node] = (scope, commit)
+
+    def _publish(self, node):
+        # Product action facts are immutable per attempt. Emit once at real EOI
+        # or stopped cleanup; the original per-microbatch ACKs remain queryable
+        # in runtime_commit_scopes throughout execution.
+        checked = getattr(self.ex, '_checked', None)
+        latest = self._last_acked.get(node)
+        if checked is not None and latest is not None and self._published.get(node) != latest:
+            checked.native_stage_commit(self.ex, *latest)
+            self._published[node] = latest
+
+    @property
+    def outputs(self):
+        return {writer.stage:writer.reference() for writer in self.writers.values() if writer.version is not None and writer.confirmed}
+
+    def close(self):
+        with self.lock:
+            first=None
+            for node, writer in self.writers.items():
+                try:self._publish(node)
+                except BaseException as exc:first=first or exc
+                try:writer.close()
+                except BaseException as exc:first=first or exc
+            if first is not None:raise first

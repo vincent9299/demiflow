@@ -160,7 +160,7 @@ def test_unknown_foreign_successor_is_never_adopted_or_overwritten(tmp_path):
 
 def test_changed_record_membership_cannot_reuse_confirmed_invocation(tmp_path,monkeypatch):
     from dataclasses import replace,asdict
-    from demiflow.execution.dataflow_stream_lance import NativeStreamLanceService
+    from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
     from demiflow.execution.contracts.recovery_contract import document
     from demiflow.operator_llm.journal import request_key
     original=NativeStreamLanceService.request

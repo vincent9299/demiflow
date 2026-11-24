@@ -31,7 +31,7 @@ from ..seal.plan import (
     seal_dataflow, stage_dataflow_programs, resolve_execution_constants,
 )
 from demiflow.execution.sources.snapshots import snapshot_source, plan_source_splits
-from ..dataflow_queue import NativeAcquisitionService
+from demiflow.execution.native_queue.dataflow_queue import NativeAcquisitionService
 from demiflow.execution.seal.runtime_bundle import stage_runtime_bundle
 from demiflow.execution.hosts.endpoints import make_host_endpoint
 from ..exchange.dataflow_channels import close_channels
@@ -457,7 +457,7 @@ class DataflowExecution:
         normalize_native_options(self._request.arguments.get("native_options"),
                                  operation_kind=self._request.kind)
         from demiflow.execution.native_queue.queue_producer import producer_actor
-        from ..dataflow_producer import NativeProducerService
+        from demiflow.execution.native_queue.dataflow_queue import NativeProducerService
         producer = producer_actor(self._request.plan)
         if producer is not None:
             if self._request.kind != 'run_stream':
@@ -686,7 +686,7 @@ class DataflowExecution:
         bind_private_storage(self._services.journal_service)
         self._stream_lance = None
         if any(node.kernel.kind == 'SaveLanceOp' for node in graph.nodes):
-            from ..dataflow_stream_lance import NativeStreamLanceService
+            from demiflow.execution.native_queue.stream_lance import NativeStreamLanceService
             self._stream_lance = NativeStreamLanceService(self)
             self._services.journal_service.bind_stream_writer(self._stream_lance)
         self._prepared = True
@@ -1498,7 +1498,7 @@ class DataflowExecution:
                     prove_frontier=self._exchange.prove_frontier)
                 self._checkpoint.update_residency(self._cut,
                     durable.metadata(all_workers <= self._done, self._checkpoint.satisfied_splits()))
-            from ..dataflow_producer import NativeProducerService
+            from demiflow.execution.native_queue.dataflow_queue import NativeProducerService
             if isinstance(self._acquisition, NativeProducerService):
                 # A parked physical owner is not the end of the native input
                 # unit. All downstream/fanout deliveries retain that ownership

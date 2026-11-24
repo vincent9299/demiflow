@@ -244,7 +244,7 @@ def _queue_service_request(command, *, services):
     return services.journal.queue(command)
 
 
-_install("demiflow.execution.dataflow_queue", queue_service_request=_queue_service_request)
+_install('demiflow.execution.native_queue.dataflow_queue', queue_service_request=_queue_service_request)
 
 from demiflow.execution.sources import snapshots as ds  # noqa: E402
 from demiflow.execution.sources import source_readers as sr  # noqa: E402

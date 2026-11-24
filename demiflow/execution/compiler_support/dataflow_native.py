@@ -91,23 +91,23 @@ def native_variant(operation, declaration) -> NativeVariant | None:
         return None
     name, configuration = None, {}
     from demiflow.execution.native_queue.dataflow_acquisition_call import AcquisitionCall
-    from demiflow.execution.dataflow_producer import ProducerCall
+    from demiflow.execution.native_queue.dataflow_acquisition_call import ProducerCall
     if declaration.target is AcquisitionCall:
         name = ACQUISITION
         configuration['native_operation'] = declaration.constructor_args[0]
         if configuration['native_operation'] == 'acquire':
             actor = getattr(operation.callable.target, '__self__', operation.callable.target)
-            from demiflow.execution.dataflow_fetch import fetch_declaration_key
+            from demiflow.execution.native_queue.dataflow_fetch import fetch_declaration_key
             configuration['native_key'] = fetch_declaration_key(actor)
     if declaration.target is ProducerCall:
         name = PRODUCER
         configuration['native_operation'] = 'producer'
-    from demiflow.execution.dataflow_search import NativeSearchCall
+    from demiflow.execution.operator_bindings.dataflow_search import NativeSearchCall
     if declaration.target is NativeSearchCall:
         name = SEARCH
         configuration['native_operation'] = 'search'
         configuration['native_key'] = declaration.constructor_args[0]
-    from demiflow.execution.dataflow_stream_lance import StreamLanceFactory
+    from demiflow.execution.native_queue.dataflow_stream_lance import StreamLanceFactory
     if declaration.target is StreamLanceFactory:
         # With no predicate this is the verified passive RPC factory, not the
         # original driver writer object. A user predicate has unproven state.
