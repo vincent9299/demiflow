@@ -395,7 +395,13 @@ def test_an_owner_that_loses_the_race_confirms_from_the_ledger_release(unit, mon
     released = unit.pool.record('held')
     assert result['cleanup'] == 'CONFIRMED' and result['evidence_ref'] == released['release_evidence']
     assert released['release_evidence'] == observed_exit_reference(unit.root, released)
-    assert owner.ensure_absent({'scope_id': 'scope', 'allocation_id': 'held'}, 1000)['evidence_ref'] == result['evidence_ref']
+    assert owner.resolve_evidence('scope', 'held', result['evidence_ref']) == released
+    # A later call finds the record released and settles from the unit's own exit proof, as before.
+    monkeypatch.undo()
+    again = owner.ensure_absent({'scope_id': 'scope', 'allocation_id': 'held'}, 1000)
+    assert again['cleanup'] == 'CONFIRMED'
+    assert owner.resolve_evidence('scope', 'held', again['evidence_ref'])['unit_stopped']
+    assert unit.pool.record('held') == released
 
 
 def test_an_admission_timeout_says_who_holds_the_domain(tmp_path, monkeypatch):
