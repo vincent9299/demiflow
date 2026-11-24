@@ -165,7 +165,7 @@ def test_importing_the_module_initialises_no_native_service():
         "assert not is_native_prompt_actor(lambda row: row)\n"
         "heavy = [name for name in ('demiflow.execution.native_queue.dataflow_acquisition_call', 'demiflow.execution.dataflow_producer',\n"
         "    'demiflow.execution.dataflow_search', 'demiflow.execution.dataflow_stream_lance', 'demiflow.execution.dataflow_fetch',\n"
-        "    'demiflow.execution.queue_source', 'demiflow.execution.sources.queue_history', 'demiflow.execution.queue_sinks',\n"
+        "    'demiflow.execution.native_queue.queue_source', 'demiflow.execution.sources.queue_history', 'demiflow.execution.native_queue.queue_sinks',\n"
         "    'demiflow.execution.sources.lance_key_source', 'demiflow.operator_llm.runtime', 'demiflow.lance.search', 'lance', 'pyarrow')\n"
         "    if name in sys.modules]\n"
         "assert not heavy, heavy\n")

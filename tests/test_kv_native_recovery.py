@@ -22,8 +22,8 @@ from pathlib import Path
 import demiflow
 from demiflow import data
 from demiflow.kv import SQLiteKV
-from demiflow.execution import commit
-from demiflow.execution.run_context import current_run
+from demiflow.execution.checkpoint import commit
+from demiflow.execution.pipeline.run_context import current_run
 from runtime_v3_recovery_scenarios import _scope
 root=Path(sys.argv[1]); boundary=sys.argv[2]; mode=sys.argv[3]
 assert Path(demiflow.__file__).resolve().is_relative_to(Path.cwd())

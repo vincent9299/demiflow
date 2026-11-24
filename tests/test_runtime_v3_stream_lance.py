@@ -93,10 +93,10 @@ import json,os,sys
 from pathlib import Path
 import pyarrow as pa
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution import commit
+from demiflow.execution.contracts.recovery_contract import RunRef
+from demiflow.execution.checkpoint import commit
 root=Path(sys.argv[1]);boundary=sys.argv[2];mode=sys.argv[3]
 directory=root/'run';prior=RunJournal(directory).recovery_identity() if directory.exists() else None
 context=RunContext.resume(RunRef(str(directory),prior['run_id'])) if prior else RunContext.start(directory,limits={'timeout_s':45})

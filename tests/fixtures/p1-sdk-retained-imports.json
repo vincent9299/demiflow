@@ -7,7 +7,7 @@
     ],
     [
       "Dataset.ack_queue",
-      "demiflow.execution.queue_ack",
+      "demiflow.execution.native_queue.queue_ack",
       "QueueAcknowledge"
     ],
     [
@@ -52,7 +52,7 @@
     ],
     [
       "Dataset.fetch",
-      "demiflow.execution.raw_fetch",
+      "demiflow.execution.native_queue.raw_fetch",
       "RawFetch"
     ],
     [

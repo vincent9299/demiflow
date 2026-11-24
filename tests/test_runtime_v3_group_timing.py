@@ -48,13 +48,13 @@ CHILD=r'''
 import json,os,sys
 from pathlib import Path
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 root=Path(sys.argv[1]);mode=sys.argv[2]
 contexts=[]
 if mode=='crash':
- from demiflow.execution import commit
+ from demiflow.execution.checkpoint import commit
  def fault(name,cid):
   if name!='after_checkpoint_committed':return
   run=contexts[0];fact=run.journal.execution_commit(cid)

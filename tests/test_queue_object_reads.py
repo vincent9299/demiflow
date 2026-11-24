@@ -127,7 +127,7 @@ def test_oversize_declarations_rejected_before_parsing_or_serialization(tmp_path
         monkeypatch.setattr('demiflow.objects._local_path',forbidden)
         reference={'uri':'file:///'+'x'*8192,'sha256':ref.sha256}
     else:
-        monkeypatch.setattr('demiflow.execution.raw_objects.document',forbidden)
+        monkeypatch.setattr('demiflow.execution.native_queue.raw_objects.document',forbidden)
         domain={**domain,field:'/'+'x'*8192};reference=ref
         if field=='store_id':store.store_id=domain[field]
         elif field=='declared_domain':store.domain_id=domain[field]

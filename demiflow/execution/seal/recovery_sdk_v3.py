@@ -91,7 +91,11 @@ _DATASET_METHODS = {'Dataset.map_embeddings': ('4319758ab733dfdb7dc059abfc237532
  'Dataset.deduplicate': ('de420504149d1d6e56e8d651d431015492aa2f254adb2a98b3a0cc477859e324',
                          'dd486724d1ccd3946d68b998f82d819a2c1eac105662adbe9b46b67fd21db58e'),
  'Dataset.write_datasink': ('68a90808d036f8ab4e6db9925ba22c1ac9b2530d7195781dbfde17ffe32c766e',
-                            'fde84c1d9bd72baea6cd92bdc3efb61b8865b53be5532861eefaef2106479009')}
+                            'fde84c1d9bd72baea6cd92bdc3efb61b8865b53be5532861eefaef2106479009'),
+ 'Dataset.ack_queue': ('81307a231469c344c5f1baad04f9761ac1e2b7361010e7b2dba2f0990b353e73',
+                       'e5c28b99199abe2ebd2fb548b108d69a1c0f93e5f844e841d1bdddd4a9fcec02'),
+ 'Dataset.fetch': ('7852985fb1e5aaf5d29a74fda28ef40bbb869ad671c5f79596bcfee20055da22',
+                   '1ef8103822eabdc89733e8bdde75e9464728324e09fda4e837806623e9caea19')}
 
 
 # Published captures contain public client getters and the bounded row queue's

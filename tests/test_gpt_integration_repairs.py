@@ -220,10 +220,10 @@ import os, sys, json
 from pathlib import Path
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
-import demiflow.execution.commit as commit
+from demiflow.execution.contracts.recovery_contract import RunRef
+import demiflow.execution.checkpoint.commit as commit
 root, endpoint, window = sys.argv[1:]
 if window != 'resume':
     def fault(name, commit_id):
@@ -288,9 +288,9 @@ from pathlib import Path
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
 from demiflow.embeddings.runtime import EmbeddingActor
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 root, endpoint, mode = sys.argv[1:]
 if mode == 'crash':
     async def unknown(self, request, encoded, timings):

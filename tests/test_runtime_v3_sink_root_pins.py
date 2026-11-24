@@ -62,7 +62,7 @@ def test_original_gc_traces_publication_root_before_record_and_through_commit(tm
                 raise RuntimeError('publication reply lost')
 
         with monkeypatch.context() as patch:
-            patch.setattr('demiflow.execution.commit.fault_point', interrupt)
+            patch.setattr('demiflow.execution.checkpoint.commit.fault_point', interrupt)
             if window == 'acked':
                 CommitCoordinator(port._action).commit(1, outputs={'test': (sink, manifest)},
                     position=SourcePosition('fixture', forest.rows))

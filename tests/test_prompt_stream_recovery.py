@@ -92,7 +92,7 @@ def test_process_loss_reuses_known_responses_and_refuses_unknown_calls(server, t
     script = r'''import os,sys
 from test_prompt_stream_recovery import execute
 from demiflow.execution.journal.run_journal import RunJournal
-import demiflow.execution.commit as protocol
+import demiflow.execution.checkpoint.commit as protocol
 from demiflow.operator_llm.runtime import PromptActor
 window=sys.argv[2]
 if window=='during_batch':

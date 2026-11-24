@@ -1,653 +1,653 @@
 {
- "schema": "demiflow_pre_v3_retention_v1",
- "candidate": "74d2f9941377a0a2ca82e492d7be3a6b02e3d014",
- "basis": [
-  "docs/unified-runtime-v3-20261114/MIGRATION.md「替换与退出」「历史结果与恢复」",
-  "_demiflow/shared-review/2026-11-18-p8-pre-v3-code-retirement-design.md",
-  "GPT 评审 2026-11-18（兼容入口保留；队列载体按符号清理；打包命令行本轮保留）"
- ],
- "modules": {
-  "demiflow.cli": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 4,
-     "historical_set_139_files": 0
+  "schema": "demiflow_pre_v3_retention_v1",
+  "candidate": "74d2f9941377a0a2ca82e492d7be3a6b02e3d014",
+  "basis": [
+    "docs/unified-runtime-v3-20261114/MIGRATION.md「替换与退出」「历史结果与恢复」",
+    "_demiflow/shared-review/2026-11-18-p8-pre-v3-code-retirement-design.md",
+    "GPT 评审 2026-11-18（兼容入口保留；队列载体按符号清理；打包命令行本轮保留）"
+  ],
+  "modules": {
+    "demiflow.cli": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 4,
+          "historical_set_139_files": 0
+        },
+        "functions": 7,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 7
+      }
     },
-    "functions": 7,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 7
-   }
-  },
-  "demiflow.execution.checkpoint.dataset_commit": {
-   "status": "history",
-   "reason": "④按13归位既有公开DatasetCommit人工append intent/receipt对账和历史恢复；当前平台无调用者，不是现行队列提交权威。公开语义见docs/platform-upgrade.md追加提交与空运行重置。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 1
+    "demiflow.execution.checkpoint.dataset_commit": {
+      "status": "history",
+      "reason": "④按13归位既有公开DatasetCommit人工append intent/receipt对账和历史恢复；当前平台无调用者，不是现行队列提交权威。公开语义见docs/platform-upgrade.md追加提交与空运行重置。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 1
+        },
+        "functions": 6,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 6,
+        "ran_only_at_import": 0,
+        "never_ran": 0
+      },
+      "original_module": "demiflow.execution.dataset_commit"
     },
-    "functions": 6,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 6,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   },
-   "original_module": "demiflow.execution.dataset_commit"
-  },
-  "demiflow.execution.contracts.native_commit_store": {
-   "status": "undecided",
-   "reason": "2026-11-20 P8批次3 D1已处置为保留：19行Protocol的当前跨进程测量、历史类型依赖、删后历史和真实Ray门槛未齐；不为可选清理新建测量体系。旧74d2f99测量不改绑，详见docs/architecture-upgrade-20261120/D/D1-NATIVE-COMMIT-STORE.md。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
+    "demiflow.execution.contracts.native_commit_store": {
+      "status": "undecided",
+      "reason": "2026-11-20 P8批次3 D1已处置为保留：19行Protocol的当前跨进程测量、历史类型依赖、删后历史和真实Ray门槛未齐；不为可选清理新建测量体系。旧74d2f99测量不改绑，详见docs/architecture-upgrade-20261120/D/D1-NATIVE-COMMIT-STORE.md。",
+      "importers": [],
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 0
+        },
+        "functions": 9,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 9
+      }
     },
-    "functions": 9,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 9
-   }
-  },
-  "demiflow.execution.contracts.pipeline": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.contracts.pipeline": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 11,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 11
+      }
     },
-    "functions": 11,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 11
-   }
-  },
-  "demiflow.execution.contracts.target": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.contracts.target": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 2,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 2
+      }
     },
-    "functions": 2,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 2
-   }
-  },
-  "demiflow.execution.hosts.dataflow_control": {
-   "status": "undecided",
-   "reason": "v3 计划 H045–H048 的交付物，产品代码没有导入方。GPT 评审 2026-11-18：职责已由 dataflow_hosts.ControlMailbox 承担，列为重复实现候选；先把它的合同测试对应到真实生产路径。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 1,
-     "historical_set_139_files": 0
+    "demiflow.execution.hosts.dataflow_control": {
+      "status": "undecided",
+      "reason": "v3 计划 H045–H048 的交付物，产品代码没有导入方。GPT 评审 2026-11-18：职责已由 dataflow_hosts.ControlMailbox 承担，列为重复实现候选；先把它的合同测试对应到真实生产路径。",
+      "importers": [],
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 1,
+          "historical_set_139_files": 0
+        },
+        "functions": 10,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 10,
+        "ran_only_at_import": 0,
+        "never_ran": 0
+      }
     },
-    "functions": 10,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 10,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   }
-  },
-  "demiflow.execution.hosts.environment": {
-   "status": "separate_entry",
-   "reason": "④按08归位原公开CLI环境投影及环境变量检查；入口保留，代码原体迁移。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.hosts.environment": {
+      "status": "separate_entry",
+      "reason": "④按08归位原公开CLI环境投影及环境变量检查；入口保留，代码原体迁移。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 4,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 2,
+        "ran_only_at_import": 0,
+        "never_ran": 2
+      },
+      "original_module": "demiflow.execution.environment"
     },
-    "functions": 4,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 2,
-    "ran_only_at_import": 0,
-    "never_ran": 2
-   },
-   "original_module": "demiflow.execution.environment"
-  },
-  "demiflow.execution.hosts.local": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
+    "demiflow.execution.hosts.local": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 0
+        },
+        "functions": 7,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 7
+      }
     },
-    "functions": 7,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 7
-   }
-  },
-  "demiflow.execution.hosts.python_environment": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.hosts.python_environment": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 9,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 9
+      }
     },
-    "functions": 9,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 9
-   }
-  },
-  "demiflow.execution.hosts.ray": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
+    "demiflow.execution.hosts.ray": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 0
+        },
+        "functions": 11,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 11
+      }
     },
-    "functions": 11,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 11
-   }
-  },
-  "demiflow.execution.hosts.ray_worker_host": {
-   "status": "undecided",
-   "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
-   "importers": [
-    "demiflow.execution.hosts.endpoints"
-   ],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 1,
-     "historical_set_139_files": 0
+    "demiflow.execution.hosts.ray_worker_host": {
+      "status": "undecided",
+      "reason": "v3 的 DataflowRayConnector 继承这里的 RayControlConnector；_RayWorkerHost 属于 11-09 那一代。需要在 Ray 环境里测量后细化到符号。",
+      "importers": [
+        "demiflow.execution.hosts.endpoints"
+      ],
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 1,
+          "historical_set_139_files": 0
+        },
+        "functions": 20,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 20
+      }
     },
-    "functions": 20,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 20
-   }
-  },
-  "demiflow.execution.hosts.timeout": {
-   "status": "undecided",
-   "reason": "2026-09 的文件，没有导入方，没有测试。批次 3，待确认。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
+    "demiflow.execution.hosts.timeout": {
+      "status": "undecided",
+      "reason": "2026-09 的文件，没有导入方，没有测试。批次 3，待确认。",
+      "importers": [],
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 0
+        },
+        "functions": 3,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 3
+      }
     },
-    "functions": 3,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 3
-   }
-  },
-  "demiflow.execution.journal.observation": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 0
+    "demiflow.execution.journal.observation": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 0
+        },
+        "functions": 4,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 4
+      }
     },
-    "functions": 4,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 4
-   }
-  },
-  "demiflow.execution.pipeline.driver": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 1,
-     "historical_set_139_files": 0
+    "demiflow.execution.pipeline.driver": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 1,
+          "historical_set_139_files": 0
+        },
+        "functions": 5,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 1,
+        "ran_only_at_import": 0,
+        "never_ran": 4
+      }
     },
-    "functions": 5,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 1,
-    "ran_only_at_import": 0,
-    "never_ran": 4
-   }
-  },
-  "demiflow.execution.pipeline.notebook": {
-   "status": "undecided",
-   "reason": "给 notebook 用的公开小工具，有测试；产品代码不导入。暂不处理。",
-   "importers": [],
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 0,
-     "historical_set_139_files": 1
+    "demiflow.execution.pipeline.notebook": {
+      "status": "undecided",
+      "reason": "给 notebook 用的公开小工具，有测试；产品代码不导入。暂不处理。",
+      "importers": [],
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 0,
+          "historical_set_139_files": 1
+        },
+        "functions": 9,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 3,
+        "ran_only_at_import": 0,
+        "never_ran": 6
+      }
     },
-    "functions": 9,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 3,
-    "ran_only_at_import": 0,
-    "never_ran": 6
-   }
-  },
-  "demiflow.execution.pipeline.package_loader": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.pipeline.package_loader": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 2,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 2
+      }
     },
-    "functions": 2,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 2
-   }
-  },
-  "demiflow.execution.pipeline.readiness": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.pipeline.readiness": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 1,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 1
+      }
     },
-    "functions": 1,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 1
-   }
-  },
-  "demiflow.execution.queue_execution": {
-   "status": "frozen",
-   "reason": "受保护的原生队列结算、确认和恢复入口。按授权删除了无调用方的 write_queue_datasink。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 211,
-     "historical_set_139_files": 70
+    "demiflow.execution.native_queue.queue_execution": {
+      "status": "frozen",
+      "reason": "受保护的原生队列结算、确认和恢复入口。按授权删除了无调用方的 write_queue_datasink。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 211,
+          "historical_set_139_files": 70
+        },
+        "functions": 8,
+        "reached_through_a_product_entry": 5,
+        "called_only_by_tests": 1,
+        "ran_only_at_import": 0,
+        "never_ran": 2
+      }
     },
-    "functions": 8,
-    "reached_through_a_product_entry": 5,
-    "called_only_by_tests": 1,
-    "ran_only_at_import": 0,
-    "never_ran": 2
-   }
-  },
-  "demiflow.execution.seal.requirements": {
-   "status": "separate_entry",
-   "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 263,
-     "historical_set_139_files": 135
+    "demiflow.execution.seal.requirements": {
+      "status": "separate_entry",
+      "reason": "打包命令行（demiflow run、demiflow inspect-readiness）那条独立入口。GPT 评审 2026-11-18：本轮保留；缺测试、业务仓不用，都不足以作为删除公开 CLI 的依据。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 263,
+          "historical_set_139_files": 135
+        },
+        "functions": 24,
+        "reached_through_a_product_entry": 0,
+        "called_only_by_tests": 0,
+        "ran_only_at_import": 0,
+        "never_ran": 24
+      }
     },
-    "functions": 24,
-    "reached_through_a_product_entry": 0,
-    "called_only_by_tests": 0,
-    "ran_only_at_import": 0,
-    "never_ran": 24
-   }
-  },
-  "demiflow.execution.seal.plan_interpreter": {
-   "status": "history",
-   "reason": "sealed_plans 读封存计划时调它的校验函数和常量；PlanContractError 是读取方的错误类型。解释旧物理计划的部分随批次 4 细化到符号。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 36,
-     "historical_set_139_files": 44
+    "demiflow.execution.seal.plan_interpreter": {
+      "status": "history",
+      "reason": "sealed_plans 读封存计划时调它的校验函数和常量；PlanContractError 是读取方的错误类型。解释旧物理计划的部分随批次 4 细化到符号。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 36,
+          "historical_set_139_files": 44
+        },
+        "functions": 17,
+        "reached_through_a_product_entry": 3,
+        "called_only_by_tests": 14,
+        "ran_only_at_import": 0,
+        "never_ran": 0
+      }
     },
-    "functions": 17,
-    "reached_through_a_product_entry": 3,
-    "called_only_by_tests": 14,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   }
-  },
-  "demiflow.execution.seal.sealed_plans": {
-   "status": "history",
-   "reason": "读封存计划：v3 封存的计划和旧运行的计划都经它读（dataflow_history、sealed_plan_facts、publication_facts、图适配器）。保留。",
-   "measured": {
-    "at": "74d2f99",
-    "test_files_that_load_it": {
-     "v3_set_276_files": 35,
-     "historical_set_139_files": 38
+    "demiflow.execution.seal.sealed_plans": {
+      "status": "history",
+      "reason": "读封存计划：v3 封存的计划和旧运行的计划都经它读（dataflow_history、sealed_plan_facts、publication_facts、图适配器）。保留。",
+      "measured": {
+        "at": "74d2f99",
+        "test_files_that_load_it": {
+          "v3_set_276_files": 35,
+          "historical_set_139_files": 38
+        },
+        "functions": 11,
+        "reached_through_a_product_entry": 7,
+        "called_only_by_tests": 4,
+        "ran_only_at_import": 0,
+        "never_ran": 0
+      }
     },
-    "functions": 11,
-    "reached_through_a_product_entry": 7,
-    "called_only_by_tests": 4,
-    "ran_only_at_import": 0,
-    "never_ran": 0
-   }
+    "demiflow.execution.journal.stream": {
+      "status": "live",
+      "reason": "公开 Dataset.run_stream 返回的 StreamStats 及其历史类型。"
+    }
   },
-  "demiflow.execution.journal.stream": {
-   "status": "live",
-   "reason": "公开 Dataset.run_stream 返回的 StreamStats 及其历史类型。"
-  }
- },
- "methods": [
-  {
-   "module": "demiflow.data.dataset",
-   "name": "_run_stream",
-   "status": "old",
-   "reason": "固定旧运行捕获了 Dataset 类。直接删除该方法会让真实 routed 非最终 cut 以不同程序身份拒绝恢复；其旧内部 benchmark 单独迁移。"
-  },
-  {
-   "module": "demiflow.execution.worker.bootstrap",
-   "name": "run_worker",
-   "status": "live",
-   "reason": "v3 worker 的启动入口。函数里 execution 分支和它的导入属于旧执行器，批次 4 去掉；queue_transform 分支已在批次 2 去掉。"
-  }
- ],
- "removed": [
-  {
-   "module": "demiflow.execution.worker.graph_host",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.worker.graph_ray_host",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.worker.graph_execution",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.worker.graph_progress",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.exchange.graph_router",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.exchange.graph_channel",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.exchange.segment_gc",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.exchange.carriage_ray",
-   "batch": 1,
-   "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
-  },
-  {
-   "module": "demiflow.execution.worker.queue_transform",
-   "batch": 2,
-   "reason": "11-12 那一代的队列转换执行器。启动它的只有 run_worker 里 queue_transform 分支，产品代码不再产生这种启动参数。批次 2。"
-  },
-  {
-   "module": "demiflow.execution.queue_chain",
-   "symbol": "_TransformClient",
-   "batch": 2,
-   "reason": "旧转换载体的驱动侧；没有产品调用方。批次 2。"
-  },
-  {
-   "module": "demiflow.execution.queue_chain",
-   "symbol": "unified_queue_chain_eligible",
-   "batch": 2,
-   "reason": "旧载体的准入判断；没有产品调用方。批次 2。"
-  },
-  {
-   "module": "demiflow.execution.worker.execution",
-   "batch": 4,
-   "reason": "两个后端都在分配前拒绝旧业务 launch。v3 worker 在原确认之后推进，K3 控制壳继续以真实 grant 和 fence 工作。"
-  },
-  {
-   "module": "demiflow.execution.worker.progress",
-   "batch": 4,
-   "reason": "旧 chain worker 是唯一产品导入方。现行 cut contributor 和 v3 运行账本持有原始回执，观测不参与确认。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "symbol": "run_local_chain",
-   "batch": 4,
-   "reason": "P1 的真实 Dataset materialize 直接运行 v3，保同一 provider 和同一 action。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "symbol": "run_ray_chain",
-   "batch": 4,
-   "reason": "P1 的真实 Dataset materialize 直接运行 v3，保同一 provider 和同一 action。"
-  },
-  {
-   "module": "demiflow.execution.queue_chain",
-   "batch": 4,
-   "reason": "公开 Dataset 写端直接走并仅走 v3 写 action。真实领取后、确认前和确认后的队列恢复已另外验证。"
-  },
-  {
-   "module": "demiflow.execution.stream_materialize",
-   "symbol": "has_stream",
-   "batch": 5,
-   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
-  },
-  {
-   "module": "demiflow.execution.stream_materialize",
-   "symbol": "stream_view",
-   "batch": 5,
-   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
-  },
-  {
-   "module": "demiflow.execution.stream_materialize",
-   "symbol": "prepare_stream_blocks",
-   "batch": 5,
-   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
-  },
-  {
-   "module": "demiflow.execution.stream_materialize",
-   "symbol": "bounded_stream_batches",
-   "batch": 5,
-   "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
-  },
-  {
-   "module": "demiflow.execution.stream_materialize",
-   "batch": 5,
-   "reason": "公开物化、恢复和发布已由 v3 负责。旧队列写入口退役后，运行中的阶段进度与终端只剩测试直接构造；旧封存没有保存这两类对象。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "symbol": "_worker_failure",
-   "batch": 4,
-   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "symbol": "_WriteSeal",
-   "batch": 4,
-   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "symbol": "seal_write_topology",
-   "batch": 4,
-   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "symbol": "_ChainBlocks",
-   "batch": 4,
-   "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
-  },
-  {
-   "module": "demiflow.execution.native_plan",
-   "batch": 4,
-   "reason": "原生旧入口的执行分派和写封存退役；原件只读函数在06 seal/plan，旧 writer 使用已发布安装生成测试样本。"
-  },
-  {
-   "module": "demiflow.execution.worker.layout",
-   "batch": 4,
-   "reason": "旧 launch execution 分派已完整退休；K3 和 v3 执行使用现行入口，历史原 group/stage 通过不可变布局读取。"
-  },
-  {
-   "module": "demiflow.execution.graph",
-   "batch": 4,
-   "reason": "当前图动作与两种 provider 共用 v3；06 校验原封存，09 执行 worker。移除原来独立的拓扑生成、通道连接、握手和结果提交。"
-  },
-  {
-   "module": "demiflow.execution.chain",
-   "batch": 3,
-   "reason": "v3 封存持有业务源码与代码身份。当前 worker、调度和提交没有旧 chain 入口。历史读取从固定的发布版生成 F1/F2、K6、代码及输出回执，在现行读取端核验。"
-  },
-  {
-   "module": "demiflow.execution.stage_buffers",
-   "batch": 5,
-   "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
-  },
-  {
-   "module": "demiflow.execution.stream_barrier",
-   "batch": 5,
-   "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
-  },
-  {
-   "module": "demiflow.execution.stream_map",
-   "batch": 5,
-   "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
-  },
-  {
-   "module": "demiflow.execution.resource_registry",
-   "batch": 5,
-   "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_Stage",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_arun",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_call",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_call_stage",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_call_sync",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_close_platform",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_close_stages",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_drain_threads",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_local_queue",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_make_worker",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_materialize",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_post_filter",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "_predicate",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.stream",
-   "symbol": "run_stream",
-   "batch": 5,
-   "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
-  },
-  {
-   "module": "demiflow.execution.dataset_commit",
-   "reason": "④原公开DatasetCommit人工append intent/receipt对账和历史恢复归位13 checkpoint.dataset_commit；当前平台无调用者，不恢复第二条执行或提交路径。"
-  },
-  {
-   "module": "demiflow.execution.environment",
-   "reason": "④按08归位原公开CLI环境投影及环境变量检查；入口保留，代码原体迁移。"
-  },
-  {
-   "module": "demiflow.execution.local_tasks",
-   "reason": "④已将仅剩_apply/_select原体归10/operators.arrow_batches；06限定验证旧by-value factory身份后绑定真实新提供者，无旧执行循环或转发壳。"
-  },
-  {
-   "module": "demiflow.execution.operator_checkpoint",
-   "reason": "④删除无人调用且构造仅拒绝的旧检查点占位器；同职责现行13检查点协调和提交校验保留。"
-  }
- ]
+  "methods": [
+    {
+      "module": "demiflow.data.dataset",
+      "name": "_run_stream",
+      "status": "old",
+      "reason": "固定旧运行捕获了 Dataset 类。直接删除该方法会让真实 routed 非最终 cut 以不同程序身份拒绝恢复；其旧内部 benchmark 单独迁移。"
+    },
+    {
+      "module": "demiflow.execution.worker.bootstrap",
+      "name": "run_worker",
+      "status": "live",
+      "reason": "v3 worker 的启动入口。函数里 execution 分支和它的导入属于旧执行器，批次 4 去掉；queue_transform 分支已在批次 2 去掉。"
+    }
+  ],
+  "removed": [
+    {
+      "module": "demiflow.execution.worker.graph_host",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.worker.graph_ray_host",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.worker.graph_execution",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.worker.graph_progress",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.exchange.graph_router",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.exchange.graph_channel",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.exchange.segment_gc",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.exchange.carriage_ray",
+      "batch": 1,
+      "reason": "11-10 那一代的图 worker（MIGRATION「替换与退出」：没有入口后清理旧专属路由）。两个入口文件没有任何导入方，也没有按模块路径启动它们的字符串；其余模块的导入方都在这一组之内。批次 1。"
+    },
+    {
+      "module": "demiflow.execution.worker.queue_transform",
+      "batch": 2,
+      "reason": "11-12 那一代的队列转换执行器。启动它的只有 run_worker 里 queue_transform 分支，产品代码不再产生这种启动参数。批次 2。"
+    },
+    {
+      "module": "demiflow.execution.queue_chain",
+      "symbol": "_TransformClient",
+      "batch": 2,
+      "reason": "旧转换载体的驱动侧；没有产品调用方。批次 2。"
+    },
+    {
+      "module": "demiflow.execution.queue_chain",
+      "symbol": "unified_queue_chain_eligible",
+      "batch": 2,
+      "reason": "旧载体的准入判断；没有产品调用方。批次 2。"
+    },
+    {
+      "module": "demiflow.execution.worker.execution",
+      "batch": 4,
+      "reason": "两个后端都在分配前拒绝旧业务 launch。v3 worker 在原确认之后推进，K3 控制壳继续以真实 grant 和 fence 工作。"
+    },
+    {
+      "module": "demiflow.execution.worker.progress",
+      "batch": 4,
+      "reason": "旧 chain worker 是唯一产品导入方。现行 cut contributor 和 v3 运行账本持有原始回执，观测不参与确认。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "symbol": "run_local_chain",
+      "batch": 4,
+      "reason": "P1 的真实 Dataset materialize 直接运行 v3，保同一 provider 和同一 action。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "symbol": "run_ray_chain",
+      "batch": 4,
+      "reason": "P1 的真实 Dataset materialize 直接运行 v3，保同一 provider 和同一 action。"
+    },
+    {
+      "module": "demiflow.execution.queue_chain",
+      "batch": 4,
+      "reason": "公开 Dataset 写端直接走并仅走 v3 写 action。真实领取后、确认前和确认后的队列恢复已另外验证。"
+    },
+    {
+      "module": "demiflow.execution.stream_materialize",
+      "symbol": "has_stream",
+      "batch": 5,
+      "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+    },
+    {
+      "module": "demiflow.execution.stream_materialize",
+      "symbol": "stream_view",
+      "batch": 5,
+      "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+    },
+    {
+      "module": "demiflow.execution.stream_materialize",
+      "symbol": "prepare_stream_blocks",
+      "batch": 5,
+      "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+    },
+    {
+      "module": "demiflow.execution.stream_materialize",
+      "symbol": "bounded_stream_batches",
+      "batch": 5,
+      "reason": "退役旧队列 datasink 后为空的流式物化入口。公开 v3 迭代保留其分批、额度与错误。"
+    },
+    {
+      "module": "demiflow.execution.stream_materialize",
+      "batch": 5,
+      "reason": "公开物化、恢复和发布已由 v3 负责。旧队列写入口退役后，运行中的阶段进度与终端只剩测试直接构造；旧封存没有保存这两类对象。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "symbol": "_worker_failure",
+      "batch": 4,
+      "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "symbol": "_WriteSeal",
+      "batch": 4,
+      "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "symbol": "seal_write_topology",
+      "batch": 4,
+      "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "symbol": "_ChainBlocks",
+      "batch": 4,
+      "reason": "真实运行由 v3 的工作进程、原始封存与持久结果读取负责，旧图与写执行入口均已退出。"
+    },
+    {
+      "module": "demiflow.execution.native_plan",
+      "batch": 4,
+      "reason": "原生旧入口的执行分派和写封存退役；原件只读函数在06 seal/plan，旧 writer 使用已发布安装生成测试样本。"
+    },
+    {
+      "module": "demiflow.execution.worker.layout",
+      "batch": 4,
+      "reason": "旧 launch execution 分派已完整退休；K3 和 v3 执行使用现行入口，历史原 group/stage 通过不可变布局读取。"
+    },
+    {
+      "module": "demiflow.execution.graph",
+      "batch": 4,
+      "reason": "当前图动作与两种 provider 共用 v3；06 校验原封存，09 执行 worker。移除原来独立的拓扑生成、通道连接、握手和结果提交。"
+    },
+    {
+      "module": "demiflow.execution.chain",
+      "batch": 3,
+      "reason": "v3 封存持有业务源码与代码身份。当前 worker、调度和提交没有旧 chain 入口。历史读取从固定的发布版生成 F1/F2、K6、代码及输出回执，在现行读取端核验。"
+    },
+    {
+      "module": "demiflow.execution.stage_buffers",
+      "batch": 5,
+      "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
+    },
+    {
+      "module": "demiflow.execution.stream_barrier",
+      "batch": 5,
+      "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
+    },
+    {
+      "module": "demiflow.execution.stream_map",
+      "batch": 5,
+      "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
+    },
+    {
+      "module": "demiflow.execution.resource_registry",
+      "batch": 5,
+      "reason": "旧进程内流调度与全局清理的独占实现已退役；现行 worker、checkpoint 以及调用方持有各自的资源。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_Stage",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_arun",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_call",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_call_stage",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_call_sync",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_close_platform",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_close_stages",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_drain_threads",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_local_queue",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_make_worker",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_materialize",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_post_filter",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "_predicate",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.stream",
+      "symbol": "run_stream",
+      "batch": 5,
+      "reason": "进程内流调度入口及其私有 stage 已由现行 Dataset action 与 worker 接管。"
+    },
+    {
+      "module": "demiflow.execution.dataset_commit",
+      "reason": "④原公开DatasetCommit人工append intent/receipt对账和历史恢复归位13 checkpoint.dataset_commit；当前平台无调用者，不恢复第二条执行或提交路径。"
+    },
+    {
+      "module": "demiflow.execution.environment",
+      "reason": "④按08归位原公开CLI环境投影及环境变量检查；入口保留，代码原体迁移。"
+    },
+    {
+      "module": "demiflow.execution.local_tasks",
+      "reason": "④已将仅剩_apply/_select原体归10/operators.arrow_batches；06限定验证旧by-value factory身份后绑定真实新提供者，无旧执行循环或转发壳。"
+    },
+    {
+      "module": "demiflow.execution.operator_checkpoint",
+      "reason": "④删除无人调用且构造仅拒绝的旧检查点占位器；同职责现行13检查点协调和提交校验保留。"
+    }
+  ]
 }

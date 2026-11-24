@@ -300,7 +300,7 @@ if mode=='supervise':
     subprocess.Popen=launch
     worker.supervise(Path(root),run_id,int(sys.argv[4]),int(sys.argv[5]))
 else:
-    from demiflow.execution import commit
+    from demiflow.execution.checkpoint import commit
     from demiflow.execution.journal.run_journal import RunJournal
     def fault(name,commit_id):
         if name!='after_sink_commit_before_receipt':return

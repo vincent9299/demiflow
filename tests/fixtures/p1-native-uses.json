@@ -5,7 +5,7 @@
     "imports": [
       [
         "Dataset.ack_queue",
-        "from ..execution.queue_ack import QueueAcknowledge"
+        "from demiflow.execution.native_queue.queue_ack import QueueAcknowledge"
       ],
       [
         "Dataset.admit_rows",
@@ -17,7 +17,7 @@
       ],
       [
         "Dataset.fetch",
-        "from ..execution.raw_fetch import RawFetch"
+        "from demiflow.execution.native_queue.raw_fetch import RawFetch"
       ],
       [
         "Dataset.lookup_lance",
@@ -164,7 +164,7 @@
         ],
         [
           "read_queue",
-          "demiflow.execution.queue_source",
+          "demiflow.execution.native_queue.queue_source",
           "QueueDatasource",
           null
         ],

@@ -69,7 +69,7 @@ def run_graph(root, window=None):
     with ExitStack() as stack:
         stack.enter_context(patch.object(DataflowCheckpointCoordinator, 'recover', observe_recovery))
         if window and window != 'during_batch':
-            stack.enter_context(patch('demiflow.execution.commit.fault_point', interrupt))
+            stack.enter_context(patch('demiflow.execution.checkpoint.commit.fault_point', interrupt))
         run = stack.enter_context(scope)
         rows = [{"id": i} for i in range(1093)] + [{"id": 1}] * 7
         materialized = data.from_items(rows).map_async(Counter(), concurrency=1).materialize()

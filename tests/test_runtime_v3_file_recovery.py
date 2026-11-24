@@ -13,7 +13,7 @@ CHILD = r'''
 import json,os,sys
 from pathlib import Path
 from demiflow import data
-from demiflow.execution import commit
+from demiflow.execution.checkpoint import commit
 from runtime_v3_recovery_scenarios import _scope
 root=Path(sys.argv[1]); boundary=sys.argv[2]; mode=sys.argv[3]; kind=sys.argv[4]
 if mode=='crash':
