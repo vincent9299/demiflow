@@ -53,10 +53,11 @@ class IsolatedWorkerPool:
         if worker['process'] is None:
             if self.initialization is None:
                 self.initialization = self._encode(self.functions)
+            from demiflow.resources.process_observation import held_unit
             launch = asyncio.create_task(asyncio.create_subprocess_exec(
                 sys.executable, '-m', __name__, str(self.limit),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                start_new_session=True))
+                start_new_session=True, pass_fds=held_unit()))
             try:
                 worker['process'] = await asyncio.shield(launch)
             except asyncio.CancelledError:

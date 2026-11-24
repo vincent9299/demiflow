@@ -75,12 +75,12 @@ class ThreadResourceProvider(LocalResourceProvider):
             return self._view(old)
         effective = normalized['effective']
         try:
-            self.pool.reserve(allocation_id, immutable_spec['spec_hash'], effective,
-                              immutable_spec['request']['provision_deadline_ms'])
+            self._reserve(allocation_id, immutable_spec['spec_hash'], effective,
+                          immutable_spec['request']['provision_deadline_ms'],
+                          self._path(scope, allocation_id).parent)
         except ResourceError as exc:
             if exc.code == 'CAPACITY_PENDING':
-                return self._observation(scope, allocation_id, 'PENDING', 'FRESH', effective=effective,
-                                         conditions=['capacity_pending'])
+                return self._capacity_pending(scope, allocation_id, effective)
             raise
         launch = self._control.launch_spec(allocation_id)
         identity = {**process_identity(os.getpid()), 'unit': 'thread-' + allocation_id}

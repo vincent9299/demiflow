@@ -34,8 +34,11 @@ def run_isolated(function, *args, timeout_s=None, **kwargs):
     with tempfile.TemporaryDirectory(prefix='demiflow-stage-') as directory:
         request, result = Path(directory) / 'input.pickle', Path(directory) / 'result.pickle'
         request.write_bytes(cloudpickle.dumps((function, args, kwargs)))
+        from demiflow.resources.process_observation import held_unit
+        # The child does this allocation's work in its own session: it keeps the
+        # unit lock, so the unit counts as running until the child has gone too.
         process = subprocess.Popen([sys.executable, '-m', __name__, str(request), str(result)],
-                                   start_new_session=True, env=os.environ.copy())
+                                   start_new_session=True, env=os.environ.copy(), pass_fds=held_unit())
         try:
             code = process.wait(timeout=timeout_s)
         except subprocess.TimeoutExpired as exc:
