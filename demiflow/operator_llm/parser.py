@@ -207,7 +207,7 @@ def resolve_prompt(pack: PromptPack, name: str) -> PromptDefinition:
 def load_referenced_prompt_packs(bundle_root: str | Path) -> dict[str, PromptPack]:
     """Load prompt configs referenced by the entrypoint source closure."""
     import ast
-    from demiflow.pipeline.discovery import discover_pipeline_definition
+    from demiflow.pipeline import discover_pipeline_definition
     from demiflow.execution.seal.pipeline_sources import reachable_pipeline_sources
     root=Path(bundle_root).resolve(); pipeline=root/"pipeline"
     entrypoint=discover_pipeline_definition(root).entrypoint

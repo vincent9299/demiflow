@@ -86,6 +86,7 @@
 - 采集的声明文件导入 17；根目录对象存储 SDK 调用 17；08 的结果对象返回 02 的 Dataset（`collect/fetch_flow.py:48,80`、`objects.py:246`、`hosts/datafusion.py:132–134`）。
 - 04 编译器导入 06 和 09（`planning/dataflow_compile.py:51,131,132,271,776`）；规约没有明确裁定方向。
 - `hosts/environment.py:9` 经公开门面 `demiflow.operator_llm` 导入 `load_referenced_prompt_packs`。
+- `operator_llm/parser.py:210` 经公开门面 `demiflow.pipeline` 导入 `discover_pipeline_definition`。`tests/test_map_prompt_async.py:270` 在门面上替换这个函数，改成直接导入定义文件会让替换失效，要连同测试的替换目标一起改。
 
 ## 已完成
 
