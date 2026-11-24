@@ -14,12 +14,30 @@
   window.addEventListener('beforeunload', event => {
     if([...sessions.values()].some(dirty)){event.preventDefault();event.returnValue='';}
   });
+  function relayout(session) {
+    const win=session.frame.contentWindow;
+    if(!win||session.frame.hidden)return;
+    const kick=()=>{
+      if(session.frame.hidden||!session.frame.isConnected)return;
+      try{win.dispatchEvent(new win.Event('resize'));}catch{}
+      try{
+        win.jupyterapp?.shell?.update();
+        const panel=notebookPanel(session);
+        panel?.update();
+        panel?.content?.update();
+      }catch{}
+    };
+    kick();
+    try{win.requestAnimationFrame(kick);}catch{}
+  }
   function position(session) {
     const visible=session.host?.isConnected&&!session.host.hidden;
+    const wasHidden=session.frame.hidden;
     session.frame.hidden=!visible;
     if(!visible)return;
     const rect=session.host.getBoundingClientRect();
     Object.assign(session.frame.style,{left:rect.left+'px',top:rect.top+'px',width:rect.width+'px',height:rect.height+'px'});
+    if(wasHidden)relayout(session);
   }
   function connectWidgets(win,panel){
     const config=JSON.parse(win.document.getElementById('jupyter-config-data').textContent);
@@ -656,7 +674,7 @@
               table:item.label,version:item.version,fields:fieldNames,
               reader:'demiflow.workbench.notebooks.data.sample'})),
             catalogCommand,layout:resize});
-          session.frame.removeAttribute('data-loading');session.onReady?.();
+          session.frame.removeAttribute('data-loading');relayout(session);session.onReady?.();
         }catch(error){status.hidden=true;fail(error);}
       };
       if(!cards&&session.readyPanel)session.onPanel(session.readyPanel);
