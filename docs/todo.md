@@ -103,22 +103,10 @@
 |---|---|
 | 26 | 确认过时，已删除（见 T-015） |
 | 45 | 需要 Ray 的测试被排进了没有 Ray 的标准线，在 Ray 线里另有结果；不是产品失败（见 T-016） |
-| 1 | prompt 节点预算的口径，待裁定（T-013） |
-| 13 | `request_gate` 参数被引擎拒绝（T-014） |
+| 1 | prompt 节点预算的口径，已定为按每次运行计（T-013，已完成） |
+| 13 | `request_gate` 参数被引擎拒绝，已退役（T-014，已完成） |
 | 140 | 引擎测试，未判定（T-017） |
 | 108 | 界面测试，未判定（T-018） |
-
-### T-013 prompt 节点的 `max_requests` 按每次运行重新计
-
-- **现象。** 同一个节点对象第二次执行 action 时预算重新计，会再次发请求；旧行为是同一个节点对象累计。一次运行内超限仍被挡住（3 行、预算 1，只发 1 次即报 `PromptBudgetExceededError`）。
-- **依据。** 2026-11-24 实测；`tests/test_map_prompt_async.py::test_sync_and_async_nodes_have_independent_budgets` 因此失败，保留未删。
-- **建议。** 定口径：若按每次运行计是有意的，删掉该测试并在 `docs/prompt_http.md` 写明"跨运行的累计上限用 `sqlite_journal.max_requests`"；若应累计，按缺陷修。
-
-### T-014 `map_prompt_async(request_gate=...)` 有文档但不可用
-
-- **现象。** 传入一个现成的 `RequestGate` / `AdaptiveRequestGate` 对象时，封存阶段报 `ValueError: Native prompt lowering/configuration copies differ`（`operator_llm/flow_contract.py:277`，只接受由 `request_policy` 重建的门）。`request_policy` 正常。`map_prompt` 不接受这个参数。
-- **依据。** 2026-11-24 实测。`data/dataset.py` 的 docstring 和 `docs/prompt_http.md:184` 仍把 `request_gate` 写成可用接口。受影响的测试 13 个：`tests/test_prompt_http_retry.py` 11 个、`tests/test_prompt_http_stream.py` 2 个，保留未删。
-- **建议。** 现成的门对象跨不了进程，多半应当退役：在声明处给出明确的拒绝信息，从签名和文档里去掉，再删这 13 个测试；它们测的重试次数、缓存错误、双预算等行为要确认 `tests/test_runtime_v3_m.py` 的 `http_error_retry` 用例是否已覆盖。
 
 ### T-015 已删除的过时测试里，仍然有效但现在没有测试的保证
 
@@ -132,15 +120,16 @@
 
 - **现象。** 标准线（没有 Ray）每天有 45 个测试因 `No module named 'ray'` 或 `NOT_RUN` 记为失败，涉及 11 个 `test_runtime_v3_*` 文件；同样的文件在 Ray 线里有真实结果。
 - **建议。** 随 T-006 的驱动脚本进仓库时，把这些文件从标准线的执行清单里去掉，让标准线的失败数只反映真实失败。
+- **补充（2026-11-25）。** `test_runtime_v3_provider_recovery.py` 用 Ray 环境跑全部通过。`test_runtime_v3_node_loss.py` 没有真实 Ray 集群时按设计报 `NOT_RUN`；`test_runtime_v3_finite_reader_recovery.py` 依赖合入闸设置的 `DEMIFLOW_RESOURCE_HOME`。这三个文件都只是排线问题。
 
 ### T-017 引擎测试里 140 个未判定的失败
 
 逐个看过报错，没有一个能仅凭报错判成"过时"，都需要对着当前设计逐条判断是测试的场景失效还是引擎行为变了。按报错形态分组：
 
 - **内存额度与放置。** `RESOURCE_INFEASIBLE`（`test_local_kernel.py` 10 个、`test_local_union_plan.py` 3 个、`test_prompt_stream_recovery.py` 3 个等）；断言里写死的额度数字对不上（`test_runtime_v3_stream_suffix.py` 5 个、`test_upgrade_business_acceptance.py` 2 个）。
-- **崩溃与恢复。** 预期在某一步被杀掉的子进程没有被杀掉（`assert 0 == 37` 一类，`test_runtime_builtin_recovery.py`、`test_gpt_integration_repairs.py`、`test_native_batch_replay_order.py`）；预期被拒绝的恢复没有被拒绝（`DID NOT RAISE RecoveryContractError`）。这一组最需要先看，可能有真缺陷。
+- **崩溃与恢复。** 已处理（2026-11-25，分支 `claude/tests/effectiveness-20261124`）。主因是测试按旧的落盘环节名 `output` 找杀进程的位置，现在叫 `materialize` / `take_all`，子进程因此一直没被杀。改对之后恢复行为正常。同时按"测的是否是用户可依赖的保证、保证坏了是否会失败、是否重复"复查了整个文件，不只是失败的用例：删掉了永远走不到的分支、在主进程里替换但代码在子进程跑的替身、读不存在目录因而恒为空的资源检查、和专门文件重复的用例。剩下要裁定的引擎行为见 T-019 到 T-023。
 - **向量检索。** `tests/test_vector_search_stream.py` 19 个：查询向量校验的错误以 `INTERNAL_PROTOCOL` 报出，以及结果为空。
-- **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）、`tests/test_prompt_stream_recovery.py::test_legacy_journal_option_is_not_a_model_execution_mode`（先报了"找不到 prompt pack"）。改测试即可。
+- **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）。改测试即可。
 - **其余**见 `_demiflow/shared-review/CLAUDE-test-audit-20261124/engine-lines.txt`，每个测试一行。
 
 ### T-018 界面测试里 108 个未判定的失败
@@ -148,6 +137,39 @@
 - **现象。** 涉及 40 个 `test_forge_*` / `test_workbench_*` 文件，低并发重跑后同样失败。大多数是等一个按钮或节点等到超时：`检查问题`、`业务参数`、`整图配置`、导航里的 `算子` 和 `运行`、`.wb-node`。这些文字和样式名在产品源码里大多还在，说明是入口位置或流程变了，而不是整块功能被删。
 - **建议。** 由熟悉当前界面的人逐个文件判断：界面有意改了就按新流程改测试或删掉；界面不该变就是缺陷。原因摘要在 `_demiflow/shared-review/CLAUDE-test-audit-20261124/ui-waits.txt`。
 
+### T-019 经过队列 `fetch` 的行不再保留元组和字节类型
+
+- **现象。** `read_queue(...).map(...).fetch(...)` 里，上游 map 产生的元组到下游变成列表，字节类型直接报 `Object of type bytes is not JSON serializable`。原因是 worker 把整行用 JSON 编码后交给驱动侧的队列服务（`execution/native_queue/dataflow_acquisition_call.py:58`）。
+- **依据。** `tests/test_mvp2_queue_unified.py` 的 `..._preserves_tuple_intermediate` / `..._preserves_bytes_intermediate`，保留为失败。11-12 的 `9192ebd5` 专门做过"保留类型的队列载体"，11-15 的 `397c1f96` 改成 JSON 编码。普通（非队列）图的类型保真由 `tests/test_u3_graph_type_fidelity.py` 覆盖且通过。
+- **建议。** 定口径：若队列行只承诺 JSON 值，就在文档写明并删掉这两个测试；否则按退步修。
+
+### T-020 `graph_spec` 适配器没有产品调用方
+
+- **现象。** `LocalDatasetExecutor.materialize_graph` / `planning/dataflow_graph_adapter.py`（文件头自称 internal）在 `demiflow/` 里没有调用方，只有约 19 个测试文件驱动它。
+- **建议。** 确认它是否还是产品路径。不是的话连同这些测试一起删除；是的话说明入口。
+
+### T-021 `docs/prompt_http.md` 对 `sqlite_journal` 自相矛盾
+
+- **现象。** 第 5 行说 `map_prompt_async` 不再接受 `sqlite_journal`；同一文档约第 178 行的示例在用它，代码也接受（2026-11-25 实测，声明阶段不报错）。
+- **建议。** 按实际行为改第 5 行。
+
+### T-022 子进程在第一次存盘之前崩溃，运行不能续跑
+
+- **现象。** 第一次存盘之前丢失 worker，续跑报 `INCOMPATIBLE_HISTORY`（`coordinator.py:449`），只能重新开一次运行。
+- **依据。** 2026-11-24 改 `tests/test_runtime_builtin_recovery.py` 时实测，原 `during_batch` 用例因此删除。
+- **建议。** 确认是有意设计（没有任何已确认进度时不续跑）就写进恢复文档；否则作为缺陷。
+
+### T-023 其他待确认
+
+- `max_output_bytes` 不约束 `materialize()`，物化只受磁盘额度和行数上限约束。若这是有意的，文档里写明适用范围。
+- `tests/test_gpt_integration_repairs.py::test_embedding_actual_process_loss[after_prepared]` 在机器负载高时失败过 1 次，之后串行 6 次、并行 5 次都通过，原因未抓到。
+
 ## 已完成
 
-（暂无）
+### T-013 prompt 节点的 `max_requests` 按每次运行重新计
+
+定为有意的设计：预算按每次运行计，同一个节点再跑一次时重新计数。写进 `docs/prompt_http.md`，删掉了要求累计的测试。提交 `ba72d8e2`。
+
+### T-014 `map_prompt_async(request_gate=...)` 有文档但不可用
+
+已退役：参数从签名去掉，传入时报 `TypeError`；文档改为只介绍 `request_policy`。只测这个参数的测试删除，测重用连接池和并发上限的改用 `request_policy`。提交 `ba72d8e2`。
