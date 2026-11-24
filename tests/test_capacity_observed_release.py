@@ -273,10 +273,18 @@ def test_a_reused_pid_is_not_the_original_driver_but_alone_releases_nothing(unit
 def test_a_unit_whose_lock_cannot_prove_its_exit_keeps_its_charge(unit, damage):
     unit.exit()
     lock = unit.directory / 'unit.lock'
-    lock.unlink()
-    if damage == 'lock_replaced':
-        lock.write_bytes(b'')   # a free lock at the same path, on another inode
-    _keeps_charge(unit, 'running=0/0m orphaned=1/1000m unknown=0/0m')
+    # Keep the original file open while it is replaced. A freed inode number may be
+    # reused at once, and only an inode nobody has open can be freed: a replacement
+    # that carries the original number would itself prove every holder has gone.
+    original = os.open(lock, os.O_RDONLY)
+    try:
+        lock.unlink()
+        if damage == 'lock_replaced':
+            lock.write_bytes(b'')   # a free lock at the same path, on another inode
+            assert lock.stat().st_ino != unit.identity['unit']['inode']
+        _keeps_charge(unit, 'running=0/0m orphaned=1/1000m unknown=0/0m')
+    finally:
+        os.close(original)
 
 
 @pytest.mark.parametrize('field,value', [('boot_id', 'another-boot'), ('pid_namespace', 'pid:[1]')])
