@@ -272,18 +272,46 @@ def test_replay_anchors_user_message_on_long_turn(tmp_path):
     ident = root_identity(proj)
     store = Store(tmp_path / 'replay_state', Limits(), initialize=True)
     sess = store.create('w1', ident, 'deepseek', 'req1', 'pol1')
-    turn, _ = store.submit('w1', sess['id'], 'sub1', sess['revision'], '用户原始诉求：帮我整理项目', ident, 'pol1')
-    tid = turn['id']
-    for i in range(150):
-        store.event(tid, 'change.observed', {'files': [{'path': f'f_{i}.py'}]})
-    store.event(tid, 'turn.state', {'state': 'completed', 'cleanup': 'complete'})
-    store.update(tid, state='completed', cleanup='complete')
 
+    # Turn 1: long turn with many tool calls + final reply
+    t1, _ = store.submit('w1', sess['id'], 'sub1', sess['revision'], '第一轮：帮我整理项目', ident, 'pol1')
+    for i in range(40):
+        store.event(t1['id'], 'item.updated', {'id': f'call_1_{i}', 'type': 'tool', 'title': 'bash', 'status': 'completed'})
+    store.event(t1['id'], 'message.completed', {'item_id': 'a1', 'text': '第一轮已完成'})
+    store.event(t1['id'], 'turn.state', {'state': 'completed', 'cleanup': 'complete'})
+    store.update(t1['id'], state='completed', cleanup='complete')
+
+    # Turn 2: long turn with 150 separate change.observed events after final answer
+    t2, _ = store.submit('w1', sess['id'], 'sub2', sess['revision'] + 1, '第二轮：继续检查干净', ident, 'pol1')
+    for i in range(30):
+        store.event(t2['id'], 'item.updated', {'id': f'call_2_{i}', 'type': 'tool', 'title': 'bash', 'status': 'completed'})
+    store.event(t2['id'], 'message.completed', {'item_id': 'a2', 'text': '第二轮全部清理完毕'})
+    for i in range(150):
+        store.event(t2['id'], 'change.observed', {'files': [{'path': f'f_{i}.py', 'diff': 'x' * 500}]})
+    store.event(t2['id'], 'turn.state', {'state': 'completed', 'cleanup': 'complete'})
+    store.update(t2['id'], state='completed', cleanup='complete')
+
+    # Initial replay must coalesce the 150 change.observed events so Turn 2's user message
+    # AND final assistant answer both appear in a small limit window.
     replayed = store.replay('w1', sess['id'], limit=20)
-    types = [ev['type'] for ev in replayed['events']]
-    assert 'message.user' in types
-    user_ev = next(ev for ev in replayed['events'] if ev['type'] == 'message.user')
-    assert user_ev['data']['text'] == '用户原始诉求：帮我整理项目'
-    # Contiguous tail first_sequence remains > user_ev sequence so upward pagination works cleanly
-    assert replayed['first_sequence'] > user_ev['sequence']
-    assert replayed['has_earlier'] is True
+    user_texts = [ev['data']['text'] for ev in replayed['events'] if ev['type'] == 'message.user']
+    ans_texts = [ev['data']['text'] for ev in replayed['events'] if ev['type'] == 'message.completed']
+    change_evs = [ev for ev in replayed['events'] if ev['type'] == 'change.observed']
+    assert '第二轮：继续检查干净' in user_texts
+    assert '第二轮全部清理完毕' in ans_texts
+    assert len(change_evs) == 1
+
+    # Even with a tiny limit forcing upward pagination into an earlier long turn,
+    # before_sequence replay MUST still anchor message.user for turns present in that page.
+    t3, _ = store.submit('w1', sess['id'], 'sub3', sess['revision'] + 2, '第三轮：测试分页锚定', ident, 'pol1')
+    for i in range(60):
+        store.event(t3['id'], 'item.updated', {'id': f'call_3_{i}', 'type': 'tool', 'title': 'bash', 'status': 'completed'})
+    store.event(t3['id'], 'message.completed', {'item_id': 'a3', 'text': '第三轮回复'})
+    store.event(t3['id'], 'turn.state', {'state': 'running', 'cleanup': 'pending'})
+    # Active (non-complete) Turn 3 keeps all 60 events verbatim, pushing Turn 3's user msg out of limit=10
+    active_tail = store.replay('w1', sess['id'], limit=10)
+    assert any(ev['type'] == 'message.user' and ev['data']['text'] == '第三轮：测试分页锚定' for ev in active_tail['events'])
+    assert active_tail['first_sequence'] > next(ev['sequence'] for ev in active_tail['events'] if ev['type'] == 'message.user')
+    # Upward pagination into Turn 3's middle events must ALSO anchor its message.user
+    older_page = store.replay('w1', sess['id'], limit=10, before_sequence=active_tail['first_sequence'])
+    assert any(ev['type'] == 'message.user' and ev['data']['text'] == '第三轮：测试分页锚定' for ev in older_page['events'])
