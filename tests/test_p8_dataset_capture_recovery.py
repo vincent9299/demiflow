@@ -70,8 +70,9 @@ def published(tmp_path_factory):
     # fixture whose imports correctly name today's module owners.
     fixtures = checkout / 'tests'
     fixtures.mkdir()
-    (fixtures / 'test_execution_recovery_entrypoints.py').write_bytes(subprocess.check_output(
-        ['git', 'show', PUBLISHED + ':tests/test_execution_recovery_entrypoints.py'], cwd=REPO))
+    for name in ('test_execution_recovery_entrypoints.py', '_native_receipt_fixtures.py'):
+        (fixtures / name).write_bytes(subprocess.check_output(
+            ['git', 'show', PUBLISHED + ':tests/' + name], cwd=REPO))
     return checkout
 
 

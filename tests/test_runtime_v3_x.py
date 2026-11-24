@@ -143,6 +143,7 @@ from demiflow.execution.contracts.exchange import (  # noqa: E402
     InputGate, ProtocolError, check_read_domain, validate_data_ref,
 )
 from demiflow.execution.exchange import dataflow_bridge as bridge  # noqa: E402
+from demiflow.execution.contracts import record_codec  # noqa: E402
 from demiflow.execution.exchange import dataflow_channels as channels  # noqa: E402
 from demiflow.execution.exchange.dataflow_state import ChannelSetState, RoutingCounters  # noqa: E402
 
@@ -235,7 +236,7 @@ def make_record(row, *, sequence=0, record_id=None, source_position=None):
 def make_ref_record(row, store, *, sequence=0):
     raw = record_codec._encode_payload(row, max_bytes=1 << 20)
     ref = store.put(iter((raw,)), max_bytes=len(raw),
-                    media_type=bridge.RECORD_MEDIA_TYPE)
+                    media_type=record_codec.RECORD_MEDIA_TYPE)
     rid = hashlib.sha256(record_codec._codec_dumps(record_codec._encode_value(row))).hexdigest()
     return Record(record_id=rid, source_position={"next": sequence + 1}, payload_ref=ref,
                   inline=None, encoded_bytes=ref.size_bytes, sequence=sequence)
@@ -295,7 +296,7 @@ def test_x002():
            "i": 7, "f": 7.0, "nan": float("nan"), "deep": {"k": [None, True]}}
     record = make_record(row)
     encoded = channels.encode_record(record, bounds=bounds)
-    assert encoded.encoding == bridge.RECORD_ENCODING
+    assert encoded.encoding == record_codec.RECORD_ENCODING
     assert encoded.encoded_bytes == len(encoded.data)
     assert encoded.ref is None
     resolved = channels.resolve_record(encoded, store=FakeStore(), bounds=bounds)
@@ -338,7 +339,7 @@ def test_x003():
     assert json.loads(ref_encoded.data)["r"]["digest"] == ref_record.payload_ref.digest
     assert channels.resolve_record(ref_encoded, store=store, bounds=bounds) == ref_record
     # small encoding with a huge declared decode ceiling is rejected before allocation
-    huge = EncodedRecord(record_id=record.record_id, encoding=bridge.RECORD_ENCODING,
+    huge = EncodedRecord(record_id=record.record_id, encoding=record_codec.RECORD_ENCODING,
                          data=encoded.data, ref=None, encoded_bytes=len(encoded.data),
                          decoded_upper_bytes=1 << 40, sequence=0)
     expect_error("BUDGET_EXCEEDED", channels.resolve_record, huge, store=store, bounds=bounds)
@@ -358,9 +359,9 @@ def test_x003():
     # digest mismatch -> CORRUPT_ARTIFACT
     tampered = ArtifactRef(digest="0" * 64, size_bytes=ref_record.payload_ref.size_bytes,
                            store_id=store.store_id, key=ref_record.payload_ref.key,
-                           media_type=bridge.RECORD_MEDIA_TYPE)
+                           media_type=record_codec.RECORD_MEDIA_TYPE)
     store.objects[tampered.digest] = b"z" * tampered.size_bytes
-    bad_digest = EncodedRecord(record_id=record.record_id, encoding=bridge.RECORD_ENCODING,
+    bad_digest = EncodedRecord(record_id=record.record_id, encoding=record_codec.RECORD_ENCODING,
                                data=None, ref=tampered,
                                encoded_bytes=tampered.size_bytes,
                                decoded_upper_bytes=tampered.size_bytes, sequence=5)
@@ -368,7 +369,7 @@ def test_x003():
     # tampered inline document
     flipped = bytearray(encoded.data)
     flipped[-2] ^= 0x01
-    tamper = EncodedRecord(record_id=record.record_id, encoding=bridge.RECORD_ENCODING,
+    tamper = EncodedRecord(record_id=record.record_id, encoding=record_codec.RECORD_ENCODING,
                            data=bytes(flipped), ref=None, encoded_bytes=len(flipped),
                            decoded_upper_bytes=len(flipped), sequence=4)
     expect_error("CORRUPT_ARTIFACT", channels.resolve_record, tamper, store=store, bounds=bounds)
@@ -523,7 +524,7 @@ def test_x007():
                                          last_sequence=0, manifest_ref=empty))
         expect_error("INVALID_CONTRACT", channels.seal_scope, "scope-1", bad, store=store)
     missing = ArtifactRef(digest="f" * 64, size_bytes=1, store_id=store.store_id, key="gone",
-                          media_type=bridge.SEGMENT_MEDIA_TYPE)
+                          media_type=record_codec.SEGMENT_MEDIA_TYPE)
     expect_error("CORRUPT_ARTIFACT", channels.seal_scope, "scope-1",
                  (ProducerCompletion(partition_id="p0", generation=1, status="succeeded",
                                      last_sequence=0, manifest_ref=missing),), store=store)
@@ -725,7 +726,7 @@ def test_x012():
 
 def test_x013():
     store = FakeStore()
-    ref = store.put(iter((b"payload",)), max_bytes=7, media_type=bridge.RECORD_MEDIA_TYPE)
+    ref = store.put(iter((b"payload",)), max_bytes=7, media_type=record_codec.RECORD_MEDIA_TYPE)
     value = bridge.artifact_to_data_ref(ref, reader_domain="dom-x", owner="ch-a")
     validate_data_ref(value)
     assert value["kind"] == "object_store" and value["durability"] == "durable"
@@ -824,7 +825,7 @@ def test_x016():
     document(doc)  # plain Json snapshot, no live carriers
     # live index stays bounded: dropped entries leave immediately
     store = FakeStore()
-    ref = store.put(iter((b"x",)), max_bytes=1, media_type=bridge.SEGMENT_MEDIA_TYPE)
+    ref = store.put(iter((b"x",)), max_bytes=1, media_type=record_codec.SEGMENT_MEDIA_TYPE)
     state.register_segment("ch-a", ref, seq_end=0)
     assert len(state.published_segments("ch-a")) == 1
     state.drop_segment("ch-a", ref.digest)
