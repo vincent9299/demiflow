@@ -21,9 +21,9 @@ max_page = 50
 time_range_support = True
 language_support = True
 safesearch = True
-TIME_RANGES = {'day': 'd', 'week': 'w', 'month': 'm', 'year': 'y'}
+time_range_dict = {'day': 'd', 'week': 'w', 'month': 'm', 'year': 'y'}
 SAFE_SEARCH = {0: 'off', 1: 'medium', 2: 'high'}
-FEATURE_PHONES = (
+nokia_useragents = (
     'Nokia7610/2.0 (5.0509.0) SymbianOS/7.0s Series60/2.1 Profile/MIDP-2.0 Configuration/CLDC-1.0',
     'Nokia7610/2.0 (7.0642.0) SymbianOS/7.0s Series60/2.1 Profile/MIDP-2.0 Configuration/CLDC-1.0',
     'Nokia6230/2.0 (05.50) Profile/MIDP-2.0 Configuration/CLDC-1.1',
@@ -44,12 +44,12 @@ def request(query, params):
     start = (params['pageno'] - 1) * 10
     if start:
         args['start'] = start
-    if params['time_range'] in TIME_RANGES:
-        args['tbs'] = 'qdr:' + TIME_RANGES[params['time_range']]
+    if params['time_range'] in time_range_dict:
+        args['tbs'] = 'qdr:' + time_range_dict[params['time_range']]
     if params['safesearch']:
         args['safe'] = SAFE_SEARCH[params['safesearch']]
     params['url'] = 'https://www.google.com/wml/search?' + urlencode(args)
-    params['headers']['User-Agent'] = random.choice(FEATURE_PHONES)
+    params['headers']['User-Agent'] = random.choice(nokia_useragents)
     params['impersonate'] = 'chrome99_android'
 
 

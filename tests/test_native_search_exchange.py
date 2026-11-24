@@ -7,16 +7,18 @@ network they send through (another source, a catalog source that is not declared
 session-wide network; yandex images, brave.images and qwant images name one by default), adapter loading
 variants, the SQLite source, and every built-in source and platform image module with only the final
 destination replaced by a loopback server that answers with fixed pages; the built-in sources again with
-one option changed in the declaration (endpoints, page sizes, switches), and every source against answers
-a provider may give instead of results (HTML, an empty object, 403, 429, 500).
+one option changed in the declaration (endpoints, page sizes, switches; then the query template,
+time-range tables, language list and User-Agent pool), and every source against answers a provider may
+give instead of results (HTML, an empty object, 403, 429, 500).
 
 ``exchange_golden.json`` holds what the previous runtime (main 5673d101; main 41f232fd for the
-network-names, options and answers suites) did with the same scenarios: receipt status and reason,
-ignored parameters, HTTP receipts, each request as the server received it (including which server: the
-destination or a proxy) and a digest of the merged results. Values that are random or bound to the HTTP
-library version by design (browser User-Agent strings, Qwant's test group) compare by family; see
-``exchange_runner.essentials``.
+network-names, options, request-options and answers suites) did with the same scenarios: receipt status
+and reason, ignored parameters, HTTP receipts, each request as the server received it (including which
+server: the destination or a proxy) and a digest of the merged results. Values that are random or bound
+to the HTTP library version by design (browser User-Agent strings, Qwant's test group) compare by
+family; see ``exchange_runner.essentials``.
 """
+import functools
 import importlib.util
 import json
 import os
@@ -34,6 +36,7 @@ DIFFERENT_BY_DESIGN = {
     'xlaboutbad': 'unknown keys in about are accepted',
     'xlnotlist': 'a search that returns text fails under another exception name',
     'xlyessafe': 'language_support declared by a custom adapter is recorded as declared',
+    'xparamscross': 'a redirect to another origin does not get the query parameters given with the request',
 }
 PROXY_VARIABLES = ('no_proxy', 'http_proxy', 'https_proxy', 'all_proxy')
 
@@ -46,18 +49,24 @@ def essentials(output):
 
 
 SUITES = ['transport', 'outgoing-proxy', 'outgoing-ips', 'network-names', 'network-names-default',
-          'network-names-outgoing', 'sqlite', 'loader', 'named', 'options', 'answers']
+          'network-names-outgoing', 'sqlite', 'loader', 'named', 'options', 'request-options', 'answers']
 
 
-@pytest.mark.parametrize('suite', SUITES)
-def test_exchanges_match_recorded_reference(suite):
+@functools.lru_cache(maxsize=None)
+def exchanges(suite):
+    """Output of one suite run (each suite runs once per test session)."""
     # Loopback requests must reach the fixture proxies, so inherited proxy settings are dropped.
     env = {k: v for k, v in os.environ.items() if k.lower() not in PROXY_VARIABLES}
     env['PYTHONPATH'] = str(ROOT)
     result = subprocess.run([sys.executable, str(FIXTURES / 'exchange_runner.py'), suite], cwd=ROOT, env=env,
                             capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stderr[-3000:]
-    output = json.loads(result.stdout)
+    return json.loads(result.stdout)
+
+
+@pytest.mark.parametrize('suite', SUITES)
+def test_exchanges_match_recorded_reference(suite):
+    output = exchanges(suite)
     actual = essentials(output)
     golden = json.loads((FIXTURES / 'exchange_golden.json').read_text())[suite]
     source = lambda key: key.split('|')[0]
@@ -69,3 +78,19 @@ def test_exchanges_match_recorded_reference(suite):
     differences = {key: {'expected': expected[key], 'actual': actual.get(key)}
                    for key in expected if actual.get(key) != expected[key]}
     assert not differences, json.dumps(dict(list(differences.items())[:3]), indent=1, ensure_ascii=False)[:4000]
+
+
+def test_redirect_to_another_origin_gets_no_request_parameters():
+    """Query parameters given with a helper call stay on its origin.
+
+    The previous runtime sent them along to the origin a redirect points to, next to the credentials it
+    did drop; here the new origin gets only the query string of the redirect target itself.
+    """
+    run = next(run for run in exchanges('transport')['runs'] if run['source'] == 'xparamscross')
+    assert run['status'] == 'ok'
+    received = [(record['server'], record['path']) for record in run['server']][1:]  # after the search request
+    assert received == [
+        ('A', '/redirect/302/1?p=one'), ('A', '/redirect/302/0?p=one'),
+        ('A', '/cross?to=http%3A%2F%2FHOST_B%2Fecho%3Ffrom%3Dcross&p=one'), ('B', '/echo?from=cross'),
+        ('A', '/cross?to=http%3A%2F%2FHOST_B%2Fecho%3Ffrom%3Dcross%26kept%3D1&p=one'), ('B', '/echo?from=cross&kept=1'),
+    ]

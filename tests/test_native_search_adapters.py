@@ -1,9 +1,12 @@
 """Request/parser parity and all result families, independent of live providers."""
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from urllib.parse import urlsplit, parse_qs
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -239,3 +242,98 @@ def test_helper_lookups_are_cached_bounded_and_refreshed():
     assert result['pexels'] == ['KEY1', 'KEY1', 2, 'SourceError', 'CONFIGURED', 'CONFIGURED', None, 4]
     assert result['pdia'] == ['https://proxy.example/search-proxy', 'https://proxy.example/search-proxy', 2,
                               'SourceAccessDenied', None, 'Search proxy URL not found']
+
+
+def test_local_address_networks_are_used_one_request_at_a_time(monkeypatch):
+    """A network among the local addresses is walked as requests are made, never expanded ahead of use."""
+    import ipaddress
+    from demiflow.collect.native_search import worker_network as wn
+    taken, hosts = [], ipaddress._BaseNetwork.hosts
+
+    def counted(self):
+        for host in hosts(self):
+            taken.append(str(host))
+            yield host
+
+    monkeypatch.setattr(ipaddress._BaseNetwork, 'hosts', counted)
+    network = wn.Network(wn.network_options({}, {'local_addresses': ['192.0.2.0/24', '198.51.100.7']}))
+    assert taken == []  # nothing before the first request
+    assert [next(network._addresses) for _ in range(3)] == ['192.0.2.1', '192.0.2.2', '192.0.2.3'] == taken
+    # an IPv6 /64 is declared and walked like any other network
+    six = wn._address_rotation(wn._local_addresses('2001:db8::/64'))
+    assert [next(six), next(six)] == ['2001:db8::1', '2001:db8::2']
+    # declared order, a network's hosts one by one, round after round
+    small = wn._address_rotation(wn._local_addresses(['192.0.2.0/30', '198.51.100.7']))
+    assert [next(small) for _ in range(7)] == ['192.0.2.1', '192.0.2.2', '198.51.100.7'] * 2 + ['192.0.2.1']
+    assert next(wn._address_rotation(wn._local_addresses(None))) is None
+    with pytest.raises(ValueError):
+        wn._local_addresses('not an address')
+
+
+def test_a_network_keeps_a_bounded_number_of_http_clients(monkeypatch):
+    """Clients are reused per local address; beyond the limit the least recently used one is closed."""
+    from demiflow.collect.native_search import worker_network as wn
+
+    class Client:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    made = []
+    monkeypatch.setattr(wn.Network, '_new_client', lambda self, *args: made.append(Client()) or made[-1])
+    few = wn.Network(wn.network_options({}, {'local_addresses': ['192.0.2.1', '192.0.2.2']}))
+    clients = [few.client() for _ in range(6)]
+    assert len(made) == 2 and clients[0] is clients[2] is clients[4] and clients[1] is clients[3] is clients[5]
+    made.clear()
+    many = wn.Network(wn.network_options({}, {'local_addresses': '192.0.2.0/24'}))
+    for _ in range(wn.CLIENT_LIMIT + 10):
+        many.client()
+    assert len(many._clients) == wn.CLIENT_LIMIT
+    assert [client.closed for client in made] == [True] * 10 + [False] * wn.CLIENT_LIMIT
+
+
+def test_sqlite_source_reads_rows_up_to_the_result_budget(tmp_path):
+    """One row more than the session allows is read to see the overflow, whatever the page size."""
+    import sqlite3
+    database = tmp_path / 'rows.sqlite'
+    with sqlite3.connect(database) as db:
+        db.execute('create table docs (label text, n int)')
+        db.executemany('insert into docs values (?, ?)', [(f'row {i}', i) for i in range(24)])
+    source = {'engine': 'sqlite', 'database': str(database), 'query_str': 'select label, n from docs order by n'}
+    result = probe('''
+ values={}
+ for name in ('page','unlimited'):
+  engine=loaded[name]
+  made=[]
+  engine.key_value=lambda row,made=made,build=engine.key_value: made.append(1) or build(row)
+  spec={'language':'en','pageno':1,'safesearch':0,'time_range':None,'engine_data':{}}
+  message={'engine':name,'query':'row','parameters':spec}
+  tight=w.run_search(message,loaded,errors,set(),{**settings,'max_results':3})
+  taken=len(made); made.clear()
+  roomy=w.run_search(message,loaded,errors,set(),settings)
+  values[name]=[tight['status'],taken,roomy['status'],len(roomy['results']),len(made)]
+ w.send(values)
+''', engines=({'name': 'page', **source, 'limit': 2000}, {'name': 'unlimited', **source, 'limit': -1}))
+    # a negative limit means no page size to SQLite; the session budget still bounds what is read
+    assert result == {'page': ['response_too_large', 4, 'ok', 24, 24],
+                      'unlimited': ['response_too_large', 4, 'ok', 24, 24]}
+
+
+def test_options_an_adapter_no_longer_has_are_rejected_when_declared():
+    """A declaration that sets a withdrawn option fails with its name instead of being accepted without effect."""
+    from demiflow.collect.native_search.catalog import WITHDRAWN_OPTIONS, entries
+    from demiflow.collect.native_search.config import SearchConfig
+    source_of = {}
+    for name, entry in entries().items():
+        source_of.setdefault(entry['engine'], name)
+    for adapter, options in WITHDRAWN_OPTIONS.items():
+        for option in options:
+            message = f'{source_of[adapter]} sets options the {adapter} adapter no longer has: {option}'
+            with pytest.raises(ValueError, match=re.escape(message)):
+                SearchConfig(engines=({'name': source_of[adapter], option: {}},)).source_configs()
+    # the adapter under another source name; a name that never had an effect is still accepted
+    with pytest.raises(ValueError, match='results_xpath'):
+        SearchConfig(engines=({'name': 'other', 'engine': 'yandex', 'search_type': 'web',
+                               'results_xpath': '//li'},)).source_configs()
+    assert SearchConfig(engines=({'name': 'wikipedia', 'lang_map': {}},)).source_configs()[0]['lang_map'] == {}

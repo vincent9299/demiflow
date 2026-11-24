@@ -48,6 +48,18 @@ SOURCES = (
     {'name': 'unsplash', 'engine': 'unsplash', 'shortcut': 'us'},
 )
 
+# Names a source declaration could set on these adapters before and cannot now (adapter -> names): the
+# tables behind safe search and endpoints and the selectors that read a provider's pages. A declaration
+# that sets one is rejected (``SearchConfig.source_configs``) instead of being accepted without effect.
+WITHDRAWN_OPTIONS = {
+    'brave': ('safesearch_map',),
+    'duckduckgo_extra': ('safesearch_cookies', 'search_path_map'),
+    'google': ('filter_mapping', 'suggestion_xpath'),
+    'google_images': ('filter_mapping',),
+    'public_domain_image_archive': ('pdia_config_start', 'pdia_config_end'),
+    'yandex': ('content_xpath', 'results_xpath', 'title_xpath', 'url_xpath'),
+}
+
 # Network names that are no source of this catalog: the transport defaults of the adapter they name apply.
 NETWORKS = {'brave': {'engine': 'brave'}, 'qwant': {'engine': 'qwant'}}
 

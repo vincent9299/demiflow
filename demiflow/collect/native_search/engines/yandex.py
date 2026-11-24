@@ -20,7 +20,7 @@ enable_http3 = True
 search_type = ''
 base_url_web = 'https://yandex.com/search/site/'
 base_url_images = 'https://yandex.com/images/search'
-WEB_LANGUAGES = ('ru', 'en', 'be', 'fr', 'de', 'id', 'kk', 'tt', 'tr', 'uk')
+yandex_supported_langs = ('ru', 'en', 'be', 'fr', 'de', 'id', 'kk', 'tt', 'tr', 'uk')  # web search ``lang``
 DISPLAY_COOKIE = 'yp=1716337604.sp.family%3A0#1685406411.szm.1:1920x1080:1920x999'
 STATE_START = '{"location":"/images/search/'
 STATE_ENDS = ('advRsyaSearchColumn":null}}', 'false}}}')
@@ -29,7 +29,7 @@ STATE_ENDS = ('advRsyaSearchColumn":null}}', 'false}}}')
 def request(query, params):
     web = {'tmpl_version': 'releases', 'text': query, 'web': '1', 'frame': '1', 'searchid': '3131712'}
     language = params['language'].split('-')[0]
-    if language in WEB_LANGUAGES:
+    if language in yandex_supported_langs:
         web['lang'] = language
     images = {'text': query, 'uinfo': 'sw-1920-sh-1080-ww-1125-wh-999'}
     if params['pageno'] > 1:

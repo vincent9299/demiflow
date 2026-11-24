@@ -8,8 +8,9 @@ Rules:
 
 * one exchange at a time per worker and no hidden retries;
 * redirects are followed hop by hop within the session limit; a cross-origin
-  hop drops credentials, cookies and host headers; 303 (and 301/302 after a
-  POST) continue as GET without a body;
+  hop drops credentials, cookies, host headers and the query parameters given
+  with the request (the target's own query string is all the new origin
+  gets); 303 (and 301/302 after a POST) continue as GET without a body;
 * the response body is capped at ``max_bytes`` across all hops;
 * userinfo in a URL becomes basic authentication and is removed from the URL;
 * only http(s) URLs, plain http only when the source network enables it;
@@ -23,7 +24,13 @@ request may choose a client by ``verify``, ``impersonate`` (a browser name;
 ``none`` disables the browser fingerprint; default ``chrome``),
 ``curl_options`` and ``enable_http3``; these are client properties and are
 never sent as per-request arguments.
+
+Bounds: local addresses are taken from their declaration one request at a
+time, so a network of any size (an IPv6 /64) costs nothing to declare; a
+network keeps at most ``CLIENT_LIMIT`` HTTP clients for reuse and closes the
+least recently used one beyond that.
 """
+from collections import OrderedDict
 import ipaddress
 import itertools
 import os
@@ -46,6 +53,8 @@ NETWORK_KEYS = tuple(NETWORK_DEFAULTS)
 IGNORED_OPTIONS = ('retries', 'retry_on_http_error', 'request_timeout', 'max_connections', 'using_tor_proxy')
 PROXY_SCHEMES = ('http', 'https', 'socks4', 'socks5', 'socks5h')
 CLIENT_OPTIONS = ('verify', 'impersonate', 'curl_options', 'enable_http3')
+# HTTP clients one network keeps for reuse (one per combination of local address, proxies and client options).
+CLIENT_LIMIT = 32
 
 
 class ResponseTooLarge(Exception):
@@ -102,16 +111,26 @@ def network_options(outgoing, declared=None, attributes=None):
 
 
 def _local_addresses(declared):
-    """Addresses to bind to, in rotation order; a network such as ``10.0.0.0/30`` stands for its hosts."""
-    if not declared:
-        return []
-    found = []
-    for item in [declared] if isinstance(declared, str) else declared:
-        if '/' in item:
-            found.extend(str(host) for host in ipaddress.ip_network(item, False).hosts())
-        else:
-            found.append(str(ipaddress.ip_address(item)))
-    return found
+    """Declared local addresses as address and network objects; a value that is neither raises ValueError."""
+    items = [declared] if isinstance(declared, str) else list(declared or ())
+    return [ipaddress.ip_network(item, False) if '/' in item else ipaddress.ip_address(item) for item in items]
+
+
+def _address_rotation(items):
+    """The local address of each request: declared order, a network's hosts one by one, round after round.
+
+    Hosts are produced when their turn comes and nothing is kept between rounds, so the size of a declared
+    network does not matter. Without addresses every step is None.
+    """
+    networks = (ipaddress.IPv4Network, ipaddress.IPv6Network)
+    while True:
+        empty = True
+        for item in items:
+            for address in item.hosts() if isinstance(item, networks) else (item,):
+                empty = False
+                yield str(address)
+        if empty:
+            yield None
 
 
 def _proxy_patterns(declared):
@@ -183,10 +202,10 @@ class Network:
 
     def __init__(self, options):
         self.options = options
-        self._addresses = itertools.cycle(_local_addresses(options['local_addresses']) or [None])
+        self._addresses = _address_rotation(_local_addresses(options['local_addresses']))
         patterns = _proxy_patterns(options['proxies'])
         self._proxies = {pattern: itertools.cycle(urls) for pattern, urls in patterns.items()}
-        self._clients = {}
+        self._clients = OrderedDict()  # least recently used first
 
     def client(self, verify=None, impersonate=None, curl_options=None, enable_http3=None):
         """The HTTP client for the next request; advances proxy and local-address rotation one step."""
@@ -197,9 +216,13 @@ class Network:
         step = tuple((pattern, next(urls)) for pattern, urls in self._proxies.items())
         key = (repr(verify), address, step, impersonate, enable_http3,
                tuple(sorted((int(k), v) for k, v in (curl_options or {}).items())))
-        if key not in self._clients:
-            self._clients[key] = self._new_client(verify, address, step, impersonate, curl_options, enable_http3)
-        return self._clients[key]
+        client = self._clients.pop(key, None)
+        if client is None:
+            client = self._new_client(verify, address, step, impersonate, curl_options, enable_http3)
+            while len(self._clients) >= CLIENT_LIMIT:
+                self._clients.popitem(last=False)[1].close()
+        self._clients[key] = client
+        return client
 
     def _new_client(self, verify, address, step, impersonate, curl_options, enable_http3):
         from curl_cffi import CurlOpt, requests
@@ -252,7 +275,8 @@ def request(method, url, *, raise_for_httperror=True, allow_redirects=True, max_
 
     ``verify``, ``impersonate``, ``curl_options`` and ``enable_http3`` choose the HTTP client; the other
     arguments (``headers``, ``cookies``, ``auth``, ``params``, ``data``, ``json``, ``content`` ...) go to
-    curl_cffi with every hop.
+    curl_cffi with every hop on the same origin. A hop to another origin gets neither credentials nor
+    ``params``: only the query string of the redirect target itself.
     """
     config = _State.config
     if config is None:
@@ -328,6 +352,7 @@ def request(method, url, *, raise_for_httperror=True, allow_redirects=True, max_
         if (nxt.scheme, nxt.netloc) != (parts.scheme, parts.netloc):
             arguments.pop('auth', None)
             arguments.pop('cookies', None)
+            arguments.pop('params', None)
             arguments['headers'] = {k: v for k, v in (arguments.get('headers') or {}).items()
                                     if k.lower() not in ('authorization', 'proxy-authorization', 'cookie', 'host')}
         if code == 303 or (code in (301, 302) and method == 'POST'):

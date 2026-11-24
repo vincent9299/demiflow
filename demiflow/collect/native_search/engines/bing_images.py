@@ -17,7 +17,7 @@ language_support = True
 time_range_support = True
 base_url = 'https://www.bing.com'
 page_size = 35
-MAX_AGE_MINUTES = {'day': 60 * 24, 'week': 60 * 24 * 7, 'month': 60 * 24 * 31, 'year': 60 * 24 * 365}
+time_map = {'day': 60 * 24, 'week': 60 * 24 * 7, 'month': 60 * 24 * 31, 'year': 60 * 24 * 365}  # minutes
 
 
 def request(query, params):
@@ -27,7 +27,7 @@ def request(query, params):
     if market:
         args['mkt'] = market
     if params['time_range']:
-        args['qft'] = 'filterui:age-lt%s' % MAX_AGE_MINUTES[params['time_range']]
+        args['qft'] = 'filterui:age-lt%s' % time_map[params['time_range']]
     params['url'] = base_url + '/images/async?' + urlencode(args)
 
 

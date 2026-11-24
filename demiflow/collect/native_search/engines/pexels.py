@@ -22,7 +22,7 @@ paging = True
 time_range_support = True
 enable_http2 = False
 api_key = ''
-DATE_FROM = {'day': 'last_24_hours', 'week': 'last_week', 'month': 'last_month', 'year': 'last_year'}
+time_range_map = {'day': 'last_24_hours', 'week': 'last_week', 'month': 'last_month', 'year': 'last_year'}
 SECRET_KEY = re.compile('"secret-key":\b*"(.*?)"')
 SECRET_MAX_CHARS = 256
 _secret = {'value': None}
@@ -46,7 +46,7 @@ def secret_key():
 def request(query, params):
     args = {'query': query, 'page': params['pageno'], 'per_page': results_per_page}
     if params['time_range']:
-        args['date_from'] = DATE_FROM[params['time_range']]
+        args['date_from'] = time_range_map[params['time_range']]
     params['url'] = f'{base_url}/en-us/api/v3/search/photos?{urlencode(args)}'
     secret = _secret['value']
     if not secret:

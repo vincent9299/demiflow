@@ -9,11 +9,13 @@ categories = ['images']
 paging = True
 page_size = 20
 base_url = 'https://api.openverse.org/v1/images/'
+# Query string of a search; a source declaration may add API filters to it (such as ``license=cc0``).
+search_string = '?page={page}&page_size={page_size}&format=json&{query}'
 
 
 def request(query, params):
-    params['url'] = (f"{base_url}?page={params['pageno']}&page_size={page_size}&format=json&"
-                     f"{urlencode({'q': query})}")
+    params['url'] = base_url + search_string.format(query=urlencode({'q': query}), page_size=page_size,
+                                                    page=params['pageno'])
 
 
 def response(resp):

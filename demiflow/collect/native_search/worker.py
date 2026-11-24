@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import itertools
 import json
 import logging
 from pathlib import Path
@@ -221,6 +222,24 @@ def online_search(engine, query, params):
     return engine.response(response)
 
 
+def within_budget(results, limit):
+    """The results as a list of at most ``limit`` items.
+
+    Reading stops at the first result beyond the limit, so a source that produces its results one by one
+    (the SQLite source reading rows) does no work past the session budget; the source is then closed.
+    """
+    from . import worker_network
+    try:
+        found = list(itertools.islice(results, limit + 1))
+    finally:
+        close = getattr(results, 'close', None)
+        if close is not None:
+            close()
+    if len(found) > limit:
+        raise worker_network.ResponseTooLarge()
+    return found
+
+
 def run_search(message, loaded, errors, initialized, config):
     from . import results as merging, worker_network
     from .errors import classify
@@ -259,9 +278,7 @@ def run_search(message, loaded, errors, initialized, config):
             results = online_search(engine, message['query'], params)
         if results is None:
             return {'status': 'unsupported_parameters', 'reason': 'Adapter declined the request', 'results': []}
-        results = list(results)
-        if len(results) > config['max_results']:
-            raise worker_network.ResponseTooLarge()
+        results = within_budget(results, config['max_results'])
         encoded = [pack(r) for r in results]
         # Validate with the merge rules before persisting a success.
         merging.validate(name, [unpack(r) for r in encoded])

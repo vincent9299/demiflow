@@ -8,7 +8,7 @@ import random
 from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 from demiflow.collect.native_search.adapter import image_result
-from demiflow.collect.native_search.engines.google import FEATURE_PHONES, TIME_RANGES, page
+from demiflow.collect.native_search.engines import google
 from demiflow.collect.native_search.locales import google_parameters
 
 about = {'website': 'https://images.google.com', 'wikidata_id': 'Q521550',
@@ -30,18 +30,18 @@ def request(query, params):
     start = (params['pageno'] - 1) * 10
     if start:
         args['start'] = start
-    if params['time_range'] in TIME_RANGES:
-        args['tbs'] = 'qdr:' + TIME_RANGES[params['time_range']]
+    if params['time_range'] in google.time_range_dict:
+        args['tbs'] = 'qdr:' + google.time_range_dict[params['time_range']]
     if params['safesearch']:
         args['safe'] = SAFE_SEARCH[params['safesearch']]
     params['url'] = 'https://www.google.com/wml/search?' + urlencode(args)
-    params['headers']['User-Agent'] = random.choice(FEATURE_PHONES)
+    params['headers']['User-Agent'] = random.choice(google.nokia_useragents)
     params['impersonate'] = 'chrome99_android'
 
 
 def response(resp):
     found = []
-    for link in page(resp).xpath('//a[contains(@href, "/imgres?")]'):
+    for link in google.page(resp).xpath('//a[contains(@href, "/imgres?")]'):
         query = parse_qs(urlparse(link.get('href', '')).query)
         image, source = query.get('imgurl', [''])[0], query.get('imgrefurl', [''])[0]
         if not image or not source:

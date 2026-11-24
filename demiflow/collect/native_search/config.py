@@ -163,6 +163,7 @@ class SearchConfig:
 
     def source_configs(self):
         import copy
+        from .catalog import WITHDRAWN_OPTIONS
         defaults = {c['name'].lower(): c for c in catalog()['engines']}
         result = []
         names = set()
@@ -206,6 +207,10 @@ class SearchConfig:
                 engine = config.get('engine', '')
                 if not re.fullmatch(r'[a-zA-Z0-9_-]+', engine) or not (ENGINES / (engine + '.py')).is_file():
                     raise ValueError('Unknown bundled search adapter; use module for installed custom sources')
+                withdrawn = sorted(set(config).intersection(WITHDRAWN_OPTIONS.get(engine, ())))
+                if withdrawn:
+                    raise ValueError(f'Search source {name} sets options the {engine} adapter no longer has: '
+                                     + ', '.join(withdrawn))
             result.append(config)
         return result
 

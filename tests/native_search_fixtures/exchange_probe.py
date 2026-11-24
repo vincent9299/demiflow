@@ -205,7 +205,7 @@ REQUESTS = {
     'big': _path('/big/200000'), 'slow': _path('/slow/4'), 'json': _path('/json'),
     'verifyfalse': _path('/echo?q=verify', verify=False),
     'decline': _decline,
-    'helpers': None, 'helpersredirect': None, 'multi': None,
+    'helpers': None, 'helpersredirect': None, 'multi': None, 'paramscross': None,
 }
 RESPONSES = {
     'helpers': _helper_response([
@@ -232,4 +232,12 @@ RESPONSES = {
         ('get-limit', lambda net: net.get(base_url + '/redirect/302/3', max_redirects=1)),
     ]),
     'multi': _helper_response([('multi', _requests_list)]),
+    # Query parameters given with a helper call: kept on a redirect within the origin, not sent to another one.
+    'paramscross': _helper_response([
+        ('same-origin', lambda net: net.get(base_url + '/redirect/302/1', params={'p': 'one'})),
+        ('cross-origin', lambda net: net.get(base_url + '/cross?' + urlencode({'to': other_url + '/echo?from=cross'}),
+                                             params={'p': 'one'})),
+        ('cross-origin-query', lambda net: net.get(
+            base_url + '/cross?' + urlencode({'to': other_url + '/echo?from=cross&kept=1'}), params={'p': 'one'})),
+    ]),
 }

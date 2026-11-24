@@ -20,30 +20,35 @@
 - 回执与状态：`SEARCH_RESULT` 结构及其 `runtime` 字段（仍为 `native-search-1`）；状态分类和暂停规则。
 - 合并：结果的字段、去重、打分和分组顺序。
 - 请求构造：各内置来源的 URL、参数、请求头、Cookie 与 TLS 指纹，包括 `zh-tw` 这类大小写不同的语言写法。
-- 内置来源的设置：目录默认设置逐键相同（包括适配器名 `engine`，如 duckduckgo images 的 `duckduckgo_extra`）；端点、每页条数等选项的名称和覆盖效果不变（如 `base_url`、`api_url`、`rest_v1_summary_url`、`page_size`、`results_per_page`）。
+- 内置来源的设置：目录默认设置逐键相同（包括适配器名 `engine`，如 duckduckgo images 的 `duckduckgo_extra`）；端点、每页条数等选项的名称和覆盖效果不变（如 `base_url`、`api_url`、`rest_v1_summary_url`、`page_size`、`results_per_page`）。决定搜索请求内容的表和模板也保留原名和效果：`search_string`（openverse，可在查询串里加 `license=cc0` 这类过滤条件）、`time_map`（bing images）、`time_range_dict` 与 `nokia_useragents`（google）、`time_range_map`（pexels）、`yandex_supported_langs`（yandex）。
 
 合并、请求构造和内置来源的设置这三项与旧实现的对照证据见上述交付报告和下文“兼容性实测”。
 
 **收窄**
 
-- **来源名**：内置来源名由 344 个减为上列 21 个，其余名称报 `Unknown search source`。需要更多来源时，可用 `search_url` 连接自部署的 SearXNG，或用 `module=` 自定义来源。来源的 `network` 写成这些已移除的名称时，该来源报 `configuration_error`；其余网络名的含义不变（见“请求与来源配置”）。
+- **来源名**：内置来源名由 344 个减为上列 21 个，其余名称报 `Unknown search source`。需要更多来源时，可用 `search_url` 连接自部署的 SearXNG，或用 `module=` 自定义来源。来源的 `network` 写成这些已移除的名称、而会话又没有定义同名的具名网络时，该来源报 `configuration_error`，其他来源不受影响；定义了同名的会话级具名网络时就用它（旧实现此时仍取那个已移除来源的默认设置）。其余网络名的含义不变（见“请求与来源配置”）。
 - **处理器族**：只保留 online 与 offline 两类。online_dictionary、online_currency、online_url_search 返回 `unsupported_processor`。
 - **非 HTTP 来源**：只保留只读 SQLite。MySQL、MariaDB、PostgreSQL、MongoDB、Valkey、command 来源及 `search-mysql`、`search-mariadb`、`search-postgresql`、`search-mongodb` extras 一并移除；`[search]` 只含 httpx、babel、lxml、curl_cffi。
 - **自定义适配器契约**：
   - HTTP 与辅助函数改从 `demiflow.collect.native_search.adapter` 导入，取代 `searx.network`、`searx.utils`、`searx.exceptions`。只提供“自定义来源”一节列出的辅助；`searx.utils` 的其余函数、`EngineCache`、engine traits 和 `result_types` 类不再提供；
   - 请求参数 `locale` 取代 `searxng_locale`；
   - 失败用 `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError` 表示；
-  - `about` 里的未知键不再导致加载失败。
+  - `about` 里的未知键不再导致加载失败；
+  - 辅助函数的 `params`（查询参数）在同源重定向时每一跳都带上，与此前相同；重定向到另一个源时不再带过去，新站点只收到重定向目标自带的查询串。旧实现会把这些参数一并发给新站点，尽管它在跨源时已经去掉了认证信息和 Cookie。
   - 其余约定不变，例如 `setup(settings)` 不返回值即表示接受，请求级的 `impersonate`、`curl_options`、`verify`，响应的 `url.host`、`url.path`。
 - **`services.searxng.SearxNGService`**：
   - 不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`。名单里的来源是否可用由外部部署决定；DemiFlow 自己的 wikisearch 只作为原生来源提供。
   - 外部运行时通过它自己的入口启动（`python -m searx.webapp`），DemiFlow 的代码不再导入它。
   - 服务指纹不再包含 wikisearch 适配器字节，启动命令也变了：同一 profile 的设置文件名、`secret_key` 和启动配置随之改变，运行中的旧服务按服务流程换版重启。
 - **网络选项**：
-  - 来源级生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`，含义与此前相同：`proxies` 可以是一个 URL，或“模式 → URL 或 URL 列表”的映射；`local_addresses` 可以是一个地址、列表或网段；列表逐请求轮换。
+  - 来源级生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`，含义与此前相同：`proxies` 可以是一个 URL，或“模式 → URL 或 URL 列表”的映射；`local_addresses` 可以是一个地址、列表或网段；列表逐请求轮换。网段里的地址轮到时才取，不在启动时展开，所以 IPv6 `/64` 这样的网段可以直接写；一个网络最多保留 32 个 HTTP 客户端供复用，超出时关闭最久没用的一个。
   - 会话级（`SearchConfig.networks` 的出口配置）生效的是 `proxies`、`verify`、`enable_http2`、`source_ips`、`max_redirects`，以及 `networks`（可供来源按名字引用的具名网络）。
   - 来源映射里的 `retries`、`retry_on_http_error`、`request_timeout`、`max_connections`、`using_tor_proxy` 接受但不生效：重试由 demiflow 统一控制，超时用 `timeout_s`，每个工作进程一次只做一个交换，不再校验 Tor 出口；其他未知选项报配置错误。
-- **内置适配器的内部常量**：适配器内部的映射表、选择器和语言表不再是可覆盖的选项，写在来源声明里不起作用。涉及的旧名称：`time_range_dict`（baidu、google、quark）、`time_map`（bing images）、`safesearch_map`（brave）、`time_range_map`（brave、pexels）、`safesearch_args`、`safesearch_cookies`、`search_path_map`（duckduckgo images）、`filter_mapping`、`nokia_useragents`、`skip_countries`、`suggestion_xpath`（google）、`search_string`（openverse）、`pdia_config_start`、`pdia_config_end`（public domain image archive）、`qwant_news_locales`（qwant）、`lang_map`、`list_of_wikipedias`、`wiki_lc_locale_variants`、`wikipedia_article_depth`、`wikipedia_script_variants`（wikipedia）、`content_xpath`、`results_xpath`、`title_xpath`、`url_xpath`、`yandex_supported_langs`（yandex）。wikisearch 的 `base_url` 此前就不参与请求，现已去掉。
+- **内置适配器不再接受的选项**：下面这些名字此前可以写在来源声明里并且真的起作用，现在不再是选项。声明里写了其中任何一个，`SearchConfig` 在声明时就报错，并写明来源、适配器和选项名，不会悄悄忽略：
+  - 安全搜索级别到站点取值的表：`safesearch_map`（brave）、`safesearch_cookies`（duckduckgo_extra）、`filter_mapping`（google、google_images）。这些表以数字为键，而来源声明里的映射只能带文本键；旧实现下一旦写了，brave 的安全搜索恒为 off，duckduckgo 不再带安全搜索参数，google 在安全搜索为 1、2 时以 `KeyError` 失败；
+  - 类别到端点的表 `search_path_map`（duckduckgo_extra）：适配器只保留图片搜索；
+  - 读取页面用的选择器和标记：`suggestion_xpath`（google）、`content_xpath`、`results_xpath`、`title_xpath`、`url_xpath`（yandex，网页与图片两个来源共用这个适配器）、`pdia_config_start`、`pdia_config_end`（public_domain_image_archive）。
+- **此前就不起作用的名字**：下面这些名字在旧实现里对这 21 个来源本来就没有作用，现在依然接受、依然没有作用：`time_range_dict`（baidu、quark）、`time_range_map`（brave）、`safesearch_args`（duckduckgo images）、`skip_countries`（google）、写在 google images 上的 `nokia_useragents`、`qwant_news_locales`（qwant）、`lang_map`、`list_of_wikipedias`、`wiki_lc_locale_variants`、`wikipedia_article_depth`、`wikipedia_script_variants`（wikipedia）、wikisearch 的 `base_url`。
 - **`search_source_inventory()`**：返回新结构（`runtime`、`scope`、`sources`、`platform_sources`），由 `tools/build_native_search_inventory.py` 生成。
 - **Pexels**：不再内置 Web 端密钥。页面取不到密钥时，使用来源配置的 `api_key`（名称不变）；没有配置时该来源以 `parse_error` 结束，不发搜索请求。
 - **Unsplash**：内置来源 unsplash 和平台模块 `unsplash_images` 请求的 User-Agent 由 SearXNG 标识改为 DemiFlow 标识。
@@ -97,16 +102,16 @@
   - 响应解析：21 个来源的合成响应。
 - 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
 - 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
-- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 14 组 1,422 个场景：
-  - HTTP 层 92 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
+- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 14 组 1,423 个场景：
+  - HTTP 层 93 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
   - 超时、会话级出口配置、TLS 与自定义 CA 共 13 个；
   - 网络名 25 个：引用已声明的来源、未声明的目录来源、`ipv4`/`ipv6`、会话级具名网络，以及 yandex images、brave.images、qwant images 默认的网络名；
   - 适配器加载 59 个，SQLite 来源 27 个；
   - 21 个内置来源、2 个显式 Google 后端和 15 个平台图片模块共 228 个，只把最终目的地换成本机服务；
   - 选项覆盖 142 个：36 个来源的 71 个选项（端点、数值、开关）逐个改值后搜索；
   - 异常应答 836 个：38 个来源各遇到 11 种应答（HTML、空内容、空对象、空列表、`null`、纯文本、403、429、500、404、跳转到验证页），分“只替换搜索应答”和“替换全部应答”两种范围；回执状态全部相同。
-  - 另有三项逐项比对：目录默认设置与旧实现的默认设置逐键相同（20 个来源，wikisearch 是 DemiFlow 自己的适配器）；运行时读取的来源属性 609 个全部相同；20 个来源各用另一个名称声明后按两种语言搜索共 80 次，74 次相同，其余 6 次是“持久格式”一节声明的三个适配器。
-  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 561 个场景固化在 `tests/test_native_search_exchange.py`。
+  - 另有四项逐项比对：目录默认设置与旧实现的默认设置逐键相同（20 个来源，wikisearch 是 DemiFlow 自己的适配器）；运行时读取的来源属性 609 个全部相同；20 个来源各用另一个名称声明后按两种语言搜索共 80 次，74 次相同，其余 6 次是“持久格式”一节声明的三个适配器；旧适配器里除端点和页长以外的 25 个名字，在用到它们的来源上逐个改值（36 个组合，各 8 种查询）：6 个名字的效果新旧相同，12 个在声明时被拒绝，其余两边都不起作用。
+  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 579 个场景固化在 `tests/test_native_search_exchange.py`。
 - 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用
@@ -258,7 +263,7 @@ JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSes
 
 目录里有三个来源默认写了网络名：yandex images 走 yandex 的网络，brave.images、qwant images 走 `brave`、`qwant` 网络。所以同时声明 yandex 和 yandex images 时，给 yandex 配的代理对 yandex images 同样生效；要让图片来源单独走别的出口，给它写 `network` 映射，只写 `proxies` 等单个选项不起作用。这些都与此前相同。
 
-只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。
+只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。行随着 worker 取结果逐行从数据库读出：一页比会话的 `max_results` 大时，读到上限再多一行就停下并报 `response_too_large`，不会先把整页读进内存；`limit` 为负数时 SQLite 当作不限页长，同样受这个上限约束。
 
 ## 返回值、缓存与资源归属
 
@@ -319,7 +324,7 @@ HTTP 客户端不保存 Cookie：服务器设置的 Cookie 只出现在那一次
 
 `demiflow.collect.native_search.adapter` 提供适配器可用的全部辅助：
 
-- HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。
+- HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。重定向到另一个源时，认证信息、Cookie 和调用时给的 `params` 都不带过去。
 - 异常：`SourceError`、`SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`。
 - 文本：`html_to_text`、`extract_text`、`ecma_unescape`、`size_text`。
 - User-Agent：`user_agent`（DemiFlow 标识）、`browser_user_agent`（随机的当前桌面浏览器）。

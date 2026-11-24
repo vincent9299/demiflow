@@ -3,11 +3,11 @@ receipt status, merged results, HTTP receipts, and every request the loopback se
 
 Usage: python exchange_runner.py <suite>
 Suites: transport, outgoing-proxy, outgoing-ips, network-names, network-names-default,
-        network-names-outgoing, sqlite, loader, named, options, answers
+        network-names-outgoing, sqlite, loader, named, options, request-options, answers
 
 ``essentials`` reduces the output to the comparable facts stored in ``exchange_golden.json``; those were
-recorded by running the same scenarios on the previous runtime (main 5673d101; the network-names, options
-and answers suites on main 41f232fd, the same runtime).
+recorded by running the same scenarios on the previous runtime (main 5673d101; the network-names, options,
+request-options and answers suites on main 41f232fd, the same runtime).
 """
 import hashlib
 import json
@@ -150,6 +150,7 @@ def transport(urls):
         net('xnetredirects', 'follow', {'max_redirects': 1, 'enable_http': True}),
         net('xnetretries', 'plain', {'retries': 2, 'enable_http': True}),
         net('xnetshared', 'plain', 'xnetlocal'),
+        probe('xparamscross', 'paramscross'),
     ]
     return items, dict(CONFIG)
 
@@ -435,21 +436,37 @@ OPTION_VARIANTS = [
     ('unsplash', 'search_url', 'https://override.example/napi/search/photos?', 'unsplash.com'),
 ]
 OPTION_QUERIES = [('oak', {}), ('oak', {'pageno': 2})]
+# Options that shape the search request itself: the query template, time-range tables, the language list
+# and the User-Agent pool. The values are JSON as a stored source declaration carries them.
+REQUEST_OPTION_VARIANTS = [
+    ('openverse', 'search_string', '?page={page}&page_size={page_size}&format=json&license=cc0&{query}', None),
+    ('bing images', 'time_map', {'day': 1, 'week': 2, 'month': 3, 'year': 4}, None),
+    ('google', 'time_range_dict', {'day': 'h', 'week': 'h', 'month': 'h', 'year': 'h'}, None),
+    ('google', 'nokia_useragents', ['Probe-UA/1.0'], None),
+    ('pexels', 'time_range_map', {'day': 'last_week', 'week': 'last_week', 'month': 'last_week',
+                                  'year': 'last_week'}, None),
+    ('yandex', 'yandex_supported_langs', [], None),
+]
+REQUEST_OPTION_QUERIES = [('oak', {}), ('oak', {'time_range': 'day'}), ('oak', {'time_range': 'year'})]
 UNEXPECTED_KINDS = ('html', 'emptyobject', 's403', 's429', 's500')
 
 
-def options(catalog):
+def options(catalog, variants=OPTION_VARIANTS, queries=OPTION_QUERIES):
     """One source per option variant: the catalog entry with that option changed. The first variant of a
     source keeps its name; further ones are declared under another name with the same settings."""
     items, seen = [], set()
-    for index, (source, option, value, host) in enumerate(OPTION_VARIANTS):
+    for index, (source, option, value, host) in enumerate(variants):
         declared = {**catalog[source], option: value}
         if source in seen:
             declared.update(name=f'variant {index:02d}', shortcut=f'variant {index:02d}')
         seen.add(source)
         state = {'label': f'{source} [{option}]', 'alias': {'override.example': host} if host else {}}
-        items.append((declared, [(query, parameters, state) for query, parameters in OPTION_QUERIES]))
+        items.append((declared, [(query, parameters, state) for query, parameters in queries]))
     return items, {**CONFIG, 'max_bytes': 1 << 20, 'max_results': 100}
+
+
+def request_options(catalog):
+    return options(catalog, REQUEST_OPTION_VARIANTS, REQUEST_OPTION_QUERIES)
 
 
 def answers():
@@ -546,12 +563,13 @@ def main(suite):
     sys.path.insert(0, str(HERE))  # exchange_probe, exchange_server and provider_pages are modules here
     work = Path(tempfile.mkdtemp(prefix='exchange-'))
     skipped = []
-    if suite in ('named', 'options', 'answers'):
+    if suite in ('named', 'options', 'request-options', 'answers'):
         destination = ProviderRecords()
         destination.route_clients()
-        if suite == 'options':
+        if suite in ('options', 'request-options'):
             from demiflow.collect.native_search.config import catalog
-            items, config = options({entry['name'].lower(): entry for entry in catalog()['engines']})
+            entries = {entry['name'].lower(): entry for entry in catalog()['engines']}
+            items, config = options(entries) if suite == 'options' else request_options(entries)
         else:
             items, config = named() if suite == 'named' else answers()
     else:
@@ -589,6 +607,7 @@ def main(suite):
             declare_errors[source if isinstance(source, str) else source['name']] = type(exc).__name__
     config = {**config, 'sources': SearchConfig(engines=tuple(declared), language='en').source_configs(),
               'worker_directory': str(work)}
+    config = json.loads(json.dumps(config))  # the parent sends the configuration to the worker as JSON
     loaded, errors = worker.bootstrap(config)
     if isinstance(destination, ProviderRecords):
         from provider_pages import BRAVE_DATA
