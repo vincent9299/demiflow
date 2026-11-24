@@ -70,15 +70,32 @@ def test_original_1026_layout_admits_new_work_without_losing_release_history(tmp
     _assert_original_bytes(root, originals)
 
 
-def test_small_existing_layout_is_unchanged_and_unknown_cleanup_stays_charged(tmp_path):
+def test_released_history_leaves_the_live_directory_and_unknown_cleanup_stays_charged(tmp_path):
     root=tmp_path/'pool'; pool, originals = _seed(root, released=4, active=2)
     before = {key: (root/'allocations'/(key+'.json')).stat().st_ino for key in originals}
     with pytest.raises(ResourceError, match='capacity stays charged'):
         pool.release('active-0', {'confirmed': False, 'identity': None, 'evidence_ref': None})
     assert pool.snapshot()['charged'] == {'cpu_millis': 2, 'memory_bytes': 32}
-    assert not (root/'released').exists()
+    # The complete scan moved every released record to history: same bytes, same inode.
+    assert sorted(path.name for path in (root/'allocations').glob('*.json')) == ['active-0.json', 'active-1.json']
     _assert_original_bytes(root, originals)
-    assert before == {key: (root/'allocations'/(key+'.json')).stat().st_ino for key in originals}
+    assert before == {key: (root/'allocations'/(key+'.json') if key.startswith('active-')
+                            else _archive_path(root, key)).stat().st_ino for key in originals}
+    fresh = LocalCapacityPool(root, capacity=CAPACITY)
+    for key in ('released-0', 'released-3'):
+        assert fresh.reservation_view(key)['state'] == 'RELEASED'
+        with pytest.raises(ResourceError, match='released allocation cannot reserve again'):
+            fresh.reserve(key, SPEC, EFFECTIVE, 9999999999999)
+
+
+def test_each_scan_moves_a_bounded_number_of_released_records(tmp_path):
+    from demiflow.resources.capacity import MAX_ARCHIVED_PER_SCAN
+    root=tmp_path/'pool'; pool, originals = _seed(root, released=2*MAX_ARCHIVED_PER_SCAN+5, active=2)
+    live = lambda: len(list((root/'allocations').glob('*.json')))
+    for remaining in (MAX_ARCHIVED_PER_SCAN+7, 7, 2, 2):
+        assert pool.snapshot()['charged'] == {'cpu_millis': 2, 'memory_bytes': 32}
+        assert live() == remaining
+    _assert_original_bytes(root, originals)
 
 
 @pytest.mark.parametrize('fault', ['after_link', 'after_target_sync', 'after_unlink'])
@@ -185,3 +202,50 @@ def test_archive_directory_symlink_is_rejected_without_writing_outside_pool(tmp_
     with pytest.raises(ResourceError,match='archive directory is a symlink'):
         pool.reserve('new',SPEC,EFFECTIVE,9999999999999)
     assert list(outside.iterdir())==[]
+
+
+DEVICES = {'devices': [{'device_id': 'gpu0', 'type': 'gpu', 'memory_bytes': 1 << 30}]}
+GPU = [{'type': 'gpu', 'count': 1}]
+
+
+def _device_cycle(pool, key):
+    pool.reserve(key, SPEC, GPU, deadline_ms=1000)
+    pool.release(key, {'confirmed': True, 'identity': None, 'evidence_ref': 'exit:' + key})
+
+
+def test_device_ledger_has_no_lifetime_record_limit_and_keeps_release_history(tmp_path):
+    from demiflow.resources.device_pool import DevicePool
+    root = tmp_path/'devices'; pool = DevicePool(root, inventory=DEVICES)
+    for number in range(MAX_ACTIVE_RECORDS + 40):
+        _device_cycle(pool, 'job-' + str(number))
+    assert pool.snapshot()['active'] == []
+    assert len(list((root/'allocations').glob('*.json'))) <= 1
+    fresh = DevicePool(root, inventory=DEVICES)
+    for key in ('job-0', 'job-' + str(MAX_ACTIVE_RECORDS + 39)):
+        assert fresh.reservation_view(key) is None
+        assert fresh.released_device_seconds(key, SPEC, 'gpu') is not None
+        with pytest.raises(ResourceError, match='released allocation cannot reserve again'):
+            fresh.reserve(key, SPEC, GPU, deadline_ms=1000)
+        assert fresh.release(key, {'confirmed': True, 'identity': None, 'evidence_ref': 'exit:' + key})['idempotent']
+    with pytest.raises(ResourceError, match='lacks matching evidence'):
+        fresh.release('job-0', {'confirmed': True, 'identity': None, 'evidence_ref': 'another-exit'})
+
+
+def test_device_ledger_charges_live_records_while_history_moves(tmp_path):
+    from demiflow.resources.device_pool import DevicePool
+    root = tmp_path/'devices'; pool = DevicePool(root, inventory=DEVICES)
+    pool.reserve('holder', SPEC, GPU, deadline_ms=1000)
+    template = json.loads((root/'allocations'/'holder.json').read_text())
+    for number in range(2 * MAX_ACTIVE_RECORDS + 30):
+        record = {**template, 'allocation_id': 'old-' + str(number), 'state': 'RELEASED',
+                  'release_evidence': 'exit', 'released_ms': template['created_ms'] + 1}
+        (root/'allocations'/('old-' + str(number) + '.json')).write_text(json.dumps(record))
+    # The legacy directory exceeds two scan pages: bounded progress, never a partial admission.
+    with pytest.raises(ResourceError) as error:
+        pool.reserve('waiting', SPEC, GPU, deadline_ms=1000)
+    assert error.value.code == 'CAPACITY_PENDING' and 'compaction made progress' in error.value.reason
+    with pytest.raises(ResourceError) as error:
+        pool.reserve('waiting', SPEC, GPU, deadline_ms=1000)
+    assert error.value.code == 'CAPACITY_PENDING' and 'no free gpu devices' in error.value.reason
+    assert [view['allocation_id'] for view in pool.snapshot()['active']] == ['holder']
+    assert pool.released_device_seconds('old-0', SPEC, 'gpu') == 0.001

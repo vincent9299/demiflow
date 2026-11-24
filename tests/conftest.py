@@ -7,6 +7,8 @@ files keep collecting unchanged.
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 from typing import Iterator
 
 import pytest
@@ -17,6 +19,38 @@ from runtime_v3_support import (
     assert_tree_binding,
     make_scope,
 )
+
+
+def pytest_configure(config):
+    """An ordinary session admits against its own capacity domain, never the host's ledger.
+
+    An explicit DEMIFLOW_RESOURCE_ROOT is respected together with its device inventory.
+    Without one, the session owns a private directory in which the main process and each
+    xdist worker get a root of their own; child processes inherit it. A deployment device
+    inventory is dropped with it: a private device ledger must not advertise the host's
+    real devices a second time. Device tests bring a test inventory.
+    """
+    domain = getattr(config, 'workerinput', {}).get('demiflow_private_domain')
+    process = getattr(config, 'workerinput', {}).get('workerid', 'main')
+    if domain is None:
+        if 'DEMIFLOW_RESOURCE_ROOT' in os.environ:
+            return
+        domain = config._demiflow_private_domain = tempfile.mkdtemp(prefix='demiflow-test-domain-')
+    os.environ['DEMIFLOW_RESOURCE_ROOT'] = os.path.join(domain, process)
+    os.environ.pop('DEMIFLOW_DEVICE_INVENTORY', None)
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_configure_node(node):
+    domain = getattr(node.config, '_demiflow_private_domain', None)
+    if domain is not None:
+        node.workerinput['demiflow_private_domain'] = domain
+
+
+def pytest_unconfigure(config):
+    directory = getattr(config, '_demiflow_private_domain', None)
+    if directory is not None:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 @pytest.fixture

@@ -31,7 +31,9 @@ def test_real_dataset_gpu_grant_reaches_child_and_releases_on_exit(tmp_path, mon
         assert run.journal.execution_commits('action-1')[-1]['status'] == 'acked'
     from demiflow.execution.hosts.devices import device_pool
     assert device_pool('local').snapshot()['charged'] == {}
-    records = [json.loads(p.read_text()) for p in (root/'devices'/'allocations').glob('*.json')]
+    # Released records are history of the same ledger, wherever a scan has left them.
+    records = [json.loads(p.read_text()) for directory in ('allocations', 'released')
+               for p in (root/'devices'/directory).rglob('*.json')]
     assert records and all(r['state'] == 'RELEASED' for r in records)
 
 
