@@ -11,6 +11,9 @@ Rows are read from the database one at a time as the worker takes results, and
 the worker stops at the session's result budget: a page larger than the budget
 (or a negative ``limit``, which SQLite reads as no limit) ends as
 ``response_too_large`` after one row more than the budget, not after the page.
+The budget counts rows. One row is read whole, so its size is bounded by
+SQLite's own length limit and not by the session; results beyond the worker's
+output limit end the search as ``response_too_large`` after they were read.
 """
 import sqlite3
 from pathlib import Path
