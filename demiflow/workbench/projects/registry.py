@@ -38,6 +38,7 @@ def validate_python(value):
 
 
 PROTECTED_SANDBOX_ROOTS = {'.git', '.forge', 'flows', 'operators', 'prompts', 'data_tools', 'tests', 'src', 'lib'}
+DEFAULT_NOTEBOOK_WRITE_PATHS = ['data', 'notebooks']
 
 
 def validate_notebook_sandbox(value):
@@ -60,8 +61,8 @@ def validate_notebook_sandbox(value):
         parts = Path(rel).parts
         if Path(item).is_absolute() or not parts or '..' in parts or '.' in parts:
             raise ForgeError('允许写入目录必须是项目内的相对子目录路径：' + item, code='invalid_request')
-        if parts[0] in PROTECTED_SANDBOX_ROOTS or rel == 'notebooks' or rel.endswith('.ipynb'):
-            raise ForgeError('不允许向受保护源码或 Notebook 根目录开放内核写入：' + item, code='invalid_request')
+        if parts[0] in PROTECTED_SANDBOX_ROOTS or rel.endswith('.ipynb'):
+            raise ForgeError('不允许向受保护源码目录开放内核写入：' + item, code='invalid_request')
         norm = '/'.join(parts)
         if norm not in cleaned:
             cleaned.append(norm)
@@ -71,8 +72,8 @@ def validate_notebook_sandbox(value):
 def notebook_sandbox(item):
     raw = item.get('notebook_sandbox') if isinstance(item, dict) else None
     if isinstance(raw, dict):
-        return {'mode': raw.get('mode', 'readonly'), 'write_paths': list(raw.get('write_paths', []))}
-    return {'mode': 'readonly', 'write_paths': []}
+        return {'mode': raw.get('mode', 'off'), 'write_paths': list(raw.get('write_paths', []))}
+    return {'mode': 'off', 'write_paths': []}
 
 
 def load_registry(path):

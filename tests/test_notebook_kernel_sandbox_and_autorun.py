@@ -134,9 +134,9 @@ def test_registry_notebook_sandbox_validation_and_persistence(tmp_path):
     wid = created['workspace_id']
 
     listed = registry.projects(registry.load_registry(reg_path))
-    assert listed['projects'][0]['notebook_sandbox'] == {'mode': 'readonly', 'write_paths': []}
+    assert listed['projects'][0]['notebook_sandbox'] == {'mode': 'off', 'write_paths': []}
 
-    for bad in ('../outside', '/tmp/abs', '.git', 'flows', 'operators/sub', 'notebooks', 'notebooks/a.ipynb'):
+    for bad in ('../outside', '/tmp/abs', '.git', 'flows', 'operators/sub', 'notebooks/a.ipynb'):
         with pytest.raises(ForgeError):
             registry.set_notebook_sandbox(reg_path, wid, expected=listed['digest'], mode='readonly', write_paths=[bad])
 

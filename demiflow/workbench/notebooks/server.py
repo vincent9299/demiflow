@@ -84,8 +84,6 @@ def main():
                     book.nbformat_minor = 5
             return model
 
-    kernel_limit = 2
-
     class ProjectKernels(MappingKernelManager):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
@@ -93,8 +91,9 @@ def main():
 
         async def start_kernel(self, *, kernel_id=None, path=None, **kwargs):
             async with self._admission:
-                if kernel_id is None and len(self.list_kernel_ids()) >= kernel_limit:
-                    raise HTTPError(429, 'This project already has two kernels')
+                grants = json.loads((config_path.parent / 'grants.json').read_text())
+                if not grants.get('has_python', False):
+                    raise HTTPError(422, '当前项目尚未配置业务 Python 环境（Notebook 内核不继承平台环境），请先在右上角「设置 → 项目设置」中指定独立 Python 路径。')
                 kwargs['cwd'] = settings['root']
                 return await super().start_kernel(kernel_id=kernel_id, path=None, **kwargs)
 
@@ -117,8 +116,8 @@ def main():
     config.ServerApp.websocket_ping_interval = 20
     config.ServerApp.websocket_ping_timeout = 20
     def page_config(handler, value):
-        can_start = (json.loads((config_path.parent / 'grants.json').read_text())['execute']
-                     and len(handler.kernel_manager.list_kernel_ids()) < kernel_limit)
+        grants = json.loads((config_path.parent / 'grants.json').read_text())
+        can_start = bool(grants.get('execute') and grants.get('has_python', False))
         disabled = [*value.get('disabledExtensions', []),
                     '@jupyter-notebook/lab-extension:interface-switcher', '@jupyterlab/lsp-extension']
         widgets = '@jupyter-widgets/jupyterlab-manager'

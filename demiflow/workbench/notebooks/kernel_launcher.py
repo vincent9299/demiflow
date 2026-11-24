@@ -151,7 +151,7 @@ def main() -> None:
     for directory in (tmp_dir, home_dir, mpl_dir, ipy_dir):
         directory.mkdir(parents=True, mode=0o700, exist_ok=True)
 
-    sandbox_mode = config.get('sandbox_mode', 'readonly')
+    sandbox_mode = config.get('sandbox_mode', 'off')
     if sandbox_mode not in {'readonly', 'off'}:
         _fail(f'不支持的 Notebook 沙箱模式: {sandbox_mode}')
 
@@ -187,7 +187,7 @@ def main() -> None:
             '/dev/random',
             '/dev/shm',
         ]
-        for rel in config.get('write_paths', ()):
+        for rel in (config.get('write_paths') or ('data', 'notebooks')):
             candidate = (Path(root) / rel).resolve()
             if not candidate.is_relative_to(Path(root)):
                 _fail(f'无效的允许写入路径: {rel}')

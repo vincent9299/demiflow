@@ -49,7 +49,7 @@ class Notebooks:
         self.lock = threading.RLock()
         self.closed = threading.Event()
         self.sockets = set()
-        self.channels = threading.BoundedSemaphore(4)
+        self.channels = threading.BoundedSemaphore(32)
         self.temp = tempfile.TemporaryDirectory(prefix='demiflow-jupyter-')
         self.monitor = threading.Thread(target=self._monitor, name='native-notebook-owner', daemon=True)
         self.monitor.start()
@@ -76,7 +76,9 @@ class Notebooks:
 
     def get(self, project, *, initialize=True):
         root, permissions = self.authorize(project)
-        grants = dict(writable=permissions['analysis_write'], execute=permissions['analysis_execute'])
+        kernel_python, _, _ = self._project_kernel_policy(project, root)
+        grants = dict(writable=permissions['analysis_write'], execute=permissions['analysis_execute'],
+                      has_python=bool(kernel_python))
         with self.lock:
             if self.closed.is_set():
                 raise ForgeError('Notebook service is stopping', code='busy')
@@ -151,7 +153,7 @@ class Notebooks:
             kernelspec = state / 'data/kernels/python3'
             kernelspec.mkdir(parents=True, mode=0o700, exist_ok=True)
             self._create(kernelspec / 'kernel.json', dict(argv=[str(self.python), '-I', '-B', str(launcher),
-                str(state / 'kernel-config.json'), '{connection_file}'], display_name='Python 3', language='python',
+                str(state / 'kernel-config.json'), '{connection_file}'], display_name='项目 Python', language='python',
                 env={'PYTHONPATH': str(code_root), 'DEMIFLOW_NOTEBOOK_ROOT': str(root)}))
             env = dict(os.environ, JUPYTER_RUNTIME_DIR=str(state/'runtime'),
                 JUPYTER_CONFIG_DIR=str(state/'config'), JUPYTER_DATA_DIR=str(state/'data'),
@@ -199,7 +201,7 @@ class Notebooks:
 
     def new_document(self, directory):
         initial = dict(nbformat=4, nbformat_minor=5, metadata={
-            'kernelspec': {'display_name': 'Python 3', 'language': 'python', 'name': 'python3'}},
+            'kernelspec': {'display_name': '项目 Python', 'language': 'python', 'name': 'python3'}},
             cells=[dict(id=secrets.token_hex(8), cell_type='code', metadata={},
                         execution_count=None, outputs=[], source='')])
         with os.scandir(directory) as entries:
@@ -261,6 +263,11 @@ class Notebooks:
             instance = self.instances.get(project)
             if instance is not None and instance.process.poll() is None:
                 self._write_kernel_config(project, instance.root, instance.state)
+                kernel_python, _, _ = self._project_kernel_policy(project, instance.root)
+                updated = {**instance.grants, 'has_python': bool(kernel_python)}
+                if updated != instance.grants:
+                    self._grants(instance.state, updated)
+                    instance.grants = updated
 
     @staticmethod
     def _create(path, value):
