@@ -177,3 +177,30 @@ def test_manage_project_layout_move_and_remove_safety_rails(tmp_path):
             _run_project_layout(root, {'action': 'remove_path', 'paths': [forbidden]})
     assert (root / 'notebooks' / 'legacy_nb.ipynb').read_bytes() == nb_bytes
     assert (root / 'runs' / 'historical_20260101' / 'receipt.json').is_file()
+
+
+def test_hygiene_flags_notebook_ui_in_operators_and_dangling_test_imports(tmp_path):
+    root = _make_clean_project(tmp_path / 'my_proj')
+    (root / 'tests').mkdir(exist_ok=True)
+    # Valid test passes cleanly
+    (root / 'tests' / 'test_ok.py').write_text('from flows import demo\nfrom operators import ops\n')
+    assert check_project(root)['status'] == 'passed'
+
+    # Operator importing IPython/ipywidgets must be flagged even if __demiflow_operators__ is declared
+    (root / 'operators' / 'widget_view.py').write_text(
+        'import ipywidgets as widgets\n'
+        '__demiflow_operators__ = ["show"]\n'
+        'def show():\n'
+        '    return widgets\n'
+    )
+    # Test importing deleted/moved project modules must be flagged
+    (root / 'tests' / 'test_broken_direct.py').write_text('from flows.deleted_flow import run\n')
+    (root / 'tests' / 'test_broken_pkg.py').write_text(f'from {tmp_path.name}.my_proj.operators import moved_mod\n')
+
+    report = check_project(root)
+    assert report['status'] == 'failed'
+    flagged = {d['path']: d['detail'] for d in report['diagnostics'] if d['rule'] == 'DF-02'}
+    assert 'operators/widget_view.py' in flagged and 'IPython/ipywidgets' in flagged['operators/widget_view.py']
+    assert 'tests/test_broken_direct.py' in flagged and 'flows.deleted_flow' in flagged['tests/test_broken_direct.py']
+    assert 'tests/test_broken_pkg.py' in flagged and 'moved_mod' in flagged['tests/test_broken_pkg.py']
+    assert 'tests/test_ok.py' not in flagged
