@@ -54,9 +54,8 @@ def test_submit_history_snapshot_and_result(root, browser):
         page.get_by_role('button', name='日志', exact=True).click()
         expect(page.locator('.wb-run-detail')).to_be_visible()
         page.locator('.wb-monitor-tabs').get_by_role('button', name='输出结果', exact=True).click()
-        expect(page.locator('.wb-output')).to_contain_text('2 行')
+        expect(page.locator('.wb-results-card')).to_contain_text('2 行')
         screenshot(page, 'run-module-fixed-output')
-        page.get_by_role('button', name='查看固定结果', exact=True).click()
         expect(page.locator('main')).to_contain_text('三角形')
         assert not errors, errors
 
@@ -156,7 +155,6 @@ def run(*, source, target, other):
                 screenshot(page, 'run-module-history-'+str(width))
             page.set_viewport_size({'width': 1440, 'height': 1050})
             page.locator('.wb-monitor-tabs').get_by_role('button', name='输出结果', exact=True).click()
-            page.get_by_role('button', name='查看固定结果', exact=True).click()
             expect(page.locator('main')).to_contain_text('三角形')
             expect(page.locator('.wb-result-preview')).to_have_attribute('data-attempt', '1')
             page.get_by_role('button', name='在数据页打开', exact=True).click()
