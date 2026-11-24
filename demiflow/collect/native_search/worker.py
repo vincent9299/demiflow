@@ -88,21 +88,34 @@ def unpack(result):
 
 
 def bootstrap(config):
+    """Load every source and its network; a source that cannot be used gets a receipt status in ``errors``."""
     from . import worker_network
     from .sources import SourceLoadError, load
-    loaded, errors, networks = {}, {}, {}
+    loaded, errors, networks, shared = {}, {}, {}, {}
     for settings in config['sources']:
         name = settings['name'].lower()
-        module = None
-        if settings.get('backend') not in ('http', 'browser'):
-            try:
-                module = loaded[name] = load(settings, config['timeout_s'])
-            except SourceLoadError as exc:
-                errors[name] = exc.status
-                continue
         try:
-            networks[name] = worker_network.network_settings(config['outgoing'], settings, config['sources'], module)
-        except ValueError:
+            # Sources with an explicit backend search through google_search, with their adapter's network.
+            module = load(settings, config['timeout_s'])
+            declared = getattr(module, 'network', None)
+            if isinstance(declared, str):
+                shared[name] = declared
+            else:
+                networks[name] = worker_network.Network(worker_network.network_options(
+                    config['outgoing'], declared, vars(module)))
+        except SourceLoadError as exc:
+            errors[name] = exc.status
+        except (ImportError, SystemExit):
+            errors[name] = 'dependency_error'
+        except Exception:
+            errors[name] = 'configuration_error'
+        else:
+            loaded[name] = module
+    for name, other in shared.items():
+        # Sources may share the network (options, rotation and clients) of another declared source.
+        if other in networks:
+            networks[name] = networks[other]
+        else:
             errors[name] = 'configuration_error'
             loaded.pop(name, None)
     worker_network.install(config, send, receive, networks)
@@ -160,11 +173,13 @@ def online_search(engine, query, params):
         options['verify'] = params['verify']
     if params.get('max_redirects'):
         options['max_redirects'] = params['max_redirects']
-    if params['method'] != 'GET':
+    # A request is a GET or, for any other declared method, a POST with its body.
+    method = 'GET' if params['method'] == 'GET' else 'POST'
+    if method == 'POST':
         for key in ('data', 'json', 'content'):
             if params.get(key):
                 options[key] = params[key]
-    response = worker_network.request(params['method'], params['url'], **options)
+    response = worker_network.request(method, params['url'], **options)
     response.search_params = params
     return engine.response(response)
 

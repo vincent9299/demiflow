@@ -13,11 +13,20 @@ Rules:
 * the response body is capped at ``max_bytes`` across all hops;
 * userinfo in a URL becomes basic authentication and is removed from the URL;
 * only http(s) URLs, plain http only when the source network enables it;
-* requests share the remaining deadline of the current source search.
+* requests share the remaining deadline of the current source search;
+* cookies a server sets are visible on that response only: clients keep no
+  cookie store, so one query or source never changes the next one's request.
 
-Transport is curl_cffi with browser TLS impersonation (``chrome`` unless a
-network or request sets ``impersonate``; ``none`` disables it).
+Transport is curl_cffi. Each source has a network (``Network``): its options,
+its rotation over several proxies or local addresses, and its HTTP clients. A
+request may choose a client by ``verify``, ``impersonate`` (a browser name;
+``none`` disables the browser fingerprint; default ``chrome``),
+``curl_options`` and ``enable_http3``; these are client properties and are
+never sent as per-request arguments.
 """
+import ipaddress
+import itertools
+import os
 import time
 from urllib.parse import unquote, urljoin, urlsplit
 
@@ -25,11 +34,18 @@ from .errors import check_status
 
 http_receipts = []
 DEFAULT_IMPERSONATE = 'chrome'
+NO_IMPERSONATE = 'none'
 REDIRECT_CODES = (301, 302, 303, 307, 308)
-NETWORK_DEFAULTS = {'proxies': {}, 'verify': True, 'enable_http': False, 'enable_http2': True,
-                    'enable_http3': False, 'local_addresses': None, 'max_redirects': 30,
-                    'impersonate': DEFAULT_IMPERSONATE}
+# Session-wide outgoing option -> network option it sets for every source.
+OUTGOING_OPTIONS = {'proxies': 'proxies', 'verify': 'verify', 'enable_http2': 'enable_http2',
+                    'source_ips': 'local_addresses', 'max_redirects': 'max_redirects'}
+NETWORK_DEFAULTS = {'enable_http': False, 'verify': True, 'enable_http2': True, 'enable_http3': False,
+                    'proxies': None, 'local_addresses': None, 'max_redirects': 30}
 NETWORK_KEYS = tuple(NETWORK_DEFAULTS)
+# Accepted in a source network for older configurations; the parent owns retries, timeouts and pooling.
+IGNORED_OPTIONS = ('retries', 'retry_on_http_error', 'request_timeout', 'max_connections', 'using_tor_proxy')
+PROXY_SCHEMES = ('http', 'https', 'socks4', 'socks5', 'socks5h')
+CLIENT_OPTIONS = ('verify', 'impersonate', 'curl_options', 'enable_http3')
 
 
 class ResponseTooLarge(Exception):
@@ -41,16 +57,17 @@ class _State:
     send = None
     receive = None
     networks = {}
-    sessions = {}
+    default = None
     source = None
     deadline = None
+    response_class = None
 
 
 def install(config, send, receive, networks):
-    """Bind worker configuration, the parent pipe and resolved per-source networks."""
+    """Bind worker configuration, the parent pipe and the network of every source."""
     _State.config, _State.send, _State.receive = config, send, receive
     _State.networks = networks
-    _State.sessions = {}
+    _State.default = None
 
 
 def begin(source, timeout_s):
@@ -60,76 +77,161 @@ def begin(source, timeout_s):
     _State.deadline = time.monotonic() + timeout_s
 
 
-def network_settings(outgoing, source=None, sources=(), module=None):
+def network_options(outgoing, declared=None, attributes=None):
     """Network options of one source.
 
-    Worker-wide ``outgoing`` options are the base. ``source['network']`` may name
-    another source (shared network) or hold a mapping of options laid over the
-    base; otherwise the adapter module's attributes (source settings already
-    applied) supply any network option they define.
+    Session-wide ``outgoing`` options are the base. ``declared`` is the source's
+    ``network`` mapping: it is laid over the base and replaces what the source says
+    elsewhere. Without it, ``attributes`` (the adapter module's namespace after the
+    source settings were applied) supply the options they define.
     """
-    settings = {**NETWORK_DEFAULTS, **{k: v for k, v in outgoing.items() if k in NETWORK_KEYS}}
-    if source is None:
-        return settings
-    declared = source.get('network')
-    if isinstance(declared, str):
-        shared = next((s for s in sources if s.get('name') == declared), None)
-        if shared is None:
-            raise ValueError('Unknown shared search network: ' + declared)
-        return network_settings(outgoing, shared, ())
+    options = dict(NETWORK_DEFAULTS)
+    for name, target in OUTGOING_OPTIONS.items():
+        if name in outgoing:
+            options[target] = outgoing[name]
     if isinstance(declared, dict):
-        unknown = set(declared) - set(NETWORK_KEYS) - {'retries', 'retry_on_http_error', 'request_timeout',
-                                                       'max_connections', 'using_tor_proxy'}
+        unknown = set(declared) - set(NETWORK_KEYS) - set(IGNORED_OPTIONS)
         if unknown:
             raise ValueError('Unsupported search network options: ' + ', '.join(sorted(unknown)))
-        return {**settings, **{k: declared[k] for k in NETWORK_KEYS if k in declared}}
-    if declared is not None:
+        options.update({k: declared[k] for k in NETWORK_KEYS if k in declared})
+    elif declared is not None:
         raise ValueError('Search network must be a source name or a mapping')
-    attributes = vars(module) if module is not None else source
-    return {**settings, **{k: attributes[k] for k in NETWORK_KEYS if k in attributes}}
+    elif attributes is not None:
+        options.update({k: attributes[k] for k in NETWORK_KEYS if k in attributes})
+    return options
 
 
-def _proxies(declared):
+def _local_addresses(declared):
+    """Addresses to bind to, in rotation order; a network such as ``10.0.0.0/30`` stands for its hosts."""
     if not declared:
-        return None
-    if isinstance(declared, str):
-        return {'http': declared, 'https': declared}
-    mapped = {}
-    for pattern, url in declared.items():
-        if pattern in ('all://', 'all'):
-            mapped.setdefault('http', url)
-            mapped.setdefault('https', url)
-        elif pattern in ('http://', 'http'):
-            mapped['http'] = url
-        elif pattern in ('https://', 'https'):
-            mapped['https'] = url
+        return []
+    found = []
+    for item in [declared] if isinstance(declared, str) else declared:
+        if '/' in item:
+            found.extend(str(host) for host in ipaddress.ip_network(item, False).hosts())
         else:
-            raise ValueError('Unsupported proxy pattern: ' + str(pattern))
-    return mapped
+            found.append(str(ipaddress.ip_address(item)))
+    return found
 
 
-def _session(settings):
-    from curl_cffi import requests as curl_requests
-    from curl_cffi.const import CurlHttpVersion
-    proxies = _proxies(settings['proxies'])
-    local = settings['local_addresses']
-    if isinstance(local, (list, tuple)):
-        local = local[0] if local else None
-    key = (repr(sorted((proxies or {}).items())), repr(settings['verify']), local,
-           settings['enable_http2'], settings['enable_http3'], settings['impersonate'])
-    session = _State.sessions.get(key)
-    if session is None:
-        options = {'verify': settings['verify'], 'proxies': proxies}
-        if settings['impersonate'] not in ('', 'none', None):
-            options['impersonate'] = settings['impersonate']
-        if local:
-            options['interface'] = local
-        if not settings['enable_http2']:
-            options['http_version'] = CurlHttpVersion.V1_1
-        elif settings['enable_http3'] and not proxies and hasattr(CurlHttpVersion, 'V3'):
-            options['http_version'] = CurlHttpVersion.V3
-        session = _State.sessions[key] = curl_requests.Session(**options)
-    return session
+def _proxy_patterns(declared):
+    """``{pattern: [proxy URL, ...]}`` from one URL or a mapping of patterns to a URL or a list of URLs."""
+    if not declared:
+        return {}
+    if isinstance(declared, str):
+        return {'all://': [declared]}
+    if not isinstance(declared, dict):
+        raise ValueError('proxies must be a URL or a mapping')
+    patterns = {}
+    for pattern, urls in declared.items():
+        scheme = pattern[:-1] if pattern.endswith(':') else pattern
+        if scheme in PROXY_SCHEMES:
+            pattern = scheme + '://'
+        patterns[pattern] = [urls] if isinstance(urls, str) else list(urls)
+    return patterns
+
+
+def _proxy_arguments(step, enable_http):
+    """curl_cffi proxy arguments for one rotation step; a catch-all pattern wins over scheme patterns."""
+    by_scheme, catch_all = {}, None
+    for pattern, url in step:
+        if pattern.startswith('http://') and not enable_http:
+            continue
+        if pattern.startswith('https'):
+            by_scheme['https'] = url
+        elif pattern.startswith('http'):
+            by_scheme['http'] = url
+        else:
+            catch_all = url
+    if catch_all:
+        return {'proxy': catch_all}
+    return {'proxies': by_scheme} if by_scheme else {}
+
+
+def _response_class():
+    if _State.response_class is None:
+        from curl_cffi.requests import Response
+
+        class SourceURL(str):
+            """Response URL as text, with its ``host`` and ``path``."""
+
+            @property
+            def host(self):
+                return urlsplit(self).hostname
+
+            @property
+            def path(self):
+                return urlsplit(self).path
+
+        class SourceResponse(Response):
+            _url = ''
+
+            @property
+            def url(self):
+                return SourceURL(self._url)
+
+            @url.setter
+            def url(self, value):
+                self._url = str(value or '')
+
+        _State.response_class = SourceResponse
+    return _State.response_class
+
+
+class Network:
+    """Transport of one source, or of the sources that share it by name."""
+
+    def __init__(self, options):
+        self.options = options
+        self._addresses = itertools.cycle(_local_addresses(options['local_addresses']) or [None])
+        patterns = _proxy_patterns(options['proxies'])
+        self._proxies = {pattern: itertools.cycle(urls) for pattern, urls in patterns.items()}
+        self._clients = {}
+
+    def client(self, verify=None, impersonate=None, curl_options=None, enable_http3=None):
+        """The HTTP client for the next request; advances proxy and local-address rotation one step."""
+        verify = self.options['verify'] if verify is None else verify
+        impersonate = impersonate or DEFAULT_IMPERSONATE
+        enable_http3 = self.options['enable_http3'] if enable_http3 is None else enable_http3
+        address = next(self._addresses)
+        step = tuple((pattern, next(urls)) for pattern, urls in self._proxies.items())
+        key = (repr(verify), address, step, impersonate, enable_http3,
+               tuple(sorted((int(k), v) for k, v in (curl_options or {}).items())))
+        if key not in self._clients:
+            self._clients[key] = self._new_client(verify, address, step, impersonate, curl_options, enable_http3)
+        return self._clients[key]
+
+    def _new_client(self, verify, address, step, impersonate, curl_options, enable_http3):
+        from curl_cffi import CurlOpt, requests
+        from curl_cffi.const import CurlHttpVersion
+        low_level = dict(curl_options or {})
+        for variable, option in (('SSL_CERT_FILE', CurlOpt.CAINFO), ('SSL_CERT_DIR', CurlOpt.CAPATH)):
+            if os.environ.get(variable):
+                low_level.setdefault(option, os.environ[variable])
+        arguments = {'verify': verify, 'discard_cookies': True, 'response_class': _response_class(),
+                     **_proxy_arguments(step, self.options['enable_http'])}
+        if impersonate != NO_IMPERSONATE:
+            arguments.update(impersonate=impersonate, default_headers=True)
+        if address:
+            arguments['interface'] = address
+        if not self.options['enable_http2']:
+            arguments['http_version'] = CurlHttpVersion.V1_1
+        elif enable_http3 and not step:
+            arguments['http_version'] = CurlHttpVersion.V3
+        else:
+            arguments['http_version'] = CurlHttpVersion.V2_0
+        if low_level:
+            arguments['curl_options'] = low_level
+        return requests.Session(**arguments)
+
+
+def _network():
+    network = _State.networks.get(_State.source)
+    if network is None:
+        if _State.default is None:
+            _State.default = Network(network_options(_State.config['outgoing']))
+        network = _State.default
+    return network
 
 
 def _remaining(requested):
@@ -138,38 +240,43 @@ def _remaining(requested):
     if _State.deadline is not None:
         left = _State.deadline - time.monotonic()
         if left <= 0:
-            raise TimeoutError('Source search deadline exceeded')
+            from curl_cffi.requests.exceptions import Timeout
+            raise Timeout('Source search deadline exceeded')
         timeout = min(timeout, left)
     return timeout
 
 
-def request(method, url, *, params=None, headers=None, cookies=None, auth=None, data=None, json=None,
-            content=None, allow_redirects=True, max_redirects=None, timeout=None, verify=None,
-            impersonate=None, curl_options=None, raise_for_httperror=True, **extra):
-    """Admitted HTTP exchange; returns a curl_cffi response with ``history``."""
+def request(method, url, *, raise_for_httperror=True, allow_redirects=True, max_redirects=None, timeout=None,
+            **arguments):
+    """Admitted HTTP exchange; returns the response with ``history``.
+
+    ``verify``, ``impersonate``, ``curl_options`` and ``enable_http3`` choose the HTTP client; the other
+    arguments (``headers``, ``cookies``, ``auth``, ``params``, ``data``, ``json``, ``content`` ...) go to
+    curl_cffi with every hop.
+    """
     config = _State.config
     if config is None:
         raise RuntimeError('Worker HTTP is not installed')
     if config.get('offline_audit'):
         raise RuntimeError('Network disabled during source audit')
-    if extra.pop('stream', False):
+    if arguments.pop('stream', False):
         raise ValueError('Raw object streaming belongs to Dataset.fetch')
     from curl_cffi.requests.exceptions import InvalidSchema
-    settings = _State.networks.get(_State.source) or network_settings(config['outgoing'])
-    session = _session(settings)
-    limit = min(settings['max_redirects'] if max_redirects is None else max_redirects, config['max_redirects'])
+    network = _network()
+    client = network.client(**{name: arguments.pop(name) for name in CLIENT_OPTIONS if name in arguments})
+    limit = min(network.options['max_redirects'] if max_redirects is None else max_redirects,
+                config['max_redirects'])
     method = str(method).upper()
-    headers = dict(headers or {})
     history, total = [], 0
     for hop in range(limit + 1):
-        if str(url).startswith('http://') and not settings['enable_http']:
+        if str(url).startswith('http://') and not network.options['enable_http']:
             raise InvalidSchema('HTTP protocol is disabled')
         parts = urlsplit(str(url))
         if parts.scheme not in ('http', 'https') or not parts.hostname:
             raise ValueError('Invalid adapter HTTP URL')
         if parts.username is not None:
-            if not auth:
-                auth = (unquote(parts.username), unquote(parts.password or ''))
+            if not arguments.get('auth'):
+                arguments['auth'] = (unquote(parts.username), unquote(parts.password or ''))
             parts = parts._replace(netloc=parts.netloc.rsplit('@', 1)[-1])
             url = parts.geturl()
         chunks, hop_bytes, too_large = [], 0, False
@@ -190,15 +297,9 @@ def request(method, url, *, params=None, headers=None, cookies=None, auth=None, 
             raise RuntimeError('Invalid admission protocol')
         started = time.monotonic()
         code = None
-        options = {'headers': headers, 'cookies': cookies, 'auth': auth, 'allow_redirects': False,
-                   'timeout': hop_timeout, 'content_callback': body, **extra}
-        for name, value in (('params', params if hop == 0 else None), ('data', data), ('json', json),
-                            ('data', content), ('verify', verify), ('impersonate', impersonate),
-                            ('curl_options', curl_options)):
-            if value is not None:
-                options[name] = value
         try:
-            response = session.request(method, url, **options)
+            response = client.request(method, url, **{**arguments, 'allow_redirects': False,
+                                                      'content_callback': body, 'timeout': hop_timeout})
             code = response.status_code
             if too_large:
                 raise ResponseTooLarge()
@@ -225,11 +326,14 @@ def request(method, url, *, params=None, headers=None, cookies=None, auth=None, 
         target = urljoin(str(url), location)
         nxt = urlsplit(target)
         if (nxt.scheme, nxt.netloc) != (parts.scheme, parts.netloc):
-            auth = cookies = None
-            headers = {k: v for k, v in headers.items()
-                       if k.lower() not in ('authorization', 'proxy-authorization', 'cookie', 'host')}
+            arguments.pop('auth', None)
+            arguments.pop('cookies', None)
+            arguments['headers'] = {k: v for k, v in (arguments.get('headers') or {}).items()
+                                    if k.lower() not in ('authorization', 'proxy-authorization', 'cookie', 'host')}
         if code == 303 or (code in (301, 302) and method == 'POST'):
-            method, data, json, content = 'GET', None, None, None
+            method = 'GET'
+            for name in ('data', 'json', 'content'):
+                arguments.pop(name, None)
         history.append(response)
         url = target
     raise AssertionError('unreachable')

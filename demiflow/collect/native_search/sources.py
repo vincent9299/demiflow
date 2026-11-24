@@ -93,13 +93,15 @@ def load(settings, timeout_s):
         raise SourceLoadError('unsupported_processor')
     setup = getattr(module, 'setup', None)
     if setup is not None:
+        if not callable(setup):
+            raise SourceLoadError('configuration_error', 'Source setup is not callable')
         try:
-            if not setup(settings):
-                raise SourceLoadError('configuration_error', 'Source setup declined')
-        except SourceLoadError:
-            raise
+            accepted = setup(settings)
         except Exception:
             raise SourceLoadError('configuration_error', 'Source setup failed') from None
+        # Returning nothing means the settings were accepted; only an explicit false value declines.
+        if accepted is not None and not accepted:
+            raise SourceLoadError('configuration_error', 'Source setup declined')
     if not any(category in TAB_CATEGORIES for category in module.categories):
         module.categories.append('other')
     return module

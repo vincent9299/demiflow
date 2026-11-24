@@ -1,27 +1,31 @@
 """Read-only query of a local SQLite database as a search source (no HTTP).
 
-Options: ``database`` (file path), ``query_str`` (SQL with the named
+Options: ``database`` (file path), ``query_str`` (a ``SELECT`` with the named
 parameters ``:query`` and/or ``:wildcard``; paging is appended as
 ``LIMIT :limit OFFSET :offset``), ``limit`` (rows per page) and
-``result_type``: ``MainResult`` turns each row into a result with the row's
-columns as fields (``url``, ``title``, ``content`` ...), ``KeyValue`` keeps the
-row as a key/value table.
+``result_type``: ``KeyValue`` (default) returns each row as a key/value table,
+``MainResult`` turns the row's columns into result fields (``url``, ``title``,
+``content`` ...; a column that is no result field is an error).
 """
 import sqlite3
 from pathlib import Path
 
+from demiflow.collect.native_search.adapter import key_value, main_result
+
 engine_type = 'offline'
 paging = True
-categories = ['general']
 about = {'website': 'https://www.sqlite.org/', 'results': 'SQL'}
-database = None
-query_str = None
+database = ''
+query_str = ''
 limit = 10
-result_type = 'MainResult'
+result_type = 'KeyValue'
 
 
 def setup(settings):
-    return result_type in ('MainResult', 'KeyValue') and type(limit) is int and 0 < limit <= 1000
+    if 'query_str' not in settings:
+        raise ValueError('query_str cannot be empty')
+    if not settings['query_str'].lower().startswith('select '):
+        raise ValueError('only SELECT query is supported')
 
 
 def search(query, params):
@@ -32,9 +36,9 @@ def search(query, params):
     try:
         cursor = connection.execute(query_str + ' LIMIT :limit OFFSET :offset', values)
         columns = [column[0] for column in cursor.description]
-        rows = [dict(zip(columns, map(str, row))) for row in cursor.fetchmany(limit)]
+        rows = [dict(zip(columns, map(str, row))) for row in cursor.fetchall()]
     finally:
         connection.close()
     if result_type == 'MainResult':
-        return rows
-    return [{'template': 'keyvalue.html', 'kvmap': row} for row in rows]
+        return [main_result(row.pop('url', None), **row) for row in rows]
+    return [key_value(row) for row in rows]

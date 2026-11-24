@@ -211,8 +211,10 @@ def test_helper_lookups_are_cached_bounded_and_refreshed():
   pexels.request('oak',params()); out['pexels'].append('no error')
  except Exception as exc:
   out['pexels'].append(type(exc).__name__)
- pexels._secret['value']=None; pexels.fallback_secret_key='FALLBACK'
+ pexels._secret['value']=None; pexels.api_key='CONFIGURED'; before=len(calls)
  fallback=params(); pexels.request('oak',fallback); out['pexels'].append(fallback['headers']['secret-key'])
+ again=params(); pexels.request('oak',again)
+ out['pexels']+=[again['headers']['secret-key'],pexels._secret['value'],len(calls)-before]
  calls.clear()
  pdia=loaded['public domain image archive']
  proxy=['https://proxy.example/search-proxy']
@@ -233,6 +235,7 @@ def test_helper_lookups_are_cached_bounded_and_refreshed():
 ''', engines=('duckduckgo images', 'baidu images', 'pexels', 'public domain image archive'))
     assert result['ddg'] == ['4-111', '4-111', 1, '4-222', 2, 256, '', False]
     assert result['baidu'] == [{'BAIDUID': 'A'}, {'BAIDUID': 'A'}, 1, {'BAIDUID': 'B'}, 2]
-    assert result['pexels'] == ['KEY1', 'KEY1', 2, 'SourceError', 'FALLBACK']
+    # The configured api_key is sent when the page lookup fails; it is not kept, so every search looks again.
+    assert result['pexels'] == ['KEY1', 'KEY1', 2, 'SourceError', 'CONFIGURED', 'CONFIGURED', None, 4]
     assert result['pdia'] == ['https://proxy.example/search-proxy', 'https://proxy.example/search-proxy', 2,
                               'SourceAccessDenied', None, 'Search proxy URL not found']

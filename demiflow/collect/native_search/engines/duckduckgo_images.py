@@ -8,7 +8,7 @@ token). Queries of 500 characters or more are declined.
 import time
 from urllib.parse import quote_plus, urlencode
 
-from demiflow.collect.native_search.adapter import get, image_result
+from demiflow.collect.native_search.adapter import browser_user_agent, get, image_result
 from demiflow.collect.native_search.locales import duckduckgo_locale
 
 about = {'website': 'https://duckduckgo.com/', 'wikidata_id': 'Q12805', 'use_official_api': False,
@@ -20,7 +20,7 @@ paging = True
 safesearch = True
 send_accept_language_header = False
 SAFE_SEARCH = {0: '-2', 1: '', 2: '1'}
-BROWSER = 'Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0'
+BROWSER = browser_user_agent()
 TOKEN_SECONDS = 3600
 TOKEN_ENTRIES = 256
 TOKEN_MAX_CHARS = 256

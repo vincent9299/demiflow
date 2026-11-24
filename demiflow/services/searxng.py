@@ -1,13 +1,12 @@
 """Platform-owned profile for running a separately installed SearXNG over HTTP.
 
-SearXNG itself is a declared installed dependency, never imported from a business
-package. No installation or modification of an existing deployment is implicit.
+SearXNG itself is a declared installed dependency: it runs in its own interpreter,
+started through its own entry point, and is never imported by DemiFlow or from a
+business package. No installation or modification of an existing deployment is implicit.
 """
 import hashlib
 import json
-import os
 from pathlib import Path
-import sys
 from .shared_http import SharedHTTPService
 
 
@@ -19,8 +18,6 @@ class SearxNGService:
         if not runtime_revision: raise ValueError('Declare the installed SearXNG runtime revision')
         if type(port) is not int or not 1<=port<=65535: raise ValueError('Invalid service port')
         if not engines or any(not isinstance(e,str) or not e for e in engines): raise ValueError('Declare search engines')
-        if 'wikisearch' in engines:
-            raise ValueError('wikisearch is a native source: use WebSession(search=SearchConfig(engines=["wikisearch"]))')
         self.root,self.name,self.python=str(Path(root).resolve()),name,str(python)
         self.runtime_directory=str(Path(runtime_directory).resolve())
         self.port,self.engines,self.proxy_url=port,tuple(engines),proxy_url
@@ -51,21 +48,14 @@ class _SearxOwner:
             if spec.proxy_url: config['outgoing']['proxies']={'all://':spec.proxy_url}
             with run_lock(directory/'profile'):
                 if not settings.exists(): settings.write_text(yaml.safe_dump(config,allow_unicode=True))
-            platform_path=str(Path(__file__).resolve().parents[2])
+            # The installed runtime starts through its own entry point; DemiFlow imports none of it.
             declaration=SharedHTTPService(root=spec.root,name=spec.name,request_concurrency=spec.request_concurrency,
-                configuration={'command':[spec.python,'-m','demiflow.services.searxng',spec.runtime_directory,str(settings)],
+                configuration={'command':[spec.python,'-m','searx.webapp'],
                     'base_url':f'http://127.0.0.1:{spec.port}','ready_path':'/healthz',
-                    'env':{'PYTHONPATH':platform_path},'startup_timeout_s':60})
+                    'env':{'PYTHONPATH':spec.runtime_directory,'SEARXNG_SETTINGS_PATH':str(settings)},
+                    'startup_timeout_s':60})
             self.owner=declaration.bind()
         await self.owner.ensure_ready()
     def request_slot(self): return self.owner.request_slot()
     async def aclose(self):
         if self.owner is not None: await self.owner.aclose()
-
-
-if __name__=='__main__':
-    runtime,settings=sys.argv[1:]
-    sys.path.insert(0,runtime)
-    os.environ['SEARXNG_SETTINGS_PATH']=settings
-    from searx.webapp import run
-    run()

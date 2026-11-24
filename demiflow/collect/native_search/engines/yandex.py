@@ -42,19 +42,20 @@ def request(query, params):
 
 
 def between(text, start, end):
-    begin = text.index(start) + len(start)
-    return text[begin:text.index(end, begin)]
+    """Text between the first ``start`` and the next ``end``; None when either is missing."""
+    begin = text.find(start)
+    finish = text.find(end, begin + len(start)) if begin >= 0 else -1
+    return text[begin + len(start):finish] if finish >= 0 else None
 
 
 def image_state(resp):
     page = unescape(html.tostring(html.fromstring(resp.text), encoding='unicode'))
-    for end in STATE_ENDS:
-        try:
-            return json.loads(STATE_START + between(page, STATE_START, end) + end)
-        except ValueError:
-            if end == STATE_ENDS[-1]:
-                raise
-    raise ValueError('Yandex image state not found')
+    end = STATE_ENDS[0]
+    inner = between(page, STATE_START, end)
+    if inner is None:
+        end = STATE_ENDS[1]
+        inner = between(page, STATE_START, end) or ''
+    return json.loads(STATE_START + inner + end)
 
 
 def response(resp):

@@ -31,8 +31,8 @@ from urllib.parse import urlparse
 
 GROUP_MEMBERS = 8
 GROUP_DISTANCE = 20
-# Records built with adapter.main_result/image_result (or decoded from typed
-# results of older receipts) carry this key; it never appears in output.
+# Records built with adapter.main_result/image_result/key_value (or decoded from
+# typed results of older receipts) carry this key; it never appears in output.
 TYPED = '__result_type__'
 _SPACES = re.compile(r'( |\t|\n)+', re.M | re.U)
 
@@ -119,7 +119,10 @@ def identity(record):
 
     Plain image records match on template, full URL and image URL; typed records
     and other plain records match on template, URL without scheme and image URL.
+    A typed key/value table only ever matches itself.
     """
+    if record.get(TYPED) == 'KeyValue':
+        return ('keyvalue.html', id(record))
     if record['template'] == 'images.html' and not record.get(TYPED):
         return ('images.html', record['url'], record['img_src'])
     parsed = record['parsed_url']

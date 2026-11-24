@@ -16,9 +16,9 @@ from .errors import SourceAccessDenied, SourceCaptcha, SourceError, SourceRateLi
 from .worker_network import Request, get, head, multi_requests, post, request
 
 __all__ = ['Request', 'SourceAccessDenied', 'SourceCaptcha', 'SourceError', 'SourceRateLimited',
-           'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text', 'image_result', 'legacy_record',
-           'main_result', 'multi_requests', 'size_text',
-           'post', 'request', 'user_agent']
+           'browser_user_agent', 'ecma_unescape', 'extract_text', 'get', 'head', 'html_to_text',
+           'image_result', 'key_value', 'legacy_record', 'main_result', 'multi_requests', 'post',
+           'request', 'size_text', 'user_agent']
 
 _UNICODE_ESCAPE = re.compile(r'%u([0-9a-fA-F]{4})')
 _BYTE_ESCAPE = re.compile(r'%([0-9a-fA-F]{2})')
@@ -32,6 +32,18 @@ def user_agent():
         return 'DemiFlow/' + version('demiflow')
     except Exception:
         return 'DemiFlow'
+
+
+BROWSER_PLATFORMS = ('Windows NT 10.0; Win64; x64', 'X11; Linux x86_64')
+BROWSER_VERSIONS = ('154.0', '153.0')
+
+
+def browser_user_agent():
+    """User-Agent of a current desktop Firefox; platform and version are picked at random."""
+    import random
+    version = random.choice(BROWSER_VERSIONS)
+    return f'Mozilla/5.0 ({random.choice(BROWSER_PLATFORMS)}; rv:{version}) Gecko/20100101 Firefox/{version}'
+
 
 
 def ecma_unescape(text):
@@ -99,18 +111,27 @@ IMAGE_RESULT_FIELDS = {**MAIN_RESULT_FIELDS, 'template': 'images.html', 'thumbna
                        'img_format': '', 'source': '', 'filesize': '', 'formats': []}
 
 
-def _typed(kind, defaults, url, fields):
+KEY_VALUE_FIELDS = {**MAIN_RESULT_FIELDS, 'template': 'keyvalue.html', 'caption': '', 'key_title': '',
+                    'value_title': ''}
+
+
+def _typed(kind, defaults, url, fields, **required):
     unknown = set(fields) - set(defaults)
     if unknown:
         raise TypeError(f'Unknown {kind} fields: ' + ', '.join(sorted(unknown)))
     from .results import TYPED
     return {'url': url, **{k: (list(v) if isinstance(v, list) else v) for k, v in defaults.items()},
-            **fields, TYPED: kind}
+            **required, **fields, TYPED: kind}
 
 
 def main_result(url, **fields):
     """A typed main result: every standard field present; duplicates match ignoring the URL scheme."""
     return _typed('MainResult', MAIN_RESULT_FIELDS, url, fields)
+
+
+def key_value(kvmap, url=None, **fields):
+    """A typed key/value table (``keyvalue.html``) of ``kvmap``; such results are never merged with others."""
+    return _typed('KeyValue', KEY_VALUE_FIELDS, url, fields, kvmap=kvmap)
 
 
 IMAGE_FORMATS = {'png': 'PNG', 'svg+xml': 'SVG', 'jpeg': 'JPG', 'bmp': 'BMP', 'x-icon': 'ICO', 'tiff': 'TIF'}

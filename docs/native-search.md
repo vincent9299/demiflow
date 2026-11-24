@@ -31,13 +31,21 @@
 - **自定义适配器契约**：
   - HTTP 与辅助函数改从 `demiflow.collect.native_search.adapter` 导入，取代 `searx.network`、`searx.utils`、`searx.exceptions`。只提供“自定义来源”一节列出的辅助；`searx.utils` 的其余函数、`EngineCache`、engine traits 和 `result_types` 类不再提供；
   - 请求参数 `locale` 取代 `searxng_locale`；
-  - 失败用 `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError` 表示。
-- **`services.searxng.SearxNGService`**：不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`，声明 wikisearch 会报错；wikisearch 只作为原生来源提供。服务指纹不再包含 wikisearch 适配器字节，同一 profile 的设置文件名和 `secret_key` 随之改变；运行中的旧服务按服务流程换版重启。
+  - 失败用 `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError` 表示；
+  - `about` 里的未知键不再导致加载失败。
+  - 其余约定不变，例如 `setup(settings)` 不返回值即表示接受，请求级的 `impersonate`、`curl_options`、`verify`，响应的 `url.host`、`url.path`。
+- **`services.searxng.SearxNGService`**：
+  - 不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`。名单里的来源是否可用由外部部署决定；DemiFlow 自己的 wikisearch 只作为原生来源提供。
+  - 外部运行时通过它自己的入口启动（`python -m searx.webapp`），DemiFlow 的代码不再导入它。
+  - 服务指纹不再包含 wikisearch 适配器字节，启动命令也变了：同一 profile 的设置文件名、`secret_key` 和启动配置随之改变，运行中的旧服务按服务流程换版重启。
 - **来源的 `network` 引用**：字符串只能写本次已声明的来源（共用其网络选项），或用映射直接写选项。不再自动加载被引用但未声明的目录来源，也不再识别 SearXNG 内置的 `ipv4`/`ipv6` 网络和 `outgoing.networks` 具名网络；源地址绑定用 `local_addresses`。内置目录已不含这类引用（旧目录中 qwant images→qwant、yandex images→yandex、brave.images→brave 只共享连接池，没有网络选项）。
-- **网络选项**：生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`、`impersonate`。来源映射里的 `retries`、`retry_on_http_error`、`request_timeout`、`max_connections`、`using_tor_proxy` 接受但不生效：重试由 demiflow 统一控制，超时用 `timeout_s`，每个工作进程一次只做一个交换，不再校验 Tor 出口；其他未知选项报配置错误。
+- **网络选项**：
+  - 来源级生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`，含义与此前相同：`proxies` 可以是一个 URL，或“模式 → URL 或 URL 列表”的映射；`local_addresses` 可以是一个地址、列表或网段；列表逐请求轮换。
+  - 会话级（`SearchConfig.networks` 的出口配置）生效的是 `proxies`、`verify`、`enable_http2`、`source_ips`、`max_redirects`。
+  - 来源映射里的 `retries`、`retry_on_http_error`、`request_timeout`、`max_connections`、`using_tor_proxy` 接受但不生效：重试由 demiflow 统一控制，超时用 `timeout_s`，每个工作进程一次只做一个交换，不再校验 Tor 出口；其他未知选项报配置错误。
 - **`search_source_inventory()`**：返回新结构（`runtime`、`scope`、`sources`、`platform_sources`），由 `tools/build_native_search_inventory.py` 生成。
-- **Pexels**：不再内置 Web 端密钥，可用 `fallback_secret_key` 提供。
-- **Unsplash**：请求的 User-Agent 改为 DemiFlow 标识。
+- **Pexels**：不再内置 Web 端密钥。页面取不到密钥时，使用来源配置的 `api_key`（名称不变）；没有配置时该来源以 `parse_error` 结束，不发搜索请求。
+- **Unsplash**：内置来源 unsplash 和平台模块 `unsplash_images` 请求的 User-Agent 由 SearXNG 标识改为 DemiFlow 标识。
 
 **持久格式**
 
@@ -48,7 +56,8 @@
   - `SearxEngineAPIException`（baidu、quark、qwant、pexels）、`SearxEngineException`（public domain image archive）、`SearxEngineResponseException`（wikisearch）→ `SourceError`。
   - 其他解析异常仍记录原异常类名（如 `KeyError`）。
 - 旧回执里的 `searx.result_types.*` 结果仍可解码、合并。
-- 由带类型结果产生的 `response_json` 字段集合保持不变（`adapter.main_result`、`image_result`）。旧 KeyValue 类型的标题类扩展字段不再出现。
+- 由带类型结果产生的 `response_json` 字段集合保持不变（`adapter.main_result`、`image_result`、`key_value`）。
+- 自定义适配器声明的 `language_support` 按声明记录。旧实现对没有内置语言表的来源一律记为 False，于是回执把 `language` 列为被忽略；内置来源的取值与此前相同。
 
 **源码身份与恢复**
 
@@ -86,6 +95,12 @@
   - 响应解析：21 个来源的合成响应。
 - 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
 - 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
+- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容、回执和合并结果，共 9 组 419 个场景：
+  - HTTP 层 92 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
+  - 超时、会话级出口配置、TLS 与自定义 CA 共 13 个；
+  - 适配器加载 59 个，SQLite 来源 27 个；
+  - 21 个内置来源、2 个显式 Google 后端和 15 个平台图片模块共 228 个，只把最终目的地换成本机服务。
+  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 289 个场景固化在 `tests/test_native_search_exchange.py`。
 - 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用
@@ -226,7 +241,7 @@ search = SearchConfig(
 
 JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSession(search=mapping)`。例如 `{"engines":["wikisearch"],"proxy":{"secret_env":"SEARCH_PROXY"}}`。精确的 `secret_env` 映射会递归恢复为 Secret；声明和快照不读取环境变量，执行时才解析。语言必须是有效 locale；业务可在配置声明一次，然后写入每条请求。
 
-每个来源有自己的网络选项；`network` 写另一个已声明来源的名字时共用其网络选项，不会因此额外选择该来源执行搜索。生效的选项和不再支持的具名网络见“兼容性声明”。只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。
+每个来源有自己的网络选项；`network` 写另一个已声明来源的名字时共用其网络选项，不会因此额外选择该来源执行搜索。生效的选项和不再支持的具名网络见“兼容性声明”。只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。
 
 ## 返回值、缓存与资源归属
 
@@ -272,22 +287,26 @@ max_bytes 限制单次 HTTP 调用累计解码响应（包括重定向），max_
 
 - **在线来源**：提供 `request(query, params)` 和 `response(resp)`。
 - **离线来源**：设 `engine_type = 'offline'`，提供 `search(query, params)`。
-- **可选**：`setup(settings)` 做配置检查，返回假值表示拒绝；`init(settings)` 在首次搜索前运行。
+- **可选**：`setup(settings)` 做配置检查：不返回值或返回真值表示接受，返回其他假值或抛出异常表示拒绝；`init(settings)` 在首次搜索前运行，返回 `False` 表示拒绝。
 - **模块属性**：`categories`、`paging`、`max_page`、`time_range_support`、`safesearch`、`language_support`、`about` 等声明能力。来源配置字典中的同名字段会覆盖它们。值为 `None` 的公开属性表示必填选项。
 
 `params` 的内容：
 
 - `query`、`pageno`、`safesearch`、`time_range`、`locale`（请求语言）、`language`、`category`、`engine_data`；
-- 适配器要设置的 `url`，以及可选的 `method`、`headers`、`data`、`json`、`content`（非 GET 请求的原始请求体）、`cookies`、`auth`、`verify`、`allow_redirects`、`max_redirects`、`raise_for_httperror`、`impersonate`。
+- 适配器要设置的 `url`，以及可选的 `method`（`GET`；其他值一律按 `POST` 发送）、`headers`、`data`、`json`、`content`（POST 的原始请求体）、`cookies`、`auth`、`allow_redirects`、`max_redirects`、`raise_for_httperror`；
+- 选择 HTTP 客户端的 `impersonate`（浏览器指纹名，默认 `chrome`，`'none'` 关闭指纹）、`curl_options`、`verify`。
 
-`url` 为空表示拒绝本次请求。`response(resp)` 返回结果字典列表。`resp` 提供 `status_code`、`headers`、`text`、`content`、`json()`、`url`、`cookies` 和 `search_params`。
+`url` 为空表示拒绝本次请求。`response(resp)` 返回结果字典列表。`resp` 提供 `status_code`、`headers`、`text`、`content`、`json()`、`url`（文本，另有 `url.host`、`url.path`）、`cookies` 和 `search_params`。
+
+HTTP 客户端不保存 Cookie：服务器设置的 Cookie 只出现在那一次响应的 `resp.cookies` 里，需要带到后续请求的由适配器自己保存并写进 `params['cookies']`。
 
 `demiflow.collect.native_search.adapter` 提供适配器可用的全部辅助：
 
 - HTTP：`get`、`post`、`head`、`request`、`multi_requests`、`Request`。每次交换都经父进程准入并记回执。
 - 异常：`SourceError`、`SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`。
-- 文本：`html_to_text`、`extract_text`、`ecma_unescape`、`size_text`、`user_agent`。
-- 结果：`main_result`、`image_result`、`legacy_record`。
+- 文本：`html_to_text`、`extract_text`、`ecma_unescape`、`size_text`。
+- User-Agent：`user_agent`（DemiFlow 标识）、`browser_user_agent`（随机的当前桌面浏览器）。
+- 结果：`main_result`、`image_result`、`key_value`、`legacy_record`。
 
 XPath 直接用 lxml。令牌一类的缓存放在模块内，并自行设置条数和大小上限。
 
@@ -322,7 +341,8 @@ SearchConfig(engines=({
 
 - `SourceCaptcha`、`SourceRateLimited`、`SourceAccessDenied`、`SourceError`；
 - `html_to_text`、`extract_text`、`ecma_unescape`、`size_text`；
-- `main_result`、`image_result`：带完整字段的类型化结果，按不含协议的 URL 判重。
+- `main_result`、`image_result`：带完整字段的类型化结果，按不含协议的 URL 判重；
+- `key_value`：键值表结果，不与其他结果合并。
 
 ## 来源清单与维护
 

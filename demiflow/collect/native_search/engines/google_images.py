@@ -20,6 +20,7 @@ max_page = 50
 time_range_support = True
 language_support = True
 safesearch = True
+enable_http3 = True
 SAFE_SEARCH = {0: 'images', 1: 'active', 2: 'active'}
 
 
