@@ -81,8 +81,8 @@ def _mutate(store, ref, invoke, *, replacement=None):
 
 def _artifact_attacks(execution, root):
     from demiflow.execution.seal.runtime_bundle import fetch_runtime_bundle
-    from demiflow.execution.seal.plan import (verify_dataflow_program, load_dataflow,
-                                                _artifact_from_json)
+    from demiflow.execution.seal.plan import verify_dataflow_program, load_dataflow
+    from demiflow.execution.contracts.dataflow_codec import artifact_reference_from_fields
     from demiflow.execution.seal.business_sources import mount_sources
     from demiflow.execution.contracts.recovery_contract import identity
     store, bounds, sealed = execution._store, execution._bounds, execution._sealed
@@ -108,7 +108,7 @@ def _artifact_attacks(execution, root):
             store=store, bounds=bounds), code='INVALID_CONTRACT', text=message, ref=asdict(ref))
         assert not list(cache.iterdir()), 'failed extraction published or leaked a bundle'
         assert not (root / 'escaped.py').exists()
-    payload_ref = _artifact_from_json(manifest['payload_ref'])
+    payload_ref = artifact_reference_from_fields(manifest['payload_ref'])
     original_payload = _read(store, payload_ref, bounds)
     changed_payload = bytes((original_payload[0] ^ 1,)) + original_payload[1:]
     result['checksum'] = _mutate(store, payload_ref, lambda: _rejection(
@@ -132,7 +132,7 @@ def _artifact_attacks(execution, root):
     sources = manifest['business_sources']
     assert sources, 'the positive program must archive a real by-reference business module'
     source_name = next(iter(sources))
-    source_ref = _artifact_from_json(sources[source_name])
+    source_ref = artifact_reference_from_fields(sources[source_name])
     result['missing_historical_source'] = _mutate(store, source_ref, lambda: _rejection(
         lambda: mount_sources(sources, expected['imports'], store=store, cache=root/'missing-source-cache'),
         code='UNKNOWN_EFFECT', text='definitely absent', ref=asdict(source_ref), module=source_name))

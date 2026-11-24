@@ -549,7 +549,7 @@ from demiflow.execution.contracts.dataflow import (  # noqa: E402
     SourceCursor, SourceSnapshot, SourceSplit, StageSpec, WorkerAssignment, WorkerLease,
 )
 from demiflow.execution.contracts.dataflow_codec import (  # noqa: E402
-    compute_graph_digest, compute_physical_digest,
+    artifact_reference_from_fields, compute_graph_digest, compute_physical_digest,
 )
 from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: E402
 from demiflow.execution.checkpoint import coordinator as ckpt  # noqa: E402
@@ -1390,7 +1390,7 @@ def test_private_task_loads_large_program_with_small_checkpoint(env, opaque):
         action_program=None, code_identity={}),))
     node, = seal.stage_dataflow_programs(compiled, action=env.action, store=env.store, bounds=bounds).nodes
     manifest = _program_manifest(env.store, node.program_ref, bounds)
-    payload = seal._artifact_from_json(manifest["payload_ref"])
+    payload = artifact_reference_from_fields(manifest["payload_ref"])
     assert payload.size_bytes > bounds.max_state_bytes
     assert node.kernel.configuration.get("task_load_bytes") == (payload.size_bytes if opaque else None)
     program = seal.verify_dataflow_program(node.program_ref, expected_pin=manifest["code_identity"],
