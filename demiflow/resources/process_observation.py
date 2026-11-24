@@ -60,6 +60,29 @@ def inherited_unit():
     return (fd,)
 
 
+def held_unit():
+    """The unit lock a child of this process must inherit to stay inside the unit.
+
+    Empty outside a unit, and in a process that inherited the unit's environment
+    without the lock itself: only a descriptor still holding the flock is the lock.
+    """
+    value = os.environ.get(UNIT_ENV)
+    if value is None:
+        return ()
+    try:
+        proof = _read(f"/proc/self/fdinfo/{int(value)}")
+    except (OSError, ValueError):
+        return ()
+    held = any(line.startswith(b"lock:") and b"FLOCK" in line and b"WRITE" in line for line in proof.splitlines())
+    return (int(value),) if held else ()
+
+
+def visibility():
+    """The boot and PID namespace in which this process can observe process identities."""
+    return {"boot_id": _read("/proc/sys/kernel/random/boot_id").decode().strip(),
+            "pid_namespace": os.readlink("/proc/self/ns/pid")}
+
+
 def unit_lock_status(path, identity=None):
     """Observe the lock and its recorded inode on the same open descriptor."""
     fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
