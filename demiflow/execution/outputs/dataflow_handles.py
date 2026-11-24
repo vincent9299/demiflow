@@ -724,3 +724,19 @@ class StoredMaterializedHandle:
             # committed owners remain intact throughout a partial release.
             self._released = True
             self._count_proof = None
+
+
+def checkpoint_block_paths(run, action_id, sequence, *, reader, has_objects, sink, coordinator):
+    for fact in run.journal.iter_execution_commits(action_id, through_sequence=sequence):
+        # Historical rows also own object publications. Verify the complete
+        # native receipt lazily before exposing this generation's blocks.
+        receipt = sink.inspect(fact['prepared']['sinks']['output'],
+                                    coordinator._context(fact['commit_id']))
+        if receipt != fact['receipts']['output']:
+            from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+            raise RecoveryContractError('Completed receipt differs from artifact evidence')
+        value = receipt['data']
+        if has_objects:
+            value = value['rows']
+        for block in reader.block_entries(value):
+            yield str(run.directory / block['path'])

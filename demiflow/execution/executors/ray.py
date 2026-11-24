@@ -43,7 +43,6 @@ class RayDatasetExecutor(DatasetExecutor):
         self._policy, self._bounds = resolve_runtime_policy(
             {}, {}, provider=self.PROVIDER,
         )
-        self._hosted_scopes: list[Any] = []
         self._last_metadata: ExecutionMetadata | None = None
         self._run_ref = None
         self._closed = False
@@ -115,20 +114,5 @@ class RayDatasetExecutor(DatasetExecutor):
         return None
 
     def close(self) -> None:
-        # Release only this executor's hosted resource scope; unified ActionHandles
-        # are owned by their callers and other runs' pins are never touched here.
-        errors: list[BaseException] = []
-        for scope in self._hosted_scopes:
-            release = getattr(scope, "release", None)
-            close = getattr(scope, "close", None)
-            try:
-                if callable(release):
-                    release()
-                elif callable(close):
-                    close()
-            except BaseException as exc:  # noqa: BLE001 - aggregate, never swallow
-                errors.append(exc)
-        self._hosted_scopes.clear()
+        # Action handles own their real endpoints and published-result pins.
         self._closed = True
-        if errors:
-            raise errors[0]

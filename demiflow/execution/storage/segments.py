@@ -328,53 +328,7 @@ class RecordBlocks:
             self._check_workspace(metadata=self._retained_metadata((columns,)))
         self.columns = columns
 
-    def manifest_chunks(self, manifest):
-        from demiflow.execution.contracts.recovery_contract import document
-        if self._workspace_limit is None:
-            raw = document(manifest, self.bounds.max_control_bytes)
-            return len(raw), iter((raw,))
-        import json
-        from demiflow.execution.contracts.record_codec import _json_shape, _string_size
-        count = [0]
-        size, _ = _json_shape(manifest, self.bounds.max_control_bytes, count=count)
-        def token_size(value):
-            if isinstance(value, Mapping):
-                return max((max(_string_size(k), token_size(v)) for k, v in value.items()), default=2)
-            if type(value) in (list, tuple):
-                return max((token_size(v) for v in value), default=2)
-            if type(value) is float:
-                import math
-                if not math.isfinite(value):
-                    from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-                    raise RecoveryContractError('Nonfinite execution metadata')
-            return _json_shape(value, self.bounds.max_control_bytes)[0]
-        # No complete output string/list of chunks is constructed. Charge the
-        # JSON iterator's sorted-key/recursion state, current Unicode fragment,
-        # UTF-8 fragment and the writer's previous fragment before advancing.
-        workspace = 8 * token_size(manifest) + 64 * count[0] + 1024
-        self._check_workspace(workspace)
-        def chunks():
-            encoder = json.JSONEncoder(sort_keys=True, ensure_ascii=False, allow_nan=False,
-                                       separators=(',', ':')).iterencode(manifest)
-            total = 0
-            try:
-                while True:
-                    self._check_workspace(workspace)
-                    try:
-                        part = next(encoder)
-                    except StopIteration:
-                        break
-                    raw = part.encode('utf-8')
-                    total += len(raw)
-                    if total > size:
-                        raise DataflowError('INVALID_CONTRACT', 'terminal manifest changed while encoding')
-                    yield raw
-                    del part, raw
-                if total != size:
-                    raise DataflowError('INVALID_CONTRACT', 'terminal manifest differs from measured size')
-            finally:
-                encoder.close()
-        return size, chunks()
+
 
     def _check_workspace(self, extra=0, *, metadata=None):
         if self._workspace_limit is None:

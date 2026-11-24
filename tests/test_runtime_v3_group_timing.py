@@ -59,7 +59,7 @@ if mode=='crash':
   if name!='after_checkpoint_committed':return
   run=contexts[0];fact=run.journal.execution_commit(cid)
   if fact['action_id']!='action-1':return
-  from demiflow.execution.kernels import state_codec
+  from demiflow.execution.contracts import state_codec
   images=[]
   for path in (run.directory/'.dataflow-store').rglob('*'):
    if not path.is_file() or path.stat().st_size>run.limits['max_state_bytes']:continue

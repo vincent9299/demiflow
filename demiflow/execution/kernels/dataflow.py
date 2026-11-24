@@ -268,7 +268,8 @@ def invoke_unary(
             if position.get('queue_delivery_ref'):
                 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
                 raise RecoveryContractError('Task map must preserve exactly one row')
-            raise _err("INVALID_CONTRACT", "map callable must return a mapping row")
+        from demiflow.operators.arrow_batches import map_row
+        result = map_row(result)
         yield output_record(record.record_id, position, result, sequence, services)
     elif kind == "FilterOp":
         selected = instance(row)
@@ -280,15 +281,13 @@ def invoke_unary(
     elif kind == "FlatMapOp":
         occurrence = _occurrence(spec)
         values = instance(row)
-        if isinstance(values, Mapping):
-            raise _err("INVALID_CONTRACT", "flat_map callable must return an iterable of rows")
-        iterator = iter(values)
+        from demiflow.operators.arrow_batches import flat_map_iterator, flat_map_row
+        iterator = flat_map_iterator(values)
         budget = _OutputBudget(spec, services)
         try:
             for index, item in enumerate(iterator):
                 _check_stop(services)
-                if not isinstance(item, Mapping):
-                    raise _err("INVALID_CONTRACT", "flat_map output rows must be mappings")
+                item = flat_map_row(item)
                 child_id = _hash_id([RECORD_DOMAIN, record.record_id, occurrence, index])
                 out = output_record(child_id, position, item, sequence, services)
                 budget.charge(out)
@@ -328,8 +327,8 @@ def invoke_unary(
         budget = _OutputBudget(spec, services)
         for index, out_row in enumerate(rows):
             _check_stop(services)
-            if not isinstance(out_row, Mapping):
-                raise _err("INVALID_CONTRACT", "async map must return row, rows or None")
+            from demiflow.operators.arrow_batches import async_map_row
+            out_row = async_map_row(out_row)
             child = record.record_id if index == 0 else _hash_id([RECORD_DOMAIN, record.record_id, _occurrence(spec), index])
             out = output_record(child, position, out_row, sequence, services)
             budget.charge(out)
@@ -360,8 +359,7 @@ def invoke_unary(
             raise _err("BUDGET_EXCEEDED", "add_column batch coexistence exceeds budget")
         values = _batch_values(instance(batch))
         from demiflow.operators.relational import add_column_row
-        result = add_column_row(row, column, values)
-        yield output_record(record.record_id, position, result, sequence, services)
+        yield output_record(record.record_id, position, add_column_row(row, column, values), sequence, services)
     elif kind == "RandomSampleOp":
         from demiflow.operators.ordering import sample_fraction, sample_record
         fraction = sample_fraction(_cfg(spec, "fraction"))

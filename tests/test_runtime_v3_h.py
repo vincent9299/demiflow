@@ -22,6 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 
 import demiflow.execution.worker.mailbox as MAILBOX
+import demiflow.execution.contracts.worker as WORKER_CONTRACT
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -314,7 +315,7 @@ class FakeExecutor:
         self._closed = True
 
 
-class FakeRuntime:
+class FakeRuntime(WORKER_SERVICES.WorkerRuntime):
     def __init__(self, launch_spec, *, control=None, manifest_loader=None):
         self._control = control
         self._v3_config = dict(launch_spec.get('dataflow_v3') or {})
@@ -657,7 +658,7 @@ def test_h016(monkeypatch):
         ep._send_k3 = lambda kind, payload: calls.append(kind) or {}
         monkeypatch.setattr(B, 'recv_message', lambda sock: {'kind': 'Register'})
         monkeypatch.setattr(W, 'WorkerProtocolModel', FakeModel)
-        monkeypatch.setattr(WH, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
+        monkeypatch.setattr(WORKER_CONTRACT, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
         ep._connector.driver_socks = {'alloc-1': ep._sock}
         with pytest.raises(DataflowError, match='staged'):
             ep.activate(assignment)
@@ -760,7 +761,7 @@ def test_h021(monkeypatch):
         ep._build_launch = lambda a: ({'dataflow_v3': {}}, {'grant_id': 'g', 'scope_id': 'scope-1'}, {'sha256': oid('pin')})
         ep._open_scope = lambda *a: None
         ep._apply = lambda *a: None
-        monkeypatch.setattr(WH, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
+        monkeypatch.setattr(WORKER_CONTRACT, 'make_worker_control_assignment', lambda *a, **k: {'restore_point': None})
         assignment = mkassignment()
         ep._send_k3 = lambda kind, payload: ep._connector.handled.append(kind) or {}
         with pytest.raises(DataflowError, match='staged'):
@@ -1283,7 +1284,7 @@ def test_h043():
 
 
 def test_h044():
-    ctrl = WH.make_worker_control_assignment(mkassignment(), grant={'grant_id': 'grant-1', 'scope_id': 'action-1'},
+    ctrl = WORKER_CONTRACT.make_worker_control_assignment(mkassignment(), grant={'grant_id': 'grant-1', 'scope_id': 'action-1'},
                                              manifest_ref={'manifest_id': oid('pin'), 'sha256': oid('pin')},
                                              ready_deadline_ms=60000)
     assert ctrl['schema_version'] == 'demiflow.worker_assignment.v1'
@@ -1296,7 +1297,7 @@ def test_h044():
     assert ctrl['plan_revision'] == 2 and ctrl['expected_plan_revision'] == 2
     assert ctrl['restore_point'] == {'checkpoint_id': oid('cp')}
     a2 = NS(**{**mkassignment().__dict__, 'restore_refs': ()})
-    assert WH.make_worker_control_assignment(a2, grant={'grant_id': 'g', 'scope_id': 'action-1'}, manifest_ref={'manifest_id': 'm', 'sha256': 'm'}, ready_deadline_ms=1)['restore_point'] is None
+    assert WORKER_CONTRACT.make_worker_control_assignment(a2, grant={'grant_id': 'g', 'scope_id': 'action-1'}, manifest_ref={'manifest_id': 'm', 'sha256': 'm'}, ready_deadline_ms=1)['restore_point'] is None
 
 
 def test_h049():

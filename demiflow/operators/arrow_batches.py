@@ -202,3 +202,27 @@ def validate_prediction_row_schema(row, expected):
 def validate_prediction_count(count, input_count):
     if count != input_count:
         raise DataflowError('INVALID_CONTRACT', 'Predictor must return one result row for every input')
+
+
+def map_row(result):
+    if not isinstance(result, Mapping):
+        raise DataflowError('INVALID_CONTRACT', 'map callable must return a mapping row')
+    return result
+
+
+def flat_map_iterator(values):
+    if isinstance(values, Mapping):
+        raise DataflowError('INVALID_CONTRACT', 'flat_map callable must return an iterable of rows')
+    return iter(values)
+
+
+def flat_map_row(item):
+    if not isinstance(item, Mapping):
+        raise DataflowError('INVALID_CONTRACT', 'flat_map output rows must be mappings')
+    return item
+
+
+def async_map_row(row):
+    if not isinstance(row, Mapping):
+        raise DataflowError('INVALID_CONTRACT', 'async map must return row, rows or None')
+    return row

@@ -361,14 +361,14 @@
     {
       "module": "demiflow.data.dataset",
       "name": "_run_stream",
-      "status": "old",
-      "reason": "固定旧运行捕获了 Dataset 类。直接删除该方法会让真实 routed 非最终 cut 以不同程序身份拒绝恢复；其旧内部 benchmark 单独迁移。"
+      "status": "removed",
+      "reason": "已按真人乙授权退役私有执行入口；此类旧程序不保证跨版续跑，已发布结果冷读保留。"
     },
     {
-      "module": "demiflow.execution.worker.bootstrap",
+      "module": "demiflow.execution.hosts.worker_bootstrap",
       "name": "run_worker",
       "status": "live",
-      "reason": "v3 worker 的启动入口。函数里 execution 分支和它的导入属于旧执行器，批次 4 去掉；queue_transform 分支已在批次 2 去掉。"
+      "reason": "现行受控worker启动与传输入口归08；旧execution载荷在register之前拒绝。"
     }
   ],
   "removed": [

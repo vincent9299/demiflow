@@ -1,6 +1,8 @@
 """Streams implementation."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from demiflow.execution.contracts.dataflow import thaw_record_value, stage_resident_bytes
 from demiflow.execution.contracts.record_codec import loads_row
 
@@ -326,3 +328,27 @@ def materialize_row(record, *, store, bounds, assignment=None, measured=False, r
     if len(data) > limit:
         raise DataflowError("BUDGET_EXCEEDED", "single row exceeds max_row_bytes", context={"size": len(data)})
     return loads_row(data)
+
+
+def read_published_blocks(blocks, *, spilled_type, encoded_type):
+    import pickle
+    for block in blocks:
+        if isinstance(block, spilled_type):
+            with open(block.path, 'rb') as stream:
+                while True:
+                    try:
+                        row = pickle.load(stream)
+                    except EOFError:
+                        break
+                    yield row
+        elif isinstance(block, encoded_type):
+            for raw in block.rows:
+                yield pickle.loads(raw)
+        else:
+            yield from block
+
+
+def release_published_blocks(blocks, *, spilled_type):
+    for block in blocks:
+        if isinstance(block, spilled_type) and not block.durable:
+            Path(block.path).unlink(missing_ok=True)

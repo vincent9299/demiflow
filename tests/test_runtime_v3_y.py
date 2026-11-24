@@ -600,14 +600,9 @@ def test_y022(executor, source, plan):
     ENGINE.next_result = owned
     Dataset(source, plan, executor).materialize()._source.handle
     other = FakeResultHandle("materialize")
-    # The executor's own hosted resource scope IS released on close.
-    scope = FakeResultHandle("host")
-    executor._hosted_scopes.append(scope)
     executor.close()
-    assert scope.released is True
     assert owned.released is False
     assert other.released is False
-    assert executor._hosted_scopes == []
     assert executor._closed is True
     executor.close()
 
