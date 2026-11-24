@@ -289,10 +289,20 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         inspected.add(path)
         by_category.setdefault(category, []).append(diagnostic('DF-02', path, detail))
 
-    # Build bounded text corpus from active checked sources & bound parameters for reachability checks.
+    # Build bounded text corpus from active checked sources, bound parameters, and
+    # declared operators/data_tools so prompts/configs used on alternate branches are
+    # never falsely flagged as unused.
+    corpus_sources = set(active_sources)
+    for rel in _iter_tree_files(root, 'operators', exclude=exclude):
+        if rel.endswith('.py') and Path(rel).name != '__init__.py':
+            if rel in checked_sources or _has_declared_export(root / rel, '__demiflow_operators__'):
+                corpus_sources.add(rel)
+    for rel in _iter_tree_files(root, 'data_tools', exclude=exclude):
+        if rel.endswith('.py') and Path(rel).name != '__init__.py':
+            corpus_sources.add(rel)
     corpus_chunks = []
     corpus_budget = 4 * 1024 * 1024
-    for rel in sorted(active_sources):
+    for rel in sorted(corpus_sources):
         if corpus_budget <= 0:
             break
         fp = root / rel
