@@ -237,13 +237,30 @@ def test_move_path_blocks_moving_notebooks_out_and_docs_py_is_flagged(tmp_path):
     with pytest.raises(Exception):
         _run_project_layout(root, {'action': 'move_path', 'src': 'notebooks/root_nb.ipynb', 'dst': 'notebooks/renamed.ipynb'})
 
-    # Smuggling obsolete .py code under docs/ must fail DF-02
+    # Smuggling obsolete .py code, archives, or mirrored role dirs under docs/ must fail DF-02
     (root / 'docs' / 'legacy_dump').mkdir(parents=True)
     (root / 'docs' / 'legacy_dump' / 'old_flow.py').write_text('def old():\n    return 1\n')
+    (root / 'docs' / 'legacy_archive').mkdir(parents=True)
+    (root / 'docs' / 'legacy_archive' / 'old_flows.tar.gz').write_bytes(b'fake-tar')
+    (root / 'docs' / 'legacy_cfg' / 'configs').mkdir(parents=True)
+    (root / 'docs' / 'legacy_cfg' / 'configs' / 'exp.json').write_text('{"x": 1}\n')
+    (root / 'docs' / 'legacy_empty' / 'operators').mkdir(parents=True)
+    # Legitimate verification evidence under docs/ must NOT be flagged
+    (root / 'docs' / 'migration-20261118').mkdir(parents=True)
+    (root / 'docs' / 'migration-20261118' / 'REPORT.md').write_text('# Report\n')
+    (root / 'docs' / 'migration-20261118' / 'proof.json').write_text('{"ok": true}\n')
+    (root / 'docs' / 'migration-20261118' / 'check.log').write_text('passed\n')
+    (root / 'old_backup.tar.gz').write_bytes(b'fake-root-tar')
+
     report = check_project(root)
     assert report['status'] == 'failed'
     flagged = {d['path'] for d in report['diagnostics'] if d['rule'] == 'DF-02'}
-    assert 'docs/legacy_dump' in flagged or 'docs/legacy_dump/old_flow.py' in flagged
+    assert 'docs/legacy_dump' in flagged
+    assert 'docs/legacy_archive' in flagged
+    assert 'docs/legacy_cfg' in flagged
+    assert 'docs/legacy_empty' in flagged
+    assert 'old_backup.tar.gz' in flagged
+    assert not any(p.startswith('docs/migration-20261118') for p in flagged)
 
 
 def test_replay_anchors_user_message_on_long_turn(tmp_path):

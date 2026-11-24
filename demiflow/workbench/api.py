@@ -273,7 +273,7 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.snapshot_bytes=0
         from demiflow.workbench.graph.preview_snapshots import PreviewSnapshots
         self.plan_snapshots = PreviewSnapshots()
-        self.development_readers = threading.BoundedSemaphore(2)
+        self.development_readers = threading.BoundedSemaphore(6)
         self.development = None
         self.development_settings = None
         self.analysis = None
