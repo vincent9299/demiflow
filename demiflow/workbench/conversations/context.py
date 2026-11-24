@@ -117,11 +117,12 @@ PROJECT_LAYOUT_TOOL = dict(
         'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
         'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
         'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, legacy tables/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
-        'sync_env_example generates/updates root .env.example (empty-value template ONLY, never real secrets) from prompts/*.yaml api_key_env/base_url_env declarations (plus optional extra variable names) and ensures .gitignore ignores .env and .forge/.'
+        'sync_env_example generates/updates root .env.example (empty-value template ONLY, never real secrets) from prompts/*.yaml api_key_env/base_url_env declarations (plus optional extra variable names) and ensures .gitignore ignores .env and .forge/; '
+        'slim_manifest moves legacy Forge internal fields (format/id/platform/audit) from workspace.json into .forge/state.json and removes unused locations, leaving workspace.json as a clean human-readable project manifest.'
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
         'action': dict(type='string', enum=[
-            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path', 'sync_env_example',
+            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path', 'sync_env_example', 'slim_manifest',
         ]),
         'dirs': dict(type='array', items=dict(type='string')),
         'entry': dict(type='string'),
@@ -344,6 +345,8 @@ def _run_project_layout(project_root, arguments):
             atomic_write_text(example_path, content)
             gi_updated = ensure_gitignore_env(root)
         return dict(status='synced', path='.env.example', variables=sorted_names, gitignore_updated=gi_updated)
+    if action == 'slim_manifest':
+        return forge_project.slim_project_manifest(root)
     reject('Unsupported manage_project_layout action', 'invalid_request')
 
 
@@ -411,6 +414,8 @@ class BridgeServer:
             recorded.add('.env.example')
             if answer.get('gitignore_updated'):
                 recorded.add('.gitignore')
+        elif action == 'slim_manifest':
+            recorded.add('workspace.json')
         if recorded:
             with self.lock:
                 self.authorized_layout_paths.update(recorded)

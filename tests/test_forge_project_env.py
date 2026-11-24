@@ -45,10 +45,7 @@ def _make_prompt_project(root: Path, *, api_key_env: str = 'DEMO_LLM_API_KEY', b
         '    content: hello\n',
         encoding='utf-8',
     )
-    (root / 'configs/demo.json').write_text(
-        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {}}\n',
-        encoding='utf-8',
-    )
+    (root / 'configs/demo.json').write_text('{}\n', encoding='utf-8')
     from demiflow.forge.project import register_flow
     register_flow(root, 'flows/demo.py:run', params='configs/demo.json')
     return root

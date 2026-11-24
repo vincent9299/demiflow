@@ -1221,7 +1221,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         # to full-project inspection instead of hitting the changed-path cap.
                         check_paths = () if len(changed_paths) > 256 else changed_paths
                         report = check_project(project['root'], paths=check_paths,
-                                               reference=coding, exclude=excluded)
+                                               reference=coding, exclude=excluded, include_hygiene=True)
                         if (sdk_identity(coding['catalog']) != coding['sdk_revision']
                                 or capture(project['root'], watched, exclude=excluded) != after):
                             reject('SDK or project source changed before checks could be reported', 'conflict')
