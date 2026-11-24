@@ -7,17 +7,28 @@ import subprocess
 
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
-from demiflow.forge.io import no_symlinks
-from demiflow.forge.project_io import relative_path
+from demiflow.forge.io import atomic_write_text, no_symlinks
+from demiflow.forge.project_io import control_lock, relative_path
 
 DIRECTORY_ENTRIES = 4096
 DIRECTORY_BYTES = 512 * 1024
 DOCUMENT_BYTES = 1024 * 1024
 DIFF_LIMIT = 200
 MARKDOWN = {'.md', '.markdown'}
-TEXT = MARKDOWN | {'.py', '.js', '.ts', '.css', '.html', '.sh', '.json', '.yaml', '.yml', '.toml', '.txt', '.csv'}
+TEXT = MARKDOWN | {'.py', '.js', '.ts', '.css', '.html', '.sh', '.json', '.yaml', '.yml', '.toml', '.txt', '.csv', '.ini', '.cfg'}
+VISIBLE_DOTFILES = frozenset({
+    '.env', '.env.example', '.env.local', '.env.sample',
+    '.gitignore', '.dockerignore', '.editorconfig',
+})
+SECRET_DOTFILES = frozenset({'.env', '.env.local'})
+READONLY_TOP_DIRS = frozenset({'data', 'runs', 'logs', 'tables', 'notebooks'})
+READONLY_ROOT_FILES = frozenset({'workspace.json'})
 SKIP = {'node_modules', '__pycache__', 'venv', 'env'}
 CHANGE_SKIP = SKIP | {'runs', 'data', 'datasets', 'outputs', 'results', 'logs'}
+
+
+def _is_text_filename(name: str) -> bool:
+    return name in VISIBLE_DOTFILES or Path(name).suffix.lower() in TEXT
 
 
 def _path(root, value, *, directory=False):
@@ -26,10 +37,34 @@ def _path(root, value, *, directory=False):
     if not isinstance(value, str) or len(value.encode('utf-8')) > 1024 or any(ord(c) < 32 for c in value):
         raise ForgeError('Invalid document path', code='invalid_request')
     parts = value.split('/')
-    if (len(parts) > 24 or any(part.startswith('.') or part in SKIP or
-                              part.endswith('.lance') for part in parts)):
+    if len(parts) > 24:
         raise ForgeError('Document path is outside the visible project directory', code='invalid_request')
+    for idx, part in enumerate(parts):
+        if part in SKIP or part.endswith('.lance'):
+            raise ForgeError('Document path is outside the visible project directory', code='invalid_request')
+        if part.startswith('.'):
+            # Allow only explicit project-config dotfiles as the final file segment; never hidden directories.
+            if directory or idx != len(parts) - 1 or part not in VISIBLE_DOTFILES:
+                raise ForgeError('Document path is outside the visible project directory', code='invalid_request')
     return relative_path(root, value)
+
+
+def editable_status(root, path):
+    """Return (writable, readonly_reason) for lightweight workbench text editing."""
+    try:
+        target = _path(root, path)
+    except ForgeError:
+        return False, '路径不在可编辑项目目录内'
+    parts = path.split('/')
+    if parts[0] in READONLY_TOP_DIRS:
+        return False, '受控目录/数据文件仅支持只读查看'
+    if len(parts) == 1 and parts[0] in READONLY_ROOT_FILES:
+        return False, 'workspace.json 由 Forge 控制台维护，不支持文本直改'
+    if not _is_text_filename(parts[-1]):
+        return False, '该文件类型仅支持只读查看'
+    if target.is_symlink():
+        return False, '符号链接不支持编辑'
+    return True, None
 
 
 def listing(root, path='', offset=0, limit=50, *, all_files=False):
@@ -43,15 +78,18 @@ def listing(root, path='', offset=0, limit=50, *, all_files=False):
                 size += len(entry.name.encode('utf-8'))
                 if index >= DIRECTORY_ENTRIES or size > DIRECTORY_BYTES:
                     raise ForgeError('Document directory exceeds listing budget', code='resource_limit')
-                if entry.name.startswith('.') or entry.name in SKIP or entry.name.endswith('.lance') or entry.is_symlink():
+                if entry.name in SKIP or entry.name.endswith('.lance') or entry.is_symlink():
                     continue
+                if entry.name.startswith('.'):
+                    if not all_files or entry.name not in VISIBLE_DOTFILES or not entry.is_file(follow_symlinks=False):
+                        continue
                 item = '/'.join(filter(None, [path, entry.name]))
                 if len(item.encode('utf-8')) > 1024 or len(item.split('/')) > 24 or '\\' in item:
                     continue
                 kind = ('directory' if entry.is_dir(follow_symlinks=False) else
                         'markdown' if Path(entry.name).suffix.lower() in MARKDOWN and entry.is_file(follow_symlinks=False) else None)
                 if all_files and kind is None and entry.is_file(follow_symlinks=False):
-                    kind = 'text' if Path(entry.name).suffix.lower() in TEXT else 'file'
+                    kind = 'text' if _is_text_filename(entry.name) else 'file'
                 if kind:
                     rows.append(dict(name=entry.name, path=item, kind=kind))
         rows.sort(key=lambda row: (row['kind'] != 'directory', row['name'].casefold(), row['name']))
@@ -92,8 +130,11 @@ def search_files(root, query, *, limit=50):
                 truncated = True
                 break
             name = entry.name
-            if name.startswith('.') or name in SKIP or name.endswith('.lance') or entry.is_symlink():
+            if name in SKIP or name.endswith('.lance') or entry.is_symlink():
                 continue
+            if name.startswith('.'):
+                if name not in VISIBLE_DOTFILES or not entry.is_file(follow_symlinks=False):
+                    continue
             item = '/'.join(filter(None, [rel_dir, name]))
             if len(item.encode('utf-8')) > 1024 or len(item.split('/')) > 24 or '\\' in item:
                 continue
@@ -107,7 +148,7 @@ def search_files(root, query, *, limit=50):
                 continue
             if needle in name.casefold() or needle in item.casefold():
                 suffix = Path(name).suffix.lower()
-                kind = 'markdown' if suffix in MARKDOWN else ('text' if suffix in TEXT else 'file')
+                kind = 'markdown' if suffix in MARKDOWN else ('text' if _is_text_filename(name) else 'file')
                 matches.append((0 if needle in name.casefold() else 1, item.casefold(), dict(name=name, path=item, kind=kind)))
                 if len(matches) >= limit * 4:
                     truncated = True
@@ -123,7 +164,7 @@ def search_files(root, query, *, limit=50):
 
 def read(root, path, *, project_text=False):
     target = _path(root, path)
-    if project_text and target.suffix.lower() not in TEXT:
+    if project_text and not _is_text_filename(target.name):
         raise ForgeError('File type cannot be previewed', code='invalid_request')
     if not project_text and target.suffix.lower() not in MARKDOWN:
         raise ForgeError('Only Markdown documents can be opened here', code='invalid_request')
@@ -250,8 +291,10 @@ def git_changes(root):
 def file_diff(root, path):
     """Read bounded current file text and git HEAD baseline for side/unified diff viewing."""
     target = _path(root, path)
-    if target.suffix.lower() not in TEXT:
+    if not _is_text_filename(target.name):
         raise ForgeError('File type cannot be previewed', code='invalid_request')
+    writable, readonly_reason = editable_status(root, path)
+    env_exists = (Path(root).absolute() / '.env').is_file() if path == '.env.example' else None
     modified, sha256, exists = '', '', False
     if target.exists():
         try:
@@ -261,12 +304,18 @@ def file_diff(root, path):
             exists = True
         except (OSError, UnicodeError) as exc:
             raise ForgeError('Document must be a readable UTF-8 file', code='invalid_request') from exc
+    else:
+        writable, readonly_reason = False, '文件不存在或已删除'
     repo = _git_repo(root)
     if repo is None:
         if not exists:
             raise ForgeError('Document no longer exists', code='not_found')
-        return dict(path=path, is_git=False, status='clean', sha256=sha256,
-                    original=None, modified=modified, changed=False, added=0, removed=0)
+        result = dict(path=path, is_git=False, status='clean', sha256=sha256,
+                      original=None, modified=modified, changed=False, added=0, removed=0,
+                      writable=writable, readonly_reason=readonly_reason)
+        if env_exists is not None:
+            result['env_exists'] = env_exists
+        return result
     base, _, prefix, _ = repo
     git_rel = prefix + path
     head_proc = _git_run(base, ['show', 'HEAD:' + git_rel])
@@ -300,6 +349,67 @@ def file_diff(root, path):
                 added += 1
             elif line.startswith('-') and not line.startswith('---'):
                 removed += 1
-    return dict(path=path, is_git=True, status=status, sha256=sha256,
-                original=original if status in {'M', 'D', 'clean'} else '',
-                modified=modified, changed=status != 'clean', added=added, removed=removed)
+    result = dict(path=path, is_git=True, status=status, sha256=sha256,
+                  original=original if status in {'M', 'D', 'clean'} else '',
+                  modified=modified, changed=status != 'clean', added=added, removed=removed,
+                  writable=writable, readonly_reason=readonly_reason)
+    if env_exists is not None:
+        result['env_exists'] = env_exists
+    return result
+
+
+def save_file(root, path, text, *, expected_sha256=None, authorize=None):
+    """Atomically save an editable UTF-8 project text file with CAS digest protection."""
+    if not isinstance(text, str) or '\x00' in text:
+        raise ForgeError('文件内容必须是合法 UTF-8 文本', code='invalid_request')
+    raw = text.encode('utf-8')
+    if len(raw) > DOCUMENT_BYTES:
+        raise ForgeError('文件内容超过 1 MiB 大小限制', code='resource_limit')
+    writable, reason = editable_status(root, path)
+    if not writable:
+        raise ForgeError(reason or '该文件不支持通过编辑器直接修改', code='operation_rejected')
+    root = Path(root).absolute()
+    with control_lock(root):
+        if authorize is not None:
+            authorize()
+        target = _path(root, path)
+        no_symlinks(target)
+        if not target.exists():
+            raise ForgeError('目标文件不存在', code='not_found')
+        if not target.is_file():
+            raise ForgeError('目标路径不是普通文件', code='invalid_request')
+        current_raw = read_bounded(target, DOCUMENT_BYTES)
+        current_sha = hashlib.sha256(current_raw).hexdigest()
+        if expected_sha256 is not None and expected_sha256 != current_sha:
+            raise ForgeError('文件已被外部修改，请先刷新后再保存', code='conflict')
+        atomic_write_text(target, text)
+        if target.name in SECRET_DOTFILES:
+            os.chmod(target, 0o600)
+    return dict(path=path, sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+
+
+def init_env_file(root, *, authorize=None):
+    """Create project-local .env from .env.example without overwriting an existing .env."""
+    from demiflow.forge.project_env import ensure_gitignore_env
+
+    root = Path(root).absolute()
+    with control_lock(root):
+        if authorize is not None:
+            authorize()
+        env_path = no_symlinks(root / '.env')
+        if env_path.exists():
+            if not env_path.is_file():
+                raise ForgeError('.env 不是普通文件', code='conflict')
+            return dict(path='.env', created=False, already_exists=True)
+        example_path = no_symlinks(root / '.env.example')
+        if example_path.is_file():
+            try:
+                content = read_bounded(example_path, 64 * 1024).decode('utf-8')
+            except (OSError, UnicodeError) as exc:
+                raise ForgeError('无法读取 .env.example 模板', code='invalid_request') from exc
+        else:
+            content = '# Project local runtime environment (never commit real secrets)\n'
+        atomic_write_text(env_path, content)
+        os.chmod(env_path, 0o600)
+        ensure_gitignore_env(root)
+    return dict(path='.env', created=True, already_exists=False)

@@ -142,6 +142,8 @@ POST_FIELDS = {
     'development-settings': ({'expected','provider','model','effort','authentication','base_url','api_key'}, set()),
     'notebook-open': (set(), {'create'}),
     'flow-arguments-save': ({'entry', 'revision', 'source_sha256', 'arguments'}, set()),
+    'project-file-save': ({'path', 'text'}, {'expected_sha256'}),
+    'project-env-init': (set(), set()),
     'project-capabilities': ({'workspace_id','expected','capabilities'}, set()),
     'parameter-preview': ({'path','expected_sha256','graph_binding','replace'}, set()),
     'parameters-update': ({'path','expected_sha256','proposed_sha256','graph_binding','replace'}, set()),
@@ -608,7 +610,8 @@ class Handler(BaseHTTPRequestHandler):
                 or not re.fullmatch(r'[0-9]{1,10}', lengths[0])):
             raise ForgeError('A single Content-Length is required', code='invalid_request')
         length = int(lengths[0])
-        if not 0 < length <= BODY_BYTES:
+        max_body = (1024 * 1024 + 8192) if name == 'project-file-save' else BODY_BYTES
+        if not 0 < length <= max_body:
             raise ForgeError('Request body exceeds budget or is empty', code='resource_limit')
         raw = self.rfile.read(length)
         if len(raw) != length:
@@ -626,6 +629,17 @@ class Handler(BaseHTTPRequestHandler):
             return validate_request(request)
         if name == 'development-settings' or name in development_http.POST_FIELDS or name in analysis_http.POST_FIELDS:
             # The fixed services own their closed, typed value schemas.
+            return request
+        if name == 'project-file-save':
+            path_val = request.get('path')
+            text_val = request.get('text')
+            sha_val = request.get('expected_sha256')
+            if type(path_val) is not str or not path_val or len(path_val.encode()) > 1024:
+                raise ForgeError('Invalid path field', code='invalid_request')
+            if type(text_val) is not str or len(text_val.encode()) > 1024 * 1024:
+                raise ForgeError('Invalid text field', code='invalid_request')
+            if sha_val is not None and (type(sha_val) is not str or (sha_val and not re.fullmatch(r'[0-9a-f]{64}', sha_val))):
+                raise ForgeError('Invalid expected_sha256 field', code='invalid_request')
             return request
         for key, value in request.items():
             if name == 'plan-preview' and key == 'params' and value is None:
@@ -796,6 +810,9 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path == '/api/project-file-diff':
                     from demiflow.workbench.projects import documents
                     value = documents.file_diff(root, query['path'])
+                    if not permissions.get('config_write'):
+                        value['writable'] = False
+                        value['readonly_reason'] = '当前项目未开启写权限'
                 elif url.path == '/api/project-changes':
                     from demiflow.workbench.projects import documents
                     value = documents.git_changes(root)
@@ -985,7 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(analysis_http.post(self.server,key,root,name,self._body(name),consumer_closed=self._consumer_closed))
                 return
             permission=(run_operations.HTTP_POST[name].permission if name in run_operations.HTTP_POST else
-                        'config_write' if name in {'flow-register','parameter-preview','parameters-update','flow-arguments-save'} else
+                        'config_write' if name in {'flow-register','parameter-preview','parameters-update','flow-arguments-save','project-file-save','project-env-init'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
             if name not in {'inspect','plan-preview','plan-node-detail','plan-pipeline-source','audit-check','project-check','run-admission'} and not permissions[permission]:
@@ -999,8 +1016,8 @@ class Handler(BaseHTTPRequestHandler):
                 # it does not occupy the separate source/compilation worker.
                 self._send(self.server.plan_snapshots.read(root, **request))
                 return
-            with self._work(control=name=='run-cancel', project=name=='flow-arguments-save'):
-                if name in {'flow-register', 'flow-arguments-save', 'parameter-preview', 'parameters-update'}:
+            with self._work(control=name=='run-cancel', project=name in {'flow-arguments-save', 'project-file-save', 'project-env-init'}):
+                if name in {'flow-register', 'flow-arguments-save', 'parameter-preview', 'parameters-update', 'project-file-save', 'project-env-init'}:
                     def authorize():
                         _, current_root, current_permissions = self.server.resolve(self.path)
                         if current_root != root or not current_permissions['config_write']:
@@ -1011,6 +1028,14 @@ class Handler(BaseHTTPRequestHandler):
                     elif name == 'flow-arguments-save':
                         from demiflow.workbench.projects.flow_arguments import save
                         value = save(root, authorize=authorize, **request)
+                    elif name == 'project-file-save':
+                        from demiflow.workbench.projects import documents
+                        value = documents.save_file(root, request['path'], request['text'],
+                                                    expected_sha256=request.get('expected_sha256'),
+                                                    authorize=authorize)
+                    elif name == 'project-env-init':
+                        from demiflow.workbench.projects import documents
+                        value = documents.init_env_file(root, authorize=authorize)
                     else:
                         from demiflow.workbench.graph import parameters
                         authorize()
