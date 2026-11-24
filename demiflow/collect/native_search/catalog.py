@@ -5,6 +5,10 @@ default settings; ``SearchConfig.engines`` entries override any of them.
 ``disabled`` marks sources that are not part of a default selection (selection
 is always explicit in ``SearchConfig``). Names are kept stable because stored
 configurations and receipts refer to them.
+
+``network`` names the network a source sends through (``worker.source_networks``):
+yandex images uses the one of yandex, and brave.images and qwant images use the
+networks ``brave`` and ``qwant`` defined below, as these three always did.
 """
 
 SOURCES = (
@@ -20,18 +24,18 @@ SOURCES = (
     # image search engines
     {'name': 'google images', 'engine': 'google_images', 'shortcut': 'goi', 'disabled': True},
     {'name': 'bing images', 'engine': 'bing_images', 'shortcut': 'bii'},
-    {'name': 'yandex images', 'engine': 'yandex', 'categories': 'images', 'search_type': 'images',
-     'shortcut': 'ydi', 'disabled': True},
+    {'name': 'yandex images', 'engine': 'yandex', 'network': 'yandex', 'categories': 'images',
+     'search_type': 'images', 'shortcut': 'ydi', 'disabled': True},
     {'name': 'baidu images', 'engine': 'baidu', 'baidu_category': 'images', 'categories': ['images'],
      'shortcut': 'bdi', 'disabled': True},
-    {'name': 'brave.images', 'engine': 'brave', 'brave_category': 'images', 'categories': ['images', 'web'],
-     'shortcut': 'brimg'},
+    {'name': 'brave.images', 'engine': 'brave', 'network': 'brave', 'brave_category': 'images',
+     'categories': ['images', 'web'], 'shortcut': 'brimg'},
     {'name': 'sogou images', 'engine': 'sogou_images', 'shortcut': 'sogoui', 'disabled': True},
     {'name': 'quark images', 'engine': 'quark', 'quark_category': 'images', 'categories': ['images'],
      'shortcut': 'qki', 'disabled': True},
     {'name': 'duckduckgo images', 'engine': 'duckduckgo_images', 'categories': ['images'], 'shortcut': 'ddi'},
-    {'name': 'qwant images', 'engine': 'qwant', 'qwant_categ': 'images', 'categories': ['images', 'web'],
-     'shortcut': 'qwi', 'disabled': True},
+    {'name': 'qwant images', 'engine': 'qwant', 'network': 'qwant', 'qwant_categ': 'images',
+     'categories': ['images', 'web'], 'shortcut': 'qwi', 'disabled': True},
     {'name': 'pinterest', 'engine': 'pinterest', 'shortcut': 'pin'},
     # open image collections
     {'name': 'wikicommons.images', 'engine': 'wikicommons', 'categories': 'images', 'wc_search_type': 'image',
@@ -42,6 +46,9 @@ SOURCES = (
     {'name': 'openverse', 'engine': 'openverse', 'categories': 'images', 'shortcut': 'opv'},
     {'name': 'unsplash', 'engine': 'unsplash', 'shortcut': 'us'},
 )
+
+# Network names that are no source of this catalog: the transport defaults of the adapter they name apply.
+NETWORKS = {'brave': {'engine': 'brave'}, 'qwant': {'engine': 'qwant'}}
 
 
 def entries():

@@ -91,35 +91,72 @@ def bootstrap(config):
     """Load every source and its network; a source that cannot be used gets a receipt status in ``errors``."""
     from . import worker_network
     from .sources import SourceLoadError, load
-    loaded, errors, networks, shared = {}, {}, {}, {}
+    loaded, errors = {}, {}
     for settings in config['sources']:
         name = settings['name'].lower()
         try:
             # Sources with an explicit backend search through google_search, with their adapter's network.
-            module = load(settings, config['timeout_s'])
-            declared = getattr(module, 'network', None)
-            if isinstance(declared, str):
-                shared[name] = declared
-            else:
-                networks[name] = worker_network.Network(worker_network.network_options(
-                    config['outgoing'], declared, vars(module)))
+            loaded[name] = load(settings, config['timeout_s'])
         except SourceLoadError as exc:
             errors[name] = exc.status
         except (ImportError, SystemExit):
             errors[name] = 'dependency_error'
         except Exception:
             errors[name] = 'configuration_error'
-        else:
-            loaded[name] = module
-    for name, other in shared.items():
-        # Sources may share the network (options, rotation and clients) of another declared source.
-        if other in networks:
-            networks[name] = networks[other]
-        else:
-            errors[name] = 'configuration_error'
-            loaded.pop(name, None)
-    worker_network.install(config, send, receive, networks)
+    worker_network.install(config, send, receive, source_networks(config, loaded, errors))
     return loaded, errors
+
+
+def source_networks(config, loaded, errors):
+    """The network of every loaded source; a source whose network cannot be built gets a status in ``errors``.
+
+    A source has a network of its own, built from its ``network`` mapping or else from its transport
+    options. When ``network`` is a name, the source sends through that network instead and its own transport
+    options are not consulted. A name is, in this order: a declared source (both then share options, rotation
+    and clients); a catalog source or catalog network that is not declared (its default settings apply, it is
+    not selected for search); ``ipv4`` or ``ipv6`` (bound to that address family); a session-wide network
+    from ``outgoing['networks']``.
+    """
+    from . import worker_network
+    from .catalog import NETWORKS, entries
+    from .sources import transport_defaults
+    outgoing = config['outgoing']
+    declared = {settings['name'].lower() for settings in config['sources']}
+    defaults = {**NETWORKS, **entries()}
+    session = {'ipv4': {'local_addresses': '0.0.0.0'}, 'ipv6': {'local_addresses': '::'}}
+    if isinstance(outgoing.get('networks'), dict):
+        session.update(outgoing['networks'])
+    named = {}
+
+    def build(options, attributes=None):
+        return worker_network.Network(worker_network.network_options(outgoing, options, attributes))
+
+    def of(attributes, path):
+        options = attributes.get('network')
+        return by_name(options, path) if isinstance(options, str) else build(options, attributes)
+
+    def by_name(name, path):
+        if name in path:
+            raise ValueError('Search networks name each other: ' + name)
+        if name not in named:
+            if name in declared:
+                named[name] = of(vars(loaded[name]), path + (name,))  # a source that failed to load has none
+            elif name in defaults:
+                named[name] = of(transport_defaults({**defaults[name], 'name': name}), path + (name,))
+            elif name in session:
+                named[name] = build(session[name])
+            else:
+                raise ValueError('Unknown search network: ' + name)
+        return named[name]
+
+    networks = {}
+    for name in list(loaded):
+        try:
+            networks[name] = by_name(name, ())
+        except (Exception, SystemExit):
+            errors[name] = 'configuration_error'
+            del loaded[name]
+    return networks
 
 
 def accept_language(locale):

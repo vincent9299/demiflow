@@ -25,7 +25,7 @@
 
 **收窄**
 
-- **来源名**：内置来源名由 344 个减为上列 21 个，其余名称报 `Unknown search source`。需要更多来源时，可用 `search_url` 连接自部署的 SearXNG，或用 `module=` 自定义来源。
+- **来源名**：内置来源名由 344 个减为上列 21 个，其余名称报 `Unknown search source`。需要更多来源时，可用 `search_url` 连接自部署的 SearXNG，或用 `module=` 自定义来源。来源的 `network` 写成这些已移除的名称时，该来源报 `configuration_error`；其余网络名的含义不变（见“请求与来源配置”）。
 - **处理器族**：只保留 online 与 offline 两类。online_dictionary、online_currency、online_url_search 返回 `unsupported_processor`。
 - **非 HTTP 来源**：只保留只读 SQLite。MySQL、MariaDB、PostgreSQL、MongoDB、Valkey、command 来源及 `search-mysql`、`search-mariadb`、`search-postgresql`、`search-mongodb` extras 一并移除；`[search]` 只含 httpx、babel、lxml、curl_cffi。
 - **自定义适配器契约**：
@@ -38,10 +38,9 @@
   - 不再注入 DemiFlow 的 wikisearch，默认 engines 改为 `('wikipedia',)`。名单里的来源是否可用由外部部署决定；DemiFlow 自己的 wikisearch 只作为原生来源提供。
   - 外部运行时通过它自己的入口启动（`python -m searx.webapp`），DemiFlow 的代码不再导入它。
   - 服务指纹不再包含 wikisearch 适配器字节，启动命令也变了：同一 profile 的设置文件名、`secret_key` 和启动配置随之改变，运行中的旧服务按服务流程换版重启。
-- **来源的 `network` 引用**：字符串只能写本次已声明的来源（共用其网络选项），或用映射直接写选项。不再自动加载被引用但未声明的目录来源，也不再识别 SearXNG 内置的 `ipv4`/`ipv6` 网络和 `outgoing.networks` 具名网络；源地址绑定用 `local_addresses`。内置目录已不含这类引用（旧目录中 qwant images→qwant、yandex images→yandex、brave.images→brave 只共享连接池，没有网络选项）。
 - **网络选项**：
   - 来源级生效的是 `proxies`、`verify`、`enable_http`、`enable_http2`、`enable_http3`、`local_addresses`、`max_redirects`，含义与此前相同：`proxies` 可以是一个 URL，或“模式 → URL 或 URL 列表”的映射；`local_addresses` 可以是一个地址、列表或网段；列表逐请求轮换。
-  - 会话级（`SearchConfig.networks` 的出口配置）生效的是 `proxies`、`verify`、`enable_http2`、`source_ips`、`max_redirects`。
+  - 会话级（`SearchConfig.networks` 的出口配置）生效的是 `proxies`、`verify`、`enable_http2`、`source_ips`、`max_redirects`，以及 `networks`（可供来源按名字引用的具名网络）。
   - 来源映射里的 `retries`、`retry_on_http_error`、`request_timeout`、`max_connections`、`using_tor_proxy` 接受但不生效：重试由 demiflow 统一控制，超时用 `timeout_s`，每个工作进程一次只做一个交换，不再校验 Tor 出口；其他未知选项报配置错误。
 - **`search_source_inventory()`**：返回新结构（`runtime`、`scope`、`sources`、`platform_sources`），由 `tools/build_native_search_inventory.py` 生成。
 - **Pexels**：不再内置 Web 端密钥。页面取不到密钥时，使用来源配置的 `api_key`（名称不变）；没有配置时该来源以 `parse_error` 结束，不发搜索请求。
@@ -95,12 +94,13 @@
   - 响应解析：21 个来源的合成响应。
 - 来源能力：回执记录的 `capabilities` 及由它得出的 `ignored_parameters`，21 个来源都与旧实现一致。
 - 其中的一个子集固化在 `tests/test_native_search_golden.py`：合并 35 例、请求 983 例、21 个来源的能力，期望值来自旧实现。
-- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容、回执和合并结果，共 9 组 419 个场景：
+- 真实发送：上面的请求对照比较的是发送前生成的参数。另外让新旧两版 worker 对本机服务真正发出请求，比较服务端实际收到的内容（含请求到达的是目的地还是代理）、回执和合并结果，共 12 组 444 个场景：
   - HTTP 层 92 个：指纹开关、客户端选项、Cookie、重定向、请求体、错误状态、代理与本地地址轮换；
   - 超时、会话级出口配置、TLS 与自定义 CA 共 13 个；
+  - 网络名 25 个：引用已声明的来源、未声明的目录来源、`ipv4`/`ipv6`、会话级具名网络，以及 yandex images、brave.images、qwant images 默认的网络名；
   - 适配器加载 59 个，SQLite 来源 27 个；
   - 21 个内置来源、2 个显式 Google 后端和 15 个平台图片模块共 228 个，只把最终目的地换成本机服务。
-  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 289 个场景固化在 `tests/test_native_search_exchange.py`。
+  - 结果：除按设计随机的值（浏览器 User-Agent、Qwant 的分组参数）、已声明的变化，以及 2 个只涉及无效适配器的情形（`about` 的未知键被接受；`search` 返回文本时记录的异常名不同）外，没有差异。其中 313 个场景固化在 `tests/test_native_search_exchange.py`。
 - 各来源的语言参数表（`locales.py`）由旧实现对上述语言标签及其大小写写法发出的请求参数反推得到。
 
 ## 安装与最小调用
@@ -220,7 +220,7 @@ Dataset 管理 session 关闭。直接使用异步 `WebSession.search` 时，调
 | `engine_data` | 按来源名组织的分页 continuation 数据；下一页可使用 `response_json.engine_data`。 |
 | `network` | 选择 SearchConfig.networks 中的请求网络配置，默认 `default`；不接受逐行明文认证参数。 |
 
-`SearchConfig.engines` 支持内置来源名和来源配置字典。字典中的字段覆盖目录默认值和适配器模块的同名选项，包括 `engine`、`categories`、`weight`、`timeout`、`base_url` 及适配器自己的选项（例如平台图片模块的 `min_short_side`）。`network` 可写选项映射（如 `{"proxies": {"all://": Secret("ENV")}}`）或另一个已声明来源的名字。显式选择会启用目录中默认 disabled 的来源。这只代表允许加载，不证明当前可用。
+`SearchConfig.engines` 支持内置来源名和来源配置字典。字典中的字段覆盖目录默认值和适配器模块的同名选项，包括 `engine`、`categories`、`weight`、`timeout`、`base_url` 及适配器自己的选项（例如平台图片模块的 `min_short_side`）。`network` 可写选项映射（如 `{"proxies": {"all://": Secret("ENV")}}`）或一个网络名（见下文）。显式选择会启用目录中默认 disabled 的来源。这只代表允许加载，不证明当前可用。
 
 ```python
 search = SearchConfig(
@@ -241,7 +241,18 @@ search = SearchConfig(
 
 JSON 配置可用 `SearchConfig.from_mapping(mapping)`，或直接传给 `WebSession(search=mapping)`。例如 `{"engines":["wikisearch"],"proxy":{"secret_env":"SEARCH_PROXY"}}`。精确的 `secret_env` 映射会递归恢复为 Secret；声明和快照不读取环境变量，执行时才解析。语言必须是有效 locale；业务可在配置声明一次，然后写入每条请求。
 
-每个来源有自己的网络选项；`network` 写另一个已声明来源的名字时共用其网络选项，不会因此额外选择该来源执行搜索。生效的选项和不再支持的具名网络见“兼容性声明”。只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。
+每个来源有自己的网络选项，生效的选项见“兼容性声明”。来源的 `network` 有两种写法：
+
+- **映射**：用映射里的选项建这个来源自己的网络。
+- **名字**：改走那个网络，这个来源自己写的网络选项（`proxies`、`verify` 等）不再参与。名字按下面的顺序解析，都找不到时该来源报 `configuration_error`：
+  1. 本次声明的来源：两者共用同一个网络（选项、代理与本地地址的轮换、连接）；
+  2. 目录里没有声明的来源，以及目录网络 `brave`、`qwant`：按其默认设置建网络，不会因此被选中执行搜索；
+  3. `ipv4`、`ipv6`：会话级选项加上绑定对应地址族；
+  4. 会话级出口配置里 `networks` 键下的具名网络。
+
+目录里有三个来源默认写了网络名：yandex images 走 yandex 的网络，brave.images、qwant images 走 `brave`、`qwant` 网络。所以同时声明 yandex 和 yandex images 时，给 yandex 配的代理对 yandex images 同样生效；要让图片来源单独走别的出口，给它写 `network` 映射，只写 `proxies` 等单个选项不起作用。这些都与此前相同。
+
+只读 SQLite 来源不经 HTTP，受来源并发、工作进程和总超时约束；HTTP 代理及 host 限流不作用于它。它的 `query_str` 必须是 `SELECT`；`result_type` 默认为 `KeyValue`（每行是一张键值表），设为 `MainResult` 时列名必须是结果字段（`url`、`title`、`content` 等）。
 
 ## 返回值、缓存与资源归属
 

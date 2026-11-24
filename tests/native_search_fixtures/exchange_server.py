@@ -17,6 +17,8 @@ def answer(tag, method, raw_path, headers, body):
     """(status, header pairs, body bytes) for one request."""
     split = urlsplit(raw_path)
     path, query = split.path, parse_qs(split.query)
+    if path.startswith('/__h/'):  # sent here instead of another host: /__h/<host>/<path>
+        path = '/' + path.split('/', 3)[3]
     if path == '/echo':
         return 200, [('Content-Type', 'text/plain')], ('echo:' + tag + ':' + method + ':' + raw_path).encode()
     if path == '/setcookie':

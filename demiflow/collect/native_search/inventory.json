@@ -367,7 +367,8 @@
       "engine": "brave",
       "load_status": "ok",
       "options": {
-        "brave_category": "images"
+        "brave_category": "images",
+        "network": "brave"
       },
       "shortcut": "brimg"
     },
@@ -622,6 +623,7 @@
       "engine": "qwant",
       "load_status": "ok",
       "options": {
+        "network": "qwant",
         "qwant_categ": "images"
       },
       "shortcut": "qwi"
@@ -813,6 +815,7 @@
       "engine": "yandex",
       "load_status": "ok",
       "options": {
+        "network": "yandex",
         "search_type": "images"
       },
       "shortcut": "ydi"

@@ -107,5 +107,11 @@ def load(settings, timeout_s):
     return module
 
 
+def transport_defaults(settings):
+    """Attributes of a source definition that is not loaded for search: the adapter file's own values
+    with ``settings`` laid over them. They describe a network other sources name (``worker.source_networks``)."""
+    return {**vars(_module(adapter_file(settings.get('engine')), settings['name'])), **settings}
+
+
 def capabilities(module):
     return {k: getattr(module, k, None) for k in CAPABILITIES}

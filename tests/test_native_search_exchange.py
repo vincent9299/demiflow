@@ -2,14 +2,18 @@
 
 Each suite runs ``native_search_fixtures/exchange_runner.py`` in its own process. Sources really send
 their requests: a probe adapter exercising the HTTP layer (fingerprint on/off, client options, cookies,
-redirects, bodies, error statuses, proxies and local addresses in rotation), adapter loading variants,
-the SQLite source, and every built-in source and platform image module with only the final destination
-replaced by a loopback server that answers with fixed pages.
+redirects, bodies, error statuses, proxies and local addresses in rotation), sources that name the
+network they send through (another source, a catalog source that is not declared, ``ipv4``, a
+session-wide network; yandex images, brave.images and qwant images name one by default), adapter loading
+variants, the SQLite source, and every built-in source and platform image module with only the final
+destination replaced by a loopback server that answers with fixed pages.
 
-``exchange_golden.json`` holds what the previous runtime (main 5673d101) did with the same scenarios:
-receipt status and reason, ignored parameters, HTTP receipts, each request as the server received it and
-a digest of the merged results. Values that are random or bound to the HTTP library version by design
-(browser User-Agent strings, Qwant's test group) compare by family; see ``exchange_runner.essentials``.
+``exchange_golden.json`` holds what the previous runtime (main 5673d101; main 41f232fd for the
+network-names suites) did with the same scenarios: receipt status and reason, ignored parameters, HTTP
+receipts, each request as the server received it (including which server: the destination or a proxy)
+and a digest of the merged results. Values that are random or bound to the HTTP library version by
+design (browser User-Agent strings, Qwant's test group) compare by family; see
+``exchange_runner.essentials``.
 """
 import importlib.util
 import json
@@ -39,7 +43,11 @@ def essentials(output):
     return module.essentials(output)
 
 
-@pytest.mark.parametrize('suite', ['transport', 'outgoing-proxy', 'outgoing-ips', 'sqlite', 'loader', 'named'])
+SUITES = ['transport', 'outgoing-proxy', 'outgoing-ips', 'network-names', 'network-names-default',
+          'network-names-outgoing', 'sqlite', 'loader', 'named']
+
+
+@pytest.mark.parametrize('suite', SUITES)
 def test_exchanges_match_recorded_reference(suite):
     # Loopback requests must reach the fixture proxies, so inherited proxy settings are dropped.
     env = {k: v for k, v in os.environ.items() if k.lower() not in PROXY_VARIABLES}

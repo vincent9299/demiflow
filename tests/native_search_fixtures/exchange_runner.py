@@ -2,10 +2,12 @@
 receipt status, merged results, HTTP receipts, and every request the loopback servers received.
 
 Usage: python exchange_runner.py <suite>
-Suites: transport, outgoing-proxy, outgoing-ips, sqlite, loader, named
+Suites: transport, outgoing-proxy, outgoing-ips, network-names, network-names-default,
+        network-names-outgoing, sqlite, loader, named
 
 ``essentials`` reduces the output to the comparable facts stored in ``exchange_golden.json``; those were
-recorded by running the same scenarios on the previous runtime (main 5673d101).
+recorded by running the same scenarios on the previous runtime (main 5673d101; the network-names suites on
+main 41f232fd, the same runtime).
 """
 import hashlib
 import json
@@ -168,6 +170,60 @@ def outgoing_ips(urls):
     item = {'name': 'xplain', 'module': 'exchange_probe', 'revision': 'x1', 'base_url': A, 'other_url': B,
             'mode': 'plain', 'enable_http': True}
     return [(item, DEFAULT_QUERY)], {**CONFIG, 'outgoing': {'source_ips': '127.0.0.2'}}
+
+
+OTHER_HOST = 'https://probe.example'  # reaches server A through route_clients()
+
+
+def network_names(urls):
+    """Sources that name the network they send through, in each of the three suites below."""
+    A, B, P1, P2 = urls
+    base = {'module': 'exchange_probe', 'revision': 'x1', 'base_url': A, 'other_url': B, 'mode': 'plain'}
+
+    def probe(name, **settings):
+        return {'name': name, **base, 'enable_http': True, **settings}, DEFAULT_QUERY
+
+    def named(name, network, **settings):
+        return {'name': name, **base, 'network': network, **settings}, DEFAULT_QUERY
+
+    # A declared source, a catalog source that is not declared, ipv4, an unknown name; yandex images next
+    # to a yandex that sends through a proxy. A named network replaces the source's own transport options.
+    names = [
+        named('xholder', {'proxies': {'all://': P1}, 'enable_http': True}),
+        named('xshared', 'xholder'),
+        named('xsharedattr', 'xholder', proxies={'all://': P2}, enable_http=True),
+        probe('xholderattr', proxies={'all://': P2}),
+        named('xsharedattr2', 'xholderattr'),
+        named('xchain', 'xshared'),
+        named('xipv4', 'ipv4', base_url=OTHER_HOST),
+        named('xipv4http', 'ipv4'),
+        named('xunknown', 'nosuchnetwork'),
+        named('xviagoogle', 'google', base_url=OTHER_HOST),
+        named('xviabing', 'bing', base_url=OTHER_HOST, proxies={'all://': P2}, enable_http=True),
+        ({'name': 'mwmbl', 'network': {'proxies': {'all://': P1}, 'enable_http': True}}, []),
+        named('xviamwmbl', 'mwmbl'),
+        ({'name': 'yandex', 'network': {'proxies': {'all://': P1}}}, DEFAULT_QUERY),
+        ({'name': 'yandex images'}, DEFAULT_QUERY),
+        ({'name': 'qwant images', 'network': {'proxies': {'all://': P2}}}, DEFAULT_QUERY),
+    ]
+    # The catalog sources with a default network name when the named source is not declared.
+    default = [
+        ({'name': 'yandex images', 'proxies': {'all://': P2}}, DEFAULT_QUERY),
+        ({'name': 'brave.images', 'proxies': {'all://': P2}}, DEFAULT_QUERY),
+        ({'name': 'qwant images', 'proxies': {'all://': P2}}, DEFAULT_QUERY),
+        probe('xplain'),
+    ]
+    # Session-wide proxies and a session-wide named network.
+    outgoing = [
+        named('xnamednet', 'viap2'),
+        named('xipv4', 'ipv4', base_url=OTHER_HOST),
+        ({'name': 'yandex images'}, DEFAULT_QUERY),
+        ({'name': 'brave.images'}, DEFAULT_QUERY),
+        probe('xplain'),
+    ]
+    session = {'proxies': {'all://': P1}, 'networks': {'viap2': {'proxies': {'all://': P2}, 'enable_http': True}}}
+    return {'network-names': (names, dict(CONFIG)), 'network-names-default': (default, dict(CONFIG)),
+            'network-names-outgoing': (outgoing, {**CONFIG, 'outgoing': session})}
 
 
 RESULT = "[{'url': 'https://example.org/' + NAME, 'title': NAME}]"
@@ -385,17 +441,7 @@ class ProviderRecords:
 
     def route_clients(self):
         """Send every request of the HTTP clients to this server instead of its real destination."""
-        from curl_cffi import requests
-        send, address = requests.Session.request, self.address
-
-        def routed(client, method, url, **kwargs):
-            parts = urlsplit(str(url))
-            local = f"http://{address}/__h/{parts.netloc}{parts.path or '/'}" + ('?' + parts.query if parts.query else '')
-            reply = send(client, method, local, **kwargs)
-            reply.url = str(url)
-            return reply
-
-        requests.Session.request = routed
+        route_clients('http://' + self.address, loopback=True)
 
     def take(self):
         with self.lock:
@@ -405,6 +451,24 @@ class ProviderRecords:
 
     def normalize(self, text):
         return text.replace(self.address, 'LOCAL')
+
+
+def route_clients(destination, loopback=False):
+    """Send the requests of the HTTP clients to ``destination`` (path ``/__h/<host>/<path>``) instead of
+    their real host; requests for 127.0.0.1 are left alone unless ``loopback``."""
+    from curl_cffi import requests
+    send = requests.Session.request
+
+    def routed(client, method, url, **kwargs):
+        parts = urlsplit(str(url))
+        if parts.hostname == '127.0.0.1' and not loopback:
+            return send(client, method, url, **kwargs)
+        local = f"{destination}/__h/{parts.netloc}{parts.path or '/'}" + ('?' + parts.query if parts.query else '')
+        reply = send(client, method, local, **kwargs)
+        reply.url = str(url)
+        return reply
+
+    requests.Session.request = routed
 
 
 # ---------------------------------------------------------------------------- runner
@@ -425,6 +489,9 @@ def main(suite):
             items, config = sqlite(work)
         elif suite == 'loader':
             items, config = loader(urls, work)
+        elif suite.startswith('network-names'):
+            route_clients(urls[0])
+            items, config = network_names(urls)[suite]
         else:
             items, config = {'transport': transport, 'outgoing-proxy': outgoing_proxy,
                              'outgoing-ips': outgoing_ips}[suite](urls)
