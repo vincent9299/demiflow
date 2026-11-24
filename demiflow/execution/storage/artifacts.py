@@ -33,12 +33,13 @@ def resolve_local_artifact(value):
             mapping = _artifact_locations(str(manifest), info.st_mtime_ns, info.st_size,
                                           info.st_dev, info.st_ino, info.st_ctime_ns,
                                           recent_digest(str(manifest), info))
-        except FileNotFoundError:
+            target = mapping.get(path.relative_to(root).as_posix())
+        except (FileNotFoundError, PermissionError):
             # An optional location manifest may disappear between stat and
-            # open during maintenance. Treat this like an absent manifest;
-            # a missing actual artifact still fails at its consuming read.
+            # open during maintenance, or sit above a confined sandbox root.
+            # Treat this like an absent manifest; a missing actual artifact
+            # still fails at its consuming read.
             continue
-        target = mapping.get(path.relative_to(root).as_posix())
         if target is not None:
             relative = Path(target)
             if relative.is_absolute() or '..' in relative.parts or not relative.parts:

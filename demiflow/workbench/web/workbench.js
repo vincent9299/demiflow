@@ -32,10 +32,10 @@
     let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
     let runInspector='observations',runDefinition=null,definitionSequence=0,runFlowFilter='';
     const runUI=globalThis.ForgeRunPresentation;
-    let pipelineCodeOpen=false,pipelineSequence=0,pipelineReadKey=null,flowCollapse,nodePanelResize;
+    let flowCollapse,nodePanelResize;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false;
-    let activePage=view.panel||(['run','run_compare','runs'].includes(view.kind)?'monitor':'flows'),detailOpen=false,locationFields=null,userNavigation=0;
-    let lastPipelinePage=activePage==='monitor'?'monitor':'flows';
+    let activePage=view.panel==='monitor'||(['run','run_compare','runs'].includes(view.kind)&&view.panel!=='flows')?'monitor':'flows',detailOpen=false,locationFields=null,userNavigation=0;
+    let lastPipelinePage=activePage;
     function rememberView(fields){locationFields=fields;saveView({...fields,panel:activePage});}
     function rememberPanel(){if(locationFields)saveView({...locationFields,panel:activePage});onPageChange(activePage);}
     const previewStorage='demiflow.preview-locators.v1';
@@ -96,9 +96,14 @@
     const advancedContent=$('div',undefined,'wb-advanced-content');advancedDialog.append(advancedDialogHead,advancedContent);root.append(advancedDialog);
     const advancedButton=button('高级诊断',()=>{more.open=false;if(!advancedDialog.open)advancedDialog.showModal();},moreBody,{cls:'quiet'});advancedButton.hidden=true;
     const pipelineHeader=$('header',undefined,'wb-pipeline-header'),headerTitleGroup=$('div',undefined,'wb-header-title');
+    const headerTitleRow=$('div',undefined,'wb-header-title-row');
     const pipelineTitle=$('h2',undefined,'wb-pipeline-title');
     const historyBadge=$('span','历史运行','wb-history-badge');historyBadge.hidden=true;
-    headerTitleGroup.append(pipelineTitle,historyBadge);
+    const basisLabel=$('span',undefined,'wb-basis');
+    const planContext=$('div',undefined,'wb-plan-context'),graphTitle=$('strong','执行计划'),graphHost=$('div',undefined,'wb-graph');
+    planContext.append(graphTitle,basisLabel);
+    headerTitleRow.append(pipelineTitle,historyBadge);
+    headerTitleGroup.append(headerTitleRow,planContext);
     const runsContextButton=button('运行记录',()=>{if(activePage!=='monitor')return showPage('monitor');},actions,{cls:'wb-history-toggle'});
     runsContextButton.setAttribute('aria-label','运行记录');runsContextButton.title='查看运行记录';
     runsContextButton.dataset.tooltip='运行记录';
@@ -128,10 +133,8 @@
       const term=flowHeader.search.value.trim().toLocaleLowerCase();
       for(const row of flowList.querySelectorAll('.wb-flow-record'))row.hidden=!(row.title+' '+row.textContent).toLocaleLowerCase().includes(term);
     }
-    const basisLabel=$('span',undefined,'wb-basis');
-    const flowTabs=$('div',undefined,'wb-view-tabs wb-flow-tabs');
     const monitorTabs=$('div',undefined,'wb-view-tabs wb-monitor-tabs');monitorTabs.hidden=true;
-    toolbar.append(selectors,flowTabs,monitorTabs);
+    toolbar.append(selectors,monitorTabs);
     const monitorStatus=button('执行图',()=>changeMode('monitor'),monitorTabs),monitorOutputs=button('输出结果',()=>changeMode('results'),monitorTabs);
     const monitorDefinition=button('本次参数与版本',()=>showRunDefinition(),monitorTabs);
     const runDefinitionPanel=$('section',undefined,'wb-run-definition-panel');runDefinitionPanel.hidden=true;root.append(runDefinitionPanel);
@@ -142,43 +145,19 @@
     const runBar=$('div',undefined,'wb-run-bar');runBar.hidden=true;runContextLine.append(runBar);
     const runFacts=$('div',undefined,'wb-run-facts');runFacts.hidden=true;
     const runAlerts=$('div',undefined,'wb-run-alerts');root.append(runAlerts);
-    const operators=$('section',undefined,'wb-operators');operators.hidden=true;operators.setAttribute('aria-label','算子目录');root.append(operators);
-    const operatorBrowser=DemiFlowOperators.mount({host:operators,request,mountText,disposeReaders,project});
     let definitionSource=null;
-    const argumentEditor=DemiFlowArguments.mount({host:root,request,canWrite:configWrite,onVisibility:()=>updateActions(),
-      onChange:()=>{clearPlanPreview(true);updateActions();},
-      onSaved:async value=>{clearPlanPreview(true);await fetchGraph(state.capture(),{preserveSelection:false,refresh:true});updateActions();}});
-    const flowGraphTab=button('执行图',()=>{
-      argumentEditor.hide();pipelineCodeOpen=false;pipelineSequence++;pipelineReadKey=null;
-      disposeReaders(pipelineCode);pipelineCode.replaceChildren();
-      if(data().mode==='checks')state.setMode('config');
-      updateActions();savePreviewLocator();rememberPanel();
-    },flowTabs);
-    const argumentsButton=button('业务参数',async()=>{
-      if(!working?.entry)return;
-      pipelineCodeOpen=false;pipelineSequence++;pipelineReadKey=null;
-      disposeReaders(pipelineCode);pipelineCode.replaceChildren();
-      if(data().mode==='checks')state.setMode('config');
-      await argumentEditor.show(working.entry);updateActions();
-    },flowTabs);
     const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('div',undefined,'wb-inspector');
     const nodePanel=$('aside',undefined,'wb-node-panel');nodePanel.setAttribute('aria-label','算子详情');
     const nodePanelTools=$('div',undefined,'wb-node-panel-tools');
     const definitionButton=button('项目算子',async()=>{
       const target=definitionSource;
-      if(typeof openOperator==='function'){await openOperator(target);return;}
-      await showPage('operators');
-      if(target){const found=target.path?await operatorBrowser.selectSource(target.path,target.line,target.sha256):await operatorBrowser.selectPrompt(target);if(!found)message('当前项目未找到唯一匹配的定义；运行快照仍保留。','notice');}
+      if(typeof openOperator==='function')await openOperator(target);
     },nodePanelTools);
     const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
     const closeDetail=button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
     nodePanel.append(nodePanelTools,inspector);
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
-    const planContext=$('div',undefined,'wb-plan-context'),graphTitle=$('strong','执行计划'),graphHost=$('div',undefined,'wb-graph');
-    planContext.append(graphTitle,basisLabel);toolbar.append(planContext);
     const tools=$('div',undefined,'wb-canvas-tools');
-    const pipelineCode=$('section',undefined,'wb-pipeline-code');pipelineCode.hidden=true;
-    pipelineCode.setAttribute('aria-label','Pipeline 源码');
     const closeChecks=button('收起检查',()=>changeMode('config'),checks);checks.prepend(closeChecks);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),actions);previewButton.title='只解析当前入口与已保存入参，不启动数据处理';
     actions.append(runsContextButton,currentContextButton,previewButton,runButton,refreshRunButton,more);
@@ -196,7 +175,7 @@
     const actionBar=$('div',undefined,'wb-action-bar');actionBar.hidden=true;
 
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
-    graphSection.prepend(actionBar,pipelineCode,graphHost);body.append(graphSection,nodePanel);root.append(body);
+    graphSection.prepend(actionBar,graphHost);body.append(graphSection,nodePanel);root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
     detailHeader.append($('strong','执行情况'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
@@ -283,29 +262,23 @@
     }
     function updateActions(){
       if(!root.isConnected)return;
-      const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks',operatorsActive=data().mode==='operators';
+      const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks';
       const monitoring=activePage==='monitor',hasRun=!!run;
       const activeEntry=monitoring?(runFlowFilter||run?.entry||working?.entry):(working?.entry||run?.entry);
       pipelineTitle.textContent=activeEntry?runUI.flowName(ctx,activeEntry):'管道';
       pipelineTitle.title=activeEntry||'';
       historyBadge.hidden=!monitoring;
-      runsContextButton.hidden=monitoring||operatorsActive;
-      currentContextButton.hidden=!monitoring||operatorsActive;
-      pipelineHeader.hidden=operatorsActive||!!comparison;
+      runsContextButton.hidden=monitoring;
+      if(monitoring)runsContextButton.removeAttribute('aria-label');else runsContextButton.setAttribute('aria-label','运行记录');
+      currentContextButton.hidden=!monitoring;
+      pipelineHeader.hidden=!!comparison;
       runContextLine.hidden=!monitoring||!!comparison;
       selectors.hidden=true;
-      flowTabs.hidden=monitoring||operatorsActive;
       monitorTabs.hidden=!monitoring||!hasRun;
-      const codeShown=pipelineCodeOpen&&activePage==='flows';
-      const argsShown=argumentEditor.visible()&&activePage==='flows';
-      const graphTabActive=!monitoring&&!codeShown&&!argsShown&&!checksActive;
-      flowGraphTab.setAttribute('aria-pressed',String(graphTabActive));
-      argumentsButton.setAttribute('aria-pressed',String(argsShown));
-      argumentsButton.disabled=!working?.entry;
-      planContext.hidden=monitoring||operatorsActive||argsShown||checksActive;
-      toolbar.hidden=operatorsActive||(monitoring&&!hasRun&&!comparison);
-      body.hidden=resultsActive||definitionActive||operatorsActive||argsShown||checksActive||(monitoring&&!hasRun);
-      operators.hidden=!operatorsActive;checks.hidden=!checksActive;
+      planContext.hidden=monitoring||checksActive;
+      toolbar.hidden=!monitoring||!hasRun||!!comparison;
+      body.hidden=resultsActive||definitionActive||checksActive||(monitoring&&!hasRun);
+      checks.hidden=!checksActive;
       performanceToggle.hidden=!monitoring||!hasRun||resultsActive||definitionActive;
       refreshRunButton.hidden=!monitoring||!hasRun;
       trend.hidden=performanceToggle.hidden||performanceToggle.getAttribute('aria-expanded')!=='true';
@@ -319,24 +292,21 @@
       detailHeader.hidden=monitoring&&runInspector!=='logs';
       monitorStatus.setAttribute('aria-pressed',String(!resultsActive&&!definitionActive));monitorDefinition.setAttribute('aria-pressed',String(definitionActive));monitorOutputs.setAttribute('aria-pressed',String(resultsActive));
       results.hidden=!resultsActive;
-      const navigationVisible=!operatorsActive;
-      flowCollapse?.setActive(navigationVisible);
-      layout.classList.toggle('wb-project-layout',navigationVisible);
-      layout.classList.toggle('wb-runs-layout',false);
-      pipelineCode.hidden=!codeShown;graphHost.hidden=codeShown;
-      nodeJump.hidden=codeShown;expandGraph.hidden=codeShown||!document.fullscreenEnabled;
-      if(codeShown)loadPipelineCode();
-      nodePanel.hidden=codeShown||(!detailOpen&&!monitoring)||operatorsActive;body.classList.toggle('wb-detail-open',!codeShown&&(detailOpen||monitoring)&&!operatorsActive);
+      flowCollapse?.setActive(true);
+      layout.classList.toggle('wb-project-layout',true);
+      graphHost.hidden=false;
+      nodeJump.hidden=false;expandGraph.hidden=!document.fullscreenEnabled;
+      nodePanel.hidden=!detailOpen&&!monitoring;body.classList.toggle('wb-detail-open',detailOpen||monitoring);
       const narrowDetail=matchMedia(monitoring?'(max-width:1200px)':'(max-width:950px)').matches;
       nodePanelResize?.setActive(!nodePanel.hidden&&!body.hidden&&!narrowDetail);
       nodeOutputs.hidden=!run||!run.outputs?.length;
-      bottom.hidden=monitoring?runInspector!=='definition':inspectorWhole&&!operatorsActive;
+      bottom.hidden=monitoring?runInspector!=='definition':inspectorWhole;
       inspector.hidden=monitoring||!inspectorWhole;
       nodePanelTools.hidden=monitoring&&runInspector!=='definition';closeDetail.hidden=monitoring;
       root.dataset.page=activePage;onPageChange(activePage);
       runBar.hidden=!run||!!comparison||activePage!=='monitor';
       if(!checksActive)documents.open=false;
-      const dirty=argumentEditor.dirty()||working&&Object.keys(getDraft().values).length>0;
+      const dirty=working&&Object.keys(getDraft().values).length>0;
       const checkDisabled=busy||previewBusy||!!run||!registered()||dirty;
       if(scopedCheckButton?.isConnected)scopedCheckButton.disabled=checkDisabled;
       runButton.disabled=busy||previewBusy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
@@ -349,7 +319,7 @@
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存业务参数，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
-      accessState.hidden=operatorsActive||monitoring||!!run||(!invalidEntry&&registered()&&can('run_submit'));
+      accessState.hidden=monitoring||!!run||(!invalidEntry&&registered()&&can('run_submit'));
       accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!working?.entry?'请在“更多 → 接入与权限”登记入口和业务参数。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
       const previewNode=!run&&planPreview?.dag.nodes.find(n=>n.occurrence_id===previewSelection?.occurrenceId);
       const reportNode=data().graph?.nodes.find(n=>n.id===data().node);
@@ -364,7 +334,7 @@
       guardSettings();
     }
     function uniqueParams(entry){const paths=ctx.flows.find(f=>f.entry===entry)?.parameters||[];return paths.length===1?paths[0]:null;}
-    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry&&!argumentEditor.dirty())await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
+    entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry)await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
     function diagnosticTarget(d){return (d.related_nodes||[])[0]||data().graph?.nodes.find(n=>n.source===d.path&&n.line===d.line)?.id;}
     function renderDiagnostics(items,parent,onLocate=null){
       if(!items.length){parent.append($('p','此范围没有诊断；是否通过仍以检查状态和覆盖为准。','wb-caption'));return;}
@@ -421,7 +391,7 @@
       if(previewBusy||busy||run||data().run)return;
       if(!working?.entry)throw new Error('请先选择流程入口。');
       if(declaredEntry()?.status==='invalid'){message(working.entry+' · '+entryIssue(),'error-box');return;}
-      if(argumentEditor.dirty()||Object.keys(getDraft().values).length)throw new Error('请先保存业务参数；计划解析只使用已保存值。');
+      if(Object.keys(getDraft().values).length)throw new Error('请先保存业务参数；计划解析只使用已保存值。');
       clearPlanPreview(true);
       const ticket=state.capture(),sequence=++previewSequence,entry=working.entry,params=(working?.params||'')||null;
       previewBusy=true;updateActions();message('正在由引擎解析执行计划；不会启动数据处理或模型请求。');
@@ -636,11 +606,11 @@
     }
     async function useWorking(entry,params,report=null,mode='config'){
       if(disposed)throw new DOMException('工作台已关闭','AbortError');
-      argumentEditor.changeFlow(entry);activePage=mode==='operators'?'operators':'flows';if(activePage!=='operators')lastPipelinePage=activePage;detailOpen=false;historyOpen=false;
+      activePage='flows';lastPipelinePage='flows';detailOpen=false;historyOpen=false;
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;
       run=null;comparison=null;working={entry,params};const ticket=transition({entry,params,report,run:null,attempt:null,mode});
       runBar.hidden=runFacts.hidden=results.hidden=true;results.replaceChildren();paintSelectors();
-      try{if(entry){if(mode!=='operators')await fetchGraph(ticket);if(current(ticket))rememberView(report?{kind:'inspection',report_digest:report}:{kind:'flows',entry,...(params?{params}:{})});}
+      try{if(entry){await fetchGraph(ticket);if(current(ticket))rememberView(report?{kind:'inspection',report_digest:report}:{kind:'flows',entry,...(params?{params}:{})});}
         else{basisLabel.textContent='尚无已声明入口';graphHost.replaceChildren($('p',entryIssue()+' 请在“接入与权限”登记入口和业务参数。'));inspector.replaceChildren($('p','可查看项目说明、数据和检查结果。'));sourceBody.replaceChildren($('p','发现或登记入口后，可在这里阅读选中节点的源码。','wb-caption'));settings.hidden=false;paintSettings();}}
       catch(error){if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);}
       finally{if(current(ticket))graphLoading(false);}
@@ -814,35 +784,6 @@
         const now=ForgeWorkbenchState.drafts.get(key);if(now){for(const[path,raw]of Object.entries(d.values))if(now.values[path]===raw)delete now.values[path];ForgeWorkbenchState.drafts.put(key,now);}
         if(current(ticket)){if(result.no_change)message('配置值未变化，未写入文件。');else{await useWorking(working.entry,working.params);message('配置已保存，图和检查需要重新核对。');}}
       }finally{busy=false;if(root.isConnected&&data().graph){if(data().mode==='checks')paintIssues();else paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);}updateActions();}
-    }
-    function pipelineAddress(){
-      if(planPreview&&!run){const b=planPreview.basis;return {preview:true,basis:{kind:'preview',entry:b.entry,params:b.params,digest:b.digest,dag_id:b.dag_id}};}
-      const binding=data().graph?.binding;return binding?.entry?{preview:false,binding}:null;
-    }
-    async function loadPipelineCode(){
-      const address=pipelineAddress(),key=json(address);
-      if(key===pipelineReadKey)return;
-      pipelineReadKey=key;const sequence=++pipelineSequence;
-      disposeReaders(pipelineCode);pipelineCode.replaceChildren();
-      if(!address){pipelineCode.append($('p','请先选择流程并解析计划，再查看对应源码。','wb-caption'));return;}
-      pipelineCode.append($('p','正在读取对应版本的 Pipeline 源码…','wb-caption'));
-      const valid=()=>!disposed&&root.isConnected&&pipelineCodeOpen&&sequence===pipelineSequence&&json(pipelineAddress())===key;
-      try{
-        const value=address.preview?await request('plan-pipeline-source',{}, {basis:address.basis})
-          :await request('pipeline-source',{graph_binding:json(address.binding)});
-        if(!valid())return;
-        if(address.preview?(value.format!=='demiflow.plan_pipeline_source.v1'||value.source_basis!=='compiled_snapshot'||Object.keys(address.basis).some(k=>value.basis?.[k]!==address.basis[k]))
-          :(value.format!=='demiflow.pipeline_source.v1'||json(value.graph_binding)!==json(address.binding)))throw new Error('Pipeline 源码版本与当前视图不一致。');
-        disposeReaders(pipelineCode);pipelineCode.replaceChildren();
-        if(value.availability!=='available'){pipelineCode.append($('p',value.reason||'这份视图没有可用的入口源码。','wb-caption'));return;}
-        if(typeof value.text!=='string')throw new Error('Pipeline 源码正文缺失。');
-        pipelineCode.append($('h3','Pipeline 源码 · '+value.path),$('p',
-          ({compiled_snapshot:'解析时快照',sealed:'历史封存源码',report_bound:'报告绑定源码',current:'当前源码 · 尚未绑定执行计划'}[value.source_basis]||'绑定源码')
-          +' · 入口文件'+(value.truncated?'（部分显示）':'全文')+'；引用的算子实现和 Prompt 可在对应节点查看。','wb-caption wb-pipeline-basis'));
-        const text=$('div',undefined,'wb-pipeline-text');pipelineCode.append(text);
-        mountText(text,value.text,{sourceOnly:true,compactSource:true,continuousSource:true});
-        if(value.truncated)pipelineCode.append($('p','源码超过 64 KiB 展示上限，当前只显示开头，未将片段标为全文。','wb-caption'));
-      }catch(error){if(valid()&&error.name!=='AbortError'){disposeReaders(pipelineCode);pipelineCode.replaceChildren($('p',error.message,'error-box'));}}
     }
     function materialTable(parent, headings, rows){
       const scroll=$('div',undefined,'wb-contract-table'),table=$('table'),head=$('thead'),body=$('tbody'),tr=$('tr');
@@ -1062,11 +1003,11 @@
       }catch(error){if(current(ticket)&&sequence===sourceSequence&&error.name!=='AbortError'){sourceBody.replaceChildren($('p',error.message,'error-box'));}}
     }
     async function showPage(page){
-      if(disposed||!root.isConnected||!['pipeline','flows','operators','monitor'].includes(page))return;
+      if(disposed||!root.isConnected)return;
       if(page==='pipeline')page=lastPipelinePage;
+      if(!['flows','monitor'].includes(page))return;
       userNavigation++;
-      if(page!=='flows'){pipelineCodeOpen=false;pipelineSequence++;pipelineReadKey=null;disposeReaders(pipelineCode);pipelineCode.replaceChildren();}
-      more.open=false;activePage=page;if(page!=='operators')lastPipelinePage=page;comparison=null;outputFingerprint=null;runConfirmation.hidden=true;
+      more.open=false;activePage=page;lastPipelinePage=page;comparison=null;outputFingerprint=null;runConfirmation.hidden=true;
       if(page==='flows'&&(run||historyOpen)){
         const entry=run?.entry||runFlowFilter||working?.entry;
         await useWorking(entry,uniqueParams(entry));
@@ -1076,8 +1017,7 @@
       if(page==='monitor'&&!run){
         await selectRunFlow(working?.entry||choices()[0]?.value||'');return;
       }
-      historyOpen=page==='monitor';state.setMode(page==='operators'?'operators':page==='monitor'?'monitor':'config');
-      argumentEditor.hide();if(page==='operators')await operatorBrowser.load();
+      historyOpen=page==='monitor';state.setMode(page==='monitor'?'monitor':'config');
       updateActions();
       if(page==='monitor'){paintRunBar();paintRunFacts();await Promise.all([listRuns(),loadRunDetail()]);}
       if(page==='flows'&&!run&&!data().graph&&working?.entry){await useWorking(working.entry,working.params);await compilePlanPreview();}
@@ -1085,7 +1025,6 @@
     }
     async function changeMode(mode){
       more.open=false;
-      if(mode==='operators')return showPage('operators');
       if(mode==='monitor')return showPage('monitor');
       if(mode==='results'){
         if(!run)return showPage('monitor');
@@ -1156,8 +1095,8 @@
       if(run.outputs.some(o=>o.status==='committed')&&run.status!=='succeeded')runAlerts.append($('div','部分输出已提交；整次运行尚未成功。','wb-partial'));
     }
     async function openRun(id,attempt=null,mode='monitor'){
-      activePage=mode==='operators'?'operators':'monitor';if(activePage!=='operators')lastPipelinePage=activePage;detailOpen=false;
-      historyOpen=activePage==='monitor';
+      activePage='monitor';lastPipelinePage='monitor';detailOpen=false;
+      historyOpen=true;
       sourceOpen=true;sourceBody.hidden=sourceTabs.hidden=false;runInspector='observations';detailKind='observations';
       run=null;comparison=null;
       const initial=transition({run:id,attempt,report:null,mode});paintHistory();
@@ -1296,7 +1235,6 @@
     }
     async function selectRunFlow(entry){
       activePage='monitor';lastPipelinePage='monitor';historyOpen=true;run=null;comparison=null;records=null;runFlowFilter=entry;
-      argumentEditor.hide();
       transition({entry,params:uniqueParams(entry),run:null,attempt:null,report:null,mode:'history'});
       rememberView(entry?{kind:'flows',entry}:{kind:'runs'});
       paintHistory();await listRuns();
@@ -1613,7 +1551,7 @@
     const layout=$('div',undefined,'wb-workspace-layout'),runMain=$('div',undefined,'wb-workspace-main');
     root.prepend(layout);layout.append(flowNavigation,runMain);
     for(const element of [...root.children])if(element!==layout)runMain.append(element);
-    flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',narrowQuery:'(max-width:680px)',active:activePage!=='operators'});
+    flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',narrowQuery:'(max-width:680px)',active:true});
     nodePanelResize=ForgeNavigation.resizable({layout:body,sidebar:nodePanel,label:'算子详情',right:true,cssVar:'--wb-detail-width',minWidth:240,maxWidth:820,minMain:260,active:false});
     let metricSequence=0,lastObservationRevision=null;
     async function refreshTrend(force=false){
@@ -1656,8 +1594,6 @@
       sync:async(fresh,{graphChanged=false,catalogChanged=false,runsChanged=false,force=false}={})=>{
         const permissionsChanged=json(ctx.run_permissions)!==json(fresh.run_permissions)||json(ctx.capabilities)!==json(fresh.capabilities);
         ctx=fresh;paintSelectors();if(historyOpen&&graphChanged)paintHistory();updateActions();
-        if(activePage==='operators'){if(graphChanged||force)await operatorBrowser.load({force:true});return;}
-        if(graphChanged||force)argumentEditor.invalidate(working?.entry);
         if(permissionsChanged){if(run){paintRunBar();paintResults();}if(data().graph&&data().mode!=='checks')paintConfiguration(inspectorWhole?null:data().graph.nodes.find(n=>n.id===data().node)||null);}
         if(historyOpen&&(runsChanged||force))await listRuns();
         if(catalogChanged||force){projectInfoRendered=false;if(documents.open)await refreshProjectInfo();}
@@ -1669,20 +1605,19 @@
           else if(working.entry)await fetchGraph(state.capture(),{preserveSelection:true,refresh:true});
         }
       },
-      dirty:()=>argumentEditor.dirty()||!!working&&Object.keys(getDraft().values).length>0,
+      dirty:()=>!!working&&Object.keys(getDraft().values).length>0,
       projectCheckSettled:()=>{if(!disposed&&documents.open&&projectInfoDirty)refreshProjectInfo();},
-      dispose:()=>{disposed=true;flowCollapse?.dispose();nodePanelResize?.dispose();operatorBrowser.dispose();argumentEditor.dispose();if(advancedDialog.open)advancedDialog.close();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);disposeReaders(pipelineCode);},
+      dispose:()=>{disposed=true;flowCollapse?.dispose();nodePanelResize?.dispose();if(advancedDialog.open)advancedDialog.close();document.removeEventListener('fullscreenchange',fullscreenChanged);window.removeEventListener('resize',positionMore);window.removeEventListener('scroll',positionMore,true);if(document.fullscreenElement===body)document.exitFullscreen().catch(()=>{});observer.dispose();graph.dispose();controller.abort();state.dispose();disposeReaders(sourceBody);disposeReaders(runDetailBody);},
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;
     let firstParams=uniqueParams(firstEntry);
     working={entry:firstEntry,params:firstParams};
-    if(view.kind==='run'&&view.panel!=='flows')await openRun(view.run_id,view.attempt||null,view.panel==='operators'?'operators':'monitor');
+    if(view.kind==='run'&&view.panel!=='flows')await openRun(view.run_id,view.attempt||null,'monitor');
     else if(view.kind==='runs'||view.kind==='flows'&&view.panel==='monitor')await selectRunFlow(firstEntry||'');
     else if(view.kind==='inspection')await useWorking(firstEntry,firstParams,view.report_digest,'checks');
     else if(view.kind==='run_compare'){await useWorking(firstEntry,firstParams);await compare(view.left,view.right);}
-    else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':view.panel==='operators'?'operators':'config');
-    if(activePage==='operators')await operatorBrowser.load();
+    else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':'config');
     if(activePage==='flows'&&!run&&['flows','run',undefined].includes(view.kind)){
       const saved=storedPreviews()[project];
       if(saved&&saved.entry===working?.entry&&saved.params===working?.params){

@@ -131,7 +131,7 @@ def test_automatic_scope_preserves_nested_data_and_notebooks(tmp_path):
     (src/'app.py').write_text('x=1')
     (src/'models').mkdir()
     grant=automatic_project(root)
-    assert set(grant['protected'])=={'src/data','src/result.ipynb','src/AGENTS.md','src/__pycache__'}
+    assert set(grant['protected'])=={'src/data','src/result.ipynb','src/AGENTS.md'}
     assert grant['writes'] == ['src/app.py', 'src/models']
     assert 'src' in grant['watch']
     from demiflow.workbench.conversations.sandbox import SandboxSpec, specification
@@ -449,7 +449,7 @@ def test_automatic_scope_allows_more_than_128_split_writable_paths(tmp_path):
             (prompts / f'p_{idx:03d}.md').write_text(f'# prompt {idx}\n')
         grant = automatic_project(big)
         assert len(grant['writes']) == 160
-        assert set(grant['protected']) == {'prompts/.probe_write', 'prompts/__pycache__'}
+        assert set(grant['protected']) == {'prompts/.probe_write'}
         inventory['projects']['wbig'] = {'root': str(big)}
         caps = service.capabilities('wbig', big)
         assert caps['enabled'] and caps['start']

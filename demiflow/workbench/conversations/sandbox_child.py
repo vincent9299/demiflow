@@ -150,7 +150,7 @@ def main():
         try:
             os.close(read_error)
             os.chdir(spec['cwd'])
-            for kind, cap in ((resource.RLIMIT_NOFILE, 256), (resource.RLIMIT_FSIZE, spec['file_bytes']),
+            for kind, cap in ((resource.RLIMIT_NOFILE, 2048), (resource.RLIMIT_FSIZE, spec['file_bytes']),
                               (resource.RLIMIT_CPU, max(1, int(spec['seconds']))), (resource.RLIMIT_CORE, 0)):
                 _, hard = resource.getrlimit(kind)
                 cap = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
@@ -184,19 +184,44 @@ def main():
         if pid:
             return os.waitstatus_to_exitcode(state) if os.WIFEXITED(state) else 128 + os.WTERMSIG(state)
         if relay_failed.is_set():
+            sys.stderr.write('[sandbox] terminated (125): control/model channel relay failed\n')
+            sys.stderr.flush()
             return 125
         check_disk = time.monotonic() - last_disk >= .2
-        rss, anonymous = sample(host_pid, spec['processes'], files=check_disk, deadline=deadline)
+        try:
+            rss, anonymous = sample(host_pid, spec['processes'], files=check_disk, deadline=deadline)
+        except Exception as exc:
+            sys.stderr.write(f'[sandbox] terminated (125): process/resource limit ({exc})\n')
+            sys.stderr.flush()
+            return 125
         if rss > spec['rss_bytes']:
+            sys.stderr.write(f'[sandbox] terminated (125): rss_bytes={rss} exceeded limit={spec["rss_bytes"]}\n')
+            sys.stderr.flush()
             return 125
         if check_disk:
             last_disk = time.monotonic()
-            private_size, private_files = tree_usage([spec['private_home']])
-            source_size, source_files = tree_usage(spec['source_roots'])
-            if (private_size + max(0, source_size - spec['source_baseline_bytes']) + anonymous > spec['private_bytes'] or
-                    private_files + max(0, source_files - spec['source_baseline_files']) > 8192):
+            try:
+                private_size, private_files = tree_usage([spec['private_home']])
+                source_size, source_files = tree_usage(spec['source_roots'])
+            except (FileNotFoundError, NotADirectoryError):
+                time.sleep(.05)
+                continue
+            except Exception as exc:
+                sys.stderr.write(f'[sandbox] terminated (125): disk scan failed ({type(exc).__name__}: {exc})\n')
+                sys.stderr.flush()
+                return 125
+            total_bytes = private_size + max(0, source_size - spec['source_baseline_bytes']) + anonymous
+            total_files = private_files + max(0, source_files - spec['source_baseline_files'])
+            if total_bytes > spec['private_bytes'] or total_files > 8192:
+                sys.stderr.write(
+                    f'[sandbox] terminated (125): disk/files exceeded '
+                    f'(bytes={total_bytes}/{spec["private_bytes"]}, files={total_files}/8192)\n'
+                )
+                sys.stderr.flush()
                 return 125
         time.sleep(.05)
+    sys.stderr.write(f'[sandbox] terminated (124): wall-clock deadline ({spec["seconds"]}s) exceeded\n')
+    sys.stderr.flush()
     return 124
 
 
@@ -204,6 +229,11 @@ if __name__ == '__main__':
     try:
         result = main()
     except BaseException as exc:
+        try:
+            sys.stderr.write(f'[sandbox] terminated (126): {type(exc).__name__}: {exc}\n')
+            sys.stderr.flush()
+        except OSError:
+            pass
         try:
             os.write(int(sys.argv[2]), ('error:' + type(exc).__name__ + ': ' + str(exc))[:2048].encode())
         except OSError:

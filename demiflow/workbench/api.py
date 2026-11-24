@@ -52,7 +52,6 @@ STATIC_ASSETS = {
     "/notebook-outputs.js": ("notebook-outputs.js", "text/javascript; charset=utf-8"),
     "/notebook-outputs.css": ("notebook-outputs.css", "text/css; charset=utf-8"),
     '/notebook-cards.css': ('notebook-cards.css', 'text/css; charset=utf-8'),
-    '/flow-arguments.js': ('flow-arguments.js', 'text/javascript; charset=utf-8'),
     '/workbench-modern.css': ('workbench-modern.css', 'text/css; charset=utf-8'),
     "/": ("index.html", "text/html; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),

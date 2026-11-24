@@ -98,6 +98,215 @@ INPUT_TOOL = dict(name='read_input', description='Discover and read bounded inpu
         'depth': dict(type='integer'), 'offset': dict(type='integer'), 'bytes': dict(type='integer'),
         'limit': dict(type='integer'), 'columns': dict(type='array', items=dict(type='string'))}))
 
+_STANDARD_PROJECT_DIRS = frozenset({
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'data', 'logs', 'tests', 'docs',
+})
+_MOVE_DEST_DIRS = frozenset({
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'tests', 'docs',
+})
+_PROTECTED_TOP_DIRS = frozenset({'.forge', '.git', '.venv', 'runs', 'data', 'logs', 'tables'})
+_PROTECTED_ROOT_FILES = frozenset({'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'README.md'})
+_PROTECTED_DATA_SUFFIXES = frozenset({'.lance', '.parquet', '.arrow', '.db', '.sqlite', '.sqlite3'})
+
+PROJECT_LAYOUT_TOOL = dict(
+    name='manage_project_layout',
+    description=(
+        'Safely manage controlled project structure, file organization, table bindings and workspace.json registrations on the host: '
+        'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/data/logs/tests/docs); '
+        'register_flow checks and registers a flow entry in workspace.json (defaulting to configs/<flow>.json); '
+        'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
+        'bind_table registers a read-only input location in workspace.json (if needed) and pins a Lance table control under tables/<alias>.json for {"kind":"table","alias":"..."} parameters; '
+        'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
+        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries.'
+    ),
+    inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
+        'action': dict(type='string', enum=[
+            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path',
+        ]),
+        'dirs': dict(type='array', items=dict(type='string')),
+        'entry': dict(type='string'),
+        'params': dict(type='string'),
+        'old_params': dict(type='string'),
+        'alias': dict(type='string'),
+        'path': dict(type='string'),
+        'location_id': dict(type='string'),
+        'version': dict(type='integer'),
+        'src': dict(type='string'),
+        'dst': dict(type='string'),
+        'paths': dict(type='array', items=dict(type='string')),
+    }),
+)
+
+
+def _registered_control_paths(root: Path) -> set[str]:
+    from demiflow.forge import project as forge_project
+    try:
+        _, value = forge_project.load_project(root)
+    except Exception:
+        return set()
+    entries = value.get('entries') or {}
+    used = {e.partition(':')[0] for e in entries}
+    for plist in entries.values():
+        used.update(plist)
+    return used
+
+
+def _validate_tree_mutable(root: Path, rel: str, target: Path, *, allow_notebooks: bool, registered: set[str]):
+    parts = Path(rel).parts
+    if not parts or any(p.startswith('.') for p in parts):
+        reject(f'Protected or hidden path cannot be modified: {rel}', 'operation_rejected')
+    top = parts[0]
+    if top in _PROTECTED_TOP_DIRS or (not allow_notebooks and top == 'notebooks'):
+        reject(f'Protected project directory cannot be modified: {rel}', 'operation_rejected')
+    if len(parts) == 1 and top in _PROTECTED_ROOT_FILES:
+        reject(f'Protected root file cannot be modified: {rel}', 'operation_rejected')
+    if rel in registered:
+        reject(f'Registered entry or bound parameter cannot be moved/removed directly: {rel}', 'conflict')
+    if target.is_symlink():
+        reject(f'Symbolic link cannot be moved/removed: {rel}', 'operation_rejected')
+    if target.is_file():
+        suf = target.suffix.lower()
+        if suf in _PROTECTED_DATA_SUFFIXES or (not allow_notebooks and suf == '.ipynb'):
+            reject(f'Protected data or notebook file cannot be deleted: {rel}', 'operation_rejected')
+        return
+    if target.is_dir():
+        count = 0
+        stack = [target]
+        while stack:
+            cur = stack.pop()
+            for child in cur.iterdir():
+                count += 1
+                if count > 4096:
+                    reject(f'Directory tree exceeds modification budget: {rel}', 'resource_limit')
+                if child.is_symlink():
+                    reject(f'Directory contains symbolic link: {rel}', 'operation_rejected')
+                child_rel = child.relative_to(root).as_posix()
+                if child_rel in registered:
+                    reject(f'Directory contains registered entry or parameter: {child_rel}', 'conflict')
+                suf = child.suffix.lower()
+                if suf in _PROTECTED_DATA_SUFFIXES or (not allow_notebooks and suf == '.ipynb'):
+                    reject(f'Directory contains protected data or notebook file: {child_rel}', 'operation_rejected')
+                if child.is_dir():
+                    stack.append(child)
+
+
+def _run_project_layout(project_root, arguments):
+    from demiflow.forge import project as forge_project
+    from demiflow.forge.io import ensure_directory
+    from demiflow.forge.project_io import control_lock, write_control
+    if type(arguments) is not dict:
+        reject('Invalid manage_project_layout arguments', 'invalid_request')
+    action = arguments.get('action')
+    root = Path(project_root).absolute()
+    if action == 'ensure_dirs':
+        dirs = arguments.get('dirs')
+        if not isinstance(dirs, list) or not dirs or len(dirs) > 16:
+            reject('ensure_dirs requires a non-empty list of standard directory names', 'invalid_request')
+        created, existing = [], []
+        for item in dirs:
+            if not isinstance(item, str) or item not in _STANDARD_PROJECT_DIRS:
+                reject(f'Directory not in standard Forge layout: {item!r}', 'invalid_request')
+            target = safe_path(root, item, missing=True)
+            if target.exists():
+                if not target.is_dir():
+                    reject(f'Path exists and is not a directory: {item}', 'conflict')
+                existing.append(item)
+            else:
+                ensure_directory(target)
+                created.append(item)
+        return dict(status='ok', action='ensure_dirs', created=created, existing=existing)
+    if action == 'register_flow':
+        entry = arguments.get('entry')
+        params = arguments.get('params')
+        if not isinstance(entry, str) or not entry:
+            reject('register_flow requires entry (e.g. flows/demo.py:run)', 'invalid_request')
+        if params is not None and not isinstance(params, str):
+            reject('params must be a relative JSON path', 'invalid_request')
+        return forge_project.register_flow(root, entry, params=params)
+    if action == 'bind_params':
+        entry = arguments.get('entry')
+        params = arguments.get('params')
+        old_params = arguments.get('old_params')
+        if not isinstance(entry, str) or not isinstance(params, str):
+            reject('bind_params requires entry and params', 'invalid_request')
+        forge_project.validate_entry(root, entry)
+        param_file = forge_project.validate_parameter_path(root, params)
+        if not param_file.is_file():
+            reject(f'Parameter file does not exist: {params}', 'not_found')
+        with control_lock(root):
+            _, value = forge_project.load_project(root)
+            expected = forge_project.content_digest(value)
+            entries = value.get('entries') or {}
+            if entry not in entries:
+                reject(f'Entry is not registered in workspace.json: {entry}', 'not_found')
+            bound = list(entries[entry])
+            if old_params is not None:
+                if old_params not in bound:
+                    reject(f'old_params not bound to {entry}: {old_params}', 'not_found')
+                bound = [params if p == old_params else p for p in bound]
+                bound = list(dict.fromkeys(bound))
+            else:
+                bound = [params]
+            value['entries'][entry] = bound
+            write_control(root / 'workspace.json', value, expected=expected)
+        return dict(status='updated', entry=entry, params=bound)
+    if action == 'bind_table':
+        from demiflow.forge.project_bindings import bind_table
+        return bind_table(
+            root,
+            arguments.get('alias'),
+            arguments.get('path'),
+            location_id=arguments.get('location_id'),
+            version=arguments.get('version'),
+        )
+    if action == 'move_path':
+        import shutil
+        src_raw = arguments.get('src')
+        dst_raw = arguments.get('dst')
+        if not isinstance(src_raw, str) or not src_raw or not isinstance(dst_raw, str) or not dst_raw:
+            reject('move_path requires non-empty relative src and dst paths', 'invalid_request')
+        src_path = safe_path(root, src_raw, missing=False)
+        dst_path = safe_path(root, dst_raw, missing=True)
+        src_rel = src_path.relative_to(root).as_posix()
+        dst_rel = dst_path.relative_to(root).as_posix()
+        dst_parts = Path(dst_rel).parts
+        if len(dst_parts) < 2 or dst_parts[0] not in _MOVE_DEST_DIRS or any(p.startswith('.') for p in dst_parts):
+            reject(f'move_path destination must be inside a standard role directory: {dst_rel}', 'invalid_request')
+        if dst_path.exists() or dst_path.is_symlink():
+            reject(f'move_path destination already exists: {dst_rel}', 'conflict')
+        if src_path == dst_path or src_path in dst_path.parents:
+            reject('move_path source and destination overlap', 'invalid_request')
+        with control_lock(root):
+            registered = _registered_control_paths(root)
+            _validate_tree_mutable(root, src_rel, src_path, allow_notebooks=True, registered=registered)
+            ensure_directory(dst_path.parent)
+            shutil.move(str(src_path), str(dst_path))
+        return dict(status='moved', src=src_rel, dst=dst_rel)
+    if action == 'remove_path':
+        import shutil
+        raw_paths = arguments.get('paths')
+        if not isinstance(raw_paths, list) or not raw_paths or len(raw_paths) > 64:
+            reject('remove_path requires a non-empty list of 1..64 relative paths', 'invalid_request')
+        targets = []
+        for item in raw_paths:
+            if not isinstance(item, str) or not item:
+                reject('remove_path entries must be non-empty relative path strings', 'invalid_request')
+            target = safe_path(root, item, missing=False)
+            targets.append((target.relative_to(root).as_posix(), target))
+        removed = []
+        with control_lock(root):
+            registered = _registered_control_paths(root)
+            for rel, target in targets:
+                _validate_tree_mutable(root, rel, target, allow_notebooks=False, registered=registered)
+            for rel, target in targets:
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.exists():
+                    target.unlink()
+                removed.append(rel)
+        return dict(status='removed', removed=removed)
+    reject('Unsupported manage_project_layout action', 'invalid_request')
+
 
 class BridgeServer:
     """Bounded input IPC owned by the trusted worker.
@@ -106,10 +315,11 @@ class BridgeServer:
     B1 may relay this Unix endpoint into its isolated network namespace; the same
     token, epoch, active-turn and fixed-operation checks apply on this side.
     """
-    def __init__(self, input_access, *, delivery_review=None):
+    def __init__(self, input_access, *, delivery_review=None, project_root=None):
         self.lock = threading.Lock()
         self.input_access = input_access
         self.delivery_review = delivery_review
+        self.project_root = Path(project_root).absolute() if project_root is not None else None
         self.bound_identity = (input_access.tid, input_access.epoch) if input_access is not None else None
         self.token = secrets.token_urlsafe(32)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-control-'))
@@ -122,10 +332,11 @@ class BridgeServer:
         self.thread = threading.Thread(target=self._run, name='development-control', daemon=True)
         self.thread.start()
 
-    def set_turn(self, input_access, *, delivery_review=None):
+    def set_turn(self, input_access, *, delivery_review=None, project_root=None):
         with self.lock:
             self.input_access = input_access
             self.delivery_review = delivery_review
+            self.project_root = Path(project_root).absolute() if project_root is not None else None
             self.count = 0
             if input_access is not None and self.bound_identity is None:
                 self.bound_identity = (input_access.tid, input_access.epoch)
@@ -146,16 +357,27 @@ class BridgeServer:
             if active is not self.input_access:
                 reject('Development control capability does not match this turn', 'not_found')
             if method == 'tools/list' and params == {}:
-                return dict(tools=[INPUT_TOOL, REVIEW_TOOL] if self.delivery_review is not None else [INPUT_TOOL])
+                tools = [INPUT_TOOL]
+                if self.delivery_review is not None:
+                    tools.append(REVIEW_TOOL)
+                if self.project_root is not None:
+                    tools.append(PROJECT_LAYOUT_TOOL)
+                return dict(tools=tools)
             if method != 'tools/call' or type(params) is not dict or set(params) != {'name', 'arguments'}:
                 reject('Unsupported development control operation')
-            if params['name'] == REVIEW_TOOL['name'] and self.delivery_review is not None:
+            name = params['name']
+            layout_root = self.project_root
+            if name == REVIEW_TOOL['name'] and self.delivery_review is not None:
                 # End-of-turn detachment serializes with this short durable admission.
                 answer = self.delivery_review.request(params['arguments'])
-            elif params['name'] != INPUT_TOOL['name']:
+            elif name == PROJECT_LAYOUT_TOOL['name'] and layout_root is not None:
+                answer = None
+            elif name != INPUT_TOOL['name']:
                 reject('Unsupported development control operation')
-        if params['name'] == INPUT_TOOL['name']:
+        if name == INPUT_TOOL['name']:
             answer = active.invoke(params['arguments'])
+        elif name == PROJECT_LAYOUT_TOOL['name']:
+            answer = _run_project_layout(layout_root, params['arguments'])
         return dict(content=[dict(type='text', text=wire(answer, 60000).decode())], isError=False)
 
     def _run(self):

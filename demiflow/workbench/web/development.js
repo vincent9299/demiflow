@@ -379,6 +379,7 @@ SOFTWARE.
     window.addEventListener('resize',sizeViewport);sizeViewport();state.releaseViewport=()=>window.removeEventListener('resize',sizeViewport);
     const chat=globalThis.ForgeDevelopmentChat.create({flow,onRaw:output,
       onOpenFile:(path,mode)=>state.files?.openFile(path,mode),
+      onContinue:()=>{if(state.disposed||input.disabled||state.sending)return;input.value='继续';resizeInput();availability();form.requestSubmit();},
       onChange:()=>{if(state.disposed||!state.chat)return;rail.update();hero.hidden=!!state.chat.items.size;layout.classList.toggle('development-empty',!state.chat.items.size);},
       onTrim:()=>{earlier.hidden=false;}});
     state.chat=chat;state.items=chat.items;
@@ -448,7 +449,7 @@ SOFTWARE.
       next.onclick=load;d.showModal();load();
     }
     function project(event, {replaying=false}={}){
-      if(event.type==='compaction.completed'&&event.data.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}
+      if(!replaying&&event.type==='compaction.completed'&&event.data.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}
       chat.project(event);
       if(event.type==='change.observed'){state.files?.recordObservedChanges(event.data?.files||[]);}
       else if(event.type==='turn.state'){
@@ -513,7 +514,7 @@ SOFTWARE.
             const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0,include_session:1});
             if(state.disposed||epoch!==state.feedEpoch)return;
             if(page.session){current=page.session;applySession(current);}
-            for(const event of page.events)project(event);
+            for(const event of page.events){recordRenderedEvent(event);project(event);}
             state.sequence=page.next_sequence;chat.updateSession(current);
             const stillBusy=current.turn&&current.turn.cleanup!=='complete';
             delay=page.events.length||state.sequence<page.last_sequence?0:stillBusy?25:1500;
@@ -523,7 +524,7 @@ SOFTWARE.
             if(!state.historyOnly){
               const busy=current.turn&&current.turn.cleanup!=='complete';
               const epoch=state.feedEpoch;const page=await api('dev-events',{session_id:current.id,after_sequence:state.sequence,limit:50,wait_ms:busy?1500:0});if(state.disposed||epoch!==state.feedEpoch)return;
-              for(const event of page.events)project(event);state.sequence=page.next_sequence;chat.updateSession(current);
+              for(const event of page.events){recordRenderedEvent(event);project(event);}state.sequence=page.next_sequence;chat.updateSession(current);
               delay=state.sequence<page.last_sequence||busy?25:1500;
             }
           }
@@ -582,14 +583,24 @@ SOFTWARE.
       }
     };
     stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
-    function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;chat.reset();newContent.hidden=true;}
+    function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;state.renderedEvents=[];chat.reset();newContent.hidden=true;}
+    function recordRenderedEvent(event){
+      if(!state.renderedEvents)state.renderedEvents=[];
+      if(Number.isSafeInteger(event?.sequence)){
+        const arr=state.renderedEvents;
+        if(!arr.length||arr[arr.length-1].sequence<event.sequence){
+          arr.push(event);
+          if(arr.length>1200)arr.splice(0,arr.length-1200);
+        }
+      }
+    }
     async function loadLatestReplay(){
       if(!state.session)return;
       if(capabilities.history_replay_api===true&&state.session.sequence>0){
         const epoch=state.feedEpoch||0;
         const replay=await api('dev-replay',{session_id:state.session.id});
         if(state.disposed||epoch!==(state.feedEpoch||0))return;
-        for(const event of replay.events)project(event,{replaying:true});
+        for(const event of replay.events){recordRenderedEvent(event);project(event,{replaying:true});}
         state.sequence=replay.next_sequence;
         state.windowStart=Math.max(0,(replay.first_sequence||1)-1);
         earlier.hidden=!replay.has_earlier;
@@ -598,6 +609,46 @@ SOFTWARE.
         state.windowStart=state.sequence;earlier.hidden=state.sequence===0;
       }
     }
+    async function loadEarlierReplay(){
+      const sid=state.displaySession||state.session?.id;
+      if(!sid)return;
+      if(capabilities.history_replay_api===true&&!state.historyOnly&&state.windowStart>0){
+        const request=++state.navigationEpoch;
+        earlier.disabled=true;
+        try{
+          const older=await api('dev-replay',{session_id:sid,before_sequence:state.windowStart+1,max_turns:8,limit:100});
+          if(state.disposed||state.navigationEpoch!==request)return;
+          const prevHeight=timeline.scrollHeight,prevTop=timeline.scrollTop;
+          const existing=state.renderedEvents||[];
+          const seenSeq=new Set();
+          const merged=[];
+          for(const ev of [...(older.events||[]),...existing]){
+            if(Number.isSafeInteger(ev?.sequence)){
+              if(seenSeq.has(ev.sequence))continue;
+              seenSeq.add(ev.sequence);
+            }
+            merged.push(ev);
+          }
+          follow.setFollowing(false);
+          chat.reset();
+          state.renderedEvents=merged;
+          for(const ev of merged)project(ev,{replaying:true});
+          if(older.events?.length){
+            state.windowStart=Math.max(0,(older.first_sequence||1)-1);
+          }else{
+            state.windowStart=0;
+          }
+          earlier.hidden=!older.has_earlier||state.windowStart===0;
+          const delta=timeline.scrollHeight-prevHeight;
+          timeline.scrollTop=Math.max(0,prevTop+delta);
+          rail.update();
+        }finally{
+          earlier.disabled=false;
+        }
+        return;
+      }
+      await loadWindow(sid,Math.max(0,(state.windowStart||0)-50));
+    }
     async function loadWindow(sid,after){
       const request=++state.navigationEpoch;
       const page=await api('dev-events',{session_id:sid,after_sequence:after,limit:50});
@@ -605,10 +656,10 @@ SOFTWARE.
       state.historyOnly=true;state.displaySession=sid;pendingHost.replaceChildren();state.pending.clear();
       follow.setFollowing(false);clearTimeline();
       state.windowStart=after;earlier.hidden=after===0;latest.hidden=false;availability();
-      for(const event of page.events)project(event,{replaying:true});
+      for(const event of page.events){recordRenderedEvent(event);project(event,{replaying:true});}
       timeline.scrollTop=0;rail.update();
     }
-    earlier.onclick=()=>loadWindow(state.displaySession||state.session.id,Math.max(0,(state.windowStart||0)-50)).catch(e=>error(body,e));
+    earlier.onclick=()=>loadEarlierReplay().catch(e=>error(body,e));
     latest.onclick=async()=>{state.navigationEpoch++;follow.setFollowing(true);clearTimeline();state.historyOnly=false;state.displaySession=null;latest.hidden=true;clearTimeout(state.timer);await loadLatestReplay();await refresh();};
     async function switchView(nextView){
       if(state.disposed||!capabilities.enabled)return;

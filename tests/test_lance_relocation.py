@@ -67,3 +67,31 @@ def test_missing_target_does_not_fall_back_or_escape(tmp_path):
     with pytest.raises(ValueError, match='Invalid relocated'):
         resolve_local_uri(tmp_path / 'old.lance')
     assert resolve_local_uri(tmp_path / 'unmapped.lance') == tmp_path / 'unmapped.lance'
+
+
+def test_unreadable_ancestor_relocation_manifest_is_skipped(tmp_path, monkeypatch):
+    import os
+    from demiflow.execution import artifacts, location_index
+    lance_manifest = tmp_path / '_demiflow/lance_locations.json'
+    lance_manifest.parent.mkdir()
+    lance_manifest.write_text(json.dumps({'version': 1, 'tables': {'sub/a.lance': 'sub/b.lance'}}))
+    art_manifest = tmp_path / '_demiflow/artifact_locations.json'
+    art_manifest.write_text(json.dumps({'version': 1, 'files': {'sub/a.bin': 'sub/b.bin'}}))
+    sub = tmp_path / 'sub'
+    sub.mkdir()
+    table = sub / 'a.lance'
+    table.mkdir()
+    blob = sub / 'a.bin'
+    blob.write_bytes(b'ok')
+
+    real_open = os.open
+    def deny_manifests(path, *args, **kwargs):
+        if str(path) in {str(lance_manifest), str(art_manifest)}:
+            raise PermissionError(13, 'Permission denied', str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(location_index.os, 'open', deny_manifests)
+    monkeypatch.setattr(artifacts.os, 'open', deny_manifests, raising=False)
+    monkeypatch.setattr(artifacts, '_LOCATION_INDEX_THRESHOLD', 0)
+    assert resolve_local_uri(table) == table.resolve()
+    assert artifacts.resolve_local_artifact(blob) == blob.resolve()

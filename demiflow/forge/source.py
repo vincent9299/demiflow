@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 import hashlib
+import os
 from pathlib import Path
 import time
 
@@ -48,6 +49,7 @@ class InspectionError(ValueError):
 @dataclass(frozen=True)
 class Symbol:
     name: str
+    opaque: bool = False
 
 
 @dataclass
@@ -194,6 +196,10 @@ class SourceTree:
                             *statement.args.kw_defaults,
                         ]:
                             if default is not None:
+                                if (isinstance(default, ast.Name)
+                                        and default.id in namespace
+                                        and not isinstance(namespace[default.id], (Symbol, Definition))):
+                                    continue
                                 self.literal(default, module)
                     namespace[statement.name] = Definition(module, statement)
                 elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
@@ -202,6 +208,35 @@ class SourceTree:
                         if isinstance(statement, ast.Assign)
                         else [statement.target]
                     )
+                    if (isinstance(statement, ast.Assign) and len(targets) == 1
+                            and isinstance(targets[0], ast.Tuple)
+                            and targets[0].elts
+                            and all(isinstance(e, ast.Name) and e.id not in namespace for e in targets[0].elts)):
+                        rhs_elts = (
+                            statement.value.elts
+                            if isinstance(statement.value, ast.Tuple) and len(statement.value.elts) == len(targets[0].elts)
+                            else None
+                        )
+                        for idx, elem in enumerate(targets[0].elts):
+                            rhs = rhs_elts[idx] if rhs_elts is not None else None
+                            if (isinstance(rhs, ast.Name)
+                                    and isinstance(namespace.get(rhs.id), (Symbol, Definition))):
+                                val = namespace[rhs.id]
+                            elif (isinstance(rhs, ast.Attribute)
+                                    and isinstance(rhs.value, ast.Name)
+                                    and isinstance(namespace.get(rhs.value.id), Symbol)):
+                                val = Symbol(namespace[rhs.value.id].name + "." + rhs.attr)
+                            elif rhs is not None:
+                                try:
+                                    val = self.literal(rhs, module)
+                                except InspectionError as exc:
+                                    if exc.diagnostic.get("rule") != "FL-01":
+                                        raise
+                                    val = Symbol(f"{module}.{elem.id}", opaque=True)
+                            else:
+                                val = Symbol(f"{module}.{elem.id}", opaque=True)
+                            namespace[elem.id] = val
+                        continue
                     if any(
                         not isinstance(t, ast.Name) or t.id in namespace
                         for t in targets
@@ -216,14 +251,27 @@ class SourceTree:
                         self._annotation_initialization(
                             statement.annotation, namespace, module
                         )
-                    value = (
-                        namespace[statement.value.id]
-                        if isinstance(statement.value, ast.Name)
-                        and isinstance(
-                            namespace.get(statement.value.id), (Symbol, Definition)
-                        )
-                        else self.literal(statement.value, module)
-                    )
+                    if (isinstance(statement.value, ast.Name)
+                            and isinstance(namespace.get(statement.value.id), (Symbol, Definition))):
+                        value = namespace[statement.value.id]
+                    elif (isinstance(statement.value, ast.Attribute)
+                            and isinstance(statement.value.value, ast.Name)
+                            and isinstance(namespace.get(statement.value.value.id), Symbol)):
+                        value = Symbol(namespace[statement.value.value.id].name + "." + statement.value.attr)
+                    else:
+                        static_path = self._static_module_path(statement.value, path)
+                        if static_path is not None:
+                            value = static_path
+                        else:
+                            try:
+                                value = self.literal(statement.value, module)
+                            except InspectionError as exc:
+                                if exc.diagnostic.get("rule") != "FL-01":
+                                    raise
+                                # Non-literal module constants (e.g. pa.schema(...),
+                                # re.compile(...)) are bound as opaque symbols so the module still
+                                # loads for downstream operator/flow checks.
+                                value = Symbol(f"{module}.{targets[0].id}", opaque=True)
                     for target in targets:
                         namespace[target.id] = value
                 else:
@@ -253,6 +301,42 @@ class SourceTree:
         finally:
             self.loading.remove(module)
 
+    def _static_module_path(self, node, file_path):
+        """Statically resolve pure Path(__file__)[.resolve()][.parent|.parents[k]] expressions within project root."""
+        def _eval(expr):
+            if (isinstance(expr, ast.Call) and len(expr.args) == 1 and not expr.keywords
+                    and isinstance(expr.args[0], ast.Name) and expr.args[0].id == "__file__"
+                    and ((isinstance(expr.func, ast.Name) and expr.func.id == "Path")
+                         or (isinstance(expr.func, ast.Attribute) and expr.func.attr == "Path"))):
+                return file_path.resolve()
+            if isinstance(expr, ast.Call) and not expr.args and not expr.keywords and isinstance(expr.func, ast.Attribute) and expr.func.attr == "resolve":
+                base = _eval(expr.func.value)
+                return base.resolve() if base is not None else None
+            if isinstance(expr, ast.Attribute) and expr.attr == "parent":
+                base = _eval(expr.value)
+                return base.parent if base is not None else None
+            if (isinstance(expr, ast.Subscript)
+                    and isinstance(expr.value, ast.Attribute) and expr.value.attr == "parents"
+                    and isinstance(expr.slice, ast.Constant) and type(expr.slice.value) is int and expr.slice.value >= 0):
+                base = _eval(expr.value.value)
+                if base is not None and expr.slice.value < len(base.parents):
+                    return base.parents[expr.slice.value]
+            if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div) and isinstance(expr.right, ast.Constant) and isinstance(expr.right.value, str):
+                base = _eval(expr.left)
+                return (base / expr.right.value) if base is not None else None
+            return None
+
+        resolved = _eval(node)
+        if resolved is None:
+            return None
+        try:
+            resolved = resolved.resolve()
+            if resolved == self.root or self.root in resolved.parents:
+                return resolved
+        except OSError:
+            return None
+        return None
+
     def _definition_initialization(self, node, namespace, module):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.decorator_list:
@@ -265,6 +349,10 @@ class SourceTree:
                 )
             for default in [*node.args.defaults, *node.args.kw_defaults]:
                 if default is not None:
+                    if (isinstance(default, ast.Name)
+                            and default.id in namespace
+                            and not isinstance(namespace[default.id], (Symbol, Definition))):
+                        continue
                     self.literal(default, module)
             annotations = [
                 p.annotation
@@ -436,25 +524,41 @@ class SourceTree:
                     )
             namespace[name] = Symbol(target)
 
+    def _local_name(self, name):
+        """Map project-relative or ancestor-package-prefixed module names to local module name."""
+        parts = name.split('.')
+        if not parts or any(not part.isidentifier() for part in parts):
+            return None
+        root_parts = [p for p in self.root.parts if p and p != os.sep]
+        candidates = [parts]
+        # Allow qualified imports such as ``pipelines.<project>.operators.foo`` when
+        # self.root ends with the matching ancestor suffix (e.g. .../pipelines/<project>).
+        max_prefix = min(len(parts) - 1, len(root_parts))
+        for prefix_len in range(max_prefix, 0, -1):
+            if tuple(parts[:prefix_len]) == tuple(root_parts[-prefix_len:]):
+                candidates.append(parts[prefix_len:])
+        for cand in candidates:
+            for end in range(len(cand), 0, -1):
+                base = self.root.joinpath(*cand[:end])
+                for file_path in (base.with_suffix('.py'), base / '__init__.py'):
+                    no_symlinks(file_path)
+                    if file_path.is_file():
+                        return '.'.join(cand)
+        return None
+
     def is_local(self, name):
         """Local module origin, independent of business directory names."""
-        parts = name.split('.')
-        if any(not part.isidentifier() for part in parts):
-            return False
-        for end in range(len(parts), 0, -1):
-            base = self.root.joinpath(*parts[:end])
-            for candidate in (base.with_suffix('.py'), base / '__init__.py'):
-                no_symlinks(candidate)
-                if candidate.is_file():
-                    return True
-        return False
+        return self._local_name(name) is not None
 
     def resolve(self, symbol, seen=()):
-        if not isinstance(symbol, Symbol) or not self.is_local(symbol.name):
+        if not isinstance(symbol, Symbol):
             return symbol
-        if symbol.name in seen or len(seen) >= self.limits["depth"]:
+        local = self._local_name(symbol.name)
+        if not local:
+            return symbol
+        if local in seen or len(seen) >= self.limits["depth"]:
             self.fail("OP-06", "Cyclic/deep symbol aliases", incomplete=True)
-        parts = symbol.name.split(".")
+        parts = local.split(".")
         if len(parts) > 1:
             module, name = ".".join(parts[:-1]), parts[-1]
             path = self.root.joinpath(*parts[:-1]).with_suffix(".py")
@@ -463,14 +567,16 @@ class SourceTree:
                 namespace = self.load(module)
                 if name in namespace:
                     value = namespace[name]
-                    if isinstance(value, Symbol) and value.name == symbol.name:
+                    if isinstance(value, Symbol) and self._local_name(value.name) == local:
+                        if value.opaque:
+                            return value
                         self.fail(
                             "OP-06",
                             "Recursive import alias",
                             module=module,
                             incomplete=True,
                         )
-                    return self.resolve(value, (*seen, symbol.name))
+                    return self.resolve(value, (*seen, local))
         return symbol
 
     def unchanged(self):

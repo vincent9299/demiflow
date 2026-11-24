@@ -57,7 +57,7 @@
   const timestamp=value=>Number.isFinite(value)&&value>0?value:null;
   function localTime(seconds){if(!seconds)return '';const date=new Date(seconds*1000);return (date.getMonth()+1)+'/'+date.getDate()+' '+String(date.getHours()).padStart(2,'0')+':'+String(date.getMinutes()).padStart(2,'0');}
   function duration(seconds){const value=Math.max(0,Math.floor(seconds));return value<60?value+'s':value<3600?Math.floor(value/60)+'m '+value%60+'s':Math.floor(value/3600)+'h '+Math.floor(value%3600/60)+'m';}
-  function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{},onOpenFile=null}={}){
+  function create({flow,onRaw=()=>{},onChange=()=>{},onTrim=()=>{},onOpenFile=null,onContinue=null}={}){
     if(!(flow instanceof Element))throw new TypeError('A chat flow element is required');
     const items=new Map(),turns=new Map(),textItems=new Map(),toolItems=new Map(),seen=new Map();
     let textBytes=0,trimmed=0,disposed=false,lastText=null,pagedText=null,latestTurn=null,renderTimer=null;
@@ -261,7 +261,19 @@
         try{
           const result=(typeof data.result==='string'?JSON.parse(data.result):data.result)||{};
           if(turn.done||['failed','cancelled','interrupted'].includes(turn.state))closeReview(turn,event,result);
-          if(result.reason)system(event,'Run details',result.reason);
+          if(result.reason){
+            const runItem=system(event,'Run details',result.reason,null,'run-details');
+            if(['interrupted','failed'].includes(turn.state)&&runItem.inProcess){
+              runItem.turn.answers.append(runItem.node);
+              runItem.inProcess=false;runItem.turn.processCount--;paintTurn(runItem.turn);
+            }
+            if(onContinue&&['interrupted','failed'].includes(turn.state)&&runItem?.row?.heading&&!runItem.row.heading.querySelector('.dfc-continue-btn')){
+              const cont=el('button','继续任务','dfc-open-code dfc-continue-btn');cont.type='button';
+              cont.title='沿用当前会话上下文继续刚才未完成的任务';
+              cont.onclick=e=>{e.preventDefault();e.stopPropagation();onContinue();};
+              runItem.row.heading.append(cont);
+            }
+          }
           for(const [key,label] of [['native_flow','原生数据流检查'],['project_layout','项目目录检查']]){
             const check=result.pipeline_checks?.[key];if(!check)continue;
             const diags=check.diagnostics||[];
@@ -279,16 +291,33 @@
         }catch{}
       }else if(['review.requested','review.started','review.detail','review.completed'].includes(event.type))review(event);
       else if(event.type==='change.observed'){
-        const files=data.files||[];
-        const item=system(event,'Changed files',files.map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n'),'change:'+event.sequence);
-        if(onOpenFile&&files.length&&item?.row?.heading&&!item.row.heading.querySelector('.dfc-open-code')){
-          const firstPath=files.map(f=>f?.path).find(p=>typeof p==='string'&&!p.includes('__pycache__')&&!p.endsWith('.pyc')&&!p.endsWith('.pyo'));
-          if(firstPath){
-            const jump=el('button','查看代码','dfc-open-code');jump.type='button';
-            jump.title='在右侧代码面板查看 '+firstPath;
-            jump.onclick=e=>{e.preventDefault();e.stopPropagation();onOpenFile(firstPath,'diff');};
+        const rawFiles=data.files||[];
+        const isNoise=p=>{
+          if(typeof p!=='string'||!p)return true;
+          const parts=p.replace(/^\/+/,'').split('/');
+          if(parts.some(seg=>!seg||seg.startsWith('.')||['__pycache__','.pytest_cache','.mypy_cache','_runtime_run','logs','node_modules'].includes(seg)||seg.endsWith('.lance')))return true;
+          return /\.(pyc|pyo|lance|manifest|parquet|arrow|png|jpe?g|webp|gif|pdf|db|sqlite3?)$/i.test(parts[parts.length-1]);
+        };
+        const files=rawFiles.filter(f=>f&&!isNoise(f.path));
+        if(!files.length)return true;
+        const turn=newTurn(event);
+        if(!turn.changedFiles)turn.changedFiles=new Map();
+        for(const file of files)turn.changedFiles.set(file.path,file);
+        const allFiles=[...turn.changedFiles.values()];
+        const paths=allFiles.map(f=>f.path);
+        const bodyText=allFiles.map(file=>file.path+'\n'+(file.diff||file.diff_unavailable||'')).join('\n\n');
+        const item=system(event,'变更文件 ('+allFiles.length+')',bodyText,'change:'+event.sequence,'turn-changes');
+        item.summary=paths.slice(0,3).join(' · ')+(paths.length>3?' 等 '+paths.length+' 项':'');
+        if(item.preview)item.preview.textContent=excerpt(item.summary);
+        if(onOpenFile&&paths.length&&item?.row?.heading){
+          let jump=item.row.heading.querySelector('.dfc-open-code');
+          if(!jump){
+            jump=el('button','查看代码','dfc-open-code');jump.type='button';
             item.row.heading.append(jump);
           }
+          const firstPath=paths[0];
+          jump.title='在右侧代码面板查看 '+firstPath;
+          jump.onclick=e=>{e.preventDefault();e.stopPropagation();onOpenFile(firstPath,'diff');};
         }
       }
       else if(event.type==='check.reference')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);

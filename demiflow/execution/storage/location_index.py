@@ -4,6 +4,7 @@ The JSON remains authoritative. Index identity includes its inode, size, mtime
 and ctime; publishing/rebuilding never writes the manifest or mapped artifacts.
 """
 from contextlib import contextmanager, closing
+import errno
 import fcntl
 from functools import lru_cache
 import hashlib
@@ -244,7 +245,12 @@ class IndexedLocations:
             return self.get_readonly(key)
         if type(key) is not str or len(key)>MAX_TOKEN: raise ValueError('Location lookup key exceeds token budget')
         self._check_source()
-        value = self._get(key)
+        try:
+            value = self._get(key)
+        except OSError as exc:
+            if exc.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):
+                raise
+            return self.get_readonly(key)
         self._check_source()
         if self.field == 'tables' and value is not None and not isinstance(value, str):
             raise ValueError('Invalid relocated table target')

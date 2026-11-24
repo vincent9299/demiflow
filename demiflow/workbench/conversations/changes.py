@@ -11,13 +11,15 @@ from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import safe_path
 
 TEXT_SUFFIXES = {'.py', '.md', '.json', '.yaml', '.yml', '.toml', '.js', '.css', '.html', '.txt'}
-IGNORED_DIRS = {'__pycache__', '.pytest_cache', '.mypy_cache'}
-IGNORED_SUFFIXES = {'.pyc', '.pyo'}
+IGNORED_DIRS = {'__pycache__', '.pytest_cache', '.mypy_cache', 'logs', 'data', 'runs', 'datasets', 'outputs', 'results'}
+IGNORED_SUFFIXES = {'.pyc', '.pyo', '.lance', '.manifest', '.parquet', '.arrow', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.db', '.sqlite', '.sqlite3', '.lock'}
 
 
 def _ignored(rel):
     parts = rel.split('/')
-    return any(part in IGNORED_DIRS for part in parts) or Path(parts[-1]).suffix in IGNORED_SUFFIXES
+    if any(not part or part.startswith('.') or part in IGNORED_DIRS or part.endswith('.lance') for part in parts):
+        return True
+    return Path(parts[-1]).suffix.lower() in IGNORED_SUFFIXES
 
 
 def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):

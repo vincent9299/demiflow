@@ -18,7 +18,7 @@ from .platform_worker import describe_fixed_table
 from .project import discover_project_sources, inspect_prompt_source, validate_entry, validate_parameter_path
 from .project_bindings import resolve_arguments, resolve_flow_resources, table_binding, table_identity
 from .project_io import decode_control, relative_path
-from .project_rules import ROLE_DIRS, RULES_ID, check_layout, diagnostic
+from .project_rules import ROLE_DIRS, RULES_ID, check_layout, check_project_hygiene, diagnostic
 from .schema import ForgeError
 from .source import Definition, InspectionError, SourceTree
 
@@ -47,7 +47,7 @@ def result(diagnostics, inspected, *, applicable=True):
     return dict(status=status, inspected_count=len(inspected), diagnostic_count=len(diagnostics),
                 diagnostics=[{k: (v[:256] if isinstance(v, str) else v)
                               for k, v in d.items() if k in {'rule', 'path', 'line', 'detail'}}
-                             for d in diagnostics[:4]])
+                             for d in diagnostics[:16]])
 
 
 def _record(sources, path, value):
@@ -391,7 +391,13 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             layout_paths.update(inspected)
             layout.extend({**d, 'entry': candidate, 'params': param} for d in issues)
             report['binding']['parameter_path'] = param
-            row = dict(entry=candidate, params=param, status=report['status'])
+            kept_entry_diags = [d for d in report['diagnostics'] if _keep_diagnostic(d)]
+            entry_status = (
+                'invalid' if any(d.get('status') == 'invalid' for d in kept_entry_diags)
+                else 'incomplete' if kept_entry_diags
+                else ('checked' if report['status'] in ('checked', 'incomplete') else report['status'])
+            )
+            row = dict(entry=candidate, params=param, status=entry_status)
             if publish is not None:
                 publish(report)
             rows.append(row)
@@ -424,6 +430,11 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
     if pipeline_paths and not checked and not definitions and not native:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
+    if scope['kind'] == 'project' and control.get('entries'):
+        hygiene_paths, hygiene_issues = check_project_hygiene(
+            root, control, checked_sources=sources, parameter_digests=parameter_digests, exclude=exclude)
+        layout_paths.update(hygiene_paths)
+        layout.extend(hygiene_issues)
     basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
                  manifest_sha256=manifest_hash, sources=sources, parameter_digests=parameter_digests, controls=table_files)
     verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes)

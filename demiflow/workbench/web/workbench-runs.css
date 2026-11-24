@@ -1,7 +1,5 @@
 /* One selected run: history, sealed execution graph, and an identity-bound reader. */
 .wb-workspace-layout,.wb-workspace-main{min-width:0}
-.wb-runs-layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:22px}
-.workbench .wb-runs-layout>.wb-history{margin:0;padding:16px 10px;background:#fafafa;border:0;border-right:1px solid #ededf0;border-radius:0;min-width:0;align-self:stretch}
 .workbench[data-page=monitor] .wb-toolbar{min-height:40px;margin:0;padding:0;border:0;border-bottom:1px solid var(--op-line);justify-content:space-between;gap:4px 12px}
 .workbench[data-page=monitor] .wb-monitor-tabs{gap:20px;align-self:stretch;align-items:stretch;flex-wrap:wrap}
 .workbench[data-page=monitor] .wb-monitor-tabs>button{border:0;background:transparent;padding:10px 0;border-radius:0;box-shadow:none;font-size:13px;font-weight:500;color:var(--op-muted)}
@@ -21,7 +19,7 @@
 .wb-run-duration,.wb-run-output-count,.wb-run-id{white-space:nowrap}
 .wb-run-alerts:empty{display:none}.wb-run-alerts>*{margin:8px 0 0}
 .workbench .wb-performance-toggle{display:inline-flex;align-items:center;gap:6px}
-.wb-performance-toggle svg,.wb-run-utilities svg,.wb-record-picker svg{width:15px;height:15px;flex:none}
+.wb-performance-toggle svg,.wb-record-picker svg{width:15px;height:15px;flex:none}
 .workbench .wb-performance-toggle[aria-expanded=true]{color:var(--op-ink);background:var(--op-soft)}
 .workbench .wb-performance-panel{padding:14px 0;border-bottom:1px solid var(--op-line)}
 .workbench[data-page=monitor] .wb-run-facts{padding:0;margin:0;border:0;gap:8px 20px}
@@ -46,10 +44,7 @@
 .wb-run-confirmation{padding:18px 20px;margin:10px 0;border:1px solid #e4e4e7;border-radius:12px;background:#fafafa;box-shadow:0 2px 8px rgba(9,9,11,.04)}
 .wb-run-confirmation button.primary{background:#18181b;border-color:#18181b;color:#fff}
 .wb-attempt-history{padding-left:20px;color:#52525b;font-size:12px;line-height:2}
-.workbench[data-page=operators] .wb-workspace-main>.wb-settings,.workbench[data-page=operators] .wb-workspace-main>.wb-toolbar,.workbench[data-page=operators] .wb-workspace-main>.wb-notice,.workbench[data-page=operators] .wb-workspace-main>.wb-pending{display:none}
 .wb-workspace-main>.wb-pending:empty{display:none}
-.workbench .wb-run-context{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:8px 14px;padding:4px 0 12px}
-.wb-run-context h2{margin:0;color:var(--op-ink);font-size:clamp(18px,1.4vw,22px);line-height:1.3;font-weight:650;letter-spacing:-.02em;overflow-wrap:anywhere}
 .wb-run-context-line{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;min-width:0}
 .wb-run-context-line:has(> :not([hidden])){min-height:30px}
 .workbench .wb-record-picker{
@@ -62,9 +57,6 @@
 .workbench .wb-record-picker:hover{background:#ebebef;border-color:#d4d4d8}
 .wb-record-picker:focus-within{outline:2px solid var(--accent,#2563eb);outline-offset:2px}
 .workbench .wb-record-picker select{position:absolute;inset:0;width:100%;height:100%;margin:0;min-width:0;opacity:0;cursor:pointer}
-.wb-run-utilities{display:flex;align-items:center;gap:2px}
-.workbench .wb-run-utilities button{display:grid;place-items:center;width:28px;height:28px;padding:0;color:#71717a;border:0;background:transparent;box-shadow:none;border-radius:6px}
-.workbench .wb-run-utilities button:hover{color:var(--op-ink);background:#f4f4f5}
 .workbench .wb-run-context-line>.quiet,.workbench .wb-run-empty button{background:transparent;border:0;box-shadow:none;padding:4px 6px;color:#2563eb;border-radius:6px}
 .workbench .wb-run-context-line>.quiet:hover,.workbench .wb-run-empty button:hover{background:#eff6ff}
 .workbench[data-page=monitor] .wb-run-detail>.wb-source-header>strong{display:none}
@@ -73,20 +65,12 @@
 .workbench[data-page=monitor] .wb-node-panel .wb-source-header>.wb-source-tabs button{margin:0;padding:4px 8px;border:0;border-radius:6px;font-size:11.5px}
 .workbench[data-page=monitor] .wb-node-panel .wb-source-header>.wb-source-tabs button.active{background:var(--op-soft);color:var(--op-ink);box-shadow:none}
 @media(max-width:680px){
-  .workbench .wb-run-context{gap:5px 7px;padding-bottom:6px}
   .workbench[data-page=monitor] .wb-run-bar{gap:4px 9px}
   .workbench[data-page=monitor] .wb-monitor-tabs{gap:12px}
 }
 .wb-run-empty{padding:28px 0;max-width:600px}.wb-run-empty p{margin:0 0 8px;font-size:13.5px;color:#71717a}
-.workbench .wb-run-flow{
-  display:block;width:100%;padding:7px 10px;margin:1px 0;border:0;border-radius:8px;
-  box-shadow:none;background:transparent;text-align:left;line-height:1.5;color:#3f3f46;font-weight:450;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-.workbench .wb-run-flow:hover{background:#f1f1f4;color:#09090b}
-.workbench .wb-run-flow[aria-current=page]{background:#fff;color:#09090b;font-weight:600;box-shadow:0 1px 2px rgba(9,9,11,.06),0 0 0 1px rgba(9,9,11,.06)}
-@media(max-width:1200px){.wb-runs-layout{grid-template-columns:185px minmax(0,1fr);gap:14px}.workbench[data-page=monitor] .wb-body.wb-detail-open{grid-template-columns:minmax(0,1fr)}.workbench[data-page=monitor] .wb-body>.side-navigation-resizer{display:none}.workbench[data-page=monitor] .wb-node-panel{padding:10px 0 0;border-left:0;border-top:1px solid var(--op-line)}.workbench[data-page=monitor] .wb-node-panel>.wb-source{max-height:650px}}
-@media(max-width:680px){.wb-runs-layout{grid-template-columns:minmax(0,1fr);gap:12px}.workbench .wb-runs-layout>.wb-history{padding:12px 6px;border-right:0;border-bottom:1px solid var(--op-line);max-height:260px;overflow:auto}.wb-run-definition{grid-template-columns:80px minmax(0,1fr);gap:10px}.wb-run-confirmation{padding:14px}.workbench[data-page=monitor] .wb-graph{height:480px}}
+@media(max-width:1200px){.workbench[data-page=monitor] .wb-body.wb-detail-open{grid-template-columns:minmax(0,1fr)}.workbench[data-page=monitor] .wb-body>.side-navigation-resizer{display:none}.workbench[data-page=monitor] .wb-node-panel{padding:10px 0 0;border-left:0;border-top:1px solid var(--op-line)}.workbench[data-page=monitor] .wb-node-panel>.wb-source{max-height:650px}}
+@media(max-width:680px){.wb-run-definition{grid-template-columns:80px minmax(0,1fr);gap:10px}.wb-run-confirmation{padding:14px}.workbench[data-page=monitor] .wb-graph{height:480px}}
 
 /* Fixed output preview. */
 .wb-result-preview{max-width:100%;min-width:0;margin:12px 0;overflow:auto}

@@ -107,6 +107,46 @@ def _build_rework_prompt(pipeline_checks, review_report):
     return (header + '\n'.join(issues))[:8000]
 
 
+def _declared_readonly_locations(root: Path, denied: list[Path], private_home: Path) -> list[Path]:
+    """Return physical read-only local data roots explicitly declared in workspace.json.
+
+    Never grants write access and skips any path overlapping denied/system scopes.
+    """
+    ws_file = root / 'workspace.json'
+    if not ws_file.is_file():
+        return []
+    try:
+        doc = json.loads(ws_file.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return []
+    locations = doc.get('locations') if isinstance(doc, dict) else None
+    if not isinstance(locations, dict):
+        return []
+    root_phys = root.resolve(strict=False)
+    forbidden = [Path(p).resolve(strict=False) for p in (*denied, private_home, Path('/dev'), Path('/proc'), Path('/sys'), Path('/run'))]
+    extra: list[Path] = []
+    for loc in locations.values():
+        if not isinstance(loc, dict):
+            continue
+        if loc.get('kind') not in (None, 'local'):
+            continue
+        is_readonly = (loc.get('writable') is False) or (loc.get('read_only') is True and loc.get('writable') is not True)
+        if not is_readonly:
+            continue
+        raw_root = loc.get('root')
+        if not isinstance(raw_root, str) or not raw_root:
+            continue
+        candidate = Path(raw_root).resolve(strict=False)
+        if not candidate.is_dir():
+            continue
+        if candidate == root_phys or candidate.is_relative_to(root_phys):
+            continue
+        if any(candidate == bad or candidate.is_relative_to(bad) or bad.is_relative_to(candidate) for bad in forbidden):
+            continue
+        extra.append(candidate)
+    return extra
+
+
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None,
                  extra_read_paths=(), extra_runtime_paths=()):
     """Assemble only controller-declared scope; no provider-supplied path grants."""
@@ -132,7 +172,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
-    writes = [] if readonly else [root / name for name in project['writes']]
+    writes = [] if readonly else [root / name for name in project['writes'] if (root / name).exists()]
     protected = [] if notebook_op else [root / name for name in ('.git', '.forge', '.venv', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md')]
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     if not notebook_op:
@@ -157,6 +197,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             cred = Path(provider['native_credentials'])
             if active_cred is None or cred.resolve() != active_cred:
                 denied.append(cred)
+    if not notebook_op:
+        read.extend(_declared_readonly_locations(root, denied, Path(private_home)))
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
     rt = tuple(sorted({*runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),
@@ -824,7 +866,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if cell_cli and control_bridge is not None:
                         control_bridge.set_turn(turn, deadline)
                     elif control_bridge is not None and input_access is not None:
-                        control_bridge.set_turn(input_access, delivery_review=delivery_review)
+                        layout_root = Path(project['root']) if (not compact and not notebook and project.get('writes')) else None
+                        control_bridge.set_turn(input_access, delivery_review=delivery_review, project_root=layout_root)
                     transport.frame_count = 0
                     transport.output_bytes = 0
                     provider.items.clear()
@@ -860,7 +903,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         from demiflow.workbench.notebooks.cell_commands import CellCommands
                         control_bridge = CellCommands(store, turn, deadline)
                     elif acp and guided:
-                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review)
+                        layout_root = Path(project['root']) if (not compact and not notebook and project.get('writes')) else None
+                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review, project_root=layout_root)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
                     if broker_home is not None:
@@ -1039,7 +1083,20 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         if pending_steer:
                             steering, message = pending_steer
                             steer_rpc = provider.steer(message, steering)
-                    if transport.closed and not completed: raise ConnectionError('Provider connection lost')
+                    if transport.closed and not completed:
+                        rc = process.poll() if process is not None else None
+                        if rc is None and process is not None:
+                            try:
+                                rc = process.wait(timeout=0.5)
+                            except Exception:
+                                rc = process.poll()
+                        stderr_tail = bytes(getattr(transport, 'stderr', b'')).decode('utf-8', 'replace').strip()[-400:]
+                        detail = 'Provider connection lost'
+                        if rc is not None:
+                            detail += f' (exit={rc})'
+                        if stderr_tail:
+                            detail += ': ' + ' '.join(stderr_tail.splitlines()[-3:])[:320]
+                        raise ConnectionError(detail)
                     # Interrupt has its own RPC result; it is not proof of child cleanup.
                     for key in list(transport.responses):
                         transport.take(key)
@@ -1111,7 +1168,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     from demiflow.forge.pipeline_check import check_project, result as check_result
                     from demiflow.forge.project_rules import diagnostic
                     try:
-                        report = check_project(project['root'], paths=[change['path'] for change in changes],
+                        changed_paths = [change['path'] for change in changes]
+                        # Large cleanup/reorganization turns (>256 changed paths) fall back
+                        # to full-project inspection instead of hitting the changed-path cap.
+                        check_paths = () if len(changed_paths) > 256 else changed_paths
+                        report = check_project(project['root'], paths=check_paths,
                                                reference=coding, exclude=excluded)
                         if (sdk_identity(coding['catalog']) != coding['sdk_revision']
                                 or capture(project['root'], watched, exclude=excluded) != after):

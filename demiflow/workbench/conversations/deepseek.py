@@ -230,11 +230,33 @@ class DeepSeek:
             if len(self.items)>=512 and key not in self.items:
                 self.items.pop(next(iter(self.items)))
             item={**self.items.get(key,{}),**update}
-            # Retain only approval context, never all prior tool output frames.
-            remembered={k:v for k,v in item.items() if k in {'toolCallId','title','rawInput','kind','locations'}}
-            wire(remembered, 16384)
+            # Bound large tool argument/output previews (e.g. writing a 30 KiB file)
+            # so event persistence & approval context never blow the per-event byte budget.
+            def _clip(value, max_str=2048, depth=0):
+                if depth > 6:
+                    return '…'
+                if isinstance(value, str):
+                    if len(value) > max_str:
+                        return value[:max_str] + f'… ({len(value)} chars)'
+                    return value
+                if isinstance(value, list):
+                    return [_clip(v, max_str, depth + 1) for v in value[:32]]
+                if isinstance(value, dict):
+                    return {str(k)[:128]: _clip(v, max_str, depth + 1) for k, v in list(value.items())[:32]}
+                return value
+            remembered={k:_clip(v, 1024) for k,v in item.items() if k in {'toolCallId','title','rawInput','kind','locations'}}
+            try:
+                wire(remembered, 16384)
+            except Exception:
+                remembered={k:_clip(v, 256) for k,v in item.items() if k in {'toolCallId','title','kind'}}
             self.items[key]=remembered
-            return [('activity',{}),('item.updated',dict(id=key,type='tool',**{k:v for k,v in item.items() if k in {'title','status','rawInput','locations','content'}}))]
+            payload=dict(id=key,type='tool',**{k:_clip(v, 4096) for k,v in item.items() if k in {'title','status','rawInput','locations','content'}})
+            try:
+                wire(payload, 49152)
+            except Exception:
+                payload=dict(id=key,type='tool',title=_clip(item.get('title'), 256),status=item.get('status'),
+                             rawInput=_clip(item.get('rawInput'), 512))
+            return [('activity',{}),('item.updated',payload)]
         if kind=='usage_update':return [('usage.observed',{k:v for k,v in update.items() if k!='sessionUpdate'})]
         return []
 
