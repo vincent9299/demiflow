@@ -88,6 +88,13 @@
   outline: none;
   user-select: text;
 }
+.dev-cm-host .cm-content[contenteditable="true"] {
+  caret-color: #18181b;
+  cursor: text;
+}
+.dev-cm-host .cm-cursor {
+  border-left: 1.5px solid #18181b;
+}
 .dev-cm-host .cm-line {
   display: block;
   padding: 0 16px 0 12px;

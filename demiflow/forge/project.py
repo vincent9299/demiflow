@@ -240,6 +240,10 @@ def initialize_project(root, *, name=None, existing=False, extras=None, modules=
         value = dict(format=FORMAT_V3, audit={'reports': [], 'change_scope': None}, id='w'+uuid.uuid4().hex,
                      name=title, entries={}, locations={}, platform=dict(path=relative, digest=digest))
         write_control(manifest, value, create=True)
+        if not existing:
+            from .project_env import ensure_gitignore_env
+            if ensure_gitignore_env(root):
+                created.append('.gitignore')
         return _init_result(root, value, [*created, 'workspace.json'])
 
 

@@ -385,13 +385,25 @@
     approveFileBtn.type = 'button';
     approveFileBtn.title = '标记当前文件改动已审核通过（保留修改历史）';
     approveFileBtn.hidden = true;
+    const envInitBtn = node('button', 'dev-action-btn dev-action-approve', '创建 .env');
+    envInitBtn.type = 'button';
+    envInitBtn.title = '从 .env.example 复制创建本地 .env（不入 Git）';
+    envInitBtn.hidden = true;
+    const saveBtn = node('button', 'dev-action-btn dev-action-save', '保存');
+    saveBtn.type = 'button';
+    saveBtn.title = '保存修改 (Ctrl/⌘+S)';
+    saveBtn.hidden = true;
+    const revertBtn = node('button', 'dev-action-btn', '还原');
+    revertBtn.type = 'button';
+    revertBtn.title = '放弃未保存的修改';
+    revertBtn.hidden = true;
     const refBtn = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
     refBtn.type = 'button';
     const searchBtn = iconButton('在代码中搜索 (Ctrl+F)', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
     const copyBtn = node('button', 'dev-action-btn', '复制');
     copyBtn.type = 'button';
     const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    toolActions.append(modeSwitch, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
+    toolActions.append(modeSwitch, envInitBtn, saveBtn, revertBtn, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
@@ -649,6 +661,11 @@
       }
     }
 
+    function hasUnsavedDraft(rel) {
+      const entry = rel ? fileCache.get(rel) : null;
+      return Boolean(entry && typeof entry.draft === 'string' && entry.draft !== (entry.modified ?? ''));
+    }
+
     function renderTabs() {
       tabList.replaceChildren();
       for (const rel of openTabs) {
@@ -657,8 +674,10 @@
         const selectBtn = node('button', 'dev-code-tab-btn');
         selectBtn.type = 'button';
         selectBtn.title = rel;
+        const dirty = hasUnsavedDraft(rel);
         const ch = changeFor(rel);
-        if (ch) selectBtn.append(node('span', 'dev-code-tab-dot dev-status-' + (ch.status || 'M').toLowerCase()));
+        if (dirty) selectBtn.append(node('span', 'dev-code-tab-dot dev-status-dirty'));
+        else if (ch) selectBtn.append(node('span', 'dev-code-tab-dot dev-status-' + (ch.status || 'M').toLowerCase()));
         selectBtn.append(node('span', 'dev-code-tab-name', splitPath(rel).name));
         selectBtn.onclick = () => openFile(rel);
         const closeBtn = node('button', 'dev-code-tab-close', '×');
@@ -676,7 +695,7 @@
       viewport.replaceChildren();
       const empty = node('div', 'dev-code-empty');
       empty.append(node('h3', null, '代码真相视图'));
-      empty.append(node('p', null, '只读查看项目源码与变更 Diff，围绕待改对象在左侧对话中驱动 Forge 修改。'));
+      empty.append(node('p', null, '查看并轻量编辑项目源码、配置文件与变更 Diff，或围绕待改对象在左侧对话中驱动 Forge 修改。'));
       const changes = mergedChanges();
       if (changes.length) {
         const box = node('div', 'dev-code-empty-changes');
@@ -704,6 +723,138 @@
       viewport.append(empty);
     }
 
+    let savingFile = false;
+
+    function syncEditControls() {
+      const entry = activePath ? fileCache.get(activePath) : null;
+      if (!entry) return;
+      const ch = changeFor(activePath);
+      const st = entry.status && entry.status !== 'clean' ? entry.status : ch?.status;
+      const canEdit = Boolean(viewMode === 'source' && entry.writable);
+      const dirty = hasUnsavedDraft(activePath);
+      const showEnvInit = activePath === '.env.example' && entry.writable;
+
+      envInitBtn.hidden = !showEnvInit;
+      if (showEnvInit) {
+        envInitBtn.textContent = entry.envExists ? '打开 .env' : '创建 .env';
+        envInitBtn.title = entry.envExists ? '打开项目本地 .env 进行编辑' : '从 .env.example 复制创建本地 .env（不入 Git）';
+      }
+      saveBtn.hidden = !canEdit;
+      saveBtn.disabled = savingFile || !dirty;
+      saveBtn.textContent = savingFile ? '保存中…' : '保存';
+      revertBtn.hidden = !canEdit || !dirty;
+      revertBtn.disabled = savingFile;
+
+      if (entry.saveError) {
+        statusPill.textContent = entry.saveError;
+        statusPill.className = 'dev-code-status dev-status-error';
+        statusPill.title = entry.saveError;
+        statusPill.hidden = false;
+      } else if (dirty) {
+        statusPill.textContent = '未保存';
+        statusPill.className = 'dev-code-status dev-status-dirty';
+        statusPill.title = '有未保存的编辑改动 (Ctrl/⌘+S 保存)';
+        statusPill.hidden = false;
+      } else if (entry.justSaved) {
+        statusPill.textContent = '已保存';
+        statusPill.className = 'dev-code-status dev-status-a';
+        statusPill.title = '已写入项目文件';
+        statusPill.hidden = false;
+      } else if (st && st !== 'clean') {
+        const added = entry.changed ? entry.added : (ch?.added || (st === 'A' && entry.modified ? entry.modified.split('\n').length : null));
+        const removed = entry.changed ? entry.removed : ch?.removed;
+        const parts = [{M:'已修改', A:'新增', D:'已删除'}[st] || st];
+        if (Number.isFinite(added) && added > 0) parts.push('+' + added);
+        if (Number.isFinite(removed) && removed > 0) parts.push('-' + removed);
+        statusPill.textContent = parts.join(' ');
+        statusPill.className = 'dev-code-status dev-status-' + st.toLowerCase();
+        statusPill.title = '';
+        statusPill.hidden = false;
+      } else if (canEdit) {
+        statusPill.textContent = '可编辑';
+        statusPill.className = 'dev-code-status dev-status-clean';
+        statusPill.title = '可直接编辑并按 Ctrl/⌘+S 保存';
+        statusPill.hidden = false;
+      } else {
+        statusPill.textContent = '只读';
+        statusPill.className = 'dev-code-status dev-status-clean';
+        statusPill.title = entry.readonlyReason || '只读查看';
+        statusPill.hidden = false;
+      }
+      renderTabs();
+    }
+
+    async function saveActiveFile() {
+      const rel = activePath;
+      const entry = rel ? fileCache.get(rel) : null;
+      if (!entry || !entry.writable || viewMode !== 'source' || savingFile) return;
+      const text = viewerHandle?.getText ? viewerHandle.getText() : (typeof entry.draft === 'string' ? entry.draft : (entry.modified ?? ''));
+      if (text === (entry.modified ?? '')) return;
+      savingFile = true;
+      entry.saveError = '';
+      syncEditControls();
+      try {
+        const res = await api('project-file-save', {}, {
+          path: rel,
+          text,
+          expected_sha256: entry.sha256 || '',
+        });
+        if (disposed) return;
+        entry.modified = text;
+        entry.sha256 = res.sha256 || entry.sha256;
+        entry.draft = null;
+        entry.justSaved = true;
+        entry.saveError = '';
+        savingFile = false;
+        syncEditControls();
+        refreshChanges();
+        setTimeout(() => {
+          if (!disposed && fileCache.get(rel) === entry && entry.justSaved) {
+            entry.justSaved = false;
+            if (activePath === rel) syncEditControls();
+          }
+        }, 1800);
+      } catch (err) {
+        if (disposed) return;
+        savingFile = false;
+        entry.saveError = err?.message || '保存失败';
+        syncEditControls();
+      }
+    }
+
+    function revertActiveFile() {
+      const rel = activePath;
+      const entry = rel ? fileCache.get(rel) : null;
+      if (!entry || savingFile) return;
+      entry.draft = null;
+      entry.saveError = '';
+      if (viewerHandle?.setText) viewerHandle.setText(entry.modified ?? '');
+      syncEditControls();
+    }
+
+    async function initOrOpenEnvFile() {
+      const entry = activePath ? fileCache.get(activePath) : null;
+      if (!entry || !entry.writable) return;
+      if (entry.envExists) {
+        openFile('.env', 'source');
+        return;
+      }
+      envInitBtn.disabled = true;
+      try {
+        await api('project-env-init', {}, {});
+        if (disposed) return;
+        entry.envExists = true;
+        resetTree();
+        openFile('.env', 'source');
+      } catch (err) {
+        if (disposed) return;
+        entry.saveError = err?.message || '创建 .env 失败';
+        syncEditControls();
+      } finally {
+        envInitBtn.disabled = false;
+      }
+    }
+
     function paintActiveCode() {
       if (!activePath) { renderEmptyState(); return; }
       const entry = fileCache.get(activePath);
@@ -728,20 +879,10 @@
       const pendingHit = ch && !isApprovedItem(ch);
       approveFileBtn.hidden = !pendingHit;
 
-      if (st && st !== 'clean') {
-        const added = entry.changed ? entry.added : (ch?.added || (st === 'A' && entry.modified ? entry.modified.split('\n').length : null));
-        const removed = entry.changed ? entry.removed : ch?.removed;
-        const parts = [{M:'已修改', A:'新增', D:'已删除'}[st] || st];
-        if (Number.isFinite(added) && added > 0) parts.push('+' + added);
-        if (Number.isFinite(removed) && removed > 0) parts.push('-' + removed);
-        statusPill.textContent = parts.join(' ');
-        statusPill.className = 'dev-code-status dev-status-' + st.toLowerCase();
-        statusPill.hidden = false;
-      } else {
-        statusPill.textContent = '只读';
-        statusPill.className = 'dev-code-status dev-status-clean';
-        statusPill.hidden = false;
-      }
+      const canEdit = Boolean(viewMode === 'source' && entry.writable);
+      const activeText = typeof entry.draft === 'string' ? entry.draft : (entry.modified ?? '');
+      const currentRel = activePath;
+      syncEditControls();
 
       destroyViewer();
       viewport.replaceChildren();
@@ -752,21 +893,31 @@
         viewerHandle = globalThis.ForgeCodeViewer.mount(host, {
           path: activePath,
           mode: viewMode,
-          text: entry.modified ?? '',
+          text: activeText,
           original: hasGitDiff ? entry.original : (hasAddedDiff ? '' : null),
           unifiedDiff: hasObsDiff ? entry.unifiedDiff : null,
+          editable: canEdit,
+          onChange: canEdit ? nextText => {
+            if (disposed || activePath !== currentRel) return;
+            entry.draft = nextText === (entry.modified ?? '') ? null : nextText;
+            entry.justSaved = false;
+            entry.saveError = '';
+            syncEditControls();
+          } : null,
+          onSave: canEdit ? () => { saveActiveFile(); } : null,
         });
       } else {
-        const pre = node('pre', 'dev-code-fallback', viewMode === 'diff' && hasObsDiff ? entry.unifiedDiff : (entry.modified ?? ''));
+        const pre = node('pre', 'dev-code-fallback', viewMode === 'diff' && hasObsDiff ? entry.unifiedDiff : activeText);
         host.append(pre);
       }
-      renderTabs();
       renderChangedList();
     }
 
     async function loadFile(rel, preferredMode, {silent = false} = {}) {
       const clean = String(rel || '').replace(/^\/+/, '');
       if (!clean) return;
+      if (silent && hasUnsavedDraft(clean)) return;
+      const prevEntry = fileCache.get(clean);
       const epoch = ++loadEpoch;
       activePath = clean;
       if (!openTabs.includes(clean)) {
@@ -786,6 +937,8 @@
         const data = await api('project-file-diff', {path: clean});
         if (disposed || epoch !== loadEpoch) return;
         const obs = observedChanges.get(clean);
+        const keepDraft = prevEntry && prevEntry.sha256 === (data.sha256 || '') && typeof prevEntry.draft === 'string'
+          ? prevEntry.draft : null;
         const entry = {
           path: clean,
           isGit: data.is_git === true,
@@ -797,6 +950,12 @@
           added: data.added || 0,
           removed: data.removed || 0,
           unifiedDiff: obs?.diff || null,
+          writable: data.writable === true,
+          readonlyReason: data.readonly_reason || '',
+          envExists: data.env_exists === true,
+          draft: keepDraft,
+          justSaved: false,
+          saveError: '',
         };
         fileCache.set(clean, entry);
         const chNow = changeFor(clean);
@@ -806,6 +965,8 @@
           || Boolean(entry.unifiedDiff);
         if (preferredMode === 'diff' || preferredMode === 'source') {
           viewMode = preferredMode === 'diff' && hasDiff ? 'diff' : 'source';
+        } else if (keepDraft !== null) {
+          viewMode = 'source';
         } else if (!silent) {
           viewMode = hasDiff ? 'diff' : 'source';
         }
@@ -828,6 +989,9 @@
     function closeTab(rel) {
       const idx = openTabs.indexOf(rel);
       if (idx < 0) return;
+      if (hasUnsavedDraft(rel) && !window.confirm('文件 ' + splitPath(rel).name + ' 有未保存的修改，确定放弃并关闭吗？')) {
+        return;
+      }
       openTabs.splice(idx, 1);
       fileCache.delete(rel);
       if (activePath === rel) {
@@ -1625,6 +1789,9 @@
 
     diffModeBtn.onclick = () => { if (!diffModeBtn.disabled) { viewMode = 'diff'; paintActiveCode(); } };
     sourceModeBtn.onclick = () => { viewMode = 'source'; paintActiveCode(); };
+    envInitBtn.onclick = () => { initOrOpenEnvFile(); };
+    saveBtn.onclick = () => { saveActiveFile(); };
+    revertBtn.onclick = () => { revertActiveFile(); };
     approveFileBtn.onclick = () => {
       if (!activePath) return;
       const ch = changeFor(activePath);
@@ -1635,13 +1802,21 @@
       if (pending.length) approveItems(pending, {advance: false});
     };
     searchBtn.onclick = () => { viewerHandle?.openSearch(); };
-    reloadFileBtn.onclick = () => { if (activePath) loadFile(activePath); refreshChanges(); };
+    reloadFileBtn.onclick = () => {
+      if (!activePath) return;
+      if (hasUnsavedDraft(activePath) && !window.confirm('当前文件有未保存的修改，刷新将丢弃未保存内容，确定继续吗？')) return;
+      const entry = fileCache.get(activePath);
+      if (entry) entry.draft = null;
+      loadFile(activePath);
+      refreshChanges();
+    };
     refBtn.onclick = () => { if (activePath && typeof onReference === 'function') onReference(activePath); };
     copyBtn.onclick = async () => {
       const entry = activePath ? fileCache.get(activePath) : null;
       if (!entry) return;
+      const text = viewerHandle?.getText ? viewerHandle.getText() : (typeof entry.draft === 'string' ? entry.draft : (entry.modified ?? ''));
       try {
-        await navigator.clipboard.writeText(entry.modified ?? '');
+        await navigator.clipboard.writeText(text);
         copyBtn.textContent = '已复制';
         setTimeout(() => { if (!disposed) copyBtn.textContent = '复制'; }, 1400);
       } catch {
@@ -1653,7 +1828,13 @@
     closePanelBtn.onclick = () => setOpen(false);
     treeRefresh.onclick = () => { resetTree(); refreshChanges(); };
     changedRefresh.onclick = () => { refreshChanges(); };
-    pane.onkeydown = e => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); } };
+    pane.onkeydown = e => {
+      if (e.key === 'Escape') {
+        if (e.target && typeof e.target.closest === 'function' && e.target.closest('.cm-editor')) return;
+        e.preventDefault();
+        setOpen(false);
+      }
+    };
 
     // Load git changes badge on mount so the left "文件" tab shows live change count immediately.
     refreshChanges();

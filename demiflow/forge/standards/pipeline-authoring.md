@@ -10,6 +10,8 @@
 
 项目标准角色目录为 `flows/`、`operators/`、`prompts/`、`configs/`、`data_tools/`、`notebooks/`。每条 Flow 在 `flows/` 定义一个明确入口并在 `workspace.json` 登记；共享代码算子放在 `operators/`；版本化的 Prompt 或 Agent 定义放在 `prompts/`；Flow 运行参数与业务/部署配置统一放在 `configs/`（不再新建 `parameters/`，已迁移入口不应在 `parameters/` 残留未登记旧文件）；数据探索与分析 Notebook 放在 `notebooks/`（保留原有输出）。业务数据表与默认运行产物统一放在 `data/`（直接平铺如 `data/<name>.lance`，不再把活跃入口默认输出写向历史 `runs/`，历史 `runs/` 仅作只读数据保留）；可读运行日志放在 `logs/`；平台内部锁、数据库与缓存由 `.forge/` 管理。项目根目录保持整洁，不散落业务配置（`*.json`/`*.yaml`）、Notebook（`*.ipynb`）、运行脚本（`*.py`）或压缩归档包；`flows/`、`operators/`、`configs/`、`prompts/` 仅保留活跃入口、已声明复用模块或有效引用文件；废弃的旧脚本、旧配置、旧参数与旧 Prompt 应直接删除清理，严禁迁入、转存或打包（`.tar.gz`/`.zip`）到 `docs/`（`docs/` 仅存放可读文档与验收证据），而历史业务数据（`runs/`、`data/`）与 Notebook（`notebooks/*.ipynb`）始终保留。项目源码必须**自包含且仅依赖 DemiFlow 公开 SDK**：`flows/`、`operators/`、`data_tools/` 仅允许依赖 Python 标准库、已安装第三方包、DemiFlow 公开 API（如 `demiflow.data`、`demiflow.objects`、`demiflow.operator_llm`、`demiflow.agent`、`demiflow.execution` 公开门面）及本项目自身模块，**严禁导入 `demiflow.execution.<内部子模块>` 等平台内部实现，严禁跨项目 `import` 其他业务项目的源码目录**。
 
+**项目运行环境变量自闭环（`.env` / `.env.example`）**：业务运行所需的外部服务密钥与环境变量归属项目空间本身——Prompt 中只通过 `api_key_env` / `base_url_env` 声明变量名；项目根目录维护入库模板 `.env.example`（完整列出所有声明变量名、值为空，严禁填写真实密钥）与本地实际配置文件 `.env`（由 `.gitignore` 排除、不进源码快照与评审材料、不对开发 Agent 开放写权限）。独立运行时按标准加载项目 `.env` 启动；工作台启动作业时按本规范从项目 `.env` 读取并按声明白名单注入执行子进程。
+
 源码目录中的文件和项目声明中已登记的入口分别计数。准备交付的入口显式绑定实际使用的参数。
 
 在模块顶层用 `__demiflow_operators__ = ["normalize"]` 声明可复用的算子函数或可调用的 Actor。尚未接入 Flow 的算子也可声明。用 docstring 说明用途、输入和返回值。
