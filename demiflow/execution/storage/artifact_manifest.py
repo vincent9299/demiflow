@@ -104,3 +104,38 @@ def entries(run, value):
     else:
         for _, page in manifest_pages(run.directory, value, maximum=run.limits['max_artifacts']):
             yield from page
+
+
+def prepared_references(directory, prepared, *, state_limit, artifact_limit):
+    """Validate the original prepared pages lazily, in their original order."""
+    remaining = artifact_limit * 4
+    def references(value, depth=0):
+        nonlocal remaining
+        if depth > 32:
+            raise RecoveryContractError('Prepared reference nesting exceeds budget')
+        if type(value) is dict:
+            path = value.get('path')
+            if type(path) is str:
+                remaining -= 1
+                if remaining < 0:
+                    raise RecoveryContractError('Prepared artifact count exceeds budget')
+                yield path
+                if value.get('format') == 'paged-artifacts-v1':
+                    for page_path, page in manifest_pages(directory, value, maximum=artifact_limit):
+                        remaining -= 1
+                        if remaining < 0:
+                            raise RecoveryContractError('Prepared artifact count exceeds budget')
+                        yield page_path
+                        yield from references(page, depth + 1)
+                if 'state_id' in value:
+                    relative = Path(path)
+                    if relative.is_absolute() or '..' in relative.parts or (not relative.parts) or (relative.parts[0] != 'state'):
+                        raise RecoveryContractError('State artifact escapes its owner')
+                    raw_state = _read(directory / relative, state_limit, size=value['bytes'], digest=value['sha256'])
+                    yield from references(json.loads(raw_state), depth + 1)
+            for child in value.values():
+                yield from references(child, depth + 1)
+        elif type(value) is list:
+            for child in value:
+                yield from references(child, depth + 1)
+    return references(prepared)

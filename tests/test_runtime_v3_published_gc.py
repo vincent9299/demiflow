@@ -381,7 +381,7 @@ def test_action_close_near_timeout_retains_orphan_and_original_charge(tmp_path):
 
 def test_optional_gc_never_waits_for_a_live_publication_owner(tmp_path):
     import threading,time
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with store_fixture(tmp_path) as (run,store,port):
         ref=put(store,b'publication-in-progress')
         owner=RunJournal(run.directory,attempt=run.attempt)

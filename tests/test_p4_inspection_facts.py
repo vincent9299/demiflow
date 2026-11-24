@@ -25,7 +25,7 @@ def test_projection_retains_prior_commit_but_current_failure_and_diagnostics(tmp
     journal.action_event('action-1','result',{'ref':{'lance_version':1},'location_id':'local'})
     state = journal.execution_status()
     journal.begin_attempt(expected_attempt=1, expected_revision=state['revision'])
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     second = RunJournal(target, attempt=2)
     second.action_event('action-1','intent',{'request_hash':'next'})
     second.action_event('action-1','failed',{'message':'current failure'})

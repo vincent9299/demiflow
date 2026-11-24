@@ -49,7 +49,7 @@ from pathlib import Path
 from demiflow import data
 from demiflow.execution.run_context import RunContext
 from demiflow.execution.recovery_contract import RunRef
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.state_artifacts import StateArtifacts
 from demiflow.execution import commit
 root=Path(sys.argv[1]);mode=sys.argv[2];shared=sys.argv[3]=='True';directory=root/'run'

@@ -215,7 +215,7 @@ import demiflow
 from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 root=Path(sys.argv[1]); mode=sys.argv[2]; form=sys.argv[3]

@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.contracts.recovery_contract import RunRef, SourcePosition
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.outputs.object_sink import ObjectRowsSink, ObjectSink

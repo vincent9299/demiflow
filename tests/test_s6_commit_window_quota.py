@@ -52,7 +52,7 @@ from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.lance.model import LanceWriteSpec
 
 from test_stage2_unified_plan import LIMITS, _crash_hook

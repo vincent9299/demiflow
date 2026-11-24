@@ -429,7 +429,7 @@ def test_native_image_delivery_remains_explicitly_nonresumable(tmp_path,joint_ht
     assert len(joint_http['requests'])==1
     # Historical selector: unified Dataset take now seals a final ACK.
     # Reuse that exact committed result; no replay of the paid operation.
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(reference.directory)
     before = journal.execution_commits('action-1')
     assert before and all(fact['status'] == 'acked' for fact in before)

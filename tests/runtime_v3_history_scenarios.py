@@ -134,7 +134,7 @@ def original_native_history(root):
     """Real old producer, current read/admission/report, then old continuation."""
     import demiflow
     import lance
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.execution.contracts.recovery_contract import RunRef
     from demiflow.execution.seal.program_identity import platform_identity

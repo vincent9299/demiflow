@@ -5,7 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, UnresolvedCommit
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.journal.publication_facts import inspect_write_receipt
 
 

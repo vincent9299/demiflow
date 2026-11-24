@@ -59,7 +59,7 @@ def test_borrowed_json_state_cannot_resume_after_original_ack(tmp_path, monkeypa
                 _counting_flow(state).take_all()
     assert seen
     before = list(state)
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     journal = RunJournal(reference.directory)
     committed = journal.execution_commits('action-1')

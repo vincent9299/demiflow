@@ -49,7 +49,7 @@ import json,os,sys
 from pathlib import Path
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
 root=Path(sys.argv[1]);mode=sys.argv[2]
 contexts=[]

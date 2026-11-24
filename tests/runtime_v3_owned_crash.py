@@ -70,7 +70,7 @@ def action_process_records(run, action_id):
 
 def assert_released(directory):
     """Observe the real allocator and birth/lock evidence; do no cleanup here."""
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     from demiflow.resources.process_unit import ManagedProcessUnit

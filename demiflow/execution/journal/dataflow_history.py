@@ -8,7 +8,7 @@ from dataclasses import replace
 from demiflow.execution.contracts.dataflow import DataflowGraph, HistoricalBinding, NodeObservation, PhysicalDataflow, SealedExecution
 from demiflow.execution.contracts.dataflow_errors import DataflowError as _err
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.contracts.dataflow_codec import artifact_reference_fields as _ref_json
 from demiflow.execution.seal.history import load_v3_binding, load_native_binding
 from demiflow.execution.checkpoint.history import latest_checkpoint_image

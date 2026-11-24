@@ -59,7 +59,7 @@ def _pack(kernels, *, store, bounds):
             del raw  # Store must release its view/chunk before advancing us.
             yield b'\n'
 
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
     try:
         return store.put(chunks(), max_bytes=total, media_type=PACK_MEDIA)
     except ExecutionBudgetExceeded as error:

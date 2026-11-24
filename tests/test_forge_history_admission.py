@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.journal.run_reader import storage_snapshot as native_storage_snapshot
 from demiflow.workbench.runs import storage as run_storage
 from demiflow.workbench.runs import domain as run_domain

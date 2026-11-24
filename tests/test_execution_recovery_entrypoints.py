@@ -15,7 +15,7 @@ if (Path(demiflow.__file__).parent / 'execution/outputs/block_sink.py').is_file(
     from demiflow.execution.outputs.block_sink import BlockSink
 else:
     from demiflow.execution.block_sink import BlockSink
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.pipeline.core import Pipeline, PipelineExecution
 

@@ -24,7 +24,7 @@ _RECOVERY_RESTRICTION = '-state-recovery-restriction'
 def _journal(directory, journal):
     if journal is not None:
         return journal
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     return RunJournal(directory)
 
 

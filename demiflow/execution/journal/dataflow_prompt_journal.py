@@ -134,7 +134,7 @@ def private_prompt_request(service, command, request):
         charges['requests-' + identity(command.node_id)] = (1, ceiling if maximum is None else maximum)
     retry = options.get('expected_attempt') if command.operation == 'reserve_http_retry' else 0
     reservation = identity(['private-prompt-admission', command.action_id, command.node_id, route, scope, command.request_key, retry])
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
     from demiflow.operator_llm.errors import PromptBudgetExceededError
     try:
         service._journal.reserve_budgets(service._fence, reservation, charges)

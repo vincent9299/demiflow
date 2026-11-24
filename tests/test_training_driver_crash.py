@@ -13,7 +13,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.training.deployment import TrainingDeployment
 from test_training_dataset_action import recipe
 from test_training_domain import setup_request

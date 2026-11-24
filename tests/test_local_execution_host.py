@@ -8,7 +8,7 @@ from demiflow.execution.pipeline.checked import CheckedExecution, current as cur
 from demiflow.execution.compiler_support.dataflow_compile_inputs import executor_defaults
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.pipeline.run_context import RunContext, current_run
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 @pytest.mark.parametrize('failure', [None, RuntimeError('cancelled by host')])

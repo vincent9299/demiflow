@@ -5,7 +5,7 @@ import sys
 import time
 
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 root = Path(sys.argv[1])
 started = time.monotonic()

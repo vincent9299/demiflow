@@ -250,7 +250,7 @@ def test_measured_merge_drops_old_wide_frames_at_single_reader_tail(tmp_path, mo
 
 def test_two_shuffle_passes_share_the_original_spill_ceiling(tmp_path, monkeypatch):
     from demiflow.execution.kernels import shuffle_order
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
     from test_runtime_v3_artifact_accounting import store_fixture, consumed
     with store_fixture(tmp_path, ceiling=256 << 10) as (run, store, port):
         services = _services(store, port)

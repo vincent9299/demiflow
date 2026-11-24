@@ -22,7 +22,7 @@ from demiflow.errors import LanceWriteConflict
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, identity
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.outputs.lance_sink import create_target_absent_binding
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.lance.model import LanceWriteSpec
 
 REFUSAL = 'This delivery-only entry needs its P3 native sink adapter before replay'

@@ -10,7 +10,7 @@ import pytest
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import manager as runs
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from test_forge_runs import base, root, execute
 
 BODY = '''from demiflow import data
@@ -301,7 +301,7 @@ if mode=='supervise':
     worker.supervise(Path(root),run_id,int(sys.argv[4]),int(sys.argv[5]))
 else:
     from demiflow.execution import commit
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     def fault(name,commit_id):
         if name!='after_sink_commit_before_receipt':return
         journal=RunJournal(target)

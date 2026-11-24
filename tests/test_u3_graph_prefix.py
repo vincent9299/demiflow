@@ -108,7 +108,7 @@ def test_literal_prefix_only_colocates_proven_safe_source_and_callbacks(tmp_path
 def test_colocated_prefix_resumes_original_source_cursor_and_sealed_layout(tmp_path, monkeypatch):
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.action_driver import dataflow
     from _native_graph_fixtures import assert_native_graph
     spec, readers, count = _graph_spec(n=24, cut_rows=8, readers=('c0', 'c1'))

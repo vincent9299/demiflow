@@ -16,7 +16,7 @@ from demiflow.execution.storage.reading import read_plan_artifact
 from demiflow.execution.seal.plan_interpreter import EXECUTION_BINDINGS_SCHEMA, EXECUTION_BINDINGS_SCHEMA_V2, _validate_bindings, _validate_manifest_ref
 from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.contracts.artifact import validate_plan_artifact_ref as _validate_artifact_ref
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.planning.dag import validate_logical_dag, validate_physical_execution_plan
 
 SEALED_PLAN_FACTS_SCHEMA = "demiflow.sealed_plan_facts.v1"

@@ -109,7 +109,7 @@ def test_yaml_stream_survives_tool_turns_repairs_and_replay(tmp_path, sse_server
         with pytest.raises(UncertainPromptCall):
             resume_collect(ds, reference)
     assert len(sse_server['requests']) == 3  # no new request or non-stream fallback
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(reference.directory)
     assert journal.budget_consumed('requests') == 3
     with journal._connection() as db:

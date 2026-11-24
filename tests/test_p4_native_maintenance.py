@@ -9,7 +9,7 @@ import pytest
 
 from demiflow.errors import ExecutionConflict, LanceResourceNotFound
 from demiflow.execution.pipeline.run_context import RunContext, clean_stopped_execution, admit_absent_create
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from test_p4_attempt_reservations import managed, resume
 
 
@@ -143,7 +143,7 @@ def test_expired_cleanup_does_not_start_and_expiry_after_claim_retains_owner(tmp
         cleanup(journal, deadline=time.monotonic() - 1)
     assert not owners(journal)
     def expire(self, fence):
-        monkeypatch.setattr('demiflow.execution.run_journal.time.monotonic', lambda: 10**12)
+        monkeypatch.setattr('demiflow.execution.journal.run_journal.time.monotonic', lambda: 10**12)
     monkeypatch.setattr(RunJournal, 'clean_orphans', expire)
     with pytest.raises(ExecutionConflict, match='expired'):
         cleanup(journal)

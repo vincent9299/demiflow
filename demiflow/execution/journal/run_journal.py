@@ -14,16 +14,12 @@ from contextlib import contextmanager, ExitStack
 
 from demiflow.execution.storage.artifacts import run_lock
 from demiflow.execution.contracts.artifact import encoded
-from ..errors import ExecutionConflict
+from demiflow.errors import ExecutionConflict
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 
 
-class ExecutionBudgetExceeded(RecoveryContractError):
-    """A valid reservation exceeded its named durable ceiling."""
 
-    def __init__(self, budget, message=None):
-        self.budget = budget
-        super().__init__(message or 'Execution budget exhausted: ' + budget)
 
 OBSERVATION_BYTES = 8192
 OBSERVATION_TOTAL_BYTES = 8 * 1024**2
@@ -295,7 +291,7 @@ class RunJournal:
 
     @contextmanager
     def _transaction(self):
-        from .storage.lease import shared_access, journal_identity
+        from demiflow.execution.storage.lease import shared_access, journal_identity
         protocol = self.dataflow_gc_protocol() if self.path.exists() else None
         # GC is optional maintenance, not loss of this supervisor's attempt.
         # Wait before taking the writer connection/transaction; the original
@@ -781,9 +777,9 @@ class RunJournal:
 
     def _reconcile_published_gc(self, fence):
         self._check_maintenance_deadline()
-        from .storage.lease import exclusive_here
+        from demiflow.execution.storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store') and self.pending_dataflow_gc():
-            from .storage.gc import recover_published_gc
+            from demiflow.execution.storage.gc import recover_published_gc
             result = recover_published_gc(self, fence, deadline=self._maintenance_deadline)
             if result.get('blocked'):
                 raise ExecutionConflict('Published artifact reconciliation is still owned or unknown: ' + result['blocked'])
@@ -815,7 +811,7 @@ class RunJournal:
         admitted between the ownership check and the external write.
         """
         from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-        from .storage.lease import exclusive_here
+        from demiflow.execution.storage.lease import exclusive_here
         self._reconcile_published_gc(fence)
         with self._transaction() as db:
             if (not exclusive_here(self.directory / '.dataflow-store') and
@@ -938,7 +934,7 @@ class RunJournal:
     def bind_dataflow_gc_protocol(self, fence, inode, *, fresh):
         """Only a namespace born under the physical lease protocol is eligible."""
         from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-        from .storage.lease import NAME, validate_identity, journal_identity
+        from demiflow.execution.storage.lease import NAME, validate_identity, journal_identity
         inode = validate_identity(inode)
         with self.execution_guard(fence) as db:
             old = self._dataflow_gc_protocol_row(db)
@@ -995,7 +991,7 @@ class RunJournal:
 
     def prepare_dataflow_gc(self, fence, *, store_id, digest, size, charge_id, inode):
         from demiflow.execution.contracts.recovery_contract import identity, RecoveryContractError
-        from .storage.lease import exclusive_here
+        from demiflow.execution.storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store'):
             raise RecoveryContractError('GC requires the original exclusive physical lease')
         gc_id = identity(['dataflow-published-gc-v1', store_id, digest, charge_id])
@@ -1018,7 +1014,7 @@ class RunJournal:
     def finish_dataflow_gc(self, fence, gc_id):
         """Debit exactly the original allocation once; old RPC receipts stay immutable."""
         from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-        from .storage.lease import exclusive_here
+        from demiflow.execution.storage.lease import exclusive_here
         if not exclusive_here(self.directory / '.dataflow-store'):
             raise RecoveryContractError('GC refund requires exclusive physical reconciliation')
         with self.execution_guard(fence) as db:
@@ -1027,7 +1023,7 @@ class RunJournal:
                 raise RecoveryContractError('GC lacks verified physical quarantine')
             if row[4] == 'done':
                 return 0
-            from .storage.gc import gc_paths
+            from demiflow.execution.storage.gc import gc_paths
             target, quarantine = gc_paths(self, dict(gc_id=gc_id, store_id=row[0], digest=row[1]))
             if target.exists() or quarantine.exists():
                 raise RecoveryContractError('GC physical removal is not confirmed')
@@ -1206,44 +1202,10 @@ class RunJournal:
         from itertools import islice
         raw = document(prepared).decode()
         limits = self.recovery_identity()['limits']
-        state_limit, remaining = limits['max_state_bytes'], limits['max_artifacts'] * 4
-
-        def references(value, depth=0):
-            nonlocal remaining
-            if depth > 32:
-                raise RecoveryContractError('Prepared reference nesting exceeds budget')
-            if type(value) is dict:
-                path = value.get('path')
-                if type(path) is str:
-                    remaining -= 1
-                    if remaining < 0:
-                        raise RecoveryContractError('Prepared artifact count exceeds budget')
-                    yield path
-                    if value.get('format') == 'paged-artifacts-v1':
-                        from demiflow.execution.storage.artifact_manifest import manifest_pages
-                        for page_path, page in manifest_pages(self.directory, value,
-                                maximum=limits['max_artifacts']):
-                            remaining -= 1
-                            if remaining < 0:
-                                raise RecoveryContractError('Prepared artifact count exceeds budget')
-                            yield page_path
-                            yield from references(page, depth + 1)
-                    if 'state_id' in value:
-                        from demiflow.execution.storage.artifact_manifest import _read
-                        relative = Path(path)
-                        if (relative.is_absolute() or '..' in relative.parts
-                                or not relative.parts or relative.parts[0] != 'state'):
-                            raise RecoveryContractError('State artifact escapes its owner')
-                        raw_state = _read(self.directory / relative, state_limit,
-                                          size=value['bytes'], digest=value['sha256'])
-                        yield from references(json.loads(raw_state), depth + 1)
-                for child in value.values():
-                    yield from references(child, depth + 1)
-            elif type(value) is list:
-                for child in value:
-                    yield from references(child, depth + 1)
-
-        iterator = references(prepared)
+        state_limit, artifact_limit = limits['max_state_bytes'], limits['max_artifacts']
+        from demiflow.execution.storage.artifact_manifest import prepared_references
+        iterator = prepared_references(self.directory, prepared,
+                                       state_limit=state_limit, artifact_limit=artifact_limit)
         while batch := tuple(set(islice(iterator, 64))):
             # Already durable references need no new write. Decode and hash the
             # next bounded page before entering either journal transaction.
@@ -1441,7 +1403,7 @@ class RunJournal:
         A reserved record proves no send yet; a sent/unknown record never grants
         another send. Lost replies may repeat the same transition idempotently.
         """
-        from .contracts.dataflow_errors import DataflowError
+        from demiflow.execution.contracts.dataflow_errors import DataflowError
         from demiflow.execution.contracts.recovery_contract import document, identifier, identity
         from dataclasses import asdict
         for value in (action_id, command.effect_id, command.actor_id, command.request_digest):

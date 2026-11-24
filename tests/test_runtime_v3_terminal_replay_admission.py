@@ -79,7 +79,7 @@ def test_final_ack_replay_admits_each_window_and_preserves_result(tmp_path, monk
     assert limited or windows
     assert (0 < len(decoded) < 20) if limited else len(decoded) == 20
     assert max(coexistence) <= (96 if limited else 256)*1024
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     assert RunJournal(tmp_path/'run').execution_commits('action-1') == previous
     assert _fd_count(tmp_path / 'run') == 0
 
@@ -139,7 +139,7 @@ def test_original_published_blocks_probe_limit_without_decoding_payload(tmp_path
     from demiflow.execution.action_driver import dataflow
     from demiflow.execution.outputs.terminals import TerminalSubscription
     from demiflow.execution.exchange import dataflow_bridge
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     captured = []
     original = dataflow.DataflowExecution._set_result
     def remember(execution, image):

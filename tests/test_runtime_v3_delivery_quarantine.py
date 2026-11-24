@@ -8,7 +8,7 @@ from demiflow import data
 from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 @pytest.mark.parametrize('hold_after_error', [0, .05, .15])

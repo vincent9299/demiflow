@@ -87,7 +87,7 @@ class RunPromptJournal(_SQLiteJournalShard):
         return super()._enqueue(operation, payload, size)
 
     def _apply_operation(self, db, item, effects):
-        from demiflow.execution.run_journal import ExecutionConflict
+        from demiflow.execution.journal.run_journal import ExecutionConflict
         owner = db.execute('SELECT attempt,fence FROM runtime_owner').fetchone()
         if owner != (self.run.attempt, self.run.fence):
             raise ExecutionConflict('Stale execution owner cannot persist a model result')
@@ -120,7 +120,7 @@ class RunPromptJournal(_SQLiteJournalShard):
             if item.payload.budget is None:
                 raise RecoveryContractError('Native request has no execution budget reservation')
             reservation, charges = item.payload.budget
-            from demiflow.execution.run_journal import ExecutionBudgetExceeded
+            from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
             try:
                 self.run.journal.reserve_budgets_in_transaction(db, reservation, charges)
             except ExecutionBudgetExceeded as error:

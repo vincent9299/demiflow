@@ -8,7 +8,7 @@ from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.planning.dataflow_budget import _model_profile
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.parser import parse_prompt_pack
 from demiflow.planning.dataflow_compile import lower_action
 from demiflow.planning.dataflow_policy import resolve_runtime_policy

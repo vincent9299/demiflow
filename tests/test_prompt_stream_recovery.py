@@ -15,7 +15,7 @@ from demiflow.data.flow_contract import arrow_fields
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
@@ -91,7 +91,7 @@ def test_process_loss_reuses_known_responses_and_refuses_unknown_calls(server, t
     setup(tmp_path, rows)
     script = r'''import os,sys
 from test_prompt_stream_recovery import execute
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 import demiflow.execution.commit as protocol
 from demiflow.operator_llm.runtime import PromptActor
 window=sys.argv[2]

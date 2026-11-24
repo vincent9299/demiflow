@@ -13,7 +13,7 @@ import pytest
 from demiflow import data
 from _worker_event_fixtures import emit, events
 from demiflow.execution import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def mapped(rows, kind, callback, **options):

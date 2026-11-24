@@ -18,7 +18,7 @@ import uuid
 
 from demiflow.execution.contracts.recovery_contract import RunRef, RecoveryContractError, identity
 from demiflow.planning.dataflow_policy import execution_limits, declared_limit_keys
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 _CURRENT = ContextVar("demiflow_run_context", default=None)
 _ACTION = ContextVar("demiflow_run_action", default=None)

@@ -34,7 +34,7 @@ import time
 
 from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError
 from demiflow.execution.contracts.recovery_contract import document as _checked_document
-from demiflow.execution.run_journal import OBSERVATION_COUNT, _node_document, _node_key
+from demiflow.execution.journal.run_journal import OBSERVATION_COUNT, _node_document, _node_key
 
 __all__ = ['JOURNAL_BYTES', 'RunReadError', 'RunReader', 'open_journal', 'read_run',
            'storage_snapshot', 'observe_storage']
@@ -1302,3 +1302,85 @@ def read_runtime_owner(journal):
     """Read the current attempt/fence fact; no claim, maintenance or GC."""
     with journal._connection() as db:
         return db.execute("SELECT attempt,fence FROM runtime_owner").fetchone()
+
+
+def require_gc_resource_cleanup(journal):
+    """Require confirmation of the original physical resource allocations."""
+    from demiflow.execution.contracts.errors import UnprovenGC
+    with journal._connection() as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='resource_allocations'").fetchone():
+            if db.execute("SELECT 1 FROM resource_allocations WHERE cleanup!='CONFIRMED' LIMIT 1").fetchone():
+                raise UnprovenGC('Original resource cleanup is not confirmed for every allocation')
+
+
+def gc_root_documents(journal, *, max_document_bytes):
+    """Read one bounded original root row per connection, before decoding it."""
+    from demiflow.execution.contracts.errors import UnprovenGC
+    columns = {'runtime_actions': ('declaration','snapshot','result'),
+        'runtime_sources': ('document',), 'runtime_commits': ('intent','prepared'),
+        'runtime_receipts': ('document',), 'runtime_effects': ('document',),
+        'runtime_commit_scopes': ('declaration',),
+        'calls': ('request_json','response_json','error_json')}
+    for table, fields in columns.items():
+        after = 0
+        with journal._connection() as db:
+            existing = {row[1] for row in db.execute('PRAGMA table_info(' + table + ')')}
+        if not existing:
+            continue
+        if not set(fields) <= existing:
+            raise UnprovenGC('Unrecognized journal root schema: ' + table)
+        while True:
+            with journal._connection() as db:
+                sizes = db.execute('SELECT rowid,' + ','.join('length(CAST('+f+' AS BLOB))' for f in fields) +
+                    ' FROM ' + table + ' WHERE rowid>? ORDER BY rowid LIMIT 1', (after,)).fetchone()
+                if sizes is None:
+                    break
+                if any(size is not None and size > max_document_bytes for size in sizes[1:]):
+                    raise UnprovenGC('Journal root exceeds collector decode bound')
+                rows = db.execute('SELECT rowid,' + ','.join(fields) + ' FROM ' + table +
+                    ' WHERE rowid=?', (sizes[0],)).fetchall()
+            if not rows:
+                break
+            for row in rows:
+                after = row[0]
+                for raw in row[1:]:
+                    if raw is not None:
+                        yield raw
+
+
+def gc_owner_publications(journal, *, maximum):
+    """Read the original typed publication proofs of bounded live owners."""
+    from demiflow.execution.contracts.errors import UnprovenGC
+    with journal._connection() as db:
+        owners = db.execute('SELECT DISTINCT store_id,digest,key FROM artifact_owner LIMIT ?',
+                            (maximum + 1,)).fetchall()
+    if len(owners) > maximum:
+        raise UnprovenGC('Owner roots exceed trace budget')
+    for store, digest, key in owners:
+        after, found = '', False
+        while True:
+            with journal._connection() as db:
+                rows = db.execute('SELECT s.reservation_id,s.publication FROM runtime_dataflow_staging s '
+                    'JOIN runtime_dataflow_settlements d ON s.reservation_id=d.reservation_id '
+                    'WHERE d.store_id=? AND d.digest=? AND s.publication IS NOT NULL '
+                    'AND s.reservation_id>? ORDER BY s.reservation_id LIMIT 16', (store,digest,after)).fetchall()
+            if not rows:
+                break
+            for after, raw in rows:
+                found = True
+                yield raw
+        if not found or key != digest:
+            raise UnprovenGC('Owner lacks original typed publication proof')
+
+
+def has_unowned_staging_reservation(journal):
+    """Whether an old staging reservation lacks both publication owners."""
+    with journal._connection() as db:
+        return db.execute("SELECT 1 FROM runtime_reservations r LEFT JOIN runtime_dataflow_settlements s ON s.reservation_id=r.reservation_id LEFT JOIN runtime_dataflow_staging t ON t.reservation_id=r.reservation_id WHERE r.name='artifact_staging_bytes' AND s.reservation_id IS NULL AND t.reservation_id IS NULL LIMIT 1").fetchone()
+
+
+def gc_object_page(journal, *, after):
+    """Read the next original bounded object-ledger page in key order."""
+    with journal._connection() as db:
+        return db.execute('SELECT store_id,digest,bytes,charge_id FROM runtime_dataflow_objects '
+            'WHERE (store_id,digest)>(?,?) ORDER BY store_id,digest LIMIT 64', after).fetchall()

@@ -8,7 +8,7 @@ import pytest
 
 from demiflow.execution import RunContext
 from demiflow.execution.pipeline.run_context import current_run
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.lance.control import control_directory
 from demiflow.lance.registry import Catalog, write_registered_table
 

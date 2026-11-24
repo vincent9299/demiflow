@@ -2,7 +2,7 @@
 import pytest
 
 from demiflow import data
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_runtime_v3_native_execution import PACK, native_server
 from _agent_runtime_fixtures import collect_before_commit, resume_collect

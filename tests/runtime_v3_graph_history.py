@@ -127,7 +127,7 @@ def assert_closed(run_directory, *, allow_unprovisioned=False):
     if process_records(run_directory):
         return assert_released(run_directory)
     assert allow_unprovisioned, 'expected an actual process worker'
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with RunJournal(run_directory)._connection() as db:
         if db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='resource_allocations'").fetchone():
             assert db.execute('SELECT count(*) FROM resource_allocations').fetchone()[0] == 0

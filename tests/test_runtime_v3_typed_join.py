@@ -157,7 +157,7 @@ def test_typed_join_completed_resume_does_not_scan_or_run_sql(tmp_path, monkeypa
 def test_legacy_partial_terminal_closure_is_rejected_before_workers_start(tmp_path, monkeypatch):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     original = DataflowExecution.satisfy_terminal
     def legacy_close(execution):
         original(execution)

@@ -7,7 +7,7 @@ import pytest
 from demiflow import data
 from demiflow.execution import RunContext, current_run
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def _record(path, phase):

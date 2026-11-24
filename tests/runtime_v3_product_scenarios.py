@@ -58,7 +58,7 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
     partial outputs are tested separately and cannot masquerade as this proof.
     """
     import lance
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     from demiflow.workbench.runs import manager as runs, facts
     from demiflow.execution.journal.publication_facts import inspect_write_receipt

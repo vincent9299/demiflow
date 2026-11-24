@@ -11,7 +11,7 @@ from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.outputs.dataflow_handles import StoredMaterializedHandle
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from _worker_event_fixtures import emit, events
 
 

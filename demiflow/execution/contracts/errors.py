@@ -92,3 +92,14 @@ class PreparedPublicationUnresolved(RecoveryContractError):
 
 class _CapacityPending(Exception):
     """No intent was written: a live response can release admission capacity."""
+
+
+class ExecutionBudgetExceeded(RecoveryContractError):
+    """A valid reservation exceeded its named durable ceiling."""
+
+    def __init__(self, budget, message=None):
+        self.budget = budget
+        super().__init__(message or 'Execution budget exhausted: ' + budget)
+
+class UnprovenGC(Exception):
+    pass

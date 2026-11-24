@@ -3,7 +3,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import ExecutionBudgetExceeded
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 

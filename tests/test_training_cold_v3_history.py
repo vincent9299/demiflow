@@ -8,7 +8,7 @@ import tarfile
 
 import pytest
 
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
 
 

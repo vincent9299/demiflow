@@ -55,7 +55,8 @@ CARRIERS = {
     'local_kernel': ['LocalKernelOptions', 'LocalExecutionSession'],
     'checked': ['CheckedExecution', 'CheckedAction'],
     'managed_native': ['NativeExecution'],
-    'run_journal': ['RunJournal'],
+    'run_journal': ['RunJournal', 'ExecutionBudgetExceeded'],
+    'storage.gc': ['UnprovenGC'],
     'worker.authority': ['WorkerAuthority'],
     'dataflow_source_context': ['source_run_scope'],
     'plan_interpreter': ['PlanContractError'],
@@ -208,6 +209,16 @@ def test_literal_names_remain_distinct_from_declaration_aliases(original_carrier
     values = [base, UnionSource((base,)), KeyedSource('groups', base, ('foo',)),
               RunRef('/fixed/run', 'r1'), CommitContext('r1', 'a1', 'c1', 1, 'f1'), SourcePosition('s1', 10)]
     assert [literal_source_digest(value) for value in values] == original_carriers['literal.values']
+
+
+def test_journal_identity_requires_original_prepared_reference_traversal(original_carriers, monkeypatch):
+    from demiflow.execution.storage.artifact_manifest import prepared_references
+    encoded, expected = original_carriers['RunJournal']
+    cls = load_payload([base64.b64decode(encoded)])
+    assert describe(cls) == expected
+    monkeypatch.setattr(prepared_references, '__code__', prepared_references.__code__.replace(
+        co_consts=(*prepared_references.__code__.co_consts, 'changed')))
+    assert describe(cls) != expected
 
 
 def test_changed_source_method_cannot_impersonate_published_carrier(original_carriers, monkeypatch):
@@ -560,9 +571,9 @@ def test_changed_unlink_cannot_impersonate_original_run_journal(original_carrier
     monkeypatch.setattr(unlink_unprotected_artifact, '__code__',
         unlink_unprotected_artifact.__code__.replace(
             co_consts=(*unlink_unprotected_artifact.__code__.co_consts, 'changed-unlink')))
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.seal.recovery_sdk_v3 import authentic_source_global
-    assert not authentic_source_global(RunJournal, 'demiflow.execution.run_journal')
+    assert not authentic_source_global(RunJournal, 'demiflow.execution.journal.run_journal')
     assert describe(RunJournal) != original_carriers['RunJournal'][1]
 
 

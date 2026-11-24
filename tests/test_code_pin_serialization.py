@@ -208,7 +208,7 @@ def test_f9_by_value_registration_roundtrip(tmp_path, monkeypatch):
 @pytest.mark.parametrize("form", FORMS)
 def test_f7c_default_edit_same_run_resume_refuses(tmp_path, monkeypatch, form):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     helper_mod, paths, helper = _helper_graph(tmp_path, monkeypatch, "f7cg1_" + form)
     transform = FACTORIES[form](helper_mod)
     hook, marker = _crash_hook(tmp_path)

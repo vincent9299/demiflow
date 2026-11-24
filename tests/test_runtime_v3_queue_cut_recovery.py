@@ -157,7 +157,7 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
         from demiflow.resources.thread import ThreadResourceProvider
         from demiflow.execution.hosts.capacity import local_capacity
         from demiflow.resources.capacity import LocalCapacityPool
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         domain, capacity = local_capacity()
         pool = LocalCapacityPool(domain/'capacity', capacity=capacity)
         provider = ThreadResourceProvider(pool, root.with_name(root.name+'-driver-resources')/'thread-units',

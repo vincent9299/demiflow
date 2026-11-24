@@ -12,7 +12,7 @@ from demiflow.planning.dataflow_policy import execution_limits
 from demiflow.execution.contracts.dataflow import BATCH_TARGET_BYTES
 from demiflow.planning.dataflow_policy import run_row_limit
 from demiflow.lance.arrow_batches import arrow_batches
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.outputs.lance_sink import LanceSink
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.contracts.recovery_contract import SourcePosition

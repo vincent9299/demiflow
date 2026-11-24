@@ -376,7 +376,7 @@ def bind_observation_scope(self, key, *, plan_id, dag_id, plan_revision, occurre
     "Bind a native producer's observation to its sealed execution instance.\n\n        The scope is written with the existing observation, never reconstructed\n        by a history reader from whichever plan happens to be selected later.\n        "
     if key is None or self.observe is None:
         return
-    from demiflow.execution.run_journal import _node_document
+    from demiflow.execution.journal.run_journal import _node_document
     scope = dict(plan_id=plan_id, dag_id=dag_id, plan_revision=plan_revision,
                  occurrence_id=occurrence_id)
     with self.observation_lock:

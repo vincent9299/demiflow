@@ -6,7 +6,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext, current_run
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 @pytest.mark.parametrize('mode', ['process', 'thread'])

@@ -311,8 +311,8 @@ def test_surface_document_is_generated_from_runtime_literal():
 
 
 @pytest.mark.parametrize('code', [
-    'from demiflow.execution.run_journal import RunJournal as J',
-    'import demiflow.execution.run_journal as j',
+    'from demiflow.execution.journal.run_journal import RunJournal as J',
+    'import demiflow.execution.journal.run_journal as j',
     'from demiflow.execution.host.control import *',
 ])
 def test_import_negative_alias_fixtures(code):
@@ -324,7 +324,7 @@ def test_import_negative_alias_fixtures(code):
     'from demiflow.execution.host.inspection import read_run as read\nwith read("x") as r:\n    alias=r\n    alias.tables',
     'from demiflow.execution.host.control import RunJournal\nj=RunJournal("x")\ngetattr(j, "db")',
     'from demiflow.execution.host.inspection import compiled_node_materials\nm=compiled_node_materials(c,bounds=b)\nitem=m["x"]\ncfg=item.configuration.engine_configuration\ncfg.get("query")',
-    'import importlib\nimportlib.import_module("demiflow.execution.run_journal")',
+    'import importlib\nimportlib.import_module("demiflow.execution.journal.run_journal")',
     'from demiflow.execution.host.inspection import capture_pipeline\nr=capture_pipeline(f,{})\nn=r.compiled.graph.nodes[0]\nn.kernel.configuration',
     'from demiflow.execution.host.control import RunJournal as J\nj=J("x")\npeek=getattr\npeek(j, "db")',
 ])

@@ -87,7 +87,7 @@ os.environ['SYNTHETIC_JSON_KEY'] = 'local-fixture-only'
 transactions = Counter()
 original_transaction = None
 from contextlib import contextmanager
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 original_transaction = RunJournal._transaction
 @contextmanager
 def observed_transaction(self):

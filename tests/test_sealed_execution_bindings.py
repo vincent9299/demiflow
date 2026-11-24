@@ -17,7 +17,7 @@ from demiflow.execution.contracts.errors import PlanContractError
 from demiflow.execution.seal.plan_interpreter import interpret_physical_plan, to_wire, validate_worker_assignment
 from demiflow.execution.contracts.recovery_contract import document, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.seal.sealed_plans import MAX_BINDINGS_BYTES, MAX_SEALED_PLAN_BYTES, SEALED_PLAN_FACTS_SCHEMA, load_execution_bindings, load_sealed_plan
 from demiflow.execution.storage.reading import read_plan_artifact
 from test_execution_layout import (

@@ -80,7 +80,7 @@ def test_externalized_input_and_content_hash(tmp_path):
 
 
 def test_empty_run_reset_and_activity_guard(tmp_path):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(tmp_path / 'run')
     journal.initialize({'code': 'draft'})
     journal.reset_empty(actor='tester', reason='finalize source')
@@ -92,7 +92,7 @@ def test_empty_run_reset_and_activity_guard(tmp_path):
 
 
 def test_empty_reset_excludes_writer(tmp_path):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.storage.artifacts import run_lock
     journal = RunJournal(tmp_path)
     journal.initialize({'code': 'x'})

@@ -206,7 +206,7 @@ def test_actual_driver_resume_preserves_partial_task_and_committed_prefix(tmp_pa
     committed_calls = [event for event in before if event['event'] == 'call' and event['row'] < cut['frontier']]
     assert [event['row'] for event in committed_calls] == list(range(cut['frontier']))
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(ref.directory)
     commits_before = journal.execution_commits('action-1')
     started = time.monotonic()

@@ -305,7 +305,7 @@ def test_reducer_value_limits_reject_without_committed_output(tmp_path, bound):
         ('reducer state', 'Reducer retained objects') if bound == 'state' else
         ('record string exceeds byte budget', 'encoded record exceeds the row byte budget')))
     assert (tmp_path / 'calls').read_text() == 'called\n'
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     assert RunJournal(tmp_path / 'run').execution_commits('action-1') == []
 
 

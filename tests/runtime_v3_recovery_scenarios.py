@@ -64,7 +64,7 @@ def _child(fx, root, *, task, mode, fault=None, extra=None):
 
 
 def _journal(directory):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     return RunJournal(directory)
 
 
@@ -127,7 +127,7 @@ def _run_child(config):
     import demiflow
     assert Path(demiflow.__file__).resolve().is_relative_to(WORKTREE), demiflow.__file__
     from demiflow.execution import commit as protocol
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.journal.dataflow_authority import DriverJournalService
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.contracts.dataflow_codec import encode_wire, decode_wire
@@ -304,7 +304,7 @@ def _probe_worker(row):
     """Actual business worker counterexamples against process-wide guards."""
     import os
     import sqlite3
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.commit import CommitCoordinator
     checked = {}
     for name, operation in (
@@ -470,7 +470,7 @@ if os.environ.get('DEMIFLOW_WORKER_LAUNCH') or 'default_worker.py' in sys.argv[0
             os.close(fd)
     try:
         import sqlite3
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         from demiflow.execution.commit import CommitCoordinator
         from demiflow.execution.worker.runtime import WorkerJournalClient
         def reject(kind):

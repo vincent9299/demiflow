@@ -65,7 +65,7 @@ def test_overwrite_failure_preserves_current_version(tmp_path, expected):
     from demiflow.execution import RunContext
     # Source failure precedes native prepare in the unified engine; preserve
     # the original business exception, not a fabricated publication receipt.
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with pytest.raises(RuntimeError) as raised:
         with RunContext.start(tmp_path / 'failed-run'):
             data.from_iter(broken).write_lance(

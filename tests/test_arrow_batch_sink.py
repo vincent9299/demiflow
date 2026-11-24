@@ -2,7 +2,7 @@ import lance
 import pyarrow as pa
 import pytest
 from demiflow import data
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 @pytest.mark.parametrize('mode', ['thread', 'process'])
@@ -46,7 +46,7 @@ def test_arrow_callback_failure_does_not_publish_or_retry(tmp_path):
             raise ValueError('deliberate callback failure')
         return batch
     from demiflow.execution import RecoveryContractError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     # Catching the callback locally must not turn its incomplete action into a
     # successful enclosing native run. Preserve both failure boundaries.
     with pytest.raises(RecoveryContractError, match='unconfirmed actions'):

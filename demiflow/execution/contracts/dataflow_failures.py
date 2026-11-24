@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowRecoveryError, DataflowUnresolvedCommit, DATAFLOW_ERROR_CODES
 from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-from demiflow.execution.run_journal import ExecutionBudgetExceeded
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 
 _BUILTINS = {name: getattr(builtins, name) for name in (
     'ValueError', 'TypeError', 'KeyError', 'IndexError', 'LookupError', 'TimeoutError',
@@ -33,7 +33,8 @@ _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
 _KNOWN[asyncio.CancelledError.__module__ + '.' + asyncio.CancelledError.__qualname__] = asyncio.CancelledError
 _RECOVERY_TYPE = DataflowRecoveryError.__module__ + '.' + DataflowRecoveryError.__qualname__
 _UNRESOLVED_TYPE = DataflowUnresolvedCommit.__module__ + '.' + DataflowUnresolvedCommit.__qualname__
-_BUDGET_TYPE = ExecutionBudgetExceeded.__module__ + '.' + ExecutionBudgetExceeded.__qualname__
+_BUDGET_TYPE = 'demiflow.execution.run_journal.ExecutionBudgetExceeded'
+_KNOWN[_BUDGET_TYPE] = ExecutionBudgetExceeded
 _KNOWN['demiflow.execution.recovery_contract.RecoveryContractError'] = RecoveryContractError
 _KNOWN['demiflow.execution.recovery_contract.UnresolvedCommit'] = UnresolvedCommit
 from demiflow.data.runtime_contract import RuntimeContractError

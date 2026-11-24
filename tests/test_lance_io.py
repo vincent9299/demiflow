@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.lance.registry import write_registered_table
 
 import pytest
@@ -51,7 +51,7 @@ def test_write_lance_append_schema_mismatch_is_indeterminate(tmp_path):
     # fail in native prepare; it is not evidence of uncertain publication.
     import lance
     from demiflow.execution import RunContext
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     uri = str(tmp_path / "t.lance")
     ds([{"k": "a"}]).write_lance(uri)
     version = lance.dataset(uri).version

@@ -438,7 +438,7 @@ class DelayedNativePromptFactory:
 def test_known_inflight_model_response_crosses_barrier_and_recovers_once(tmp_path, fixture_http, monkeypatch):
     import demiflow.execution.commit as protocol
     import demiflow.execution.operator_bindings.dataflow_model_factory as factories
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.storage.state_artifacts import StateArtifacts
     from demiflow.execution.seal.sealed_plans import sealed_read_bounds
     from demiflow.execution.storage.objects import readonly_run_store

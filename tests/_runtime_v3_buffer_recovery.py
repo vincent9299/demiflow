@@ -5,7 +5,7 @@ from demiflow.execution import commit as protocol
 from demiflow.execution.contracts.dataflow import ArtifactRef
 from demiflow.execution.contracts import state_codec
 from demiflow.execution.kernels.operator import IMAGE_MEDIA_TYPE
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 from demiflow.execution.seal.sealed_plans import load_sealed_plan, sealed_read_bounds
 from demiflow.execution.storage.objects import readonly_run_store

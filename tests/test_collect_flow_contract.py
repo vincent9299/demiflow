@@ -168,7 +168,7 @@ def test_wiki_syntax_is_bounded_and_contains_no_template_policy():
 
 def test_image_fixed_residency_rejects_smaller_native_budget(root, monkeypatch):
     from demiflow.execution import RunContext, RecoveryContractError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
 
     report, _ = inspected(root, 'image')
     assert report['status'] == 'checked', report['diagnostics']

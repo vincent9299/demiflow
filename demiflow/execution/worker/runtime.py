@@ -161,7 +161,7 @@ class WorkerRuntime:
                 raise DataflowError("CODE_MISMATCH", "v3 launch payload missing code pin observation")
             self._artifact_digest_observed = digest
         else:
-            from ..run_journal import RunJournal
+            from demiflow.execution.journal.run_journal import RunJournal
             config = RunJournal(self.directory).recovery_identity()
             if config is None or config["run_id"] != self.run_id:
                 raise RecoveryContractError("Worker launch run identity differs")

@@ -97,7 +97,7 @@ def test_default_in_driver_path_unchanged(tmp_path):
     # The old opt-in flag is inert: the default uses the same managed engine.
     records = list((tmp_path / 'run-driver-resources' / 'units').glob('*/*/process.json'))
     assert records and all(json.loads(p.read_text())['identity']['pid'] != os.getpid() for p in records)
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(tmp_path / 'run')
     assert journal.source_binding('action-1-dataflow-sealed') is not None
 

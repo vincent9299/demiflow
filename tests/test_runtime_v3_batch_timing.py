@@ -58,7 +58,7 @@ from pathlib import Path
 import pyarrow as pa
 from demiflow import data
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
 from runtime_v3_recovery_scenarios import _native_calls
 root=Path(sys.argv[1]);mode=sys.argv[2];kind=sys.argv[3]

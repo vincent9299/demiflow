@@ -9,7 +9,7 @@ import pytest
 from demiflow import data
 from demiflow.execution.commit import CommitCoordinator
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 _OVERLAP = None
@@ -302,7 +302,7 @@ def test_direct_lance_prepares_before_source_finishes_and_publishes_once(tmp_pat
 
 def test_temporary_release_rejects_live_files_and_stale_fence(tmp_path):
     from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-    from demiflow.execution.run_journal import ExecutionConflict
+    from demiflow.execution.journal.run_journal import ExecutionConflict
     with RunContext.start(tmp_path/'run') as run:
         path = run.directory/'scratch'/'live'
         path.parent.mkdir()
@@ -379,7 +379,7 @@ def test_publication_fence_does_not_hold_control_db_during_io(tmp_path):
                 assert pool.submit(run.reserve, 'probe', 1).result(timeout=1) == 1
                 assert not changed.done()
             changed.result(timeout=2)
-        from demiflow.execution.run_journal import ExecutionConflict
+        from demiflow.execution.journal.run_journal import ExecutionConflict
         with pytest.raises(ExecutionConflict, match='Stale'):
             with run.journal.publication_guard(run.fence):
                 pytest.fail('old publisher admitted')

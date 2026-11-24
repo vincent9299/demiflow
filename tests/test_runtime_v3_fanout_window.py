@@ -46,7 +46,7 @@ def test_actual_shared_source_fanout_keeps_one_read_and_original_ack(tmp_path, m
     from demiflow.execution.sources.source_readers import ItemsReader
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     reads, cuts, source_frontiers = [], [], []
     next_record, commit = ItemsReader.next_record, DataflowCheckpointCoordinator.commit
     def observe(reader):
@@ -121,7 +121,7 @@ def _disable_optional_fusion(monkeypatch):
 def test_unfused_source_parks_at_64_real_deliveries_before_reading_fifth_row(tmp_path, monkeypatch):
     from demiflow.execution.sources.source_readers import ItemsReader
     from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
     _disable_optional_fusion(monkeypatch)
     reads, images = [], []
@@ -160,7 +160,7 @@ def test_unfused_source_parks_at_64_real_deliveries_before_reading_fifth_row(tmp
 
 def test_single_source_invocation_wider_than_all_slots_still_rejects(tmp_path, monkeypatch):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     _disable_optional_fusion(monkeypatch)
     with pytest.raises(DataflowError, match='one operator invocation exceeds the parked durable credit window'):
         with RunContext.start(tmp_path/'run', limits={'memory_bytes':256*1024**2,

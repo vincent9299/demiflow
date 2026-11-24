@@ -11,7 +11,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext, current_run
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 from demiflow.kv import KVDatasink, SQLiteKV
 
@@ -207,7 +207,7 @@ def test_corrupt_prepared_payload_rolls_back_prior_upserts(tmp_path, monkeypatch
 
 
 def test_sqlite_scratch_uses_aggregate_original_run_admission(tmp_path, monkeypatch):
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
     store = SQLiteKV(tmp_path/'index.sqlite', 'test')
     prepare = KVDatasink.prepare
     observed = []

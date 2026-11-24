@@ -102,7 +102,7 @@ def private_embedding_request(service, command, request):
     node_ceiling = ceiling if config['max_requests'] is None else config['max_requests']
     reservation = identity(['private-embedding-admission', command.action_id,
                             command.node_id, scope, part, command.request_key])
-    from demiflow.execution.run_journal import ExecutionBudgetExceeded
+    from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
     from demiflow.operator_llm.errors import PromptBudgetExceededError
     try:
         service._journal.reserve_budgets(service._fence, reservation, {

@@ -9,7 +9,7 @@ from demiflow.execution.queue import QueueChannel, QueueConfig
 from demiflow.execution.queue_contract import resolve_consumer_contract, resolve_producer_contract
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, document
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from test_queue_v2_protocol import source, native_parent, publish, domain, task_message
 
 

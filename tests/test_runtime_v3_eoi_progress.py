@@ -50,7 +50,7 @@ from pathlib import Path
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
 from demiflow.execution.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.recovery_contract import RunRef
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
 from demiflow.execution.kernels import state_codec

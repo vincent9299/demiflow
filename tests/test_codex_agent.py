@@ -17,7 +17,7 @@ from test_agentmap_async import resource, collect, configured_agent
 from test_map_prompt_async import PACK
 from _agent_runtime_fixtures import collect_before_commit, resume_collect, call_metrics, collect_actor_component
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
 
 

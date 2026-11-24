@@ -89,7 +89,7 @@ def test_take_all_zero_limit_empty_input_succeeds(tmp_path):
 @pytest.mark.parametrize('worker_mode', ['thread', 'process'])
 @pytest.mark.parametrize('limit', [0, 2, 65])
 def test_direct_collection_stops_input_at_first_overflow(tmp_path, worker_mode, limit):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     with pytest.raises(ValueError, match='more than the take_all limit'):
         with RunContext.start(tmp_path / 'run', limits={'timeout_s': 30,
                 'checkpoint_rows': 8}), data.local_execution(workers=2, worker_mode=worker_mode):

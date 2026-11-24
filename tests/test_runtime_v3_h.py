@@ -61,7 +61,7 @@ from demiflow.execution.worker import runtime as WORKER_SERVICES
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.storage.objects import ARTIFACT_STAGING_BUDGET, RunArtifactStore
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.worker import dataflow_host as WH
 from demiflow.resources.manager import ResourceManager
 

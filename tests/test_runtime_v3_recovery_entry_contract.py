@@ -7,7 +7,8 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal, ExecutionBudgetExceeded
+from demiflow.execution.journal.run_journal import RunJournal
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit
 from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowUnresolvedCommit
 from demiflow.execution.contracts.dataflow_failures import failure_payload, restore_failure
@@ -133,7 +134,7 @@ def test_unknown_transport_failure_cannot_be_reclassified_as_budget_rejection():
 def test_real_worker_budget_failure_keeps_class_name_and_message(tmp_path):
     events=tmp_path/'calls'
     def reject(row):
-        from demiflow.execution.run_journal import ExecutionBudgetExceeded
+        from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
         with events.open('a') as output: output.write('call\n')
         raise ExecutionBudgetExceeded('row_bytes',message='worker admitted row budget is exhausted')
     with pytest.raises(ExecutionBudgetExceeded,match='worker admitted row budget is exhausted') as caught:

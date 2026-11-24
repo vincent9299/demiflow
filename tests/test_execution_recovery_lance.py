@@ -11,7 +11,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution import RunContext, RunRef, UnresolvedCommit
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def write_graph(root, mode, window=None):

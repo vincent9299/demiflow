@@ -517,7 +517,7 @@ def test_unified_queue_carrier_releases_quota_on_business_failure_no_helper(tmp_
 
 
 def test_public_queue_releases_staging_throughout_settlement(tmp_path, monkeypatch):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
 
     # Inspect the owning store, both while the real acquisition is staging and
     # after its last settlement. A defunct carrier directory proves no bound.

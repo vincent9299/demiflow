@@ -7,7 +7,7 @@ from demiflow.data.api import DataAPI
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.pipeline.run_context import RunContext, current_run, execution_scope, bind_iteration
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def on_thread(fn):

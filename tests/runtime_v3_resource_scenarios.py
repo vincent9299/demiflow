@@ -324,7 +324,7 @@ def observe_execution(*, workers, memory_bytes):
     from demiflow.execution.action_driver.dataflow import DataflowExecution
     from demiflow.execution.hosts.run_state import RunResourceState
     from demiflow.execution.exchange.dataflow_state import ChannelSetState
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from runtime_v3_performance_scenarios import _plain
     report = {'plans': [], 'launches': [], 'charged_peak': {}, 'credit_peak_bytes': 0,
               'credit_peak_rows': 0, 'credit_samples': 0, 'budget_peaks': {}}

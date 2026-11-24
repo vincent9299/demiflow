@@ -12,7 +12,7 @@ from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from tests.test_local_relational import _oracle_join, assert_same_rows
 from _worker_event_fixtures import emit, events
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def api(tmp_path):

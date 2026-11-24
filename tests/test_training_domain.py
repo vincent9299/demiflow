@@ -363,7 +363,7 @@ def test_fit_observation_is_attempt_scoped_and_read_only(tmp_path):
 
 
 def test_stopped_control_reconciles_model_without_replaying_rows(tmp_path):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.training.deployment import TrainingDeployment
     from demiflow.execution.pipeline.training_maintenance import reconcile_stopped_fits
     request,binding = setup_request(tmp_path)
@@ -585,7 +585,7 @@ def test_two_live_dataset_drivers_submit_one_actual_job(tmp_path):
 
 
 def test_stopped_candidate_before_election_does_not_acquire_or_dispatch(tmp_path,monkeypatch):
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.training.deployment import TrainingDeployment
     from demiflow.execution.pipeline.training_maintenance import reconcile_stopped_fits
     from demiflow.execution.journal.run_reader import read_run
@@ -789,7 +789,7 @@ def test_quota_raise_preserves_published_training_and_scoring_table_hold(tmp_pat
 def _quota_lance_action(root, resume):
     from demiflow import data
     from demiflow.execution.contracts.recovery_contract import RunRef
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from test_training_dataset_action import recipe
     from training_action_programs import waiting_trainer
     _, binding = setup_request(root,managed=True)
@@ -812,7 +812,7 @@ def test_original_submitted_action_recovers_using_raised_storage_quota(tmp_path)
     import sys
     import lance
     import pyarrow as pa
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     lance.write_dataset(pa.table({'x':[1]}),str(tmp_path/'input.lance'))
     _, binding = setup_request(tmp_path,managed=True)
     original = replace(binding,max_files=1,provider_options={'cpu_millis':100,'memory_bytes':16<<20})

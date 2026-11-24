@@ -61,7 +61,7 @@ from demiflow.execution.queue_contract import HistoryReadLimit, HistoryReadLimit
 from demiflow.execution.queue_sinks import QueuePublishSink, QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
 from demiflow.execution.journal.prompt import RunPromptJournal
@@ -776,7 +776,7 @@ def test_workbench_normal_flow_real_worker(tmp_path, pidfds):
         assert sealed['version'] == 'v3'
         dag = sealed['plan_view']['dag']
         assert dag['nodes']
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         import json
         journal = RunJournal(observed['target'])
         bridge_ref = journal.source_binding(action_id + '-identity-bridge')

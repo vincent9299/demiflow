@@ -44,7 +44,7 @@ from demiflow.execution.seal.identity_bridge import build_identity_bridge
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
 from demiflow.execution.seal.program_identity import describe
 from demiflow.execution.pipeline.run_context import RunAction
-from ..run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 SEAL_SCHEMA = "demiflow.dataflow_seal.v3"
 TRAINING_SEAL_SCHEMA = "demiflow.dataflow_seal.v4"

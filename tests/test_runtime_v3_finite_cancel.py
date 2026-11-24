@@ -200,7 +200,7 @@ def test_real_dataset_cancel_interrupts_finite_authentication_and_releases_worke
                     # so its test-owned waiter cannot hide the real failure.
                     cancelled.set()
     assert decoded and len(decoded) == 1
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
     with RunJournal(tmp_path/'run')._connection() as db:

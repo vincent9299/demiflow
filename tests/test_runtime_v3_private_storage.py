@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.execution.journal.dataflow_authority import bind_private_storage, private_storage
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
-from demiflow.execution.run_journal import ExecutionBudgetExceeded
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from test_runtime_v3_native_rpc_replay import IntentionalInterruption, service
 from test_runtime_v3_private_prompt_journal import _pipeline, _charged, native_server

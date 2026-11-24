@@ -49,7 +49,7 @@ from demiflow.execution.seal.plan import SEAL_SCHEMA  # noqa: E402
 from demiflow.execution.seal import sealed_plans  # noqa: E402
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError  # noqa: E402
 from demiflow.execution.seal.program_identity import platform_identity  # noqa: E402
-from demiflow.execution.run_journal import RunJournal  # noqa: E402
+from demiflow.execution.journal.run_journal import RunJournal  # noqa: E402
 from demiflow.resources.contracts import ResourceProfile  # noqa: E402
 
 

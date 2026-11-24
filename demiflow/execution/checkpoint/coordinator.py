@@ -36,7 +36,7 @@ from demiflow.execution.contracts.dataflow import ArtifactRef, CutContribution, 
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.recovery_contract import MAX_SINKS, MAX_STATES, RecoveryContractError, UnresolvedCommit, SourcePosition, document, identifier, identity
 from demiflow.execution.pipeline.run_context import RunAction
-from demiflow.execution.run_journal import ExecutionBudgetExceeded
+from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 from demiflow.execution.storage.state_artifacts import StateArtifacts
 
 # Reserved vector slot named by ARCHITECTURE §6. It is nested inside the

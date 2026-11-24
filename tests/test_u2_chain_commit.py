@@ -12,7 +12,7 @@ from demiflow.execution.contracts.checkpoint import (
 )
 from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.contracts.recovery_contract import identity
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 
 
 def write_original_chain(checkout, root):

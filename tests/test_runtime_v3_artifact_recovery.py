@@ -16,7 +16,7 @@ from demiflow.execution.storage.staging import StagingLease, recover_staging, st
 from demiflow.execution.storage.objects import RunArtifactStore
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.run_journal import RunJournal
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
 from test_runtime_v3_artifact_accounting import store_fixture, consumed

@@ -110,7 +110,7 @@ def test_real_native_and_private_admitted_responses_survive_cooperative_stop(tmp
     if private:
         connection = sqlite3.connect(path)
     else:
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         context = RunJournal(tmp_path/'run')._connection()
         connection = context.__enter__()
     try:
@@ -150,7 +150,7 @@ def test_cooperative_drain_remains_bounded_by_original_instance_deadline():
 def test_native_paid_stop_without_cut_cannot_invent_recovery(tmp_path, server):
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     stop = tmp_path/'STOP'
     server['delay'] = .2
     def on_request():

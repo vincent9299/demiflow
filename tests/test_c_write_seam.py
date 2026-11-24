@@ -201,7 +201,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
             relational_dataset().write_lance(str(target), mode="create", return_receipt=True)
     assert len(altered) == 1
     assert not target.exists(), "publication happened despite a failed binding gate"
-    from demiflow.execution.run_journal import RunJournal
+    from demiflow.execution.journal.run_journal import RunJournal
     journal = RunJournal(run_dir)
     action_id = sealed_action_id(journal)
     assert journal.execution_action(action_id)['result'] is None

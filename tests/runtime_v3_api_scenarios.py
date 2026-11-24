@@ -387,7 +387,7 @@ def _run_case(fx,case,index,source):
     if observed is not None:
         # The RunContext has closed its scoped connection pool. Inspect through
         # a new unpooled read-only view rather than resurrecting that pool.
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         with RunJournal(observed.directory)._connection() as db:
             outcome['native_actions']=[{'action_id':a,'complete':result is not None} for a,result in db.execute('SELECT action_id,result FROM runtime_actions ORDER BY action_id')]
             outcome['native_commits']=[{'commit_id':cid,'status':s} for cid,s in db.execute('SELECT commit_id,status FROM runtime_commits ORDER BY sequence')]
@@ -395,7 +395,7 @@ def _run_case(fx,case,index,source):
             if not outcome['native_commits'] or any(c['status']!='acked' for c in outcome['native_commits']):
                 outcome['status']='failed'; outcome['unconfirmed_native_commit']=True
     if case.self_managed and outcome['status']=='passed':
-        from demiflow.execution.run_journal import RunJournal
+        from demiflow.execution.journal.run_journal import RunJournal
         scopes=outcome['result'].get('native_scopes', [])
         outcome['native_commits']=[]
         for scope in scopes:

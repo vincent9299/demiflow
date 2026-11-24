@@ -28,7 +28,7 @@
         "RunContext"
       ],
       "RunJournal": [
-        "demiflow.execution.run_journal",
+        "demiflow.execution.journal.run_journal",
         "RunJournal"
       ],
       "admit_absent_create": [
@@ -78,7 +78,7 @@
     },
     "inspection": {
       "OBSERVATION_COUNT": [
-        "demiflow.execution.run_journal",
+        "demiflow.execution.journal.run_journal",
         "OBSERVATION_COUNT"
       ],
       "PlanContractError": [
