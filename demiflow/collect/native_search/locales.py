@@ -1,9 +1,17 @@
-"""Language tags of search requests mapped to source-specific codes."""
+"""Language tags of search requests mapped to source-specific codes.
+
+Each source has a general rule and two tables fitted to the requests the
+previous runtime produced for every known language tag and for its lower- and
+upper-case spellings: ``*_EXCEPTIONS`` keyed by the tag as written and
+``*_FOLDED`` keyed by the lower-cased tag (any other spelling). Lookup order:
+as written, other spelling, rule (``_lookup``). Tags babel cannot parse never
+reach this module (``config.validate_language`` rejects them).
+"""
 import babel
 
 # Wikipedia editions by language (and script). Derived from the hosts the
-# previous runtime chose for every babel locale; ``wikipedia_host`` reproduces
-# all of them. Exceptions are keyed by the tag as written (None: no edition).
+# previous runtime chose for every babel locale and its other spellings;
+# ``wikipedia_host`` reproduces all of them (table value None: no edition).
 WIKIPEDIA_CODES = {
     'af': 'af', 'am': 'am', 'an': 'an', 'ar': 'ar', 'as': 'as', 'az': 'az', 'ba': 'ba', 'be': 'be', 'bg': 'bg',
     'bn': 'bn', 'bo': 'zh', 'bs': 'bs', 'ca': 'ca', 'ckb': 'ckb', 'cs': 'cs', 'cy': 'cy', 'da': 'da', 'de':
@@ -18,12 +26,28 @@ WIKIPEDIA_CODES = {
     'ur': 'ur', 'uz': 'uz', 'vi': 'vi', 'vo': 'vo', 'wa': 'wa', 'yi': 'yi', 'yue-Hans': 'zh', 'yue-Hant': 'zh',
     'za': 'zh', 'zgh': 'zgh', 'zh': 'zh', 'zh-Hans': 'zh', 'zh-Hant': 'zh', 'zh-Latn': 'zh'
 }
-WIKIPEDIA_EXCEPTIONS = {
-    'bo': None, 'bo-IN': None, 'en-SG': 'zh.wikipedia.org', 'ii': None, 'kk-Arab': None, 'ko-CN':
-    'zh.wikipedia.org', 'mn-Mong': None, 'mn-Mong-MN': None, 'ms': None, 'ms-BN': None, 'ms-ID': None, 'ms-MY':
-    None, 'ta-SG': 'zh.wikipedia.org', 'ug': None, 'yue-HK': None, 'yue-Hans': None, 'yue-Hant': None,
-    'yue-Hant-HK': None, 'yue-Hant-MO': None, 'yue-MO': None, 'za': None, 'zh-Latn': None
+WIKIPEDIA_EXCEPTIONS = {}
+WIKIPEDIA_FOLDED = {
+    'bo': None, 'bo-in': None, 'en-sg': 'zh.wikipedia.org', 'ii': None, 'kk-arab': None, 'ko-cn':
+    'zh.wikipedia.org', 'mn-mong': None, 'mn-mong-mn': None, 'ms': None, 'ms-bn': None, 'ms-id': None, 'ms-my':
+    None, 'ta-sg': 'zh.wikipedia.org', 'ug': None, 'yue-hk': None, 'yue-hans': None, 'yue-hant': None,
+    'yue-hant-hk': None, 'yue-hant-mo': None, 'yue-mo': None, 'za': None, 'zh-latn': None
 }
+
+
+_MISSING = object()
+
+
+def _lookup(exact, folded, tag):
+    """Table value for a tag: as written first, then any other letter case of it.
+
+    The previous runtime looked a tag up as written and otherwise resolved its
+    babel-normalized form, so ``zh-TW`` and ``zh-tw`` can map differently.
+    ``exact`` is keyed by tags as written, ``folded`` by lower-cased tags.
+    """
+    if tag in exact:
+        return exact[tag]
+    return folded.get(tag.lower(), _MISSING)
 
 
 def parse(tag):
@@ -40,20 +64,25 @@ def wikipedia_host(tag, default='en.wikipedia.org'):
     """Host of the Wikipedia edition for a request language; ``default`` when none is declared."""
     if not tag or tag == 'all':
         return default
-    if tag in WIKIPEDIA_EXCEPTIONS:
-        return WIKIPEDIA_EXCEPTIONS[tag] or default
+    host = _lookup(WIKIPEDIA_EXCEPTIONS, WIKIPEDIA_FOLDED, tag)
+    if host is _MISSING:
+        host = _wikipedia_rule(tag)
+    return host or default
+
+
+def _wikipedia_rule(tag):
     locale = parse(tag)
     if locale is None:
-        return default
+        return None
     key = locale.language + ('-' + locale.script if locale.script else '')
     code = WIKIPEDIA_CODES.get(key) or (WIKIPEDIA_CODES.get(locale.language) if not locale.script else None)
-    return code + '.wikipedia.org' if code else default
+    return code + '.wikipedia.org' if code else None
 
 
 # Google interface languages and search regions. Derived from the request
 # parameters the previous runtime produced for 1134 language tags (every babel
-# locale plus the common language-region pairs); ``google_parameters``
-# reproduces all of them. Exceptions are keyed by the tag as written.
+# locale plus the common language-region pairs) and their other spellings;
+# ``google_parameters`` reproduces all of them.
 GOOGLE_LANGUAGES = frozenset((
     'af', 'ak', 'am', 'ar', 'az', 'be', 'bem', 'bg', 'bn', 'br', 'bs', 'ca', 'ceb', 'chr', 'ckb', 'co', 'cs',
     'cy', 'da', 'de', 'ee', 'el', 'en', 'eo', 'es', 'et', 'eu', 'fa', 'fi', 'fil', 'fo', 'fr', 'fy', 'ga',
@@ -91,16 +120,19 @@ GOOGLE_DEFAULT_REGIONS = {
     'za': 'HK', 'zh': 'HK'
 }
 GOOGLE_EXCEPTIONS = {
-    'be-TARASK': ('be', 'lang_be', 'countryBY'), 'bs-Cyrl': ('en', 'lang_en', 'countryBA'), 'el-POLYTON': ('el',
-    'lang_el', 'countryGR'), 'ko-KP': ('ko', 'lang_ko', 'countryKR'), 'mn-CN': ('en', 'lang_en', 'countryHK'),
-    'mn-Mong-CN': ('en', 'lang_en', 'countryHK'), 'ms-BN': ('ms', 'lang_ms', 'countrySG'), 'ms-MY': ('ms',
-    'lang_ms', 'countrySG'), 'sd-Deva': ('en', 'lang_en', 'countryIN'), 'sr-Latn': ('sr-ME', 'lang_sr-ME',
-    'countryRS'), 'sr-Latn-ME': ('sr-ME', 'lang_sr-ME', 'countryRS'), 'sr-Latn-XK': ('sr-ME', 'lang_sr-ME',
-    'countryRS'), 'sr-ME': ('sr-ME', 'lang_sr-ME', 'countryRS'), 'trv-TW': ('en', 'lang_en', 'countryZZ'),
-    'yue-Hant-MO': ('en', 'lang_en', 'countryZZ'), 'yue-MO': ('en', 'lang_en', 'countryZZ'), 'zh-Hans-MO':
-    ('zh-CN', 'lang_zh-CN', 'countryZZ'), 'zh-Hans-MY': ('zh-CN', 'lang_zh-CN', 'countryZZ'), 'zh-Hant':
-    ('zh-TW', 'lang_zh-TW', 'countryHK'), 'zh-Hant-TW': ('zh-TW', 'lang_zh-TW', 'countryHK'), 'zh-MY': ('zh-CN',
-    'lang_zh-CN', 'countryZZ')
+    'zh-TW': ('zh-TW', 'lang_zh-TW', 'countryTW')
+}
+GOOGLE_FOLDED = {
+    'be-tarask': ('be', 'lang_be', 'countryBY'), 'bs-cyrl': ('en', 'lang_en', 'countryBA'), 'el-polyton': ('el',
+    'lang_el', 'countryGR'), 'ko-kp': ('ko', 'lang_ko', 'countryKR'), 'mn-cn': ('en', 'lang_en', 'countryHK'),
+    'mn-mong-cn': ('en', 'lang_en', 'countryHK'), 'ms-bn': ('ms', 'lang_ms', 'countrySG'), 'ms-my': ('ms',
+    'lang_ms', 'countrySG'), 'sd-deva': ('en', 'lang_en', 'countryIN'), 'sr-latn': ('sr-ME', 'lang_sr-ME',
+    'countryRS'), 'sr-latn-me': ('sr-ME', 'lang_sr-ME', 'countryRS'), 'sr-latn-xk': ('sr-ME', 'lang_sr-ME',
+    'countryRS'), 'sr-me': ('sr-ME', 'lang_sr-ME', 'countryRS'), 'trv-tw': ('en', 'lang_en', 'countryZZ'),
+    'yue-hant-mo': ('en', 'lang_en', 'countryZZ'), 'yue-mo': ('en', 'lang_en', 'countryZZ'), 'zh-hans-mo':
+    ('zh-CN', 'lang_zh-CN', 'countryZZ'), 'zh-hans-my': ('zh-CN', 'lang_zh-CN', 'countryZZ'), 'zh-hant':
+    ('zh-TW', 'lang_zh-TW', 'countryHK'), 'zh-hant-tw': ('zh-TW', 'lang_zh-TW', 'countryHK'), 'zh-my': ('zh-CN',
+    'lang_zh-CN', 'countryZZ'), 'zh-tw': ('zh-TW', 'lang_zh-TW', 'countryHK')
 }
 
 
@@ -108,9 +140,12 @@ def google_parameters(tag):
     """Google ``hl``, ``lr``, ``cr``, ``ie`` and ``oe`` query arguments for a request language."""
     if not tag or tag == 'all':
         return {'hl': 'ZZ', 'lr': '', 'cr': '', 'ie': 'utf8', 'oe': 'utf8'}
-    if tag in GOOGLE_EXCEPTIONS:
-        hl, lr, cr = GOOGLE_EXCEPTIONS[tag]
-        return {'hl': hl, 'lr': lr, 'cr': cr, 'ie': 'utf8', 'oe': 'utf8'}
+    values = _lookup(GOOGLE_EXCEPTIONS, GOOGLE_FOLDED, tag)
+    hl, lr, cr = _google_rule(tag) if values is _MISSING else values
+    return {'hl': hl, 'lr': lr, 'cr': cr, 'ie': 'utf8', 'oe': 'utf8'}
+
+
+def _google_rule(tag):
     locale = babel.Locale.parse(tag, sep='-')
     key = locale.language + ('-' + locale.script if locale.script else '')
     if key in GOOGLE_LANGUAGES or key in GOOGLE_LANGUAGE_CODES:
@@ -127,12 +162,11 @@ def google_parameters(tag):
         cr = 'country' + GOOGLE_DEFAULT_REGIONS.get(locale.language, 'ZZ')
     else:
         cr = 'countryZZ'
-    return {'hl': hl, 'lr': 'lang_' + hl, 'cr': cr, 'ie': 'utf8', 'oe': 'utf8'}
+    return hl, 'lang_' + hl, cr
 
 
 # Bing markets (``mkt``). Derived like the Google tables from the previous
-# runtime's requests for 1135 language tags; ``bing_market`` reproduces all of
-# them. A tag naming a territory uses that territory's market when Bing has no
+# runtime's requests; ``bing_market`` reproduces all of them. A tag naming a territory uses that territory's market when Bing has no
 # market for the tag's own language there.
 BING_MARKETS = frozenset((
     'am-et', 'ar-ae', 'ar-bh', 'ar-dj', 'ar-dz', 'ar-eg', 'ar-er', 'ar-il', 'ar-iq', 'ar-jo', 'ar-km', 'ar-kw',
@@ -223,12 +257,41 @@ BING_TERRITORY_MARKETS = {
     'ZM': 'en-zm'
 }
 BING_EXCEPTIONS = {
-    'az-Arab': None, 'az-Latn': None, 'bs-Latn': None, 'en-Dsrt': None, 'en-Shaw': None, 'hi-Latn': None,
-    'kk-Arab': None, 'kk-Cyrl': None, 'kk-Cyrl-KZ': 'ru-kz', 'mn-Mong': None, 'sr-BA': 'sr-ba', 'sr-Cyrl': None,
-    'sr-Cyrl-BA': 'bs-ba', 'sr-Cyrl-ME': None, 'sr-Cyrl-XK': None, 'sr-Latn': 'sr-me', 'sr-Latn-BA': 'bs-ba',
-    'sr-Latn-ME': 'sr-me', 'sr-Latn-XK': 'sr-me', 'sr-ME': 'sr-me', 'sr-XK': None, 'uz-Arab': None, 'uz-Latn':
-    None, 'yue-Hans': None, 'yue-Hant': None, 'zh-Hans': None, 'zh-Hans-SG': 'en-sg', 'zh-Hant': 'zh-mo',
-    'zh-Hant-TW': 'zh-mo', 'zh-Latn': None, 'zh-MO': 'zh-mo', 'zh-SG': 'zh-sg', 'zh-TW': 'zh-tw'
+    'ar-DJ': 'ar-dj', 'ar-ER': 'ar-er', 'ar-IL': 'ar-il', 'ar-SD': 'ar-sd', 'ar-SO': 'ar-so', 'de-BE': 'de-be',
+    'de-LU': 'de-lu', 'en-BI': 'en-bi', 'en-CM': 'en-cm', 'en-ER': 'en-er', 'en-IN': 'en-in', 'en-KE': 'en-ke',
+    'en-LS': 'en-ls', 'en-MG': 'en-mg', 'en-MT': 'en-mt', 'en-MU': 'en-mu', 'en-MW': 'en-mw', 'en-PG': 'en-pg',
+    'en-PK': 'en-pk', 'en-PR': 'en-pr', 'en-RW': 'en-rw', 'en-SC': 'en-sc', 'en-TO': 'en-to', 'en-TZ': 'en-tz',
+    'en-UG': 'en-ug', 'en-ZW': 'en-zw', 'es-PY': 'es-py', 'fil-PH': 'fil-ph', 'fr-BE': 'fr-be', 'fr-BI':
+    'fr-bi', 'fr-CA': 'fr-ca', 'fr-CF': 'fr-cf', 'fr-CH': 'fr-ch', 'fr-DZ': 'fr-dz', 'fr-GQ': 'fr-gq', 'fr-HT':
+    'fr-ht', 'fr-KM': 'fr-km', 'fr-MA': 'fr-ma', 'fr-MG': 'fr-mg', 'fr-RW': 'fr-rw', 'fr-SN': 'fr-sn', 'fr-TD':
+    'fr-td', 'fr-TN': 'fr-tn', 'fr-VU': 'fr-vu', 'ga-IE': 'ga-ie', 'gsw-CH': 'gsw-ch', 'gsw-LI': 'gsw-li',
+    'hr-BA': 'hr-ba', 'it-CH': 'it-ch', 'kk-KZ': 'kk-kz', 'lb-LU': 'lb-lu', 'mi-NZ': 'mi-nz', 'ms-SG': 'ms-sg',
+    'nd-ZW': 'nd-zw', 'nl-CW': 'nl-cw', 'nl-SX': 'nl-sx', 'nn-NO': 'nn-no', 'pap-AW': 'pap-aw', 'ps-AF':
+    'ps-af', 'pt-GQ': 'pt-gq', 'pt-MO': 'pt-mo', 'qu-BO': 'qu-bo', 'qu-EC': 'qu-ec', 'qu-PE': 'qu-pe', 'ru-BY':
+    'ru-by', 'ru-KG': 'ru-kg', 'ru-UA': 'ru-ua', 'sr-BA': 'sr-ba', 'ss-SZ': 'ss-sz', 'sv-FI': 'sv-fi', 'ta-LK':
+    'ta-lk', 'ta-SG': 'ta-sg', 'tn-BW': 'tn-bw', 'tr-CY': 'tr-cy', 'tzm-MA': 'tzm-ma', 'yo-NG': 'yo-ng',
+    'zh-MO': 'zh-mo', 'zh-SG': 'zh-sg', 'zh-TW': 'zh-tw'
+}
+BING_FOLDED = {
+    'ar-dj': 'fr-dj', 'ar-er': 'ti-er', 'ar-il': 'he-il', 'ar-sd': 'en-sd', 'ar-so': 'so-so', 'az-arab': None,
+    'az-latn': None, 'bs-latn': None, 'de-be': 'nl-be', 'de-lu': 'fr-lu', 'en-bi': 'rn-bi', 'en-cm': 'fr-cm',
+    'en-dsrt': None, 'en-er': 'ti-er', 'en-in': 'hi-in', 'en-ke': 'sw-ke', 'en-ls': 'st-ls', 'en-mg': 'mg-mg',
+    'en-mt': 'mt-mt', 'en-mu': 'fr-mu', 'en-mw': 'ny-mw', 'en-pg': 'tpi-pg', 'en-pk': 'ur-pk', 'en-pr': 'es-pr',
+    'en-rw': 'rw-rw', 'en-sc': 'fr-sc', 'en-shaw': None, 'en-to': 'to-to', 'en-tz': 'sw-tz', 'en-ug': 'sw-ug',
+    'en-zw': 'sn-zw', 'es-py': 'gn-py', 'fil-ph': 'en-ph', 'fr-be': 'nl-be', 'fr-bi': 'rn-bi', 'fr-ca': 'en-ca',
+    'fr-cf': 'sg-cf', 'fr-ch': 'de-ch', 'fr-dz': 'ar-dz', 'fr-gq': 'es-gq', 'fr-ht': 'ht-ht', 'fr-km': 'ar-km',
+    'fr-ma': 'ar-ma', 'fr-mg': 'mg-mg', 'fr-rw': 'rw-rw', 'fr-sn': 'wo-sn', 'fr-td': 'ar-td', 'fr-tn': 'ar-tn',
+    'fr-vu': 'en-vu', 'ga-ie': 'en-ie', 'gsw-ch': 'de-ch', 'gsw-li': 'de-li', 'hi-latn': None, 'hr-ba': 'bs-ba',
+    'it-ch': 'de-ch', 'kk-arab': None, 'kk-cyrl': None, 'kk-cyrl-kz': 'ru-kz', 'kk-kz': 'ru-kz', 'lb-lu':
+    'fr-lu', 'mi-nz': 'en-nz', 'mn-mong': None, 'ms-sg': 'en-sg', 'nd-zw': 'sn-zw', 'nl-cw': 'pap-cw', 'nl-sx':
+    'en-sx', 'nn-no': 'nb-no', 'pap-aw': 'nl-aw', 'ps-af': 'fa-af', 'pt-gq': 'es-gq', 'pt-mo': 'yue-mo',
+    'qu-bo': 'es-bo', 'qu-ec': 'es-ec', 'qu-pe': 'es-pe', 'ru-by': 'be-by', 'ru-kg': 'ky-kg', 'ru-ua': 'uk-ua',
+    'sr-ba': 'bs-ba', 'sr-cyrl': None, 'sr-cyrl-ba': 'bs-ba', 'sr-cyrl-me': None, 'sr-cyrl-xk': None, 'sr-latn':
+    'sr-me', 'sr-latn-ba': 'bs-ba', 'sr-latn-me': 'sr-me', 'sr-latn-xk': 'sr-me', 'sr-me': 'sr-me', 'sr-xk':
+    None, 'ss-sz': 'en-sz', 'sv-fi': 'fi-fi', 'ta-lk': 'si-lk', 'ta-sg': 'en-sg', 'tn-bw': 'en-bw', 'tr-cy':
+    'el-cy', 'tzm-ma': 'ar-ma', 'uz-arab': None, 'uz-latn': None, 'yo-ng': 'en-ng', 'yue-hans': None,
+    'yue-hant': None, 'zh-hans': None, 'zh-hans-sg': 'en-sg', 'zh-hant': 'zh-mo', 'zh-hant-tw': 'zh-mo',
+    'zh-latn': None, 'zh-sg': 'en-sg', 'zh-tw': 'zh-mo'
 }
 
 
@@ -236,8 +299,11 @@ def bing_market(tag):
     """Bing market code for a request language, or None for ``all`` (Bing's "clear" market)."""
     if not tag or tag == 'all':
         return None
-    if tag in BING_EXCEPTIONS:
-        return BING_EXCEPTIONS[tag]
+    market = _lookup(BING_EXCEPTIONS, BING_FOLDED, tag)
+    return _bing_rule(tag) if market is _MISSING else market
+
+
+def _bing_rule(tag):
     locale = babel.Locale.parse(tag, sep='-')
     if locale.territory:
         own = locale.language + '-' + locale.territory.lower()
@@ -249,8 +315,7 @@ def bing_market(tag):
 
 
 # Brave ``country`` and ``ui_lang`` cookies. Derived like the tables above from
-# the previous runtime's requests for 1135 language tags; ``brave_cookies``
-# reproduces all of them.
+# the previous runtime's requests; ``brave_cookies`` reproduces all of them.
 BRAVE_COUNTRIES = frozenset((
     'ar', 'at', 'au', 'be', 'br', 'ca', 'ch', 'cl', 'cn', 'de', 'dk', 'es', 'fi', 'fr', 'gb', 'hk', 'id', 'in',
     'it', 'jp', 'kr', 'mx', 'my', 'nl', 'no', 'nz', 'ph', 'pl', 'pt', 'ru', 'sa', 'se', 'tr', 'tw', 'us', 'za'
@@ -355,22 +420,26 @@ BRAVE_TERRITORY_UI = {
     'KE': 'sw-ke', 'TW': 'zh-tw', 'US': 'en-us'
 }
 BRAVE_EXCEPTIONS = {
-    'az-AZ': ('all', 'en-us'), 'az-Arab': ('all', 'en-us'), 'az-Arab-IQ': ('all', 'en-us'), 'az-Arab-IR':
-    ('all', 'en-us'), 'az-Arab-TR': ('tr', 'en-us'), 'az-Cyrl': ('all', 'en-us'), 'az-Cyrl-AZ': ('all',
-    'en-us'), 'az-IQ': ('all', 'en-us'), 'az-IR': ('all', 'en-us'), 'az-Latn': ('all', 'en-us'), 'az-Latn-AZ':
-    ('all', 'en-us'), 'br-FR': ('fr', 'br'), 'ca-FR': ('fr', 'ca'), 'cy-GB': ('gb', 'cy'), 'en-Dsrt': ('all',
-    'en-us'), 'en-Shaw': ('all', 'en-us'), 'es-BR': ('br', 'es'), 'es-US': ('us', 'es'), 'hi-Latn': ('all',
-    'en-us'), 'ms-Arab': ('all', 'en-us'), 'ms-Arab-BN': ('all', 'en-us'), 'ms-Arab-MY': ('my', 'en-us'),
-    'sr-BA': ('all', 'en-us'), 'sr-Cyrl': ('all', 'en-us'), 'sr-Cyrl-BA': ('all', 'en-us'), 'sr-Cyrl-ME':
-    ('all', 'en-us'), 'sr-Cyrl-RS': ('all', 'en-us'), 'sr-Cyrl-XK': ('all', 'en-us'), 'sr-Latn': ('all',
-    'sr-latn'), 'sr-Latn-BA': ('all', 'sr-latn'), 'sr-Latn-ME': ('all', 'sr-latn'), 'sr-Latn-RS': ('all',
-    'sr-latn'), 'sr-Latn-XK': ('all', 'sr-latn'), 'sr-ME': ('all', 'sr-latn'), 'sr-RS': ('all', 'en-us'),
-    'sr-XK': ('all', 'en-us'), 'sv-FI': ('fi', 'sv'), 'trv-TW': ('all', 'en-us'), 'zh-CN': ('cn', 'en-us'),
-    'zh-HK': ('hk', 'zh-tw'), 'zh-Hans': ('all', 'en-us'), 'zh-Hans-CN': ('cn', 'en-us'), 'zh-Hans-HK': ('hk',
-    'en-us'), 'zh-Hans-MO': ('all', 'en-us'), 'zh-Hans-MY': ('my', 'en-us'), 'zh-Hans-SG': ('all', 'en-us'),
-    'zh-Hant': ('hk', 'zh-tw'), 'zh-Hant-HK': ('hk', 'zh-tw'), 'zh-Hant-MO': ('hk', 'zh-tw'), 'zh-Hant-MY':
-    ('my', 'zh-tw'), 'zh-Hant-TW': ('hk', 'zh-tw'), 'zh-Latn': ('all', 'en-us'), 'zh-Latn-CN': ('cn', 'en-us'),
-    'zh-MO': ('hk', 'zh-tw'), 'zh-MY': ('my', 'en-us'), 'zh-SG': ('all', 'en-us')
+    'fr-CA': ('ca', 'fr-ca'), 'zh-TW': ('tw', 'zh-tw')
+}
+BRAVE_FOLDED = {
+    'az-az': ('all', 'en-us'), 'az-arab': ('all', 'en-us'), 'az-arab-iq': ('all', 'en-us'), 'az-arab-ir':
+    ('all', 'en-us'), 'az-arab-tr': ('tr', 'en-us'), 'az-cyrl': ('all', 'en-us'), 'az-cyrl-az': ('all',
+    'en-us'), 'az-iq': ('all', 'en-us'), 'az-ir': ('all', 'en-us'), 'az-latn': ('all', 'en-us'), 'az-latn-az':
+    ('all', 'en-us'), 'br-fr': ('fr', 'br'), 'ca-fr': ('fr', 'ca'), 'cy-gb': ('gb', 'cy'), 'en-dsrt': ('all',
+    'en-us'), 'en-shaw': ('all', 'en-us'), 'es-br': ('br', 'es'), 'es-us': ('us', 'es'), 'fr-ca': ('ca',
+    'en-ca'), 'hi-latn': ('all', 'en-us'), 'ms-arab': ('all', 'en-us'), 'ms-arab-bn': ('all', 'en-us'),
+    'ms-arab-my': ('my', 'en-us'), 'sr-ba': ('all', 'en-us'), 'sr-cyrl': ('all', 'en-us'), 'sr-cyrl-ba': ('all',
+    'en-us'), 'sr-cyrl-me': ('all', 'en-us'), 'sr-cyrl-rs': ('all', 'en-us'), 'sr-cyrl-xk': ('all', 'en-us'),
+    'sr-latn': ('all', 'sr-latn'), 'sr-latn-ba': ('all', 'sr-latn'), 'sr-latn-me': ('all', 'sr-latn'),
+    'sr-latn-rs': ('all', 'sr-latn'), 'sr-latn-xk': ('all', 'sr-latn'), 'sr-me': ('all', 'sr-latn'), 'sr-rs':
+    ('all', 'en-us'), 'sr-xk': ('all', 'en-us'), 'sv-fi': ('fi', 'sv'), 'trv-tw': ('all', 'en-us'), 'zh-cn':
+    ('cn', 'en-us'), 'zh-hk': ('hk', 'zh-tw'), 'zh-hans': ('all', 'en-us'), 'zh-hans-cn': ('cn', 'en-us'),
+    'zh-hans-hk': ('hk', 'en-us'), 'zh-hans-mo': ('all', 'en-us'), 'zh-hans-my': ('my', 'en-us'), 'zh-hans-sg':
+    ('all', 'en-us'), 'zh-hant': ('hk', 'zh-tw'), 'zh-hant-hk': ('hk', 'zh-tw'), 'zh-hant-mo': ('hk', 'zh-tw'),
+    'zh-hant-my': ('my', 'zh-tw'), 'zh-hant-tw': ('hk', 'zh-tw'), 'zh-latn': ('all', 'en-us'), 'zh-latn-cn':
+    ('cn', 'en-us'), 'zh-mo': ('hk', 'zh-tw'), 'zh-my': ('my', 'en-us'), 'zh-sg': ('all', 'en-us'), 'zh-tw':
+    ('hk', 'zh-tw')
 }
 
 
@@ -378,8 +447,11 @@ def brave_cookies(tag):
     """Brave ``(country, ui_lang)`` cookie values for a request language."""
     if not tag or tag == 'all':
         return 'all', 'en-us'
-    if tag in BRAVE_EXCEPTIONS:
-        return BRAVE_EXCEPTIONS[tag]
+    values = _lookup(BRAVE_EXCEPTIONS, BRAVE_FOLDED, tag)
+    return _brave_rule(tag) if values is _MISSING else values
+
+
+def _brave_rule(tag):
     locale = babel.Locale.parse(tag, sep='-')
     territory = locale.territory.lower() if locale.territory else None
     if territory in BRAVE_COUNTRIES:
@@ -397,7 +469,7 @@ def brave_cookies(tag):
 
 
 # Qwant ``locale`` argument. Derived like the tables above from the previous
-# runtime's requests for 1135 language tags; ``qwant_locale`` reproduces all.
+# runtime's requests; ``qwant_locale`` reproduces all of them.
 QWANT_LOCALES = frozenset((
     'bg_BG', 'ca_ES', 'cs_CZ', 'da_DK', 'de_AT', 'de_CH', 'de_DE', 'el_GR', 'en_AU', 'en_CA', 'en_GB', 'en_IE',
     'en_MY', 'en_NZ', 'en_US', 'es_AR', 'es_CL', 'es_ES', 'es_MX', 'et_EE', 'fi_FI', 'fr_BE', 'fr_CA', 'fr_CH',
@@ -459,10 +531,14 @@ QWANT_TERRITORY_LOCALES = {
     'NZ': 'en_NZ', 'PL': 'pl_PL', 'PT': 'pt_PT', 'RO': 'ro_RO', 'SE': 'sv_SE', 'TH': 'th_TH', 'US': 'en_US'
 }
 QWANT_EXCEPTIONS = {
-    'ca-ES-VALENCIA': 'es_ES', 'zh-HK': 'en_US', 'zh-Hans': 'en_US', 'zh-Hans-HK': 'en_US', 'zh-Hans-MO':
-    'en_US', 'zh-Hans-MY': 'en_US', 'zh-Hans-SG': 'en_US', 'zh-Hant': 'en_US', 'zh-Hant-HK': 'en_US',
-    'zh-Hant-MO': 'en_US', 'zh-Hant-MY': 'en_US', 'zh-Hant-TW': 'en_US', 'zh-Latn': 'en_US', 'zh-MO': 'en_US',
-    'zh-MY': 'en_US', 'zh-SG': 'en_US', 'zh-TW': 'en_US'
+    'ca-ES': 'ca_ES', 'en-MY': 'en_MY', 'fr-BE': 'fr_BE', 'fr-CA': 'fr_CA', 'fr-CH': 'fr_CH', 'it-CH': 'it_CH'
+}
+QWANT_FOLDED = {
+    'ca-es': 'es_ES', 'ca-es-valencia': 'es_ES', 'en-my': 'en_US', 'fr-be': 'nl_BE', 'fr-ca': 'en_CA', 'fr-ch':
+    'de_CH', 'it-ch': 'de_CH', 'zh-hk': 'en_US', 'zh-hans': 'en_US', 'zh-hans-hk': 'en_US', 'zh-hans-mo':
+    'en_US', 'zh-hans-my': 'en_US', 'zh-hans-sg': 'en_US', 'zh-hant': 'en_US', 'zh-hant-hk': 'en_US',
+    'zh-hant-mo': 'en_US', 'zh-hant-my': 'en_US', 'zh-hant-tw': 'en_US', 'zh-latn': 'en_US', 'zh-mo': 'en_US',
+    'zh-my': 'en_US', 'zh-sg': 'en_US', 'zh-tw': 'en_US'
 }
 
 
@@ -470,8 +546,11 @@ def qwant_locale(tag):
     """Qwant locale (``en_US`` style) for a request language; ``en_US`` when none fits."""
     if not tag or tag == 'all':
         return 'en_US'
-    if tag in QWANT_EXCEPTIONS:
-        return QWANT_EXCEPTIONS[tag]
+    value = _lookup(QWANT_EXCEPTIONS, QWANT_FOLDED, tag)
+    return _qwant_rule(tag) if value is _MISSING else value
+
+
+def _qwant_rule(tag):
     locale = babel.Locale.parse(tag, sep='-')
     own = f'{locale.language}_{locale.territory}' if locale.territory else None
     if own in QWANT_LOCALES and not locale.script:
@@ -482,8 +561,8 @@ def qwant_locale(tag):
 
 
 # DuckDuckGo region (``l``/``ah``) and language (``ad``) values. Derived like the
-# tables above from the previous runtime's requests for 1135 language tags;
-# ``duckduckgo_locale`` reproduces all of them.
+# tables above from the previous runtime's requests; ``duckduckgo_locale``
+# reproduces all of them.
 DDG_REGIONS = frozenset((
     'ar-es', 'at-de', 'au-en', 'be-fr', 'be-nl', 'bg-bg', 'br-pt', 'ca-en', 'ca-fr', 'ch-de', 'ch-fr', 'cl-es',
     'cn-zh', 'co-es', 'cz-cs', 'de-de', 'dk-da', 'ee-et', 'es-ca', 'es-es', 'fi-fi', 'fr-fr', 'gr-el', 'hk-tzh',
@@ -608,20 +687,37 @@ DDG_TERRITORY_REGIONS = {
     'US': 'us-en', 'VN': 'vn-en', 'ZA': 'za-en'
 }
 DDG_EXCEPTIONS = {
-    'az-Latn': ('wt-wt', 'az_AZ'), 'az-Latn-AZ': ('wt-wt', 'az_AZ'), 'bs-Latn': ('wt-wt', 'bs_BA'),
-    'bs-Latn-BA': ('wt-wt', 'bs_BA'), 'cy-GB': ('uk-en', 'cy_GB'), 'en-Dsrt': ('wt-wt', 'en_US'), 'en-GB':
-    ('uk-en', 'en_GB'), 'en-HK': ('us-en', 'en_US'), 'en-SI': ('sl-sl', 'en_US'), 'en-Shaw': ('wt-wt', 'en_US'),
-    'en-Shaw-GB': ('uk-en', 'en_US'), 'ga-GB': ('uk-en', 'ga_IE'), 'gd-GB': ('uk-en', 'gd_GB'), 'hi-Latn':
-    ('wt-wt', 'en_US'), 'hi-Latn-IN': ('in-en', 'en_US'), 'kw-GB': ('uk-en', 'kw_GB'), 'ms-Arab': ('wt-wt',
-    'en_US'), 'ms-Arab-BN': ('wt-wt', 'en_US'), 'ms-Arab-MY': ('wt-wt', 'en_US'), 'sr-BA': ('wt-wt', 'sr_RS'),
-    'sr-Cyrl': ('wt-wt', 'sr_RS'), 'sr-Cyrl-BA': ('wt-wt', 'sr_RS'), 'sr-Cyrl-ME': ('wt-wt', 'sr_RS'),
-    'sr-Cyrl-RS': ('wt-wt', 'sr_RS'), 'sr-Cyrl-XK': ('wt-wt', 'sr_RS'), 'sr-XK': ('wt-wt', 'sr_RS'), 'trv-TW':
-    ('wt-wt', 'en_US'), 'yue-HK': ('wt-wt', 'en_US'), 'yue-Hant-HK': ('wt-wt', 'en_US'), 'zh-HK': ('hk-tzh',
-    'zh_TW'), 'zh-Hans': ('wt-wt', 'zh_CN'), 'zh-Hans-CN': ('cn-zh', 'zh_CN'), 'zh-Hans-HK': ('wt-wt', 'zh_CN'),
-    'zh-Hans-MO': ('wt-wt', 'zh_CN'), 'zh-Hans-MY': ('wt-wt', 'zh_CN'), 'zh-Hans-SG': ('sg-en', 'zh_CN'),
-    'zh-Hant': ('hk-tzh', 'zh_TW'), 'zh-Hant-HK': ('hk-tzh', 'zh_TW'), 'zh-Hant-MO': ('hk-tzh', 'zh_TW'),
-    'zh-Hant-MY': ('hk-tzh', 'zh_TW'), 'zh-Hant-TW': ('hk-tzh', 'zh_TW'), 'zh-Latn': ('wt-wt', 'en_US'),
-    'zh-MO': ('hk-tzh', 'zh_TW'), 'zh-MY': ('wt-wt', 'zh_CN'), 'zh-SG': ('sg-en', 'zh_CN')
+    'ar-DZ': ('xa-ar', 'ar_DZ'), 'ar-SA': ('xa-ar', 'ar_SA'), 'bn-IN': ('in-en', 'bn_IN'), 'ca-ES': ('es-ca',
+    'ca_ES'), 'de-CH': ('ch-de', 'de_CH'), 'en-AU': ('au-en', 'en_AU'), 'en-CA': ('ca-en', 'en_CA'), 'en-GB':
+    ('uk-en', 'en_GB'), 'en-IL': ('il-en', 'en_US'), 'en-MY': ('my-en', 'en_US'), 'es-AR': ('ar-es', 'es_AR'),
+    'es-CL': ('cl-es', 'es_CL'), 'es-CO': ('co-es', 'es_CO'), 'es-CR': ('es-es', 'es_CR'), 'es-EC': ('es-es',
+    'es_EC'), 'es-MX': ('mx-es', 'es_MX'), 'es-PE': ('pe-es', 'es_PE'), 'es-US': ('us-es', 'es_ES'), 'es-UY':
+    ('es-es', 'es_UY'), 'es-VE': ('es-es', 'es_VE'), 'fr-BE': ('be-fr', 'fr_BE'), 'fr-CA': ('ca-fr', 'fr_CA'),
+    'fr-CH': ('ch-fr', 'fr_CH'), 'nl-BE': ('be-nl', 'nl_BE'), 'pt-BR': ('br-pt', 'pt_BR'), 'zh-TW': ('tw-tzh',
+    'zh_TW')
+}
+DDG_FOLDED = {
+    'ar-dz': ('xa-ar', 'ar_EG'), 'ar-sa': ('xa-ar', 'ar_EG'), 'az-latn': ('wt-wt', 'az_AZ'), 'az-latn-az':
+    ('wt-wt', 'az_AZ'), 'bn-in': ('in-en', 'bn_BD'), 'bs-latn': ('wt-wt', 'bs_BA'), 'bs-latn-ba': ('wt-wt',
+    'bs_BA'), 'ca-es': ('es-es', 'ca_ES'), 'cy-gb': ('uk-en', 'cy_GB'), 'de-ch': ('ch-de', 'de_DE'), 'en-au':
+    ('au-en', 'en_US'), 'en-ca': ('ca-en', 'en_US'), 'en-dsrt': ('wt-wt', 'en_US'), 'en-gb': ('uk-en', 'en_US'),
+    'en-hk': ('us-en', 'en_US'), 'en-il': ('us-en', 'en_US'), 'en-my': ('us-en', 'en_US'), 'en-si': ('sl-sl',
+    'en_US'), 'en-shaw': ('wt-wt', 'en_US'), 'en-shaw-gb': ('uk-en', 'en_US'), 'es-ar': ('ar-es', 'es_ES'),
+    'es-cl': ('cl-es', 'es_ES'), 'es-co': ('co-es', 'es_ES'), 'es-cr': ('es-es', 'es_ES'), 'es-ec': ('es-es',
+    'es_ES'), 'es-mx': ('mx-es', 'es_ES'), 'es-pe': ('pe-es', 'es_ES'), 'es-us': ('us-en', 'es_ES'), 'es-uy':
+    ('es-es', 'es_ES'), 'es-ve': ('es-es', 'es_ES'), 'fr-be': ('be-nl', 'fr_FR'), 'fr-ca': ('ca-en', 'fr_FR'),
+    'fr-ch': ('ch-de', 'fr_FR'), 'ga-gb': ('uk-en', 'ga_IE'), 'gd-gb': ('uk-en', 'gd_GB'), 'hi-latn': ('wt-wt',
+    'en_US'), 'hi-latn-in': ('in-en', 'en_US'), 'kw-gb': ('uk-en', 'kw_GB'), 'ms-arab': ('wt-wt', 'en_US'),
+    'ms-arab-bn': ('wt-wt', 'en_US'), 'ms-arab-my': ('wt-wt', 'en_US'), 'nl-be': ('be-nl', 'nl_NL'), 'pt-br':
+    ('br-pt', 'pt_PT'), 'sr-ba': ('wt-wt', 'sr_RS'), 'sr-cyrl': ('wt-wt', 'sr_RS'), 'sr-cyrl-ba': ('wt-wt',
+    'sr_RS'), 'sr-cyrl-me': ('wt-wt', 'sr_RS'), 'sr-cyrl-rs': ('wt-wt', 'sr_RS'), 'sr-cyrl-xk': ('wt-wt',
+    'sr_RS'), 'sr-xk': ('wt-wt', 'sr_RS'), 'trv-tw': ('wt-wt', 'en_US'), 'yue-hk': ('wt-wt', 'en_US'),
+    'yue-hant-hk': ('wt-wt', 'en_US'), 'zh-hk': ('hk-tzh', 'zh_TW'), 'zh-hans': ('wt-wt', 'zh_CN'),
+    'zh-hans-cn': ('cn-zh', 'zh_CN'), 'zh-hans-hk': ('wt-wt', 'zh_CN'), 'zh-hans-mo': ('wt-wt', 'zh_CN'),
+    'zh-hans-my': ('wt-wt', 'zh_CN'), 'zh-hans-sg': ('sg-en', 'zh_CN'), 'zh-hant': ('hk-tzh', 'zh_TW'),
+    'zh-hant-hk': ('hk-tzh', 'zh_TW'), 'zh-hant-mo': ('hk-tzh', 'zh_TW'), 'zh-hant-my': ('hk-tzh', 'zh_TW'),
+    'zh-hant-tw': ('hk-tzh', 'zh_TW'), 'zh-latn': ('wt-wt', 'en_US'), 'zh-mo': ('hk-tzh', 'zh_TW'), 'zh-my':
+    ('wt-wt', 'zh_CN'), 'zh-sg': ('sg-en', 'zh_CN'), 'zh-tw': ('hk-tzh', 'zh_TW')
 }
 
 
@@ -629,8 +725,11 @@ def duckduckgo_locale(tag):
     """DuckDuckGo ``(region, language)`` for a request language, e.g. ``('cn-zh', 'zh_CN')``."""
     if not tag or tag == 'all':
         return 'wt-wt', 'wt-wt'
-    if tag in DDG_EXCEPTIONS:
-        return DDG_EXCEPTIONS[tag]
+    values = _lookup(DDG_EXCEPTIONS, DDG_FOLDED, tag)
+    return _duckduckgo_rule(tag) if values is _MISSING else values
+
+
+def _duckduckgo_rule(tag):
     locale = babel.Locale.parse(tag, sep='-')
     two_part = len(tag.split('-')) == 2
     territory = locale.territory

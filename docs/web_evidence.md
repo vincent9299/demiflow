@@ -128,7 +128,7 @@ metrics to distinguish new work from journal replay. `library_hits`,
 `library_misses`, and `library_registrations` count this action's work;
 ## 独立低层 HTTP 搜索资源（不在当前 Dataset native 准入内）
 
-The default backend now bundles the complete adapter catalog and executes native workers in the application interpreter. No service address, listening port, source checkout or second interpreter is needed. Use [native search configuration](native-search.md). An explicit service/search_url still selects the legacy path for consumers that have not migrated; the concepts pipeline no longer uses this path. Existing services and historical evidence are not stopped or deleted by upgrading the library.
+The default backend ships DemiFlow's own source adapters (21 built-in sources plus the platform image modules; SearXNG is no longer bundled since 2026-11-24) and executes native workers in the application interpreter. No service address, listening port, source checkout or second interpreter is needed. Use [native search configuration](native-search.md). An explicit service/search_url still selects the legacy path for consumers that have not migrated; the concepts pipeline no longer uses this path. Existing services and historical evidence are not stopped or deleted by upgrading the library.
 
 ```python
 from demiflow.services.searxng import SearxNGService
@@ -136,16 +136,16 @@ service = SearxNGService(
     root='/explicit/workspace', name='web-search',
     python='/installed/search-env/bin/python',
     runtime_directory='/installed/searxng', runtime_revision='verified-source-revision',
-    port=8080, engines=['wikisearch','wikipedia'],
+    port=8080, engines=['wikipedia'],
     proxy_url=None, request_concurrency=8,
 )
 web = WebSession(service=service, search_url=service.search_url,
                  cache_path=ledger, object_directory=objects, search_language='en')
 ```
 
-The runtime is an explicit installed dependency. The platform supplies the settings and `wikisearch` keyword engine; it does not import a business package, rewrite the installed runtime or install another platform. `wikipedia` is the upstream entity-summary engine; `wikisearch` uses keyword page search. The response adapter accepts normal results and infobox links, merges engine provenance, and classifies malformed candidates. It does not infer that an infobox link proves a business claim.
+The runtime is an explicit installed dependency. The platform supplies the settings only; it does not import a business package, rewrite the installed runtime or install another platform. `wikipedia` is the upstream entity-summary engine. The keyword page search `wikisearch` is a native source only (`SearchConfig(engines=['wikisearch'])`); this service refuses it. The response adapter accepts normal results and infobox links, merges engine provenance, and classifies malformed candidates. It does not infer that an infobox link proves a business claim.
 
-A managed profile fingerprints the declared runtime revision, engines, proxy route, profile revision and keyword-adapter code. The service supervisor compares its launch configuration before reuse. Explicit `engines` requests omit `categories=general`, which could union additional engines. External deployments require a caller-supplied `search_profile` revision; the platform cannot verify an operator's undeclared changes behind an external URL. Change that revision when the deployment changes. Native source/configuration identities replace this deployment profile on the default path.
+A managed profile fingerprints the declared runtime revision, engines, proxy route and profile revision (until 2026-11-24 it also covered the bundled keyword-adapter code, so existing profiles now get a new settings file and secret key). The service supervisor compares its launch configuration before reuse. Explicit `engines` requests omit `categories=general`, which could union additional engines. External deployments require a caller-supplied `search_profile` revision; the platform cannot verify an operator's undeclared changes behind an external URL. Change that revision when the deployment changes. Native source/configuration identities replace this deployment profile on the default path.
 
 `WebSession(search_interval_s=...)` spaces query starts across nodes sharing that session; the platform default is zero. This pacing does not claim a cross-process rate limit. HTTP 200 responses with failed/suspended engines are observed as technical failures after provider normalization, so they do not reset the service failure circuit as healthy HTTP responses. The triggering receipt is retained, and subsequent admission stops at the configured threshold. No hidden model or provider-response retry is introduced. Genuine empty results remain healthy technical responses.
 

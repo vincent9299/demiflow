@@ -1,7 +1,7 @@
 """Public Domain Image Archive (pdimagearchive.org) through its search proxy (20 per page).
 
-The proxy URL is read from the site's search script once per source; a 403
-answer forgets it so the next search looks it up again.
+The proxy URL is read from the site's search script once per source (at most
+2048 characters); a 403 answer forgets it so the next search looks it up again.
 """
 from json import dumps
 import re
@@ -18,6 +18,7 @@ paging = True
 THUMBNAIL_SUFFIX = '?fit=max&h=360&w=360'
 CONFIG_START, CONFIG_END = '/_astro/InfiniteSearch.', '.js'
 PROXY_URL = re.compile(r'"(https://.*?/search-proxy)"')
+PROXY_URL_MAX_CHARS = 2048
 _proxy = {'url': None}
 
 
@@ -42,7 +43,7 @@ def proxy_url():
     if script.status_code != 200:
         raise LookupError('Search script unavailable')
     match = PROXY_URL.search(script.text)
-    if match is None:
+    if match is None or len(match.group(1)) > PROXY_URL_MAX_CHARS:
         raise LookupError('Search proxy URL not found')
     _proxy['url'] = match.group(1)
     return _proxy['url']

@@ -162,3 +162,77 @@ def test_only_online_and_offline_adapters_are_supported(tmp_path):
 ''', engines=({'name': 'local', 'engine': 'sqlite', 'database': str(tmp_path / 'db.sqlite'),
                 'query_str': 'select 1'},))
     assert result == {'status': 'unsupported_processor', 'sqlite': 'offline'}
+
+
+def test_helper_lookups_are_cached_bounded_and_refreshed():
+    # Token, cookie and key pages of the built-in adapters, answered by fixed pages instead of the network.
+    result = probe('''
+ import types
+ clock=[1000.0]
+ calls=[]
+ class Page:
+  def __init__(self,text='',status=200,cookies=None): self.text,self.status_code,self.cookies=text,status,cookies or {}
+ def serve(pages):
+  def get(url,**kw):
+   calls.append(url)
+   return pages(url)
+  return get
+ out={}
+ ddg=loaded['duckduckgo images']
+ ddg.time=types.SimpleNamespace(monotonic=lambda: clock[0])
+ token=['4-111']
+ ddg.get=serve(lambda url: Page('<script>vqd="%s"</script>' % token[0]))
+ spec={'headers':{'User-Agent':'UA'}}
+ out['ddg']=[ddg.vqd('oak',spec),ddg.vqd('oak',spec),len(calls)]
+ clock[0]+=ddg.TOKEN_SECONDS+1; token[0]='4-222'
+ out['ddg']+=[ddg.vqd('oak',spec),len(calls)]
+ for i in range(300): ddg.vqd('q%d'%i,spec)
+ token[0]='x'*300
+ out['ddg']+=[len(ddg._tokens),ddg.vqd('long',spec),any(k[0]=='long' for k in ddg._tokens)]
+ calls.clear()
+ baidu=loaded['baidu images']
+ baidu.time=types.SimpleNamespace(monotonic=lambda: clock[0])
+ jar=[{'BAIDUID':'A'}]
+ baidu.get=serve(lambda url: Page(cookies=dict(jar[0])))
+ out['baidu']=[baidu.image_cookies({}),baidu.image_cookies({}),len(calls)]
+ clock[0]+=baidu.COOKIE_SECONDS+1; jar[0]={'BAIDUID':'B'}
+ out['baidu']+=[baidu.image_cookies({}),len(calls)]
+ calls.clear()
+ pexels=loaded['pexels']
+ secret=['KEY1']
+ pexels.get=serve(lambda url: Page('<html><head><script src="https://cdn.example/a.js"></script></head></html>')
+                  if url.rstrip('/')==pexels.base_url else Page('x={"secret-key":"%s"}' % secret[0]))
+ params=lambda: {'pageno':1,'time_range':None,'headers':{}}
+ first,second=params(),params()
+ pexels.request('oak',first); pexels.request('oak',second)
+ out['pexels']=[first['headers']['secret-key'],second['headers']['secret-key'],len(calls)]
+ pexels._secret['value']=None; secret[0]='k'*300
+ try:
+  pexels.request('oak',params()); out['pexels'].append('no error')
+ except Exception as exc:
+  out['pexels'].append(type(exc).__name__)
+ pexels._secret['value']=None; pexels.fallback_secret_key='FALLBACK'
+ fallback=params(); pexels.request('oak',fallback); out['pexels'].append(fallback['headers']['secret-key'])
+ calls.clear()
+ pdia=loaded['public domain image archive']
+ proxy=['https://proxy.example/search-proxy']
+ pdia.get=serve(lambda url: Page('<script src="/_astro/InfiniteSearch.abc.js"></script>') if '/search/' in url
+                else Page('const u="%s";' % proxy[0]))
+ out['pdia']=[pdia.proxy_url(),pdia.proxy_url(),len(calls)]
+ try:
+  pdia.response(Reply(proxy[0],{'error':'refused'},status=403)); out['pdia'].append('no error')
+ except Exception as exc:
+  out['pdia'].append(type(exc).__name__)
+ out['pdia'].append(pdia._proxy['url'])
+ proxy[0]='https://'+'p'*3000+'/search-proxy'
+ try:
+  pdia.proxy_url(); out['pdia'].append('no error')
+ except LookupError as exc:
+  out['pdia'].append(str(exc))
+ w.send(out)
+''', engines=('duckduckgo images', 'baidu images', 'pexels', 'public domain image archive'))
+    assert result['ddg'] == ['4-111', '4-111', 1, '4-222', 2, 256, '', False]
+    assert result['baidu'] == [{'BAIDUID': 'A'}, {'BAIDUID': 'A'}, 1, {'BAIDUID': 'B'}, 2]
+    assert result['pexels'] == ['KEY1', 'KEY1', 2, 'SourceError', 'FALLBACK']
+    assert result['pdia'] == ['https://proxy.example/search-proxy', 'https://proxy.example/search-proxy', 2,
+                              'SourceAccessDenied', None, 'Search proxy URL not found']

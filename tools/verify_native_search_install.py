@@ -27,7 +27,7 @@ def main():
         subprocess.run([sys.executable,'-m','pip','install','--no-deps','--no-compile','--target',str(target),str(wheel)],
             cwd=root,stdout=subprocess.DEVNULL,check=True)
         program='''
-import json,sys
+import json,os,sys
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
 from demiflow import data
@@ -56,7 +56,7 @@ inv=search_source_inventory()
 metrics=stats.metrics['resources']['WebSession:0']['native_search']
 assert metrics['http_requests']==0
 assert metrics['worker_starts']==1
-receipt={'status':'passed','runtime_id':runtime_id(),
+receipt={'status':'passed','runtime_id':runtime_id(),'resource_root':os.environ['DEMIFLOW_RESOURCE_ROOT'],
  'named_sources':len(inv['sources']),'platform_sources':len(inv['platform_sources']),
  'metrics':metrics,'candidate_count':len(rows[0]['found'][0]['candidates']),
  'imports_from_installed_wheel':True,'vendor_absent_in_pipeline_interpreter':True}
@@ -73,6 +73,13 @@ print(json.dumps(receipt))
 '''
         env=dict(os.environ)
         env.pop('PYTHONPATH',None)
+        # The pipeline runs in a private resource domain inside this temporary directory,
+        # never in the caller's or the shared default capacity ledger.
+        for key,name in (('DEMIFLOW_RESOURCE_ROOT','resources'),('DEMIFLOW_RESOURCE_HOME','home'),
+                         ('DEMIFLOW_FORGE_DOMAIN','forge'),('DEMIFLOW_LOCATION_CACHE','locations')):
+            (root/name).mkdir()
+            env[key]=str(root/name)
+        env['TMPDIR']=str(root)
         result=subprocess.run([sys.executable,'-I','-c',program,str(target),args.live_proxy_env or ''],cwd=root,env=env,
                               capture_output=True,text=True,timeout=60)
         if result.returncode:

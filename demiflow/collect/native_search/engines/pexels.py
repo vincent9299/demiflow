@@ -2,7 +2,8 @@
 
 The API wants the ``secret-key`` the Pexels web app embeds in one of its
 scripts; it is read from the home page scripts once per source and kept in this
-worker. ``fallback_secret_key`` may supply a key when that lookup fails.
+worker (a value over 256 characters is not a key). ``fallback_secret_key`` may
+supply a key when that lookup fails.
 """
 import re
 from urllib.parse import urlencode
@@ -22,6 +23,7 @@ enable_http2 = False
 fallback_secret_key = ''
 DATE_FROM = {'day': 'last_24_hours', 'week': 'last_week', 'month': 'last_month', 'year': 'last_year'}
 SECRET_KEY = re.compile('"secret-key":\b*"(.*?)"')
+SECRET_MAX_CHARS = 256
 BROWSER = ('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
            'Chrome/136.0.0.0 Safari/537.36')
 _secret = {'value': None}
@@ -37,7 +39,7 @@ def secret_key():
         if script.status_code != 200:
             raise SourceError('Pexels script unavailable')
         match = SECRET_KEY.search(script.text)
-        if match:
+        if match and len(match.group(1)) <= SECRET_MAX_CHARS:
             return match.group(1)
     raise SourceError('Pexels secret key not found')
 

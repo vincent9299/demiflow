@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+from pathlib import Path
 import sys
 import warnings
 
@@ -198,7 +199,8 @@ def run_search(message, loaded, errors, initialized, config):
             return {'status': 'unsupported_parameters', 'reason': 'Source does not support this query/page/time range',
                     'capabilities': capability, 'results': [], 'http': list(worker_network.http_receipts)}
         if getattr(engine, 'requires_language', False) and spec['language'] == 'all':
-            return {'status': 'unsupported_parameters', 'reason': name + ' requires an explicit language', 'results': []}
+            adapter = Path(getattr(engine, '__file__', None) or name).stem
+            return {'status': 'unsupported_parameters', 'reason': adapter + ' requires an explicit language', 'results': []}
         if engine.engine_type == 'offline':
             results = engine.search(message['query'], params)
         else:

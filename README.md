@@ -76,8 +76,8 @@ pip install -e .[collect]     # + 采集栈：crawl4ai（crawl）+ pillow（imag
 `save_lance` 在流中小批提交，`run_stream` 负责资源生命周期及技术观测。
 `admit_rows` 在同一流中逐行执行持久去重及多个按键配额，返回准入回执；
 它不攒齐分组、不排序行、不识别业务含义，详见 [在线准入](docs/web_evidence.md#在线准入与持久配额)。
-原生搜索安装 `demiflow[search]`，全部来源适配器及公共依赖随包交付；
-无需 SearXNG 服务地址、端口、源码目录或独立解释器。旧显式 HTTP 接口仅作兼容保留。
+原生搜索安装 `demiflow[search]`，内置的 21 个来源适配器、15 个平台图片适配器及所需依赖随包交付（2026-11-24 起不再内置 SearXNG）；
+无需搜索服务地址、端口、源码目录或独立解释器。其他来源可用 `module=` 自定义，或用 `search_url` 连接自行部署的 SearXNG；旧显式 HTTP 接口仅作兼容保留。
 完整接口、契约及服务配置见 [网页文档 Dataset API](docs/web_evidence.md)。
 
 python smoke_standalone.py  # Dataset 惰性路径与写入冒烟
@@ -485,7 +485,7 @@ Codex 原生调用现已统一使用 SQLite journal，文件交付使用 ObjectR
 
 ## 原生多源检索
 
-`Dataset.search_web` 可通过 `WebSession(search=SearchConfig(...))` 使用随包交付的 SearXNG 适配器，无需部署搜索 HTTP 服务。安装 `demiflow[search]`；配置、逐请求语言、来源状态、回执、自定义来源及切换说明见 [原生检索文档](docs/native-search.md)。
+`Dataset.search_web` 可通过 `WebSession(search=SearchConfig(...))` 使用 DemiFlow 自带的来源适配器（2026-11-24 起不再内置 SearXNG），无需部署搜索 HTTP 服务。安装 `demiflow[search]`；配置、逐请求语言、来源状态、回执、自定义来源及切换说明见 [原生检索文档](docs/native-search.md)。
 
 ## 流式按键组批与固定版本查找
 

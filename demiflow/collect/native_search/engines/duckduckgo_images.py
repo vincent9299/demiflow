@@ -2,7 +2,8 @@
 
 Each query needs the ``vqd`` token of DuckDuckGo's search page; it is fetched
 with the same headers and kept for an hour per query and User-Agent in this
-worker. Queries of 500 characters or more are declined.
+worker (at most 256 tokens of at most 256 characters; a longer value is not a
+token). Queries of 500 characters or more are declined.
 """
 import time
 from urllib.parse import quote_plus, urlencode
@@ -21,6 +22,8 @@ send_accept_language_header = False
 SAFE_SEARCH = {0: '-2', 1: '', 2: '1'}
 BROWSER = 'Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0'
 TOKEN_SECONDS = 3600
+TOKEN_ENTRIES = 256
+TOKEN_MAX_CHARS = 256
 _tokens = {}
 
 
@@ -42,8 +45,10 @@ def vqd(query, params):
         start = text.find('vqd="')
         end = text.find('"', start + 5) if start >= 0 else -1
         value = text[start + 5:end] if start >= 0 and end >= 0 else ''
+    if len(value) > TOKEN_MAX_CHARS:
+        value = ''
     if value:
-        if len(_tokens) >= 256:
+        if len(_tokens) >= TOKEN_ENTRIES:
             _tokens.pop(next(iter(_tokens)))
         _tokens[key] = (value, time.monotonic() + TOKEN_SECONDS)
     return value

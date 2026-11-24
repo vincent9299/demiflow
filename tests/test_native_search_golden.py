@@ -2,8 +2,9 @@
 
 The fixtures hold inputs and the outputs the previous runtime produced (main
 9bad3137): result merging, and offline request building of every built-in source
-across languages, paging, safe search and time ranges (helper lookups such as
-cookie or token pages are stubbed identically on both sides).
+across languages (including other letter cases such as ``zh-tw``), paging, safe
+search and time ranges (helper lookups such as cookie or token pages are stubbed
+identically on both sides).
 """
 import datetime
 import json
@@ -94,3 +95,15 @@ def test_request_building_matches_recorded_reference():
     differences = [(case, expected, normalize(got)) for case, expected, got
                    in zip(golden['cases'], golden['expected'], actual) if normalize(got) != normalize(expected)]
     assert not differences, differences[:3]
+
+
+def test_language_tags_babel_cannot_parse_never_reach_sources():
+    # Locale tables cover babel-parsable tags only; anything else is refused up front.
+    import pytest
+    from demiflow.collect.native_search.config import SearchConfig, validate_language
+    for tag in ('az-TR', 'no-NO', 'en_US', 'xx-YY'):
+        with pytest.raises(ValueError):
+            validate_language(tag)
+    with pytest.raises(ValueError):
+        SearchConfig(engines=('google',), language='az-TR')
+    assert validate_language('zh-tw') == 'zh-tw'

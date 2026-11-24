@@ -23,6 +23,8 @@ browser_user_agent = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 
 
 def request(query, params):
+    if params['locale'] in (None, '', 'all'):
+        raise SourceError('wikisearch requires an explicit language')
     host = wikipedia_host(params['locale'], default=None)
     if host is None:
         raise SourceError('Wikipedia does not declare the requested language')
