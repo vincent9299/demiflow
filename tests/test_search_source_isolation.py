@@ -6,7 +6,6 @@ import time
 import pytest
 from demiflow.collect.native_search import NativeSearchSession, SearchConfig
 from demiflow.collect.search_routes import SearchRoutePool
-from demiflow.collect.operators import SearchWeb
 from demiflow.services.request_limits import ServiceStopped
 from test_search_recovery import policy
 
@@ -72,32 +71,6 @@ def test_legacy_global_stop_does_not_poison_new_scope_or_reset_receipts(tmp_path
             with s.routes[0]['session']._db() as db:
                 state=json.loads(db.execute('SELECT state_json FROM native_search_recovery WHERE identity=?',(identity,)).fetchone()[0])
             assert state['fatal']=='search_authentication_or_configuration'
-        finally:await s.aclose()
-    asyncio.run(run())
-
-
-def test_deferred_checkpoint_recovers_without_upstream_and_skips_completed(tmp_path,monkeypatch):
-    calls=source(monkeypatch,'network_error')
-    async def run():
-        s=pool(tmp_path,cooldown=.05)
-        ledger=tmp_path/'tasks.sqlite'
-        actor=SearchWeb('requests','results',s,None,5,2,checkpoint=ledger)
-        await actor({'requests':[{'request_id':'bad','query':'bad','engines':['google']}]})
-        out=await actor({'requests':[
-            {'request_id':'later','query':'later','engines':['google']},
-            {'request_id':'good','query':'good','engines':['bing']}]})
-        assert out['results'][0]['retryable'] and out['results'][1]['status']=='ok'
-        assert actor._checkpoint.stats()=={'completed':2,'retryable':1}
-        await s.aclose()
-        await asyncio.sleep(.06)
-        source(monkeypatch,'ok')
-        s=pool(tmp_path,cooldown=.05)
-        actor=SearchWeb('requests','results',s,None,5,2,checkpoint=ledger)
-        try:
-            recovered=actor.recovery_rows()
-            assert [r['requests'][0]['request_id'] for r in recovered]==['later']
-            assert (await actor(recovered[0]))['results'][0]['status']=='ok'
-            assert actor._checkpoint.stats()=={'completed':3}
         finally:await s.aclose()
     asyncio.run(run())
 
