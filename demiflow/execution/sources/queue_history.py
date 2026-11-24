@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata
 from demiflow.execution.native_queue.queue import QueueChannel
-from demiflow.execution.queue_contract import queue_config, QueueSnapshot, HistoryReadLimits, HistoryReadLimit
+from demiflow.execution.contracts.queue_contract import queue_config, QueueSnapshot, HistoryReadLimits, HistoryReadLimit
 from demiflow.execution.native_queue.queue_commit import QueueCommitStore
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity, identifier
 

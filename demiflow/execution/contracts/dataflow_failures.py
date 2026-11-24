@@ -27,8 +27,8 @@ except ImportError:
 else:
     _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
                    for cls in (JSONError, IncompleteJSONError)})
-from demiflow.execution.queue_contract import QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit
-_KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls for cls in (
+from demiflow.execution.contracts.queue_contract import QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable, HistoryReadLimit
+_KNOWN.update({'demiflow.execution.queue_contract.' + cls.__qualname__: cls for cls in (
     QueueIncomplete, QueueIdleTimeout, StaleQueueOwner, ArtifactDomainUnavailable)})
 _KNOWN[asyncio.CancelledError.__module__ + '.' + asyncio.CancelledError.__qualname__] = asyncio.CancelledError
 _RECOVERY_TYPE = DataflowRecoveryError.__module__ + '.' + DataflowRecoveryError.__qualname__

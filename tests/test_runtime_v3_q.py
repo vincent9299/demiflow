@@ -158,7 +158,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError  # noqa: 
 from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message  # noqa: E402
 from demiflow.execution.native_queue.queue_ack import QueueAcknowledge  # noqa: E402
 from demiflow.execution.native_queue.queue_commit import producer_action  # noqa: E402
-from demiflow.execution.queue_contract import QueueIncomplete  # noqa: E402
+from demiflow.execution.contracts.queue_contract import QueueIncomplete  # noqa: E402
 from demiflow.execution.native_queue.queue_execution import validate_topology  # noqa: E402
 from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink  # noqa: E402
 from demiflow.execution.native_queue.queue_source import QueueDatasource  # noqa: E402

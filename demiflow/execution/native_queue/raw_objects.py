@@ -469,7 +469,7 @@ def inspect_acquisition(run, commit_id):
     domain = prepared['domain']
     namespace = None
     if domain is not None:
-        from demiflow.execution.queue_contract import ArtifactDomainUnavailable
+        from demiflow.execution.contracts.queue_contract import ArtifactDomainUnavailable
         host=_host_identity()
         if domain['read_domain']=='host' and domain['host_identity']!=host:
             raise ArtifactDomainUnavailable('Raw artifact belongs to another host domain')

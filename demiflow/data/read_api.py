@@ -12,7 +12,7 @@ from .flow_contract import flow_api as _flow_api
 from .api import DataAPI, _select_executor
 from .execution_contract import InputSpec, _current_executor
 from .dataset import Dataset, MaterializedDataset
-from ..execution import queue_flow as _queue_flow
+from demiflow.execution.executors import queue_flow as _queue_flow
 
 
 @_flow_api('read_queue', execution='stream', effects=('queue',),

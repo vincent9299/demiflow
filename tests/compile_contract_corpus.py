@@ -104,11 +104,11 @@ class Context:
         return data.read_lance(self.lance_uri, **options)
 
     def queue(self):
-        from demiflow.execution.queue_contract import QueueConfig
+        from demiflow.execution.contracts.queue_contract import QueueConfig
         return QueueConfig(backend='sqlite', queue_id='q', path=self.path('q.db'))
 
     def producer(self):
-        from demiflow.execution.queue_contract import ProducerRef, ProducerSourceSpec
+        from demiflow.execution.contracts.queue_contract import ProducerRef, ProducerSourceSpec
         source = ProducerSourceSpec(kind='records', source_id='src', uri='file:///corpus/x', version=1)
         return ProducerRef(queue_uuid='qu', pool='pool', generation='gen', producer_id='pid', source=source,
                            epoch=0, token='tok')
@@ -159,7 +159,7 @@ class Context:
         return parse_prompt_pack(PACK.replace('base_url_env: TEST_PROMPT_URL', 'base_url: http://127.0.0.1:59999/v1'))
 
     def snapshot(self):
-        from demiflow.execution.queue_contract import QueueSnapshot
+        from demiflow.execution.contracts.queue_contract import QueueSnapshot
         return QueueSnapshot(queue_uuid='qu', pool='default', generation='gen', kind='tasks', cursor=1)
 
 

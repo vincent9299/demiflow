@@ -22,7 +22,7 @@ from ..lance.flow_contract import normalize_lookup as _normalize_lookup, lookup_
 from ..lance.flow_contract import normalize_save as _normalize_save, analyze_save as _analyze_save
 from ..collect import flow_contract as _collect_contract
 from ..collect import fetch_flow as _fetch_flow
-from ..execution import queue_flow as _queue_flow
+from demiflow.execution.executors import queue_flow as _queue_flow
 from ..operator_llm import packing as _prompt_packing
 from .datasink import Datasink
 from .plan import (

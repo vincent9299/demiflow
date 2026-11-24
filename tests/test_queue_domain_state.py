@@ -1,7 +1,7 @@
 """Bounded native affinity counts; unavailable to this worker is not global liveness."""
 import json
 import pytest
-from demiflow.execution.queue_contract import ArtifactDomainUnavailable
+from demiflow.execution.contracts.queue_contract import ArtifactDomainUnavailable
 from test_queue_v2_protocol import channel
 from test_queue_v2_boundaries import seed,worker
 from test_raw_fetch import origin_server

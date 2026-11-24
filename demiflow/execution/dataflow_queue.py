@@ -29,7 +29,7 @@ from .contracts.dataflow import (
 )
 from .contracts.dataflow_errors import DataflowError, DataflowRecoveryError
 from demiflow.execution.native_queue.queue_ack import QueueAcknowledge
-from .queue_contract import QueueIncomplete
+from demiflow.execution.contracts.queue_contract import QueueIncomplete
 from demiflow.execution.native_queue.queue_execution import configure_explicit, finalize_task, queue_source, validate_topology
 from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.native_queue.queue_source import QueueDatasource

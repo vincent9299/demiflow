@@ -122,7 +122,7 @@ def validate_topology(source,plan,sink,*,mode='sink',action=None):
             raise RecoveryContractError('Task settlement supports pure one-to-one maps and exactly one raw fetch')
     if len(fetch)!=1 or fetch[0][1].output!=sink.result:
         raise RecoveryContractError('Task result sink requires exactly one matching fetch receipt')
-    from demiflow.execution.queue_contract import resolve_consumer_contract
+    from demiflow.execution.native_queue.queue_sql import resolve_consumer_contract
     declaration=dict(protocol='demiflow.queue.consumer.v3',
                      operations=operations,result=sink.result,settlement=source.settlement)
     return fetch[0],resolve_consumer_contract(source,declaration,action=action)
@@ -131,7 +131,7 @@ def validate_topology(source,plan,sink,*,mode='sink',action=None):
 def finalize_task(source,delivery,row):
     from demiflow.execution.native_queue.queue_commit import task_action
     from demiflow.execution.checkpoint.commit import CommitCoordinator
-    from demiflow.execution.queue_contract import QueueIncomplete
+    from demiflow.execution.contracts.queue_contract import QueueIncomplete
     action=task_action(source.parent,source.channel,source.pool,delivery,'final','terminal',source.contract,stop_check=source._check)
     sink=source.sink.bind(action)
     coordinator=CommitCoordinator(action)

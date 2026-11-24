@@ -218,23 +218,7 @@ def _code_identity_from_value(kind, value, *, sources=None):
 
 
 def _matches_original_program(kind, value, expected):
-    actual = _code_identity_from_value(kind, value)
-    expected_digest = identity(expected)
-    if identity(actual) == expected_digest:
-        return True
-    if kind != 'callable' or type(value) is not CallableSpec:
-        return False
-    # This is a fresh plan_code_pin for one MapOp. Business arguments, the
-    # entire code record and every dependency remain in the digest comparison.
-    from demiflow.execution.seal.recovery_sdk_v3 import routing_source_revisions
-    revisions = routing_source_revisions(value.target)
-    if revisions is None:
-        return False
-    target = actual['operations'][0]['fields']['callable']['fields']['target']
-    if target['source_hash'] != revisions[0]:
-        return False
-    target['source_hash'] = revisions[1]
-    return identity(actual) == expected_digest
+    return identity(_code_identity_from_value(kind, value)) == identity(expected)
 
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,

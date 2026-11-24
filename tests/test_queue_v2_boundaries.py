@@ -11,7 +11,7 @@ from demiflow.collect import FetchPolicy,HttpSource
 from demiflow.objects import LocalObjectStore
 from demiflow.execution.native_queue.queue import ProducerSourceSpec, task_message
 from demiflow.execution.native_queue.queue_sinks import QueueResultSink
-from demiflow.execution.queue_contract import QueueIncomplete,HistoryReadLimits
+from demiflow.execution.contracts.queue_contract import QueueIncomplete, HistoryReadLimits
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext
 from test_queue_v2_protocol import channel,native_parent,publish,source

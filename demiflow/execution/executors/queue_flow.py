@@ -6,13 +6,13 @@ the capability without guessing business fields or manufacturing an owner ref.
 from dataclasses import asdict
 from functools import partial
 
-from ..data.flow_contract import flow_api, literal_type
+from demiflow.data.flow_contract import flow_api, literal_type
 
 
 def decode(value):
-    from ..collect.fetch_flow import _decode
+    from demiflow.collect.fetch_flow import _decode
     if type(value) is dict and set(value) == {'native_queue_declaration', 'value'}:
-        from .queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, QueueSnapshot, HistoryReadLimits
+        from demiflow.execution.contracts.queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, QueueSnapshot, HistoryReadLimits
         target = {'config': QueueConfig, 'limits': QueueLimits, 'source': ProducerSourceSpec,
                   'snapshot': QueueSnapshot, 'history_limits': HistoryReadLimits}[value['native_queue_declaration']]
         return target(**{key: decode(item) for key, item in value['value'].items()})
@@ -24,7 +24,7 @@ def decode(value):
 
 
 def normalize_declaration(kind, arguments):
-    from .queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, QueueSnapshot, HistoryReadLimits
+    from demiflow.execution.contracts.queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, QueueSnapshot, HistoryReadLimits
     target = {'config': QueueConfig, 'limits': QueueLimits, 'source': ProducerSourceSpec,
               'snapshot': QueueSnapshot, 'history_limits': HistoryReadLimits}[kind]
     value = target(**{key: decode(item) for key, item in arguments.items()})
@@ -53,7 +53,7 @@ def normalize_history(arguments):
 
 def normalize_enqueue(arguments):
     from demiflow.execution.native_queue.queue_producer import QueueProducer
-    from .queue_contract import ProducerRef
+    from demiflow.execution.contracts.queue_contract import ProducerRef
     values = {key: decode(value) for key, value in arguments.items()}
     if type(values.get('producer')) is not ProducerRef:
         raise ValueError('enqueue needs its real administrative ProducerRef; static inspection cannot manufacture an owner')
@@ -69,6 +69,7 @@ def analyze_untyped(arguments, *, inputs, callables, resources):
     raise ValueError('Queue payloads have no fixed static schema in this revision; typed Forge admission is unavailable')
 
 
-def resource(config, access):
-    return dict(kind='queue', access=access, backend=config.backend, queue_id=config.queue_id,
-                path=config.path, namespace=config.namespace, dsn=config.declaration()['dsn'])
+from demiflow.execution.contracts.queue_contract import QueueConfig, QueueLimits, ProducerSourceSpec, QueueSnapshot, HistoryReadLimits
+for _value, _kind in ((QueueConfig,'config'), (QueueLimits,'limits'), (ProducerSourceSpec,'source'),
+                       (QueueSnapshot,'snapshot'), (HistoryReadLimits,'history_limits')):
+    declare_value(_value, _kind)

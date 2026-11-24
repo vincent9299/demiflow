@@ -3,7 +3,7 @@ import json
 
 from demiflow.data.datasink import Datasink
 from demiflow.data.runtime_contract import check_size
-from demiflow.execution.queue_contract import queue_config
+from demiflow.execution.contracts.queue_contract import queue_config
 from demiflow.execution.native_queue.queue import QueueChannel
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, UnresolvedCommit, document, identity
 
@@ -129,7 +129,7 @@ class QueuePublishSink(Datasink):
         for m in values:
             if type(m) is not dict or set(m)!={'task_id','pool','payload'} or m['pool']!=self.producer.pool:
                 raise RecoveryContractError('Producer message differs from its pool contract')
-            from demiflow.execution.queue_contract import task_message
+            from demiflow.execution.contracts.queue_contract import task_message
             task_message(m['task_id'],m['payload'],pool=m['pool'])
             document(m['payload'],self.config.limits.max_payload_bytes)
         for n in ('source_position','output_ordinal'):

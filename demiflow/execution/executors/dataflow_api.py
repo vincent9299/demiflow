@@ -43,8 +43,7 @@ def _native_operation_factory(*args: object, **kwargs: object) -> object:
 
 def _native_operation_identity(operation: NativeOperation) -> dict:
     target = operation.factory.target
-    from demiflow.execution.seal.recovery_sdk_v3 import persistent_source_module
-    name = persistent_source_module(target) + "." + getattr(
+    name = target.__module__ + "." + getattr(
         target, "__qualname__", type(target).__name__)
     return {"native": {
         "contract": "demiflow.native.operation.v3", "kind": operation.kind,

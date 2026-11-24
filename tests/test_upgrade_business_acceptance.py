@@ -57,7 +57,7 @@ from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, ProducerSourceSpec, task_message
 from demiflow.execution.native_queue.queue_commit import producer_action
-from demiflow.execution.queue_contract import HistoryReadLimit, HistoryReadLimits
+from demiflow.execution.contracts.queue_contract import HistoryReadLimit, HistoryReadLimits
 from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, RunRef, SourcePosition, identity
 from demiflow.execution.pipeline.run_context import RunAction, RunContext

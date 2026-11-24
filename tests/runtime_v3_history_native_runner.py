@@ -5,8 +5,8 @@ import json
 import sys
 
 from demiflow import data
-from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.contracts.recovery_contract import RunRef
+from demiflow.execution.run_context import RunContext
+from demiflow.execution.recovery_contract import RunRef
 
 
 def increment(row):
@@ -32,7 +32,7 @@ if __name__ == "__main__":
         assert mode in ("complete", "interrupt")
         root.mkdir(exist_ok=False)
         if mode == "interrupt":
-            from demiflow.execution.checkpoint import commit
+            from demiflow.execution import commit
 
             def fault(name, commit_id):
                 if name == "after_acked":

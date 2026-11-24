@@ -10,7 +10,7 @@ from demiflow import data
 from demiflow.collect import FetchPolicy, HttpSource
 from demiflow.objects import LocalObjectStore
 from demiflow.execution.native_queue.queue import QueueChannel, ProducerSourceSpec, task_message
-from demiflow.execution.queue_contract import QueueIncomplete
+from demiflow.execution.contracts.queue_contract import QueueIncomplete
 from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext

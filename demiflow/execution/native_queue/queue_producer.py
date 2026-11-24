@@ -9,7 +9,7 @@ from demiflow.data.sources import FileSource, ItemsSource, MaterializedSource, L
 from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.execution.checkpoint.commit import CommitCoordinator
 from demiflow.execution.native_queue.queue import QueueChannel
-from demiflow.execution.queue_contract import ProducerRef, ProducerWindowLimit, queue_config
+from demiflow.execution.contracts.queue_contract import ProducerRef, ProducerWindowLimit, queue_config
 from demiflow.execution.native_queue.queue_commit import producer_action
 from demiflow.execution.native_queue.queue_sinks import QueuePublishSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, SourcePosition, document, identity, identifier
@@ -124,7 +124,7 @@ class QueueProducer:
         self.parent, self.source = parent, source
         binding = source_identity(source)
         self._verify_source(source, binding)
-        from demiflow.execution.queue_contract import resolve_producer_contract
+        from demiflow.execution.native_queue.queue_sql import resolve_producer_contract
         declaration = dict(protocol='demiflow.queue.producer-transform.v3',
             source=binding, specification=describe(self.producer.source), operations=operations, messages=self.messages)
         self.channel = QueueChannel(self.config)
@@ -356,6 +356,6 @@ class QueueProducer:
 
 
 def producer_facts(actor):
-    from demiflow.execution.queue_flow import resource
+    from demiflow.execution.contracts.queue_contract import resource
     return dict(native=actor.recovery_identity(), effects=['queue'],
                 resources=[resource(actor.config, 'publish')], reserved_bytes=4*1024**2)

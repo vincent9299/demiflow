@@ -3,8 +3,8 @@ from dataclasses import asdict, dataclass, field
 import math
 from pathlib import Path
 
-from ..collect.raw_contract import integer
-from ..secrets import Secret, public
+from demiflow.collect.raw_contract import integer
+from demiflow.secrets import Secret, public
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier
 
 
@@ -190,94 +190,6 @@ def task_message(task_id, payload, *, pool='default'):
     return dict(task_id=task_id,pool=pool,payload=payload)
 
 
-from .queue_flow import declare_value as _declare_queue_value
-for _value, _kind in ((QueueConfig,'config'), (QueueLimits,'limits'), (ProducerSourceSpec,'source'),
-                       (QueueSnapshot,'snapshot'), (HistoryReadLimits,'history_limits')):
-    _declare_queue_value(_value, _kind)
-
-
-def _legacy_contract(declaration, action):
-    """Use an original run's provenance as old hash material, never compare runtimes."""
-    if action is None:
-        return None
-    config = action.context.journal.recovery_identity()
-    revision = config.get('platform_revision') if config else None
-    if not isinstance(revision, str) or not revision:
-        return None
-    return {**declaration, 'protocol': declaration['protocol'].removesuffix('.v3') + '.v2',
-            'platform': revision}
-
-
-def resolve_producer_contract(channel, producer, declaration, action):
-    from demiflow.execution.contracts.recovery_contract import identity
-    document(declaration, 65536)
-    channel._attach()
-    if channel.database.queue_uuid != producer.queue_uuid:
-        raise RecoveryContractError('Producer belongs to another physical queue')
-    with channel.database.connection() as db:
-        row = db.execute('SELECT producer_contract FROM queue_pools WHERE generation=?',
-                         (producer.generation,)).fetchone()
-    if row is None:
-        raise RecoveryContractError('Unknown queue producer generation')
-    candidate = identity(declaration)
-    if row[0] is None or row[0] == candidate:
-        return candidate
-    legacy = _legacy_contract(declaration, action)
-    if legacy is not None and identity(legacy) == row[0]:
-        return row[0]  # Preserve scope/commit identities, including acknowledged effects.
-    if getattr(action, 'replaying', False):
-        raise RecoveryContractError('Producer source/transformation contract changed')
-    raise RecoveryContractError('Original producer contract material is unavailable (hash only); use its original RunRef')
-
-
-def resolve_consumer_contract(source, declaration, *, action=None):
-    from demiflow.execution.contracts.recovery_contract import identity
-    document(declaration, 65536)
-    if action is None:
-        return declaration  # Passive topology inspection has no queue/run authority.
-    from demiflow.execution.native_queue.queue import QueueChannel
-    channel = QueueChannel(source.config)
-    channel._attach()
-    with channel.database.connection() as db:
-        pool = db.execute('SELECT generation,consumer_contract FROM queue_pools WHERE pool=?',
-                          (source.pool,)).fetchone()
-        if pool is None:
-            raise RecoveryContractError('Unknown queue pool')
-        if pool[1] is None or pool[1] == identity(declaration):
-            return declaration
-        legacy = _legacy_contract(declaration, action)
-        if legacy is not None and identity(legacy) == pool[1]:
-            return legacy
-        # One original task scope carries the full consumer declaration. The
-        # generation primary-key prefix and DB timeout bound this old-record read.
-        payload = ("CASE WHEN typeof(s.declaration)='text' THEN substr(CAST(s.declaration AS BLOB),1,65537) ELSE NULL END"
-                   if channel.config.backend == 'sqlite' else
-                   "substring(convert_to(s.declaration,'UTF8') from 1 for 65537)")
-        row = db.execute('SELECT s.scope_id,' + payload + ',t.task_id,t.fingerprint '
-                         'FROM queue_tasks t JOIN runtime_commit_scopes s '
-                         'ON s.scope_id=t.acquisition_scope WHERE t.generation=? LIMIT 1',
-                         (pool[0],)).fetchone()
-    if row is not None:
-        import json
-        if not isinstance(row[1], (bytes, memoryview)) or len(row[1]) > 65536:
-            raise RecoveryContractError('Original consumer declaration exceeds byte budget or is not text')
-        old = json.loads(bytes(row[1]).decode('utf-8'))
-        document(old, 65536)
-        original = old.get('consumer') if type(old) is dict else None
-        expected_keys = {'protocol', 'platform', 'operations', 'result', 'settlement'}
-        if (identity(old) != row[0] or old.get('protocol') != 'demiflow.queue.task.v2'
-                or old.get('queue_uuid') != channel.database.queue_uuid
-                or old.get('generation') != pool[0] or old.get('task_id') != row[2]
-                or old.get('fingerprint') != row[3] or old.get('phase') != 'acquisition'
-                or type(original) is not dict or set(original) != expected_keys
-                or original.get('protocol') != 'demiflow.queue.consumer.v2'
-                or identity(original) != pool[1]):
-            raise RecoveryContractError('Original queue consumer scope proof differs')
-        normalized = {k: v for k, v in original.items() if k != 'platform'}
-        normalized['protocol'] = 'demiflow.queue.consumer.v3'
-        if normalized != declaration:
-            raise RecoveryContractError('Queue consumer business contract differs')
-        return original
-    if getattr(action, 'replaying', False):
-        raise RecoveryContractError('Queue consumer business contract differs')
-    raise RecoveryContractError('Original consumer contract material is unavailable (hash only); use its original RunRef')
+def resource(config, access):
+    return dict(kind='queue', access=access, backend=config.backend, queue_id=config.queue_id,
+                path=config.path, namespace=config.namespace, dsn=config.declaration()['dsn'])

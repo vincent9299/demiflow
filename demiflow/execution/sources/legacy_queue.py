@@ -8,7 +8,7 @@ import stat
 import time
 
 from demiflow.data.datasource import Datasource, ReadTask, BlockMetadata
-from demiflow.execution.queue_contract import HistoryReadLimits, HistoryReadLimit
+from demiflow.execution.contracts.queue_contract import HistoryReadLimits, HistoryReadLimit
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, identifier
 
 

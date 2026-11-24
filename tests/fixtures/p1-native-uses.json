@@ -146,7 +146,7 @@
       "imports": [
         [
           "",
-          "demiflow.execution",
+          "demiflow.execution.executors",
           "queue_flow",
           "_queue_flow"
         ],

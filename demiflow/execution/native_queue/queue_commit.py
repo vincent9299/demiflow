@@ -8,7 +8,7 @@ import json
 from types import SimpleNamespace
 
 from demiflow.execution.native_queue.queue import QueueChannel
-from demiflow.execution.queue_contract import StaleQueueOwner
+from demiflow.execution.contracts.queue_contract import StaleQueueOwner
 from demiflow.execution.contracts.recovery_contract import COMMIT_STATES, RecoveryContractError, document, identity
 from demiflow.execution.pipeline.run_context import RunAction
 

@@ -6,7 +6,7 @@ import time
 from demiflow.data.datasource import Datasource
 from demiflow.services.blocking_io import BlockingIOPool
 from demiflow.execution.native_queue.queue import QueueChannel
-from demiflow.execution.queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
+from demiflow.execution.contracts.queue_contract import queue_config, QueueIdleTimeout, QueueIncomplete
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, identifier
 from demiflow.execution.worker.row_scope import RowScope, ScopedRow
 
@@ -99,7 +99,7 @@ class QueueDatasource(Datasource):
             worker=db.execute('SELECT domain,limits,claimed,settled,exhausted FROM queue_workers WHERE worker_id=?',(self.worker_id,)).fetchone()
         import json
         if worker is None or json.loads(worker[0])!=domain:
-            from demiflow.execution.queue_contract import ArtifactDomainUnavailable
+            from demiflow.execution.contracts.queue_contract import ArtifactDomainUnavailable
             raise ArtifactDomainUnavailable('Native worker window artifact domain is unavailable')
         self.window_limit=json.loads(worker[1])['queue_max_tasks']
         self.counts.update(claimed=worker[2],settled=worker[3],exhausted=worker[4])
@@ -178,7 +178,7 @@ class QueueDatasource(Datasource):
                 await asyncio.sleep(min(15,self.lease_s/4))
                 with self.lock:values=list(self.active.values())
                 for delivery in values:
-                    from demiflow.execution.queue_contract import StaleQueueOwner
+                    from demiflow.execution.contracts.queue_contract import StaleQueueOwner
                     try:await self.lease_io.run(self.channel.renew,delivery,lease_s=self.lease_s)
                     except StaleQueueOwner:
                         # Confirmation may have won after this heartbeat took
@@ -229,7 +229,7 @@ class QueueDatasource(Datasource):
                     idle_since=time.monotonic()
                 elif time.monotonic()-idle_since>=self.idle_timeout_s:
                     if self.blocked_artifact_domain:
-                        from demiflow.execution.queue_contract import ArtifactDomainUnavailable
+                        from demiflow.execution.contracts.queue_contract import ArtifactDomainUnavailable
                         raise ArtifactDomainUnavailable('Unfinished artifacts are outside this worker reading domain')
                     raise QueueIdleTimeout('Queue is not drained before its idle deadline')
                 self.closed.wait(.05)

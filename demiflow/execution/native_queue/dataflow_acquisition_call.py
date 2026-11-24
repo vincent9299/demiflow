@@ -70,7 +70,7 @@ class AcquisitionCall:
         reply = queue_service_request(command, services=services)
         if reply.status != 'confirmed' or reply.row_ref is None or reply.native_fact_ref is None:
             if self.binding.mode in ('sink', 'explicit'):
-                from demiflow.execution.queue_contract import QueueIncomplete
+                from demiflow.execution.contracts.queue_contract import QueueIncomplete
                 raise QueueIncomplete('Native task acquisition/settlement remains unconfirmed')
             raise DataflowError('UNKNOWN_EFFECT', 'Native acquisition/settlement was not confirmed')
         result = json.loads(b''.join(services.store.read(reply.row_ref,

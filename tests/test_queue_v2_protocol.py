@@ -14,7 +14,7 @@ from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig, Pro
 from demiflow.execution.native_queue.queue_commit import producer_action, task_action
 from demiflow.execution.native_queue.queue_sinks import QueuePublishSink, QueueResultSink
 from demiflow.execution.contracts.recovery_contract import SourcePosition, RecoveryContractError, identity
-from demiflow.execution.queue_contract import StaleQueueOwner
+from demiflow.execution.contracts.queue_contract import StaleQueueOwner
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.secrets import Secret
 
@@ -210,7 +210,7 @@ def test_terminal_refuses_lost_source_confirmation(channel,tmp_path,monkeypatch)
     from demiflow.collect import FetchPolicy,HttpSource
     from demiflow.objects import LocalObjectStore
     from demiflow.execution.native_queue.queue_source import QueueDatasource
-    from demiflow.execution.queue_contract import QueueIncomplete
+    from demiflow.execution.contracts.queue_contract import QueueIncomplete
     from test_raw_fetch import origin_server
     with origin_server() as (url,calls):
         p=channel.open('p',producer_id='producer',source=source())
@@ -300,7 +300,7 @@ def publish_and_consume(channel,tmp_path,url,*,explicit=False):
 
 def test_public_producer_consumer_history_and_explicit_ack(channel,tmp_path):
     from demiflow import data
-    from demiflow.execution.queue_contract import HistoryReadLimits,HistoryReadLimit
+    from demiflow.execution.contracts.queue_contract import HistoryReadLimits, HistoryReadLimit
     from test_raw_fetch import origin_server
     with origin_server() as (url,calls):
         p=publish_and_consume(channel,tmp_path,url,explicit=True)

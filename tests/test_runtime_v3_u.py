@@ -47,9 +47,7 @@ from demiflow.environment import OperatorEnvironment  # noqa: E402
 from demiflow.objects import LocalObjectStore  # noqa: E402
 from demiflow.collect.document_library import DocumentLibrary  # noqa: E402
 from demiflow.collect.reading import PromptContext  # noqa: E402
-from demiflow.execution.queue_contract import (  # noqa: E402
-    QueueConfig, ProducerRef, ProducerSourceSpec,
-)
+from demiflow.execution.contracts.queue_contract import QueueConfig, ProducerRef, ProducerSourceSpec
 
 PACK = '''
 schema_version: demiflow_prompt_pack_v2

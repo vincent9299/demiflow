@@ -47,13 +47,13 @@ def source_facts(source):
     from demiflow.execution.sources.queue_history import QueueHistoryDatasource
     if type(source) is DatasourceSource and type(source.datasource) is QueueHistoryDatasource:
         if source.native_options is not None:raise RuntimeContractError('History has no alternate execution backend')
-        from demiflow.execution.queue_flow import resource
+        from demiflow.execution.contracts.queue_contract import resource
         return {'kind':'read_queue_records','arguments':source.datasource.declaration(),'inputs':0,
                 'effects':['queue_read','objects_read'], 'resources':[resource(source.datasource.config,'read')]}
     if type(source) is DatasourceSource and type(source.datasource) is QueueDatasource:
         if source.native_options is not None:
             raise RuntimeContractError('Queue source has no alternate execution backend')
-        from demiflow.execution.queue_flow import resource
+        from demiflow.execution.contracts.queue_contract import resource
         return {'kind':'read_queue','arguments':source.datasource.declaration(),'inputs':0,
                 'effects':['queue'], 'resources':[resource(source.datasource.config,'claim')]}
     if type(source) is LanceSource:

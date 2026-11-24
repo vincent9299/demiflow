@@ -1,5 +1,5 @@
 """Explicit graph-tail adapter to the same native final task commit."""
-from demiflow.execution.queue_contract import queue_config
+from demiflow.execution.contracts.queue_contract import queue_config
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identifier
 from demiflow.execution.worker.row_scope import current_row_scope
 
@@ -34,6 +34,6 @@ class QueueAcknowledge:
 
 
 def ack_facts(actor):
-    from demiflow.execution.queue_flow import resource
+    from demiflow.execution.contracts.queue_contract import resource
     return dict(native=actor.recovery_identity(), effects=['queue'],
                 resources=[resource(actor.config, 'complete')], reserved_bytes=65536)

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.execution.native_queue.queue import QueueChannel, QueueConfig
-from demiflow.execution.queue_contract import resolve_consumer_contract, resolve_producer_contract
+from demiflow.execution.native_queue.queue_sql import resolve_consumer_contract, resolve_producer_contract
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, identity, document
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal

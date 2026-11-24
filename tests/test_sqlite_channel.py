@@ -7,7 +7,7 @@ import pytest
 from demiflow import data
 from demiflow.queue import QueueChannel,QueueConfig,ProducerSourceSpec,QueueResultSink
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
-from demiflow.execution.queue_contract import HistoryReadLimits,HistoryReadLimit
+from demiflow.execution.contracts.queue_contract import HistoryReadLimits, HistoryReadLimit
 
 
 def archive(tmp_path):

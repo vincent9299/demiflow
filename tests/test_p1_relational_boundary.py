@@ -1,4 +1,4 @@
-"""Pure relational assembly retains existing plans and historic source classes."""
+"""Pure relational assembly retains plans and the actual declaration owners."""
 from pathlib import Path
 import os
 import pickle
@@ -31,26 +31,21 @@ def test_keyed_source_retains_exact_plan_inputs_without_sort_or_normalizing_rows
 
 
 @pytest.mark.parametrize('kind', [PlanInput, KeyedSource, UnionSource])
-def test_relational_declarations_keep_historical_pickle_names_and_code_pins(kind):
+def test_relational_declarations_use_their_actual_pickle_names_and_code_pins(kind):
     from demiflow.execution.seal.program_identity import describe
-
-    old_module = 'demiflow.execution.local_kernel'
-    # Protocol 0 GLOBAL is the exact historic module/name lookup, independent
-    # of where the candidate's pickler would now choose to store the class.
-    old_reference = f'c{old_module}\n{kind.__name__}\n.'.encode('ascii')
     from demiflow.execution.seal.program_pickle import load_payload
-    assert load_payload([old_reference]) is kind
-    assert kind.__module__ == 'demiflow.data.sources'
-    assert describe(kind)['module'] == old_module
-    assert describe(kind.__init__)['module'] == old_module
-    assert describe(kind.__repr__)['module'] == old_module
-    wrapped = getattr(kind.__repr__, '__wrapped__', None)
-    if wrapped is not None:
-        assert describe(wrapped)['module'] == old_module
+    from demiflow.execution.contracts.recovery_contract import code_record, identity
 
-    # An identically named class or method must keep its own module identity.
-    unrelated = type(kind.__name__, (), {'__module__': kind.__module__})
-    assert describe(unrelated)['module'] == kind.__module__
+    assert kind.__module__ == 'demiflow.data.sources'
+    assert load_payload([pickle.dumps(kind)]) is kind
+    assert describe(kind)['module'] == kind.__module__
+    for method in (kind.__init__, kind.__repr__):
+        assert describe(method)['module'] == method.__module__
+        assert describe(method)['code'] == identity(code_record(method.__code__))
+    # Deleted owners do not silently resolve to a new definition.
+    old_reference = f'cdemiflow.execution.local_kernel\n{kind.__name__}\n.'.encode('ascii')
+    with pytest.raises(DataflowError, match='Program payload failed to load'):
+        load_payload([old_reference])
 
 
 def test_relational_instance_seal_retains_tags_and_fields():
@@ -59,9 +54,9 @@ def test_relational_instance_seal_retains_tags_and_fields():
     item = _input()
     keyed = KeyedSource('groups', item, ('key',))
     union = UnionSource((item,))
-    assert describe(keyed)['type'] == 'demiflow.execution.local_kernel.KeyedSource'
+    assert describe(keyed)['type'] == 'demiflow.data.sources.KeyedSource'
     assert describe(keyed)['fields']['on'] == ['key']
-    assert describe(union)['type'] == 'demiflow.execution.local_kernel.UnionSource'
+    assert describe(union)['type'] == 'demiflow.data.sources.UnionSource'
     assert describe(union)['fields']['inputs'] == [describe(item)]
 
 

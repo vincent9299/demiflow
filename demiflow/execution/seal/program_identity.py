@@ -10,9 +10,8 @@ import inspect
 from pathlib import Path
 import types
 from contextvars import ContextVar
-from demiflow.execution.contracts.recovery_sdk_v3 import code_record
+from demiflow.execution.contracts.recovery_contract import code_record
 from demiflow.execution.contracts.recovery_contract import identity, document, RecoveryContractError, MAX_DOCUMENT_BYTES
-from demiflow.execution.seal.recovery_sdk_v3 import class_method_pins, function_pin, persistent_source_module, persistent_source_name, _layout_source_type
 
 from demiflow.data.plan import actor_owner
 from demiflow.execution.contracts.dataflow import shared_binding
@@ -130,21 +129,6 @@ def _recipe_actor_relation(request, *, bounds):
 
 _SOURCE_WALK = ContextVar('demiflow_source_identity_walk', default=None)
 
-def _persistent_module(value):
-    """Preserve the v3 names for the relocated relational classes and their methods."""
-    module = persistent_source_module(value)
-    if type(module) is not str or module != 'demiflow.data.sources':
-        return module
-    from demiflow.data.sources import KeyedSource, PlanInput, UnionSource
-    for declaration in (KeyedSource, PlanInput, UnionSource):
-        if value is declaration:
-            return 'demiflow.execution.local_kernel'
-        if inspect.isfunction(value):
-            method = vars(declaration).get(value.__name__)
-            # The generated dataclass repr also captures its wrapped function.
-            if value is method or value is getattr(method, '__wrapped__', None):
-                return 'demiflow.execution.local_kernel'
-    return module
 
 def describe(value, depth=0):
     if depth > 32:
@@ -224,8 +208,7 @@ def describe(value, depth=0):
             source = Path(filename).read_bytes()
             source_hash = hashlib.sha256(source).hexdigest()
         code = identity(code_record(value.__code__))
-        source_hash, code = function_pin(value, source, source_hash, code)
-        return dict(module=_persistent_module(value), name=persistent_source_name(value), source_hash=source_hash,
+        return dict(module=value.__module__, name=value.__qualname__, source_hash=source_hash,
                     code=code,
                     defaults=describe(value.__defaults__, depth + 1),
                     kwdefaults=describe(value.__kwdefaults__, depth + 1), closure=closure)
@@ -234,8 +217,8 @@ def describe(value, depth=0):
         for name, method in vars(value).items():
             if inspect.isfunction(method):
                 methods[name] = identity(code_record(method.__code__))
-        return dict(module=_persistent_module(value), name=value.__qualname__,
-                    methods=class_method_pins(value, methods))
+        return dict(module=value.__module__, name=value.__qualname__,
+                    methods=methods)
     from demiflow.data.sources import PlanInput
     if isinstance(value, PlanInput):
         return plan_identity('input', value.source, value.plan)
@@ -251,7 +234,7 @@ def describe(value, depth=0):
         return {'array': str(value.dtype), 'shape': list(value.shape), 'sha256': digest.hexdigest()}
     if is_dataclass(value):
         # Runtime validators/observation coordinates are not semantic parameters.
-        return {"type": _persistent_module(type(value)) + "." + type(value).__qualname__,
+        return {"type": type(value).__module__ + "." + type(value).__qualname__,
                 "fields": {f.name: describe(getattr(value, f.name), depth + 1)
                            for f in fields(value) if f.name not in {"runtime_contract", "label"}}}
     native = getattr(value, "recovery_identity", None)
@@ -536,13 +519,7 @@ def literal_source_digest(value, *, max_bytes=256 * 1024**2):
                 emit(b':', sink)
                 visit(getattr(item, name), depth + 1, sink)
             emit(b'},"type":', sink)
-            # Literal values historically used their physical class module,
-            # unlike describe's older declaration-name projection. Only an
-            # authenticated, measured literal relocation may change that name.
-            relocation = _layout_source_type(kind)
-            module = (relocation.get('literal_module', kind.__module__)
-                      if relocation is not None else kind.__module__)
-            string(module + '.' + kind.__qualname__, sink)
+            string(kind.__module__ + '.' + kind.__qualname__, sink)
             emit(b'}', sink)
         elif not projected:
 
