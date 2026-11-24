@@ -3,7 +3,6 @@ from pathlib import Path
 import os
 
 import pytest
-from demiflow.execution.outputs.block_sink import storage_usage
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
@@ -20,9 +19,9 @@ def test_completed_decoder_file_disappears_before_storage_stat(tmp_path,monkeypa
                 transient.unlink();removed.append(True)
             return original(path,*a,**kw)
         monkeypatch.setattr(Path,'lstat',stat_after_cleanup)
-        assert storage_usage(run)==8
+        assert run.journal.storage_usage()==8
         run.release_temporaries([transient])
-        assert storage_usage(run)==0
+        assert run.journal.storage_usage()==0
         assert removed==[True]
 
 
@@ -34,7 +33,7 @@ def test_quota_observation_does_not_enumerate_completed_decoder_directories(tmp_
         def forbidden_scan(path):
             raise AssertionError('Quota observation scanned historical files')
         monkeypatch.setattr(Path,'iterdir',forbidden_scan)
-        assert storage_usage(run)==0
+        assert run.journal.storage_usage()==0
 
 
 @pytest.mark.parametrize('kind',['symlink','fifo','permission'])

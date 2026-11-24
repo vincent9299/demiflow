@@ -97,7 +97,7 @@ def test_native_crash_orphans_keep_slot_until_owned_cleanup(tmp_path, monkeypatc
             """
 import os,sys
 from pathlib import Path
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
 with RunContext.attach(RunJournal(Path(sys.argv[1]),attempt=1)) as native:
     namespace=native.object_namespace(sys.argv[2])

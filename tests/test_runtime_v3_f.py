@@ -157,7 +157,7 @@ def _fake_resolve_runtime_policy(options, limits, *, provider):
 
 
 def _fake_expand_relational_inputs(source, *, path, bounds):
-    from demiflow.execution.pipeline.local_kernel import KeyedSource, UnionSource
+    from demiflow.data.sources import KeyedSource, UnionSource
     STATE.relational_calls.append({"source": source, "path": path, "bounds": bounds})
     if STATE.relational_bindings is not None:
         return STATE.relational_bindings

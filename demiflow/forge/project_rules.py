@@ -1,9 +1,11 @@
 """Packaged authoring rules and independent source-layout diagnostics."""
 import ast
 from hashlib import sha256
+import importlib.util
 import json
 from pathlib import Path
 import re
+import sys
 
 from .platform import content_digest
 from .platform_environment import read_bounded
@@ -30,6 +32,9 @@ _OUTPUT_ARG_KEYS = frozenset({
 })
 _NOTEBOOK_UI_MODULES = frozenset({'IPython', 'ipywidgets'})
 _LOCAL_CODE_PACKAGES = frozenset({'flows', 'operators', 'data_tools', 'tests'})
+_PIPELINE_ROLE_SEGMENTS = frozenset({'flows', 'operators', 'data_tools'})
+_INTERNAL_DEMIFLOW_SUBPACKAGES = frozenset({'workbench', 'forge', 'services'})
+_SITE_DIR_MARKERS = ('site-packages', 'dist-packages', 'lib-dynload')
 
 
 def _read_guide():
@@ -238,6 +243,164 @@ def _dangling_local_imports(root: Path, path: Path) -> list[tuple[int, str]]:
     return missing
 
 
+def _public_execution_exports() -> frozenset[str]:
+    try:
+        import demiflow.execution as _exec_mod
+        return frozenset(getattr(_exec_mod, '__all__', ()))
+    except Exception:
+        return frozenset({'RunContext', 'RunRef', 'current_run'})
+
+
+def _is_site_or_stdlib(top_pkg: str) -> bool:
+    if top_pkg in sys.stdlib_module_names or top_pkg == 'demiflow':
+        return True
+    try:
+        spec = importlib.util.find_spec(top_pkg)
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+    if spec is None:
+        return False
+    if spec.origin in (None, 'built-in', 'frozen'):
+        locs = list(spec.submodule_search_locations or ())
+        if not locs:
+            return spec.origin in ('built-in', 'frozen')
+        candidates = [str(loc) for loc in locs]
+    else:
+        candidates = [str(spec.origin)]
+    prefixes = tuple({str(Path(p).resolve()) for p in (sys.prefix, sys.base_prefix) if p})
+    for raw in candidates:
+        if any(marker in raw for marker in _SITE_DIR_MARKERS):
+            return True
+        try:
+            resolved = str(Path(raw).resolve())
+        except OSError:
+            resolved = raw
+        if any(resolved.startswith(pref + '/') for pref in prefixes):
+            return True
+    return False
+
+
+def _is_local_to_project(root: Path, parts: tuple[str, ...], prefixes: list[tuple[str, ...]]) -> bool:
+    if not parts:
+        return True
+    if parts[0] in _LOCAL_CODE_PACKAGES:
+        return True
+    for pref in prefixes:
+        if len(parts) >= len(pref) and parts[:len(pref)] == pref:
+            return True
+    try:
+        if (root / parts[0]).exists() or (root / f'{parts[0]}.py').is_file():
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _is_cross_project_sibling(root: Path, parts: tuple[str, ...]) -> bool:
+    """Detect imports reaching outside this project into a sibling business project (works inside Landlock)."""
+    if not parts:
+        return False
+    top = parts[0]
+    if _is_site_or_stdlib(top):
+        return False
+    # 1. Same-parent sibling project (e.g. `pipelines.other_proj...` inside `pipelines/this_proj`)
+    parent_name = root.parent.name
+    if parent_name and parent_name.isidentifier() and top == parent_name and len(parts) >= 2 and parts[1] != root.name:
+        return True
+    # 2. Multi-part import carrying Forge role-dir segment outside this project (works under Landlock)
+    if len(parts) >= 3 and any(seg in _PIPELINE_ROLE_SEGMENTS for seg in parts[1:]):
+        return True
+    # 3. Readable ancestor sibling directory on disk (host check)
+    for anc in (root.parent, root.parent.parent):
+        if anc == anc.parent:
+            break
+        try:
+            cand = anc / top
+            if cand != root and cand not in root.parents and cand.is_dir():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _check_demiflow_module_public(mod_name: str, imported_names: tuple[str, ...] = ()) -> str | None:
+    """Return a violation target string if a demiflow.* import targets a private/removed/internal module."""
+    parts = tuple(mod_name.split('.'))
+    if not parts or parts[0] != 'demiflow':
+        return None
+    if any(p.startswith('_') for p in parts[1:]):
+        return mod_name
+    if len(parts) >= 2 and parts[1] in _INTERNAL_DEMIFLOW_SUBPACKAGES:
+        return mod_name
+    if len(parts) >= 3 and parts[1] == 'execution':
+        return mod_name
+    if len(parts) == 2 and parts[1] == 'execution' and imported_names:
+        public_exec = _public_execution_exports()
+        for sym in imported_names:
+            if sym != '*' and sym not in public_exec:
+                return f'{mod_name}.{sym}'
+    try:
+        spec = importlib.util.find_spec(mod_name)
+    except (ImportError, ModuleNotFoundError, ValueError):
+        spec = None
+    if spec is None:
+        return mod_name
+    return None
+
+
+def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool = True):
+    """Return (sdk_issues, cross_project_issues) as [(lineno, target)] lists."""
+    try:
+        raw = read_bounded(path, 512 * 1024)
+        tree = ast.parse(raw, filename=str(path))
+    except Exception:
+        return [], []
+    prefixes = _project_import_prefixes(root)
+    sdk_issues: list[tuple[int, str]] = []
+    cross_issues: list[tuple[int, str]] = []
+    seen_sdk: set[str] = set()
+    seen_cross: set[str] = set()
+
+    def record_sdk(lineno: int, bad: str):
+        if bad not in seen_sdk:
+            seen_sdk.add(bad)
+            sdk_issues.append((lineno, bad))
+
+    def record_cross(lineno: int, mod: str):
+        if mod not in seen_cross:
+            seen_cross.add(mod)
+            cross_issues.append((lineno, mod))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                mod = alias.name
+                parts = tuple(mod.split('.'))
+                if parts[0] == 'demiflow':
+                    bad = _check_demiflow_module_public(mod)
+                    if bad:
+                        record_sdk(node.lineno, bad)
+                elif check_cross_project and not _is_local_to_project(root, parts, prefixes):
+                    if _is_cross_project_sibling(root, parts):
+                        record_cross(node.lineno, mod)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            mod = node.module
+            parts = tuple(mod.split('.'))
+            names = tuple(a.name for a in node.names)
+            if parts[0] == 'demiflow':
+                bad = _check_demiflow_module_public(mod, names)
+                if bad:
+                    record_sdk(node.lineno, bad)
+                elif mod == 'demiflow':
+                    for sym in names:
+                        if sym in _INTERNAL_DEMIFLOW_SUBPACKAGES or sym.startswith('_'):
+                            record_sdk(node.lineno, f'demiflow.{sym}')
+            elif check_cross_project and not _is_local_to_project(root, parts, prefixes):
+                if _is_cross_project_sibling(root, parts):
+                    record_cross(node.lineno, mod)
+    return sdk_issues, cross_issues
+
+
 def _points_to_runs(root: Path, value) -> bool:
     runs_root = (root / 'runs').resolve(strict=False)
     candidates = []
@@ -386,7 +549,34 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             if not _has_declared_export(root / rel, '__demiflow_data_tools__'):
                 add('data_tools_export', rel, 'data_tools/ 模块需在顶层声明 __demiflow_data_tools__ 映射（如 {"review": "annotation"}）以便工作台「工具」面板发现。')
 
-    # 5b. Dangling project-local imports in tests/*.py (catches broken tests after cleanup/moves).
+    # 5b. Public DemiFlow SDK & project self-containment boundary across code dirs.
+    for code_dir in ('flows', 'operators', 'data_tools', 'tests'):
+        check_cross = code_dir != 'tests'
+        for rel in _iter_tree_files(root, code_dir, exclude=exclude):
+            p = Path(rel)
+            if p.suffix != '.py' or p.name == '__init__.py':
+                continue
+            sdk_bad, cross_bad = _boundary_import_issues(root, root / rel, check_cross_project=check_cross)
+            if sdk_bad:
+                first_line, first_mod = sdk_bad[0]
+                extra = f' 等 {len(sdk_bad)} 处' if len(sdk_bad) > 1 else ''
+                inspected.add(rel)
+                by_category.setdefault('internal_sdk_import', []).append(
+                    diagnostic('DF-02', rel,
+                               f'导入了非公开或已移除的 DemiFlow 内部模块 {first_mod}{extra}；业务项目仅允许依赖 DemiFlow 公开 SDK（运行 demiflow forge context --root . --topic sdk 查看当前公开接口）。',
+                               line=first_line)
+                )
+            if cross_bad:
+                first_line, first_mod = cross_bad[0]
+                extra = f' 等 {len(cross_bad)} 处' if len(cross_bad) > 1 else ''
+                inspected.add(rel)
+                by_category.setdefault('cross_project_import', []).append(
+                    diagnostic('DF-02', rel,
+                               f'跨项目导入了外部业务源码 {first_mod}{extra}；按 Forge 独立项目规范，项目源码须自包含，仅依赖标准库、已安装三方包、DemiFlow 公开 SDK 及本项目自身模块，请将所需纯计算/辅助逻辑迁入本项目并解耦外部源码依赖。',
+                               line=first_line)
+                )
+
+    # 5c. Dangling project-local imports in tests/*.py (catches broken tests after cleanup/moves).
     for rel in _iter_tree_files(root, 'tests', exclude=exclude):
         p = Path(rel)
         if p.suffix != '.py' or p.name == '__init__.py':

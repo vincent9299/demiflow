@@ -79,8 +79,26 @@ def _has_code_changes(changes):
     return False
 
 
-def _build_rework_prompt(pipeline_checks, review_report):
-    """Construct a bounded structured rework prompt for hard check failures or blocking findings."""
+def _project_has_business_python(project_root) -> bool | None:
+    """Return True/False if workspace.json declares/omits a project Python, or None if unavailable."""
+    if not project_root:
+        return None
+    ws_file = Path(project_root) / 'workspace.json'
+    if not ws_file.is_file():
+        return None
+    try:
+        doc = json.loads(ws_file.read_bytes()[:256 * 1024].decode('utf-8'))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(doc, dict):
+        return None
+    env = doc.get('environment') if isinstance(doc.get('environment'), dict) else {}
+    py = doc.get('python') or env.get('python')
+    return isinstance(py, str) and bool(py.strip())
+
+
+def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None):
+    """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
     issues = []
     if isinstance(pipeline_checks, dict):
         for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
@@ -88,22 +106,41 @@ def _build_rework_prompt(pipeline_checks, review_report):
             if isinstance(item, dict) and item.get('status') == 'failed':
                 diags = item.get('diagnostics') or []
                 if diags:
-                    for d in diags[:6]:
+                    grouped = {}
+                    for d in diags:
                         loc = (d.get('path') or '') + (f":{d['line']}" if d.get('line') else '')
-                        issues.append(f"- [{label} · {d.get('rule', 'ERROR')}] {loc} {d.get('detail', '')}".strip())
+                        rule = d.get('rule', 'ERROR')
+                        detail = d.get('detail', '')
+                        line = f"- [{label} · {rule}] {loc} {detail}".strip()
+                        grouped[line] = grouped.get(line, 0) + 1
+                    for line, count in list(grouped.items())[:6]:
+                        issues.append(f"{line}（共 {count} 处）" if count > 1 else line)
                 else:
                     issues.append(f"- [{label}] 检查未通过，请排查并修复相关改动。")
     if isinstance(review_report, dict) and review_report.get('status') == 'invalid':
-        for f in (review_report.get('findings') or [])[:6]:
+        seen_findings = set()
+        added_findings = 0
+        for f in (review_report.get('findings') or []):
             if f.get('severity') != 'blocking':
                 continue
             loc = (f.get('path') or '') + (f":{f['line']}" if f.get('line') else '')
             parts = [p for p in (f.get('trigger'), f.get('impact')) if p]
             sug = f"（建议：{f['suggestion']}）" if f.get('suggestion') else ''
-            issues.append(f"- [独立评审阻断] {loc} {' · '.join(parts)}{sug}".strip())
+            line = f"- [独立评审阻断] {loc} {' · '.join(parts)}{sug}".strip()
+            if line in seen_findings:
+                continue
+            seen_findings.add(line)
+            issues.append(line)
+            added_findings += 1
+            if added_findings >= 6:
+                break
     if not issues:
         return None
-    header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并运行项目 pytest 验证后交付：\n'
+    has_python = _project_has_business_python(project_root)
+    if has_python is False:
+        header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并复跑 demiflow forge check --root . --json 确认清零后直接交付（该项目未配置业务 Python，无需探测宿主机环境或强行运行 pytest）：\n'
+    else:
+        header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并复跑 demiflow forge check 与项目测试验证后交付：\n'
     return (header + '\n'.join(issues))[:8000]
 
 
@@ -1247,7 +1284,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 result['cleanup'] = 'complete' if drained else 'unknown'
                 if (auto_review and rework_depth == 0 and final == 'completed' and drained
                         and not saved['stop_at'] and not requested and turn.get('operation') == 'message'):
-                    rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report)
+                    rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report,
+                                                         project_root=project['root'])
                     if rework_prompt:
                         try:
                             existing_queue = store.show(session['workspace'], session['id']).get('queued_messages') or []

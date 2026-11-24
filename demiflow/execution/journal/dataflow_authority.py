@@ -18,7 +18,7 @@ from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_SCHEMA as S
 
 import json
 from demiflow.execution.storage.staging import apply_artifact_command
-from demiflow.execution.contracts.dataflow_codec import decode_artifact_reference as _ref_from_json, encode_artifact_reference as _ref_to_json, validate_control_payload as _payload_bytes, decode_effect_command as _effect_command, decode_artifact_command as _artifact_command, decode_queue_command as _queue_command, decode_native_command as _native_command
+from demiflow.execution.contracts.dataflow_codec import artifact_reference_from_fields, decode_artifact_reference as _ref_from_json, encode_artifact_reference as _ref_to_json, validate_control_payload as _payload_bytes, decode_effect_command as _effect_command, decode_artifact_command as _artifact_command, decode_queue_command as _queue_command, decode_native_command as _native_command
 from collections import OrderedDict
 import queue
 import socket
@@ -880,12 +880,11 @@ def private_storage(service, declared_path):
 
 
 def stage_image(service, journal, command, request):
-    from demiflow.execution.seal.plan import _artifact_from_json
     from demiflow.operator_llm.media import store_image, media_limits
     options = getattr(service, '_image_declarations', {}).get(command.node_id)
     if options is None or set(request) != {'image_ref'}:
         raise DataflowError('INVALID_CONTRACT', 'Image command has no sealed image declaration')
-    ref = _artifact_from_json(request['image_ref'])
+    ref = artifact_reference_from_fields(request['image_ref'])
     raw = b''.join(service._store.read(ref, max_bytes=media_limits(options)['max_image_bytes']))
     owner = service._action.object_sinks[options['object_store']]
     result = store_image(raw, options, store=owner)

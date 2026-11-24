@@ -11,7 +11,7 @@ def test_first_import_and_second_recorder_observe_their_own_actions(tmp_path):
 from pathlib import Path
 import sys
 from runtime_v3_support import _ExecuteActionRecorder
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 
 if __name__ == '__main__':
     assert 'demiflow.execution.executors.dataflow_api' not in sys.modules

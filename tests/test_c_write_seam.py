@@ -350,14 +350,14 @@ def test_pure_copy_consumes_sealed_native_plan(tmp_path):
 
 def test_code_pin_source_archive_survives_run_exit(tmp_path, monkeypatch):
     """Every pinned source remains readable after actual run-exit collection."""
-    from demiflow.execution.seal.plan import _artifact_from_json
+    from demiflow.execution.contracts.dataflow_codec import artifact_reference_from_fields
     ds = relational_dataset()
     run_dir = tmp_path / "run"
     with RunContext.start(run_dir) as run:
         ds.write_lance(str(tmp_path / "out.lance"), mode="create", return_receipt=True)
         action_id = sealed_action_id(run.journal)
         _, store, _, _, manifests = read_program_evidence(run_dir, action_id)
-        sources = [(name, _artifact_from_json(ref), m["code_identity"]["imports"][name])
+        sources = [(name, artifact_reference_from_fields(ref), m["code_identity"]["imports"][name])
                    for m in manifests for name, ref in m["business_sources"].items()]
         assert sources, "no business source was archived"
         before = {(name, ref.digest): b"".join(store.read(ref, max_bytes=ref.size_bytes))

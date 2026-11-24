@@ -49,11 +49,11 @@ import json,os,sys
 from pathlib import Path
 from demiflow import data
 from demiflow.embeddings import EmbeddingModel
-from demiflow.execution.run_context import RunContext
+from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.recovery_contract import RunRef
+from demiflow.execution.contracts.recovery_contract import RunRef
 from demiflow.execution.checkpoint.coordinator import DataflowCheckpointCoordinator
-from demiflow.execution.kernels import state_codec
+from demiflow.execution.contracts import state_codec
 root=Path(sys.argv[1]);mode=sys.argv[2];url=sys.argv[3]
 if mode=='crash':
  original=DataflowCheckpointCoordinator.commit
