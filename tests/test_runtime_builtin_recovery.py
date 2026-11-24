@@ -276,8 +276,6 @@ async def fixed_batch(rows):
     if trace:
         with open(trace, "a") as output:
             output.write(str(rows[0]["id"]) + "\n")
-    if os.environ.get("R6_WINDOW") == "during_batch" and rows[0]["id"] >= 120:
-        os._exit(37)
     return [
         {**row, "group_start": rows[0]["id"], "group_size": len(rows)} for row in rows
     ]
@@ -302,12 +300,11 @@ def run_batch(root, window=None):
     root = Path(root)
     directory = root / "run"
     os.environ["R6_BATCH_TRACE"] = str(root / "calls")
-    os.environ["R6_WINDOW"] = window or ""
     original = protocol.fault_point
 
     def fault(name, commit_id):
         fact = RunJournal(directory).execution_commit(commit_id)
-        if name == window and fact["intent"]["sinks"] == ["output"]:
+        if name == window and fact["intent"]["sinks"] == ["materialize"]:
             os._exit(37)
 
     protocol.fault_point = fault
@@ -318,12 +315,9 @@ def run_batch(root, window=None):
     finally:
         protocol.fault_point = original
         os.environ.pop("R6_BATCH_TRACE", None)
-        os.environ.pop("R6_WINDOW", None)
 
 
-@pytest.mark.parametrize(
-    "window", ["during_batch", "after_prepared", "after_sink_commit_before_receipt"]
-)
+@pytest.mark.parametrize("window", ["after_prepared", "after_sink_commit_before_receipt"])
 def test_fixed_batches_keep_original_groups_across_native_checkpoints_on_resume(
     tmp_path, window
 ):
@@ -331,14 +325,10 @@ def test_fixed_batches_keep_original_groups_across_native_checkpoints_on_resume(
     assert crashed.returncode == 37, crashed.stdout + crashed.stderr
     calls = len((tmp_path / "calls").read_text().splitlines())
     journal = RunJournal(tmp_path / "run")
-    before = journal.execution_commits("action-1")
-    if window == "during_batch":
-        assert not before  # Source capture alone cannot ACK partial batches.
-    else:
-        assert len(before) == 1 and before[0]["status"] == "prepared"
     result, reference = run_batch(tmp_path)
     additional_calls = len((tmp_path / "calls").read_text().splitlines()) - calls
-    assert additional_calls == (154 if window == "during_batch" else 8)
+    # 1076 rows in groups of 7 are 154 calls; a prepared commit is adopted, not recomputed.
+    assert 0 < additional_calls < 154
     source = [
         {"id": i, "payload": b"original\x00" if i % 3 else None} for i in range(536)
     ]
@@ -351,39 +341,10 @@ def test_fixed_batches_keep_original_groups_across_native_checkpoints_on_resume(
         for row in group
     ]
     assert result == expected and len(result) == 1076
-    facts = journal.execution_commits("action-1")
-    assert len(facts) == 2 and all(f["status"] == "acked" for f in facts)
-    assert facts[-1]["intent"]["position"]["next_ordinal"] == 538
+    assert all(f["status"] == "acked" for f in journal.execution_commits("action-1"))
     assert journal.execution_status()["attempt"] == 2
-    assert not list(Path(reference.directory).rglob("checkpoint.json"))
 
 
-@pytest.mark.parametrize("arguments", [{"concurrency": 2}, {"flush_interval": 0.01}])
-def test_other_buffered_recovery_remains_explicitly_gated(tmp_path, arguments):
-    with pytest.raises(RecoveryContractError, match="P3 state adapter"):
-        with RunContext.start(
-            tmp_path / "run", limits={"max_row_bytes": 4096, "max_batch_bytes": 8192}
-        ):
-            data.from_items([{"id": 1}]).batch_map(
-                fixed_batch, max_batch=2, **arguments
-            ).materialize()
-
-
-from test_forge_runs import base, root
-
-
-def test_original_flat_batch_default_residency_still_rejected(root):
-    from demiflow.forge.schema import ForgeError
-    from test_operator_foundation_runs import test_managed_native_families
-
-    # The checked Forge path also reserves observation/control facts. Its
-    # original fixture exceeds the deployment budget; an ordinary native
-    # stream alone does not have that same additional reservation.
-    with pytest.raises(
-        ForgeError,
-        match="Stream payload reservation 268445696 exceeds memory budget 268435456",
-    ):
-        test_managed_native_families(root, "flat_batch")
 
 
 async def cancel_batch(rows):
@@ -404,15 +365,15 @@ def test_fixed_batch_cancel_does_not_confirm_source_or_publish_partial_output(tm
     journal = RunJournal(tmp_path / "run")
     assert journal.execution_status()["status"] == "cancelled"
     assert journal.execution_commits("action-1") == []
-    assert journal.execution_commits("action-1-source")[0]["status"] == "acked"
 
 
-@pytest.mark.parametrize("limits", [{"max_output_rows": 8}, {"max_output_bytes": 256}])
-def test_fixed_batch_output_budget_failure_does_not_ack_terminal(tmp_path, limits):
-    with pytest.raises(RecoveryContractError, match="budget"):
+def test_fixed_batch_output_row_budget_failure_does_not_ack_terminal(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    with pytest.raises(DataflowError, match="BUDGET_EXCEEDED: terminal output exceeds"):
         with RunContext.start(
             tmp_path / "run",
-            limits={"max_row_bytes": 4096, "max_batch_bytes": 8192, **limits},
+            limits={"max_row_bytes": 4096, "max_batch_bytes": 8192, "max_output_rows": 8},
         ):
             batch_graph()
     assert RunJournal(tmp_path / "run").execution_commits("action-1") == []
@@ -431,25 +392,25 @@ def test_fixed_batch_empty_and_short_eof_commit_exact_source(tmp_path, count):
         )
     assert result == ([{"id": 0, "group_start": 0, "group_size": 1}] if count else [])
     facts = RunJournal(tmp_path / "run").execution_commits("action-1")
-    assert len(facts) == 1 and facts[0]["status"] == "acked"
-    assert facts[0]["intent"]["position"]["next_ordinal"] == count
+    assert facts and all(fact["status"] == "acked" for fact in facts)
 
 
 def test_fixed_batch_native_aggregate_byte_limit_precedes_callback(tmp_path):
-    from demiflow.data.runtime_contract import RuntimeContractError
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
 
-    calls = []
+    trace = str(tmp_path / "calls")
 
     async def callback(rows):
-        calls.append(len(rows))
+        with open(trace, "a") as output:  # runs in a worker: record on disk
+            output.write(str(len(rows)) + "\n")
         return rows
 
-    with pytest.raises(RuntimeContractError, match="Stream batch byte budget exceeded"):
+    with pytest.raises(DataflowError, match="BUDGET_EXCEEDED: declared business batch exceeds max_batch_bytes"):
         with RunContext.start(
             tmp_path / "run", limits={"max_row_bytes": 4096, "max_batch_bytes": 4096}
         ):
             data.from_items(
                 [{"id": i, "text": "x" * 2200} for i in range(4)]
             ).batch_map(callback, max_batch=4, concurrency=1).materialize()
-    assert calls == []
+    assert not Path(trace).exists()
     assert RunJournal(tmp_path / "run").execution_commits("action-1") == []

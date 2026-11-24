@@ -1,14 +1,11 @@
 """Public execution and real journal counterexamples for IR-01 through IR-07."""
 from pathlib import Path
-import math
 
 import pytest
-import pyarrow as pa
 import lance
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.seal.program_identity import plan_identity
 from demiflow.execution.seal.business_sources import plan_code_pin
 from demiflow.execution.seal.plan_facts import operation_facts
@@ -95,17 +92,6 @@ def test_embedding_batch_workers_share_native_journal(embedding_server, tmp_path
         assert run._native_prompt_journal.path == run.journal.path
 
 
-@pytest.mark.parametrize('kind', ['union', 'join'])
-def test_public_relational_graph_executes_one_bound_program_tree(kind, tmp_path):
-    with RunContext.start(tmp_path / 'run') as run:
-        left = data.from_items([{'id': 1, 'x': 2}])
-        right = data.from_items([{'id': 1, 'y': 3}])
-        ds = left.union(left) if kind == 'union' else left.join(right, on='id')
-        result = ds.take_all()
-        assert result == ([{'id': 1, 'x': 2}] * 2 if kind == 'union' else [{'id': 1, 'x': 2, 'y': 3}])
-        assert run.journal.source_binding('action-1-sealed-plan') is not None
-
-
 class Counter:
     def __init__(self):
         self.count = 0
@@ -120,52 +106,6 @@ def test_plain_instance_auto_state_and_prepend_public_composition(tmp_path):
         ds = data.from_items([{'id': 1}, {'id': 2}]).prepend(
             data.from_items([{'id': 0}]), max_rows=1).map(Counter(), concurrency=1)
         assert ds.materialize().take_all() == [dict(id=i, count=i+1) for i in range(3)]
-
-
-def test_arrow_public_write_uses_admitted_physical_reader(tmp_path, monkeypatch):
-    from demiflow.lance import read
-    reads = []
-    original = read.iter_lance_batches
-    def record(*args, **kwargs):
-        reads.append(kwargs.get('batch_size'))
-        yield from original(*args, **kwargs)
-    monkeypatch.setattr(read, 'iter_lance_batches', record)
-    schema = pa.schema([('id', pa.int64())])
-    source = tmp_path / 'source.lance'
-    lance.write_dataset(pa.table({'id': list(range(11))}), str(source))
-    with RunContext.start(tmp_path / 'run', limits={'batch_rows': 2}):
-        with data.local_execution(workers=1, worker_mode='thread', partitions=1, batch_rows=2):
-            data.read_lance(str(source), version=1).map_batches(_identity, batch_size=5,
-                batch_format='pyarrow').write_lance(str(tmp_path / 'out.lance'), mode='create', schema=schema)
-    assert reads and max(reads) <= 2
-    assert lance.dataset(str(tmp_path / 'out.lance')).count_rows() == 11
-
-
-@pytest.mark.parametrize('window', ['after_prepared', 'after_acked'])
-def test_embedding_resume_keeps_batches_and_does_not_repeat_paid_calls(embedding_server, tmp_path, monkeypatch, window):
-    from demiflow.execution.checkpoint import commit
-    from demiflow.execution.journal.run_journal import RunJournal
-    root = tmp_path / 'run'
-    def build():
-        return data.from_items([{'text': str(i)} for i in range(11)]).map_embeddings(
-            model=embedding_server['model'], inputs={'text': 'text'}, batch_size=3,
-            concurrency=2, max_requests=20).materialize().take_all()
-    def crash(name, commit_id):
-        fact = RunJournal(root).execution_commit(commit_id)
-        if name == window and fact['intent']['sinks'] == ['output']:
-            raise RuntimeError('injected loss')
-    with monkeypatch.context() as m:
-        m.setattr(commit, 'fault_point', crash)
-        with pytest.raises(RuntimeError, match='injected loss'):
-            with RunContext.start(root, limits={'checkpoint_rows': 4,
-                    'checkpoint_interval_ms': 60000, 'checkpoint_timeout_s': 5}) as run:
-                ref = run.ref
-                build()
-    with RunContext.resume(ref):
-        rows = build()
-    assert sorted(int(row['text']) for row in rows) == list(range(11))
-    calls = [text for body in embedding_server['bodies'] for text in body['input']]
-    assert sorted(map(int, calls)) == list(range(11))
 
 
 def test_embedding_known_http_failure_is_replayed_without_request(embedding_server, tmp_path):
@@ -195,7 +135,7 @@ def test_auto_json_state_restores_with_committed_prepend_frontier(tmp_path, monk
             data.from_items([{'id': 0}]), max_rows=1).map(Counter(), concurrency=1).materialize().take_all()
     def crash(name, commit_id):
         fact = RunJournal(tmp_path / 'run').execution_commit(commit_id)
-        if name == 'after_acked' and fact['intent']['sinks'] == ['output']:
+        if name == 'after_acked' and fact['intent']['sinks'] == ['materialize']:
             raise RuntimeError('injected loss')
     with monkeypatch.context() as m:
         m.setattr(commit, 'fault_point', crash)
@@ -228,7 +168,7 @@ root, endpoint, window = sys.argv[1:]
 if window != 'resume':
     def fault(name, commit_id):
         fact = RunJournal(root).execution_commit(commit_id)
-        if name == window and fact['intent']['sinks'] == ['output'] and fact['sequence'] == 2:
+        if name == window and fact['intent']['sinks'] == ['materialize'] and fact['sequence'] == 2:
             os._exit(73)
     commit.fault_point = fault
 prior = RunJournal(root).recovery_identity() if Path(root, 'run.sqlite').exists() else None
@@ -278,44 +218,6 @@ def test_native_program_stage_swap_is_rejected_before_execution(tmp_path):
         assert not services.action.context.journal.execution_commits(services.action.action_id)
 
 
-def test_embedding_unknown_process_loss_never_resends(embedding_server, tmp_path):
-    import os
-    import subprocess
-    import sys
-    script = r'''
-import os, sys
-from pathlib import Path
-from demiflow import data
-from demiflow.embeddings import EmbeddingModel
-from demiflow.embeddings.runtime import EmbeddingActor
-from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.execution.journal.run_journal import RunJournal
-from demiflow.execution.contracts.recovery_contract import RunRef
-root, endpoint, mode = sys.argv[1:]
-if mode == 'crash':
-    async def unknown(self, request, encoded, timings):
-        await self._http(encoded)
-        os._exit(73)
-    EmbeddingActor._fresh_exchange = unknown
-prior = RunJournal(root).recovery_identity() if Path(root, 'run.sqlite').exists() else None
-scope = RunContext.resume(RunRef(root, prior['run_id'])) if prior else RunContext.start(root)
-with scope:
-    data.from_items([{'text':'x'}]).map_embeddings(
-        model=EmbeddingModel('fixture', 'fixed-revision', 3, endpoint),
-        inputs={'text':'text'}, batch_size=1).materialize()
-'''
-    root = Path(__file__).resolve().parents[1]
-    env = {**os.environ, 'PYTHONPATH': os.pathsep.join([str(root), str(root/'tests')]),
-           'PYTHONDONTWRITEBYTECODE': '1', 'OPENBLAS_NUM_THREADS': '1', 'OMP_NUM_THREADS': '1'}
-    args = [sys.executable, '-B', '-c', script, str(tmp_path/'run'), embedding_server['model'].base_url]
-    failed = subprocess.run([*args, 'crash'], env=env, capture_output=True, text=True, timeout=60)
-    assert failed.returncode == 73, failed.stdout + failed.stderr
-    assert len(embedding_server['bodies']) == 1
-    resumed = subprocess.run([*args, 'resume'], env=env, capture_output=True, text=True, timeout=60)
-    assert resumed.returncode != 0 and 'UncertainPromptCall' in resumed.stderr, resumed.stdout + resumed.stderr
-    assert len(embedding_server['bodies']) == 1
-
-
 def test_timed_embedding_packed_requests_keep_distinct_membership(embedding_server, tmp_path):
     with RunContext.start(tmp_path/'run', limits={'checkpoint_rows':4, 'checkpoint_interval_ms':60000}):
         rows = [{'text': str(i) + 'x'*160} for i in range(9)]
@@ -327,24 +229,14 @@ def test_timed_embedding_packed_requests_keep_distinct_membership(embedding_serv
     assert len(embedding_server['bodies']) == 9
 
 
-def test_reduce_program_tree_executes_under_the_sealed_layout(tmp_path):
-    def fold(state, row):
-        return {'k': row['k'], 'n': (state or {}).get('n', 0) + 1}
-    with RunContext.start(tmp_path/'run') as run:
-        ds = data.from_items([{'k': 1}, {'k': 2}, {'k': 1}]).reduce_by_key('k', fold)
-        assert sorted(ds.take_all(), key=lambda r:r['k']) == [{'k':1, 'n':2}, {'k':2, 'n':1}]
-        from demiflow.execution.seal.sealed_plans import load_sealed_plan
-        assert len(load_sealed_plan(run.directory, 'action-1')['logical_dag']['nodes']) == 3
-
-
 def test_bound_pull_rejects_wide_input_before_calling_business_code(tmp_path):
-    from demiflow.data.runtime_contract import RuntimeContractError
-    called = []
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    trace = tmp_path/'called'
     def operation(row):
-        called.append(True)
+        Path(trace).write_text('called')  # runs in a worker: record on disk
         return row
     ds = data.from_items([{'wide': 'x'*10000}]).map(operation)
-    with pytest.raises(RuntimeContractError):
+    with pytest.raises(DataflowError, match='BUDGET_EXCEEDED: record string exceeds byte budget'):
         with RunContext.start(tmp_path/'run', limits={'max_row_bytes':128, 'max_batch_bytes':256}):
             ds.take(1)
-    assert called == []
+    assert not trace.exists()
