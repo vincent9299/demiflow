@@ -416,7 +416,14 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
     for target in _group_unreferenced_under('prompts', prompt_files, unref_prompts):
         add('orphan_prompts', target, 'prompts/ 中存在未被任何活跃 Flow、算子或配置引用的废弃 Prompt；请清理以保持目录整洁。')
 
-    # 8. Active configs/*.json output paths should target data/, not legacy runs/.
+    # 8. docs/ is for documentation, never a dumping ground for obsolete Python code.
+    docs_files = _iter_tree_files(root, 'docs', exclude=exclude)
+    docs_py = [rel for rel in docs_files if Path(rel).suffix.lower() == '.py']
+    if docs_py:
+        for target in _group_unreferenced_under('docs', docs_files, docs_py):
+            add('code_in_docs', target, 'docs/ 仅用于项目文档，不应存放 Python 源码或废弃代码归档；请按职责迁入标准目录或彻底清理废弃代码。')
+
+    # 9. Active configs/*.json output paths should target data/, not legacy runs/.
     for param_rel in sorted(bound_params):
         if not param_rel.startswith('configs/'):
             continue

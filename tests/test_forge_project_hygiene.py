@@ -219,3 +219,54 @@ def test_hygiene_keeps_prompt_referenced_by_alternate_branch_declared_operator(t
     report = check_project(root)
     assert report['status'] == 'passed', report
     assert report['diagnostic_count'] == 0
+
+
+def test_move_path_blocks_moving_notebooks_out_and_docs_py_is_flagged(tmp_path):
+    root = _make_clean_project(tmp_path / 'nb_guard_proj')
+    nb_bytes = b'{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}\n'
+    (root / 'root_nb.ipynb').write_bytes(nb_bytes)
+    # Moving a root notebook into operators/ must be rejected
+    with pytest.raises(Exception):
+        _run_project_layout(root, {'action': 'move_path', 'src': 'root_nb.ipynb', 'dst': 'operators/root_nb.ipynb'})
+    # Moving a root notebook into notebooks/ succeeds
+    moved = _run_project_layout(root, {'action': 'move_path', 'src': 'root_nb.ipynb', 'dst': 'notebooks/root_nb.ipynb'})
+    assert moved['status'] == 'moved'
+    # Moving any file OUT of notebooks/ must be rejected
+    with pytest.raises(Exception):
+        _run_project_layout(root, {'action': 'move_path', 'src': 'notebooks/root_nb.ipynb', 'dst': 'operators/root_nb.ipynb'})
+    with pytest.raises(Exception):
+        _run_project_layout(root, {'action': 'move_path', 'src': 'notebooks/root_nb.ipynb', 'dst': 'notebooks/renamed.ipynb'})
+
+    # Smuggling obsolete .py code under docs/ must fail DF-02
+    (root / 'docs' / 'legacy_dump').mkdir(parents=True)
+    (root / 'docs' / 'legacy_dump' / 'old_flow.py').write_text('def old():\n    return 1\n')
+    report = check_project(root)
+    assert report['status'] == 'failed'
+    flagged = {d['path'] for d in report['diagnostics'] if d['rule'] == 'DF-02'}
+    assert 'docs/legacy_dump' in flagged or 'docs/legacy_dump/old_flow.py' in flagged
+
+
+def test_replay_anchors_user_message_on_long_turn(tmp_path):
+    from demiflow.workbench.conversations.policy import Limits, root_identity
+    from demiflow.workbench.conversations.store import Store
+
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    ident = root_identity(proj)
+    store = Store(tmp_path / 'replay_state', Limits(), initialize=True)
+    sess = store.create('w1', ident, 'deepseek', 'req1', 'pol1')
+    turn, _ = store.submit('w1', sess['id'], 'sub1', sess['revision'], '用户原始诉求：帮我整理项目', ident, 'pol1')
+    tid = turn['id']
+    for i in range(150):
+        store.event(tid, 'change.observed', {'files': [{'path': f'f_{i}.py'}]})
+    store.event(tid, 'turn.state', {'state': 'completed', 'cleanup': 'complete'})
+    store.update(tid, state='completed', cleanup='complete')
+
+    replayed = store.replay('w1', sess['id'], limit=20)
+    types = [ev['type'] for ev in replayed['events']]
+    assert 'message.user' in types
+    user_ev = next(ev for ev in replayed['events'] if ev['type'] == 'message.user')
+    assert user_ev['data']['text'] == '用户原始诉求：帮我整理项目'
+    # Contiguous tail first_sequence remains > user_ev sequence so upward pagination works cleanly
+    assert replayed['first_sequence'] > user_ev['sequence']
+    assert replayed['has_earlier'] is True
