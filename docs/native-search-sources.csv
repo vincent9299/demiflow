@@ -1,19 +1,19 @@
 name,kind,engine,categories,disabled_default,load_status,paging,max_page,safesearch,language_support,time_range_support,engine_type
 google,catalog,google,general,True,ok,True,50,True,True,True,online
-bing,catalog,bing,general,True,ok,False,0,True,False,False,online
+bing,catalog,bing,general,True,ok,False,0,True,True,False,online
 yandex,catalog,yandex,general,True,ok,True,0,False,False,False,online
 mwmbl,catalog,mwmbl,general,True,ok,False,0,False,False,False,online
 wikipedia,catalog,wikipedia,general,False,ok,False,0,False,True,False,online
-wikisearch,catalog,wikisearch,general,False,ok,False,0,False,True,False,online
+wikisearch,catalog,wikisearch,general,False,ok,False,0,False,False,False,online
 google images,catalog,google_images,general,True,ok,True,50,True,True,True,online
-bing images,catalog,bing_images,general,False,ok,True,0,True,False,True,online
+bing images,catalog,bing_images,general,False,ok,True,0,True,True,True,online
 yandex images,catalog,yandex,images,True,ok,True,0,False,False,False,online
 baidu images,catalog,baidu,images,True,ok,True,0,False,False,True,online
-brave.images,catalog,brave,images|web,False,ok,False,10,True,False,False,online
+brave.images,catalog,brave,images|web,False,ok,False,10,True,True,False,online
 sogou images,catalog,sogou_images,general,True,ok,True,0,False,False,False,online
 quark images,catalog,quark,images,True,ok,True,0,False,False,True,online
 duckduckgo images,catalog,duckduckgo_images,images,False,ok,True,0,True,True,False,online
-qwant images,catalog,qwant,images|web,True,ok,True,5,True,False,False,online
+qwant images,catalog,qwant,images|web,True,ok,True,5,True,True,False,online
 pinterest,catalog,pinterest,general,False,ok,True,0,False,False,False,online
 wikicommons.images,catalog,wikicommons,images,False,ok,True,0,False,False,False,online
 public domain image archive,catalog,public_domain_image_archive,general,True,ok,True,0,False,False,False,online

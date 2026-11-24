@@ -302,7 +302,7 @@
           "wikidata_id": "Q182496"
         },
         "engine_type": "online",
-        "language_support": false,
+        "language_support": true,
         "max_page": 0,
         "paging": false,
         "safesearch": true,
@@ -328,7 +328,7 @@
           "wikidata_id": "Q182496"
         },
         "engine_type": "online",
-        "language_support": false,
+        "language_support": true,
         "max_page": 0,
         "paging": true,
         "safesearch": true,
@@ -353,7 +353,7 @@
           "wikidata_id": "Q22906900"
         },
         "engine_type": "online",
-        "language_support": false,
+        "language_support": true,
         "max_page": 10,
         "paging": false,
         "safesearch": true,
@@ -608,7 +608,7 @@
           "wikidata_id": "Q14657870"
         },
         "engine_type": "online",
-        "language_support": false,
+        "language_support": true,
         "max_page": 5,
         "paging": true,
         "safesearch": true,
@@ -746,7 +746,7 @@
           "wikidata_id": "Q52"
         },
         "engine_type": "online",
-        "language_support": true,
+        "language_support": false,
         "max_page": 0,
         "paging": false,
         "safesearch": false,
