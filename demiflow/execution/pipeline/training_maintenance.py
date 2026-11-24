@@ -8,7 +8,7 @@ from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.pipeline.run_context import RunAction, stopped_publication_context
 from demiflow.execution.journal.run_reader import read_run
 from demiflow.execution.journal.training_index import FitConflict, TrainingIndex
-from demiflow.execution.training.runtime import FitRuntime
+from demiflow.execution.action_driver.training_runtime import FitRuntime
 
 
 def reconcile_stopped_fits(journal, *, expected_attempt, expected_revision, deadline,
@@ -21,7 +21,7 @@ def reconcile_stopped_fits(journal, *, expected_attempt, expected_revision, dead
     with stopped_publication_context(journal, expected_attempt=expected_attempt, expected_revision=expected_revision,
                                      deadline=deadline, confirm_stopped=confirm_stopped) as run:
         if deployment is None:
-            from demiflow.execution.training.deployment import load_training_deployment
+            from demiflow.execution.pipeline.training_deployment import load_training_deployment
             location = deployment_ref['path'] if deployment_ref else os.environ.get('DEMIFLOW_TRAINING_DEPLOYMENT')
             if not location:
                 raise FitConflict("Stopped fit requires its original project deployment")

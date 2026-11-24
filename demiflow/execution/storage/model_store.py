@@ -1,5 +1,6 @@
 """Verified, immutable project-owned model objects, outside the run artifact store."""
 from __future__ import annotations
+from demiflow.execution.contracts.training import validate_result
 
 from contextlib import contextmanager
 from dataclasses import replace
@@ -13,7 +14,7 @@ import stat
 import time
 from urllib.parse import urlsplit, unquote
 
-from ..contracts.training import FitResult, ProjectObject
+from demiflow.execution.contracts.training import FitResult, ProjectObject
 from demiflow.execution.contracts.recovery_contract import MAX_DOCUMENT_BYTES, RecoveryContractError, document
 from demiflow.execution.journal.training_index import FitConflict
 
@@ -223,12 +224,11 @@ class ModelStore:
         return result
 
 
-def validate_result(result, request):
-    if (type(result) is not FitResult or result.instance_id != request.instance_id
-            or result.fit_key != request.fit_key
-            or any(s.model_format != request.semantics['model_format'] for s in result.snapshots)):
-        raise RecoveryContractError("Training provider returned an incompatible instance, recipe or model")
-    result.select(request.semantics['save_steps'])
-    budget = request.semantics['budget'].get('optimizer_updates')
-    if budget is not None and result.final_step != budget:
-        raise RecoveryContractError("Training ended at a different optimizer update than requested")
+def read_metadata(path, limit):
+    if path.resolve(strict=True) != path:
+        raise ValueError("Job metadata must be a direct file")
+    with path.open('rb') as stream:
+        raw = stream.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("Job metadata exceeds its admitted byte limit")
+    return raw

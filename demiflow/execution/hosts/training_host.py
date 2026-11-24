@@ -14,7 +14,7 @@ from demiflow.execution.scheduler.native_limits import admission_timeout_ms
 from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from demiflow.execution.scheduler.job import JobAllocation
 from demiflow.execution.storage.state_artifacts import atomic_bytes
-from demiflow.execution.training.managed_bootstrap import read_metadata
+from demiflow.execution.storage.model_store import read_metadata
 from demiflow.execution.journal.training_index import TrainingIndex
 
 
@@ -116,7 +116,7 @@ class ManagedFitHost:
         if inspect_source:
             authority['inspection_key'] = key
         self.run.journal.bind_source(self.run.fence, 'fit-resource-' + key, authority)
-        module = 'demiflow.execution.training.managed_bootstrap'
+        module = 'demiflow.execution.hosts.training_bootstrap'
         spec = WorkerLaunchSpec({'launch': {'digest': digest, 'location': str(location)}}, module,
                         (str(executable), '-B', '-m', module, str(location), digest),
                         'training', {}, RESOURCE_PROTOCOL_VERSION)

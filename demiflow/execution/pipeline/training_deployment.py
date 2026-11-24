@@ -1,12 +1,12 @@
 """Training services selected by the run's deployment, outside the sealed recipe."""
 from dataclasses import dataclass
-from importlib import import_module
+
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 
-from ..contracts.training import FitBinding, FitJobProvider
+from demiflow.execution.contracts.training import FitBinding, FitJobProvider
 from demiflow.execution.contracts.recovery_contract import document, identifier, identity
 from demiflow.execution.journal.training_index import TrainingIndex
 
@@ -94,8 +94,6 @@ def load_training_deployment(location, *, project_root=None, expected_digest=Non
     if 'provider_factory' in value:
         if binding.hosting != 'ProviderManaged':
             raise ValueError("A provider factory requires ProviderManaged hosting")
-        module, separator, name = value['provider_factory'].partition(':')
-        if not separator or not all(part.isidentifier() for part in module.split('.')) or not name.isidentifier():
-            raise ValueError("Invalid deployment provider factory")
-        provider = getattr(import_module(module), name)(binding)
+        from demiflow.execution.hosts.training_provider_io import instantiate_provider
+        provider = instantiate_provider(value['provider_factory'], binding)
     return TrainingDeployment(value['project_id'], binding, provider)

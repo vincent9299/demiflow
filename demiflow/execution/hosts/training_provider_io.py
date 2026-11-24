@@ -1,4 +1,6 @@
 """Deadline-aware transport calls; only the driver may mutate durable fit state."""
+
+from importlib import import_module
 from concurrent.futures import Future
 import inspect
 import threading
@@ -64,3 +66,10 @@ class ProviderCalls:
                 raise TimeoutError("Training provider operation exceeded its deadline")
             yield
         return completion.result()
+
+
+def instantiate_provider(factory, binding):
+    module, separator, name = factory.partition(':')
+    if not separator or not all(part.isidentifier() for part in module.split('.')) or not name.isidentifier():
+        raise ValueError("Invalid deployment provider factory")
+    return getattr(import_module(module), name)(binding)

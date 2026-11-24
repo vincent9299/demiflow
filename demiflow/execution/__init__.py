@@ -2,6 +2,7 @@
 from importlib import import_module as _import_module
 
 _EXPORTS = {
+    "prepare_candidate_environment": (".hosts.python_environment", "prepare_candidate_environment"),
     "PipelineBundleRef": (".pipeline.package_loader", "PipelineBundleRef"),
     "PipelineExecutionEnvironment": (".hosts.python_environment", "PipelineExecutionEnvironment"),
     **{name: (".contracts", name) for name in (
@@ -61,15 +62,5 @@ __all__ = [
     "PipelineRunObservation", "PipelineRunObserver", "PipelineRunReadiness", "PipelineRunRequest", "PipelineRunResult", "PipelineExecutionTarget", "PlatformRuntimeIdentity", "inspect_pipeline_run_readiness", "backend_for",
 ]
 
-
-def prepare_candidate_environment(execution_environment, bundle_root, *, deadline_at, cancellation=None, resolution=None):
-    """Prepare the exact local Candidate Python environment for trusted callers."""
-    from demiflow.execution.seal.requirements import read_candidate_requirements
-    from demiflow.execution.hosts.python_environment import prepare_local_environment
-    return prepare_local_environment(
-        execution_environment, read_candidate_requirements(bundle_root),
-        deadline_at=deadline_at, cancellation=cancellation,
-        resolution=resolution,
-    )
 
 __all__.append("prepare_candidate_environment")

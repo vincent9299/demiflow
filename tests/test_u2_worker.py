@@ -25,7 +25,7 @@ from demiflow.execution.contracts.errors import ProtocolError
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext, run_scope, current_run
 from demiflow.execution.storage.state_artifacts import StateArtifacts
-from demiflow.execution.worker.authority import WorkerAuthority
+from demiflow.execution.worker.runtime import WorkerAuthority
 from demiflow.execution.worker.bootstrap import recv_message, send_message, spawn_local_worker
 from demiflow.execution.worker.runtime import WorkerRuntime
 
@@ -102,8 +102,6 @@ def _assignment(env, *, plan_revision=0, expected=0):
 def _verify(env, rt, caps=("cpu-map",), **over):
     return _handle(env, rt, "VerifyArtifactAndCapabilities",
                    {"artifact_manifest_ref": env.mref, "required_capabilities": list(caps)}, **over)
-
-
 def _restore(env, rt, state_refs=()):
     return _handle(env, rt, "Restore", {"assignment_ref": uuid.uuid4().hex,
                                         "restore_point": None, "state_refs": list(state_refs)})

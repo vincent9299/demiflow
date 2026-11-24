@@ -6,9 +6,9 @@ from ..contracts.dataflow_errors import DataflowError
 from ..contracts.training import FitRequest
 from demiflow.execution.contracts.recovery_contract import identity
 from ..seal.plan import load_sealed_dataflow
-from ..training.deployment import bind_action_deployment, resolve_training_deployment
-from ..training.inputs import fix_input
-from ..training.runtime import FitRuntime, confirm_table_consumption, consumed_model_digest, read_consumed_fit, read_parent
+from demiflow.execution.pipeline.training_deployment import bind_action_deployment, resolve_training_deployment
+from demiflow.execution.action_driver.training_runtime import FitRuntime
+from demiflow.execution.outputs.training_publication import confirm_table_consumption, consumed_model_digest, read_consumed_fit, read_parent
 
 
 class FitDependencies:
@@ -163,3 +163,17 @@ class FitDependencies:
     def release(self):
         for key in self.results:
             self.controls[key].release_active()
+
+
+def fix_input(occurrence, columns, *, graph, physical, action, image, services, check_stop, media, media_roots):
+    from demiflow.execution.sources.training_inputs import source_proof, direct_training_input, prove_lance
+    from demiflow.execution.checkpoint.fit_inputs import publish_training_input
+    source = next((s for s in physical.sources if s.source_id == occurrence), None)
+    proof = source_proof(graph, physical, occurrence)
+    if source is not None:
+        return direct_training_input(source, columns, proof=proof, bounds=services.bounds,
+            check_stop=check_stop, media=media, media_roots=media_roots)
+    uri, version = publish_training_input(occurrence, proof, action=action, image=image,
+        services=services, check_stop=check_stop)
+    return prove_lance(uri, version, columns, source_digest=proof, bounds=services.bounds,
+        check_stop=check_stop, media=media, media_roots=media_roots)

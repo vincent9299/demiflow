@@ -1,17 +1,17 @@
 """Fix a training input to an ordered, versioned Lance dataset before claiming a job."""
 import hashlib
-import json
+
 from pathlib import Path
 
-from ..contracts.dataflow import thaw_record_value
-from ..contracts.dataflow_errors import DataflowError
-from ..contracts.training import FixedDatasetRef
-from demiflow.execution.outputs.sinks import publication_blocks
+from demiflow.execution.contracts.dataflow import thaw_record_value
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.training import FixedDatasetRef
+
 from demiflow.execution.contracts.recovery_contract import identity
-from ...lance.storage import open_lance_dataset
+from demiflow.lance.storage import open_lance_dataset
 
 
-def _source_proof(graph, physical, occurrence):
+def source_proof(graph, physical, occurrence):
     sources = {s.source_id: s for s in physical.sources}
     parents = {}
     for edge in graph.edges:
@@ -47,7 +47,7 @@ def _verify_media(value, *, file_limit, roots, check_stop):
                 raise ValueError("Training media is outside its authorized content directory")
             digest = hashlib.sha256()
             size = 0
-            from .store import open_regular_file
+            from demiflow.execution.storage.model_store import open_regular_file
             with open_regular_file(path) as stream:
                 while chunk := stream.read(min(file_limit, 1024 * 1024)):
                     check_stop()
@@ -68,7 +68,7 @@ def prove_lance(uri, version, columns, *, source_digest, bounds, check_stop, med
     table = open_lance_dataset(uri, version, storage_options)
     if version != table.version:
         raise ValueError("Lance training input changed version")
-    from ...data.training_schema import validate_columns
+    from demiflow.data.training_schema import validate_columns
     validate_columns(table.schema, columns)
     names = table.schema.names
     roots = tuple(Path(root) for root in media_roots)
@@ -100,61 +100,12 @@ def prove_lance(uri, version, columns, *, source_digest, bounds, check_stop, med
                            count, source_digest)
 
 
-def fix_input(occurrence, columns, *, graph, physical, action, image, services, check_stop, media, media_roots):
-    source = next((s for s in physical.sources if s.source_id == occurrence), None)
-    proof = _source_proof(graph, physical, occurrence)
-    if source is not None:
-        fixed = source.immutable_identity
-        query = fixed['query']
-        if (fixed['kind'] != 'LanceSource' or query['kind'] != 'scan' or query['columns']
-                or query['filter'] or query['limit'] is not None or query.get('projection')):
-            raise ValueError("Only a complete versioned Lance scan can supply a direct training input")
-        return prove_lance(query['uri'], fixed['version'], columns, source_digest=proof,
-                           bounds=services.bounds, check_stop=check_stop, media=media, media_roots=media_roots,
-                           storage_options=tuple(query['storage_options'].items()))
-
-    if image is None or occurrence not in image.confirmed_sinks:
-        raise ValueError("Training input requires a confirmed row publication")
-    ref = image.confirmed_sinks[occurrence]
-    raw = b''.join(services.store.read(ref, max_bytes=services.bounds.max_control_bytes))
-    publication = json.loads(raw)
-    if publication['sink_id'] != occurrence:
-        raise ValueError("Training input publication belongs to a different occurrence")
-    root = action.context.directory / 'materializations' / 'fixed-datasets'
-    root.mkdir(parents=True, exist_ok=True)
-    destination = root / occurrence
-    from demiflow.execution.checkpoint.commit import CommitCoordinator
-    from demiflow.execution.contracts.recovery_contract import SourcePosition
-    from demiflow.execution.pipeline.run_context import RunAction
-    from demiflow.execution.outputs.lance_sink import LanceSink
-    from ...lance.model import LanceWriteSpec
-    scope = identity(['training_input', action.action_id, occurrence])
-    # The row receipt can be carried into later cuts. Its ordered partition
-    # contents and source versions identify the original publication.
-    position = SourcePosition(identity([proof, publication['manifest']['partitions']]), 1)
-    declaration = {'kind': 'fixed_dataset', 'input': occurrence, 'target': str(destination),
-                   'source': position.source_id}
-    run = action.context
-    run.journal.bind_commit_scope(run.fence, scope, action.action_id, declaration)
-    child = RunAction(run, scope, declaration)
-    sink = LanceSink(child, LanceWriteSpec(str(destination), mode='create'))
-    coordinator = CommitCoordinator(child)
-    fact = run.journal.latest_execution_commit(scope)
-    if fact and fact['status'] != 'pending':
-        coordinator.recover({'lance': sink})
-    else:
-        def blocks():
-            for block in publication_blocks(publication['manifest'], store=services.store,
-                        bounds=services.bounds, batch_rows=1, publication_workspace=True,
-                        publication_metadata=True):
-                check_stop()
-                yield block
-        coordinator.commit(1, outputs={'lance': (sink, blocks())}, position=position)
-    fact = run.journal.latest_execution_commit(scope)
-    if fact['status'] != 'acked' or fact['intent']['position'] != position.to_dict():
-        raise ValueError("Fixed training input lacks its original commit receipt")
-    receipt = fact['receipts']['lance']['data']
-    if receipt['uri'] != str(destination):
-        raise ValueError("Fixed training input receipt belongs to another table")
-    return prove_lance(str(destination), receipt['committed_version'], columns, source_digest=proof,
-                       bounds=services.bounds, check_stop=check_stop, media=media, media_roots=media_roots)
+def direct_training_input(source, columns, *, proof, bounds, check_stop, media, media_roots):
+    fixed = source.immutable_identity
+    query = fixed['query']
+    if (fixed['kind'] != 'LanceSource' or query['kind'] != 'scan' or query['columns']
+            or query['filter'] or query['limit'] is not None or query.get('projection')):
+        raise ValueError("Only a complete versioned Lance scan can supply a direct training input")
+    return prove_lance(query['uri'], fixed['version'], columns, source_digest=proof,
+                       bounds=bounds, check_stop=check_stop, media=media, media_roots=media_roots,
+                       storage_options=tuple(query['storage_options'].items()))

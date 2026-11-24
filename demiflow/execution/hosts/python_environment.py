@@ -294,8 +294,6 @@ def _terminate(process):
 
 
 __all__ = ["inspect_local_environment_cache", "prepare_local_environment", "uses_embedded_current_runtime"]
-
-
 @dataclass(frozen=True)
 class PipelineExecutionEnvironment:
     runtime: PlatformRuntimeIdentity
@@ -349,3 +347,13 @@ class PipelineExecutionEnvironment:
             payload, sort_keys=True, separators=(",", ":"),
         ).encode()
         return hashlib.sha256(encoded).hexdigest()
+
+
+def prepare_candidate_environment(execution_environment, bundle_root, *, deadline_at, cancellation=None, resolution=None):
+    """Prepare the exact local Candidate Python environment for trusted callers."""
+    from demiflow.execution.seal.requirements import read_candidate_requirements
+    return prepare_local_environment(
+        execution_environment, read_candidate_requirements(bundle_root),
+        deadline_at=deadline_at, cancellation=cancellation,
+        resolution=resolution,
+    )
