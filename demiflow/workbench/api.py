@@ -753,6 +753,10 @@ class Handler(BaseHTTPRequestHandler):
                     value['runs_enabled'] = permissions['run_submit']
                     value['run_permissions'] = {k:permissions[k] for k in console.PERMISSIONS}
                     value['capabilities'] = {k:permissions[k] for k in console.CAPABILITIES}
+                    key = self.path.split('/')[3] if self.path.startswith('/api/workspaces/') else next(iter(self.server.single['projects']))
+                    proj_item = self.server.inventory()['projects'].get(key, {})
+                    py_cfg = proj_item.get('python')
+                    value['project_python'] = py_cfg.strip() if isinstance(py_cfg, str) and py_cfg.strip() else None
                     value['analysis_connected'] = self.server.analysis is not None
                     value['native_notebook'] = self.server.notebooks is not None
                     value['analysis_execution_profile']=self.server.analysis_execution_profile()

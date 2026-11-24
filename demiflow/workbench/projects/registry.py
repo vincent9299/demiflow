@@ -29,15 +29,25 @@ def validate_python(value):
         return value
     if type(value) is not str or len(value.encode('utf-8')) > 2048 or any(ord(c) < 32 for c in value):
         raise ForgeError('Python 路径格式不正确。', code='invalid_request')
-    p = Path(value)
-    if not p.is_absolute() or str(p) != value or '..' in p.parts:
+    raw = value.strip()
+    if len(raw) > 1:
+        raw = raw.rstrip('/')
+    p = Path(raw)
+    if not p.is_absolute() or str(p) != raw or '..' in p.parts:
         raise ForgeError('Python 路径必须是规范的绝对路径。', code='invalid_request')
+    if p.is_dir():
+        for rel in ('bin/python', 'bin/python3', 'python', 'python3'):
+            candidate = p / rel
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        raise ForgeError('该目录下未找到可执行的 bin/python 或 bin/python3：' + raw, code='invalid_request')
     if not p.is_file() or not os.access(p, os.X_OK):
-        raise ForgeError('指定的 Python 解释器不存在或不可执行：' + value, code='invalid_request')
-    return value
+        raise ForgeError('指定的 Python 解释器不存在或不可执行：' + raw, code='invalid_request')
+    return raw
 
 
 PROTECTED_SANDBOX_ROOTS = {'.git', '.forge', 'flows', 'operators', 'prompts', 'data_tools', 'tests', 'src', 'lib'}
+DEFAULT_NOTEBOOK_WRITE_PATHS = ['data', 'notebooks']
 
 
 def validate_notebook_sandbox(value):
@@ -60,8 +70,8 @@ def validate_notebook_sandbox(value):
         parts = Path(rel).parts
         if Path(item).is_absolute() or not parts or '..' in parts or '.' in parts:
             raise ForgeError('允许写入目录必须是项目内的相对子目录路径：' + item, code='invalid_request')
-        if parts[0] in PROTECTED_SANDBOX_ROOTS or rel == 'notebooks' or rel.endswith('.ipynb'):
-            raise ForgeError('不允许向受保护源码或 Notebook 根目录开放内核写入：' + item, code='invalid_request')
+        if parts[0] in PROTECTED_SANDBOX_ROOTS or rel.endswith('.ipynb'):
+            raise ForgeError('不允许向受保护源码目录开放内核写入：' + item, code='invalid_request')
         norm = '/'.join(parts)
         if norm not in cleaned:
             cleaned.append(norm)
@@ -71,8 +81,8 @@ def validate_notebook_sandbox(value):
 def notebook_sandbox(item):
     raw = item.get('notebook_sandbox') if isinstance(item, dict) else None
     if isinstance(raw, dict):
-        return {'mode': raw.get('mode', 'readonly'), 'write_paths': list(raw.get('write_paths', []))}
-    return {'mode': 'readonly', 'write_paths': []}
+        return {'mode': raw.get('mode', 'off'), 'write_paths': list(raw.get('write_paths', []))}
+    return {'mode': 'off', 'write_paths': []}
 
 
 def load_registry(path):

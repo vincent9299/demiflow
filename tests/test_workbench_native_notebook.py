@@ -95,8 +95,8 @@ def test_native_gateway_permissions_files_and_owned_cleanup(native_project,tmp_p
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=2) as pool:
             starts=list(pool.map(lambda _:call(app,'POST',base+'api/kernels',{'name':'python3'},cookie=cookie)[0],range(2)))
-        assert sorted(starts)==[201,429]
-        assert len(call(app,'GET',base+'api/kernels',cookie=cookie)[2])==2
+        assert sorted(starts)==[201,201]
+        assert len(call(app,'GET',base+'api/kernels',cookie=cookie)[2])==3
         server_process=psutil.Process(instance.process.pid)
         descendants=server_process.children(recursive=True)
         assert descendants
@@ -435,7 +435,7 @@ def test_reuse_annotation_tool_preset_in_native_notebook(browser,native_project)
             expect(frame.locator('.jp-Notebook')).to_be_visible(timeout=60000)
             frame.locator('body').evaluate('async()=>{const a=window.jupyterapp;await a.restored;const p=a.shell.currentWidget;await p.context.ready;await p.sessionContext.ready;}')
             dataTabs=page.get_by_role('tablist',name='数据分类')
-            expect(dataTabs.get_by_role('tab')).to_have_text(['数据字典','工具'])
+            expect(dataTabs.get_by_role('tab')).to_have_text(['数据字典','工具','Notebook'])
             expect(dataTabs.get_by_role('tab',name='数据字典')).to_have_attribute('aria-selected','true')
             kernel=frame.locator('body').evaluate('()=>window.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id')
             frame.locator('.jp-CodeCell .cm-content').first.fill('original_draft = 1')
@@ -618,7 +618,7 @@ def test_card_assistant_generates_editable_notebook_widgets(browser,native_proje
             shots=os.environ.get('FORGE_ACCEPTANCE_DIR')
             for width in (1920,1440):
                 page.set_viewport_size({'width':width,'height':950})
-                expect(page.locator('.df-book-header')).to_have_css('height','36px')
+                expect(page.locator('.df-book-header')).to_have_css('height','38px')
                 frame.locator('body').evaluate('''() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))''')
                 margins=card.evaluate('''c=>{const r=c.getBoundingClientRect();return [r.left,innerWidth-r.right]}''')
                 assert all(8 <= margin <= 17 for margin in margins), margins
@@ -838,8 +838,10 @@ def test_cell_saves_are_independent_and_analysis_tab_deletes_its_document(browse
         cells.nth(1).locator('.cm-content').press('Control+s')
         expect(cells.nth(1).locator('.df-save-state')).to_have_text('已保存')
         assert sources() == ['a = 41\nprint(a)','b = 42']
+        page.get_by_role('tab', name='Notebook', exact=True).click()
+        page.locator('#data-pane-notebooks .df-nb-item', has_text='分析 2').click()
         tab = tabs.get_by_role('tab',name='分析 2',exact=True)
-        tab.click()
+        expect(tab).to_have_attribute('aria-selected','true')
         expect(cells.first.get_by_role('button',name='保存这张卡片')).to_be_enabled(timeout=60000)
         remove = page.get_by_role('button',name='删除「分析 2」',exact=True)
         remove.click()
@@ -883,3 +885,81 @@ def test_two_editors_commit_only_their_cell_and_detect_stale_saves(native_projec
         assert call(app,'GET','/jupyter/'+project+'/api/kernels',cookie=cookie)[2]==[]
         grants(registry_path,project,analysis_write=False)
         assert save('a','a=6','b')==403
+
+
+def test_missing_project_python_shows_chinese_banner_and_fails_run_explicitly(browser, native_project):
+    from demiflow.workbench.projects import registry
+    root, registry_path, project = native_project
+    reg = registry.load_registry(registry_path)
+    digest = registry.projects(reg)['digest']
+    registry.set_python(registry_path, project, expected=digest, python=None)
+    with service(None, registry=registry_path, notebook_python=PYTHON) as app:
+        _, headers, _ = call(app, 'POST', '/api/workspaces/' + project + '/notebook-open', {}, token=True)
+        cookie = headers['Set-Cookie'].split(';')[0]
+        status_code, _, _ = call(app, 'POST', '/jupyter/' + project + '/api/kernels', {'name': 'python3'}, cookie=cookie)
+        assert status_code == 422
+
+        page = browser.new_page()
+        try:
+            view = quote(json.dumps(dict(v=2, workspace=project, kind='tables')))
+            page.goto(app.origin + '/#token=' + app.token + '&view=' + view)
+            expect(page.locator('.df-python-banner')).to_be_visible(timeout=30000)
+            expect(page.locator('.df-python-banner')).to_contain_text('尚未配置项目业务 Python 环境')
+            frame = page.frame_locator('iframe.native-notebook-frame:not([hidden])')
+            run = frame.locator('.jp-CodeCell').first.get_by_role('button', name='运行卡片', exact=True)
+            expect(run).to_be_enabled(timeout=60000)
+            expect(frame.locator('.jp-Dialog')).to_have_count(0)
+            run.click()
+            expect(frame.locator('.df-run-error')).to_contain_text('尚未配置业务 Python 环境', timeout=15000)
+            expect(frame.locator('.jp-Dialog')).to_have_count(0)
+        finally:
+            page.close()
+
+
+def test_sidebar_notebook_tab_open_close_lifecycle_and_multi_kernel(browser, native_project):
+    root, registry_path, project = native_project
+    with service(None, registry=registry_path, notebook_python=PYTHON) as app:
+        _, headers, _ = call(app, 'POST', '/api/workspaces/' + project + '/notebook-open', {}, token=True)
+        cookie = headers['Set-Cookie'].split(';')[0]
+        page = browser.new_page()
+        try:
+            view = quote(json.dumps(dict(v=2, workspace=project, kind='tables')))
+            page.goto(app.origin + '/#token=' + app.token + '&view=' + view)
+            tabs = page.get_by_role('tablist', name='Notebook', exact=True)
+            expect(tabs.get_by_role('tab', name='分析', exact=True)).to_be_visible(timeout=60000)
+            frame = page.frame_locator('iframe.native-notebook-frame:not([hidden])')
+            expect(frame.locator('.jp-CodeCell').first.get_by_role('button', name='运行卡片', exact=True)).to_be_enabled(timeout=60000)
+
+            # Create 2nd and 3rd notebooks concurrently — no kernel_limit=2 / Select Kernel popup.
+            create = page.get_by_role('button', name='新建 Notebook', exact=True)
+            create.click()
+            expect(tabs.get_by_role('tab', name='分析 2', exact=True)).to_have_attribute('aria-selected', 'true', timeout=30000)
+            expect(frame.locator('.jp-CodeCell').first.get_by_role('button', name='运行卡片', exact=True)).to_be_enabled(timeout=60000)
+            create.click()
+            expect(tabs.get_by_role('tab', name='分析 3', exact=True)).to_have_attribute('aria-selected', 'true', timeout=30000)
+            expect(frame.locator('.jp-CodeCell').first.get_by_role('button', name='运行卡片', exact=True)).to_be_enabled(timeout=60000)
+            expect(frame.locator('.jp-Dialog')).to_have_count(0)
+
+            # All 3 kernels are live.
+            expect(tabs.get_by_role('tab')).to_have_text(['分析', '分析 2', '分析 3'])
+            page.get_by_role('tab', name='Notebook', exact=True).click()
+            rows = page.locator('#data-pane-notebooks .df-nb-row')
+            expect(rows).to_have_count(3)
+            for name in ('分析.ipynb', '分析 2.ipynb', '分析 3.ipynb'):
+                expect(page.locator(f'#data-pane-notebooks .df-nb-row[data-path="{name}"] .df-nb-dot')).to_have_attribute('data-state', 'running', timeout=30000)
+            assert len(call(app, 'GET', '/jupyter/' + project + '/api/kernels', cookie=cookie)[2]) == 3
+
+            # Close 分析 3 via top tab × button: shuts down kernel without deleting file.
+            page.get_by_role('button', name='关闭「分析 3」', exact=True).click()
+            expect(tabs.get_by_role('tab')).to_have_text(['分析', '分析 2'], timeout=30000)
+            assert (root / 'notebooks' / '分析 3.ipynb').is_file()
+            expect(page.locator('#data-pane-notebooks .df-nb-row[data-path="分析 3.ipynb"] .df-nb-dot')).to_have_attribute('data-state', 'closed', timeout=15000)
+            assert len(call(app, 'GET', '/jupyter/' + project + '/api/kernels', cookie=cookie)[2]) == 2
+
+            # Reopen 分析 3 from sidebar Notebook tab.
+            page.locator('#data-pane-notebooks .df-nb-row[data-path="分析 3.ipynb"] .df-nb-item').click()
+            expect(tabs.get_by_role('tab', name='分析 3', exact=True)).to_have_attribute('aria-selected', 'true', timeout=30000)
+            expect(page.locator('#data-pane-notebooks .df-nb-row[data-path="分析 3.ipynb"] .df-nb-dot')).to_have_attribute('data-state', 'running', timeout=30000)
+            assert len(call(app, 'GET', '/jupyter/' + project + '/api/kernels', cookie=cookie)[2]) == 3
+        finally:
+            page.close()

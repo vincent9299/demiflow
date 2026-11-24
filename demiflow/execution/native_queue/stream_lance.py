@@ -210,7 +210,8 @@ class StreamLanceWriter:
                         if batch.nbytes > self.max_row_bytes:
                             raise ValueError('saved row exceeds max_row_bytes')
                         found.extend(batch.to_pylist())
-                    expected = pa.Table.from_pylist([row], schema=self.schema).to_pylist()
+                    from demiflow.execution.outputs.batch_conversion import table_from_pylist
+                    expected = table_from_pylist([row], self.schema).to_pylist()
                     if _canonical(found) != _canonical(expected):
                         raise ValueError('stream append key has conflicting saved content')
             fresh = [(k, d, r) for k, d, r, seen in zip(keys, digests, projected, known) if not seen]
@@ -223,8 +224,9 @@ class StreamLanceWriter:
             return self.forward(rows, selected)
         # Reserve index capacity before the external commit. Any subsequent
         # failure invalidates this derived index; committed rows remain in Lance.
+        from demiflow.execution.outputs.batch_conversion import table_from_pylist
+        table = table_from_pylist(projected, self.schema)
         self._remember(digests)
-        table = pa.Table.from_pylist(projected, schema=self.schema)
         base = self.version
         if self.checkpoint is not None:
             self.checkpoint.begin(self.stage, self.uri, base, fields, table.to_pylist(), self.max_row_bytes)
@@ -432,11 +434,13 @@ class _NativeWriter(StreamLanceWriter):
                         batch_size=1,batch_readahead=1,fragment_readahead=1).to_batches():
                     if batch.nbytes>self.max_row_bytes:raise ValueError('saved row exceeds max_row_bytes')
                     found.extend(batch.to_pylist())
-                if _canonical(found)!=_canonical(pa.Table.from_pylist([row],schema=self.schema).to_pylist()):
+                from demiflow.execution.outputs.batch_conversion import table_from_pylist
+                if _canonical(found)!=_canonical(table_from_pylist([row],self.schema).to_pylist()):
                     raise ValueError('stream append key has conflicting saved content')
             else:fresh.append(row);additions.append(digest);indices.append(input_index)
         if self.rows+len(fresh)>self.max_rows:raise ValueError('stream snapshot exceeds max_rows')
-        table=pa.Table.from_pylist(fresh,schema=self.schema)
+        from demiflow.execution.outputs.batch_conversion import table_from_pylist
+        table=table_from_pylist(fresh,self.schema)
         if input_bytes+table.get_total_buffer_size()>self.bounds.max_batch_bytes:
             raise DataflowError('BUDGET_EXCEEDED','Stream writer Python rows and Arrow coexistence exceed native batch budget')
         self._remember(additions)  # Reserve derived index capacity before publication.

@@ -133,7 +133,7 @@ async function open(panel, project, base) {
     clearTimeout(timer);window.removeEventListener('pagehide',persistDrafts);
     openPanels.delete(panel);
   });
-  return {changes,isDraft,persistDrafts,
+  return {changes,isDraft,hasDrafts:()=>cells().some(isDraft),persistDrafts,
     forget(){clearTimeout(timer);sessionStorage.removeItem(cacheKey);},
     status(cell){return errors.get(cell.id) || (pending.has(cell.id)?'正在保存…':isDraft(cell)?'草稿':'已保存');},
     async save(cell){

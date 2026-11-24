@@ -61,11 +61,13 @@ def required_environment(
 
 
 class OpenAICompatibleOperatorLLMClient:
-    def __init__(self, model: PromptModel) -> None:
+    def __init__(self, model: PromptModel, *, temperature=None) -> None:
         if model.transport != "openai_compatible":
             raise PromptProviderUnavailableError(
                 f"unsupported Operator LLM transport: {model.transport}"
             )
+        from .http_options import validate_temperature
+        self.temperature = validate_temperature(temperature)
         names = tuple(name for name in (model.base_url_env, model.api_key_env) if name)
         values = required_environment(names)
         self.base_url = (model.base_url or values[model.base_url_env]).rstrip("/")
@@ -87,7 +89,7 @@ class OpenAICompatibleOperatorLLMClient:
                             "model": request.model,
                             "messages": request_messages(request),
                             **({'response_format': {'type': 'text'}} if request.messages is not None and request.response_format == 'text' else {}),
-                            "temperature": 0,
+                            **({"temperature": self.temperature} if self.temperature is not None else {}),
                         },
                         timeout=self.timeout_seconds,
                     )
@@ -114,11 +116,13 @@ class OpenAICompatibleOperatorLLMClient:
 
 
 class AzureOpenAIOperatorLLMClient:
-    def __init__(self, model: PromptModel) -> None:
+    def __init__(self, model: PromptModel, *, temperature=None) -> None:
         if model.transport != "azure_openai":
             raise PromptProviderUnavailableError(
                 f"unsupported Operator LLM transport: {model.transport}"
             )
+        from .http_options import validate_temperature
+        self.temperature = validate_temperature(temperature)
         names = tuple(name for name in (model.base_url_env, model.api_key_env) if name)
         values = required_environment(names)
         self.model = model
@@ -146,7 +150,7 @@ class AzureOpenAIOperatorLLMClient:
                         model=request.model,
                         messages=request_messages(request),
                         **({'response_format': {'type': 'text'}} if request.messages is not None and request.response_format == 'text' else {}),
-                        temperature=1.0,
+                        **({"temperature": self.temperature} if self.temperature is not None else {}),
                     )
                     break
                 except Exception:
@@ -319,17 +323,17 @@ class AsyncOperatorLLMClient:
         key=values.get(model.api_key_env, '')
         if model.transport=='azure_openai':
             self.url=f'{self.base}/openai/deployments/{quote(model.name,safe="")}/chat/completions'
-            self.params={'api-version':model.api_version};headers={'api-key':key};self.temperature=1.0
+            self.params={'api-version':model.api_version};headers={'api-key':key}
         elif model.transport=='openai_compatible':
             self.url=f'{self.base}/chat/completions';self.params=None
-            headers={'Authorization':f'Bearer {key}'} if key else {};self.temperature=0
+            headers={'Authorization':f'Bearer {key}'} if key else {}
         elif model.transport=='systemone':
             if self.options.get('stream'):
                 raise ValueError('SystemOne requires stream=False')
             self.url=f'{self.base}/systemone';self.params=None
-            headers={'Authorization':f'Bearer {key}'} if key else {};self.temperature=0
+            headers={'Authorization':f'Bearer {key}'} if key else {}
         elif model.transport == 'diffusers':
-            self.url='diffusers';self.params=None;headers={};self.temperature=0
+            self.url='diffusers';self.params=None;headers={}
         else:raise PromptProviderUnavailableError(f'unsupported Operator LLM transport: {model.transport}')
         self._headers = headers
         if model.provider:self._headers['Accept-Encoding']='identity'
@@ -381,7 +385,7 @@ class AsyncOperatorLLMClient:
             payload = request_payload(request)
         else:
             payload={'model':request.model,'messages':request_messages(request),
-                'temperature':self.temperature,**self.request_options}
+                **self.request_options}
         if request.response_format == 'text':
             if request.messages is not None:
                 payload['response_format'] = {'type': 'text'}
@@ -842,6 +846,9 @@ def create_async_operator_llm_client(model: PromptModel, options=None, max_reque
     validate_prompt_options(options)
     if options and 'codex_agent' in options:
         raise ValueError('codex_agent transport requires agentmap_async with runtime=codex')
+    if options and 'cli' in options:
+        from .cli_exec import create_cli_prompt_client
+        return create_cli_prompt_client(model, options, max_requests, native_journal=native_journal)
     if options and 'codex_exec' in options:
         from .codex_exec import CodexExecPromptClient
         return CodexExecPromptClient(model, options, max_requests, native_journal=native_journal)

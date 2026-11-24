@@ -5,11 +5,47 @@ import io
 from demiflow.execution.contracts.record_codec import is_lance_blob_type, writer_metadata_bytes as _writer_metadata, writer_type_bytes as _writer_type
 
 
+def _first_incompatible_row(values, arrow_type):
+    import pyarrow as pa
+    for index, value in enumerate(values):
+        try:
+            pa.array([value], type=arrow_type)
+        except (pa.ArrowTypeError, pa.ArrowInvalid):
+            return index, type(value).__name__
+    return None, None
+
+
+def _column_schema_error(field, values, exc):
+    row_index, actual_type = _first_incompatible_row(values, field.type)
+    got = f', got {actual_type}' if actual_type is not None else ''
+    loc = f' at row {row_index}' if row_index is not None else ''
+    return ValueError(
+        f"Lance schema mismatch on column '{field.name}': "
+        f"expected {field.type}{got}{loc} ({exc})"
+    )
+
+
+def table_from_pylist(rows, schema):
+    """Build an Arrow table from row dicts; name the failing column and types on mismatch."""
+    import pyarrow as pa
+    try:
+        return pa.Table.from_pylist(rows, schema=schema)
+    except (pa.ArrowTypeError, pa.ArrowInvalid) as exc:
+        if schema is not None and rows:
+            for field in schema:
+                values = [row.get(field.name) for row in rows]
+                try:
+                    pa.array(values, type=field.type)
+                except (pa.ArrowTypeError, pa.ArrowInvalid) as col_exc:
+                    raise _column_schema_error(field, values, col_exc) from None
+        raise ValueError(f'Lance schema mismatch: {exc}') from None
+
+
 def native_arrow_table(rows, schema):
     """Construct already-admitted native columns with original blob semantics."""
     import pyarrow as pa
     if schema is None or not any(is_lance_blob_type(f.type) for f in schema):
-        return pa.Table.from_pylist(rows, schema=schema)
+        return table_from_pylist(rows, schema)
     import lance
     from lance.blob import Blob
     arrays = []
@@ -25,7 +61,10 @@ def native_arrow_table(rows, schema):
                     fields=list(field.type.storage_type), mask=array.is_null())
                 array = pa.ExtensionArray.from_storage(field.type, storage)
         else:
-            array = pa.array(values, type=field.type)
+            try:
+                array = pa.array(values, type=field.type)
+            except (pa.ArrowTypeError, pa.ArrowInvalid) as col_exc:
+                raise _column_schema_error(field, values, col_exc) from None
         arrays.append(array)
     return pa.Table.from_arrays(arrays, schema=schema)
 
