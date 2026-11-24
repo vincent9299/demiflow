@@ -15,7 +15,8 @@ from pathlib import Path
 import pyarrow as pa
 import demiflow
 from demiflow import data
-from demiflow.execution import RunContext,RunRef,commit
+from demiflow.execution import RunContext,RunRef
+from demiflow.execution.checkpoint import commit
 root=Path(sys.argv[1]);mode=sys.argv[2]
 budget_test=sys.argv[4]=='budget'
 assert Path(demiflow.__file__).resolve().parents[1]==Path(sys.argv[3]).resolve()

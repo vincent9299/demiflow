@@ -32,7 +32,8 @@ from pathlib import Path
 import pyarrow as pa
 import demiflow
 from demiflow import data
-from demiflow.execution import RunContext,RunRef,commit
+from demiflow.execution import RunContext,RunRef
+from demiflow.execution.checkpoint import commit
 from demiflow.execution.journal.run_telemetry import CallMetrics
 from demiflow.operator_llm.parser import parse_prompt_pack
 from test_native_prompt_delivery_replay import pack_call,pack_second
