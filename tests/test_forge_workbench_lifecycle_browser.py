@@ -78,18 +78,25 @@ def test_unified_three_tab_nav_and_three_column_pipeline_workspace(project,brows
         expect(nav.get_by_role('button')).to_have_text(['管线', '数据', '文档'])
         nav.get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.pw-workspace')).to_be_visible()
+        # Left sidebar exposes 管线 | 会话 | 组件 | 文件.
+        sidebar = page.locator('.pw-sidebar')
+        for label in ('管线', '会话', '组件', '文件'):
+            expect(sidebar.get_by_role('button', name=label, exact=True)).to_be_visible()
         expect(page.locator('.wb-node').first).to_be_visible(timeout=30000)
-        # Clicking a DAG node opens the right single docked drawer on 节点详情 (no modal dialog).
+        # Clicking a DAG node opens the right supplementary panel on 节点详情 (no modal dialog).
         page.locator('.wb-node').first.click()
         expect(page.locator('.pw-drawer')).to_be_visible()
-        expect(page.get_by_role('tab', name='节点详情', exact=True)).to_have_attribute('aria-selected', 'true')
+        expect(page.locator('.pw-drawer-pane[data-pane="detail"]')).to_be_visible()
         expect(page.get_by_role('dialog')).to_have_count(0)
-        # Switching drawer tab to 开发助手 stays in the same single right drawer.
-        page.get_by_role('tab', name='开发助手', exact=True).click()
-        expect(page.get_by_role('tab', name='开发助手', exact=True)).to_have_attribute('aria-selected', 'true')
-        expect(page.locator('.pw-drawer-pane[data-pane="assistant"]')).to_be_visible()
-        expect(page.locator('.pw-drawer-pane[data-pane="detail"]')).to_be_hidden()
-        # Closing the right drawer expands center DAG back to full width.
-        page.get_by_role('button', name='收起右侧面板', exact=True).click()
+        # Clicking 关闭详情 cleanly closes the right supplementary panel without bouncing back.
+        page.locator('.pw-drawer-pane[data-pane="detail"]').get_by_role('button', name='关闭详情', exact=True).first.click()
         expect(page.locator('.pw-drawer')).to_be_hidden()
+        # Clicking 会话 switches center stage to wide assistant and hides canvas.
+        sidebar.get_by_role('button', name='会话', exact=True).click()
+        expect(page.locator('.pw-assistant-host')).to_be_visible()
+        expect(page.locator('.pw-workbench-host')).to_be_hidden()
+        # Switching back to 管线 restores the wide canvas.
+        sidebar.get_by_role('button', name='管线', exact=True).click()
+        expect(page.locator('.pw-workbench-host')).to_be_visible()
+        expect(page.locator('.pw-assistant-host')).to_be_hidden()
         assert not errors, errors

@@ -63,8 +63,9 @@ def browser_page(server, initial_drafts=None):
             page.add_init_script("sessionStorage.setItem('forge-development-drafts'," + json.dumps(json.dumps(initial_drafts)) + ");")
         errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(server.origin + '/#token=' + server.token)
-        page.get_by_role('button', name='开发', exact=True).click()
-        page.wait_for_function("()=>ForgeView.decodeView(location.hash)?.kind?.startsWith('development')")
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
+        page.locator('.pw-sidebar').get_by_role('button', name='会话', exact=True).click()
+        page.wait_for_selector('.pw-assistant-host:not([hidden])')
         try:
             yield page, playwright.expect
             assert not errors, errors
@@ -77,8 +78,8 @@ def current_session(page):
 
 
 def pick(page, sid):
-    if not page.locator('.development-session-sidebar').is_visible():
-        page.get_by_role('button', name='会话列表', exact=True).click()
+    if not page.locator('.pw-sidebar').is_visible():
+        page.get_by_role('button', name='展开管线目录', exact=True).click()
     page.locator('.development-session[data-session-id="' + sid + '"]').click()
     page.wait_for_function('(sid)=>ForgeView.decodeView(location.hash).session_id===sid', arg=sid)
 

@@ -134,7 +134,7 @@
     return svg;
   }
 
-  function filePanel({layout, filesHost, operatorsHost, paneHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange, onOpenChange, onSelectFlow}) {
+  function filePanel({layout, filesHost, operatorsHost, paneHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange, onOpenChange, onSelectFlow, excludeFlows = false}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
     let gitChanges = [], gitBranch = '', gitIsRepo = false;
@@ -1483,13 +1483,14 @@
 
     if (operatorsHost) {
       outlineExplorer = node('div', 'dev-outline-explorer');
-      const specs = [
-        ['flows', '管道', '调整管道与配置高度', false],
+      const allSpecs = [
+        ['flows', '管线', '调整管线与配置高度', false],
         ['configs', '配置', '调整配置与代码算子高度', false],
         ['code', '代码算子', '调整代码算子与 Prompt 算子高度', false],
         ['prompt', 'Prompt 算子', '调整 Prompt 算子与标准 API 高度', false],
         ['apis', '标准 API', null, false],
       ];
+      const specs = excludeFlows ? allSpecs.filter(([key]) => key !== 'flows') : allSpecs;
       specs.forEach(([key, label, handleLabel, defaultOpen], idx) => {
         const section = node('div', 'dev-outline-section');
         const header = node('div', 'dev-section-header');
@@ -1599,7 +1600,7 @@
         sec.list.append(b);
       }
       if (!matches.length) {
-        sec.list.append(node('p', 'op-muted dev-op-pad', term ? '无匹配管道' : '暂无已登记管道'));
+        sec.list.append(node('p', 'op-muted dev-op-pad', term ? '无匹配管线' : '暂无已登记管线'));
       }
     }
 
