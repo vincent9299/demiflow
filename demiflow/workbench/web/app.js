@@ -244,13 +244,12 @@
   const staleRequest = () => new DOMException('页面选择已变化', 'AbortError');
   function pageKind(reference = pendingView || view) {
     const kind = reference?.kind || 'overview';
-    if(reference?.panel==='operators')return 'development';
-    if(reference?.panel==='flows'||reference?.panel==='monitor')return 'flows';
-    return ({development_new:'development',development_session:'development',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'flows',run_compare:'flows',runs:'flows',checks:'flows'})[kind] || kind;
+    if(reference?.panel==='operators'||reference?.panel==='flows'||reference?.panel==='monitor')return 'flows';
+    return ({development:'flows',development_new:'flows',development_session:'flows',table:'tables',table_request:'tables',case:'tables',inspection:'flows',run:'flows',run_compare:'flows',runs:'flows',checks:'flows'})[kind] || kind;
   }
   const pipelinePage=page=>page==='flows';
   function markFunction(page=pageKind()) {
-    const active=page==='monitor'?'flows':page==='operators'?'development':page;
+    const active=(page==='monitor'||page==='operators'||page==='development')?'flows':page;
     for(const b of nav.querySelectorAll('[data-page]')){
       const selected=b.dataset.page===active;b.classList.toggle('active',selected);b.setAttribute('aria-pressed',String(selected));
       if(selected)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');
@@ -417,7 +416,25 @@
     value = V.validateView(value);
     if (value.workspace !== (value.v === 2 ? workspaceId : context.workspace)) throw new Error('workspace_mismatch：此链接属于另一个工作区');
     if(value.v === 1)value={...value,v:2,workspace:workspaceId};
-    const sameDevelopment = ['development', 'development_session', 'development_new'].includes(value.kind)
+    const isDevTarget = ['development', 'development_session', 'development_new'].includes(value.kind);
+    const samePipelineDev = isDevTarget && workbenchView && workbenchView.workspaceId === workspaceId && typeof workbenchView.navigate === 'function';
+    if (samePipelineDev) {
+      rememberTab();
+      pendingView = value; clearSelection(); viewState = 'loading'; markFunction();
+      try {
+        await workbenchView.navigate(value);
+        if (workbenchView?.sessionId) value = target('development_session', {session_id: workbenchView.sessionId});
+        view = value; pendingView = null; viewState = 'ready';
+        if (!selection) clearSelection();
+        putHistory(value, historyMode);
+        return;
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+        view = value; pendingView = null; viewState = 'error';
+        throw err;
+      }
+    }
+    const sameDevelopment = isDevTarget
       && developmentView && developmentView.workspaceId === workspaceId && typeof developmentView.navigate === 'function';
     if (sameDevelopment) {
       rememberTab();
@@ -837,9 +854,14 @@
     if(workbenchContract!=='demiflow_workbench_graph_v1')throw new Error('当前服务尚未提供图工作台契约');
     const id=workspaceId,epoch=viewEpoch;let reference=request,mountedHandle=null,checkVersion=0,checksPending=0;
     const isCurrent=()=>epoch===viewEpoch&&workspaceId===id;
-    const handle=await ForgeWorkbench.mount({main,api,icon,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
-      openOperator:async targetOp=>{pendingOperatorTarget=targetOp||true;await openView(target('development'));},
-      register:handle=>{mountedHandle=handle;if(isCurrent())workbenchView=handle;else handle.dispose();},
+    const localApi=(path,query,body,projectId=id,opts)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,projectId,opts);};
+    const operatorTarget=pendingOperatorTarget;pendingOperatorTarget=null;
+    const handle=await ForgePipelineWorkspace.mount({main,api:localApi,icon,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
+      operatorTarget,
+      openNew:()=>epoch===viewEpoch?openView(target('development_new')):undefined,
+      openSession:sid=>epoch===viewEpoch?openView(target('development_session',{session_id:sid})):undefined,
+      error,
+      register:h=>{mountedHandle=h;if(isCurrent())workbenchView=h;else h.dispose();},
       projectCheckState:()=>({version:checkVersion,active:checksPending>0}),
       continueInput,
       continueWithResult:async(run,output)=>{continueInput=addResultTable(run,output);await openView(target('flows'));},
@@ -878,7 +900,7 @@
     mode.textContent=context?(context.runs_enabled?'可查看、检查与运行':canRun('run_control')?'可查看、检查与停止已有运行':'可查看、检查 · 运行未开启'):'';
     mode.hidden=!context;
     const path=document.getElementById('workspace-path');
-    if(path){const current=pendingView||view;path.textContent=({development:'开发',overview:'Readme',tables:'数据',flows:'管道',operators:'开发',monitor:'管道'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
+    if(path){const current=pendingView||view;path.textContent=({development:'管线',overview:'文档',tables:'数据',flows:'管线',operators:'管线',monitor:'管线'})[pageKind()]+(current?.alias?' / '+current.alias:'')+(current?.row_id?' / Case '+current.row_id:'');}
     const settings=document.getElementById('project-settings');if(settings)settings.disabled=offline||!workspaceId;
     const status=document.getElementById('workspace-status');if(status){status.hidden=!workspaceId;if(!workspaceId)status.open=false;}
   }
@@ -1050,7 +1072,7 @@
     });
     picker.addEventListener('focusout',event=>{if(event.relatedTarget&&!picker.contains(event.relatedTarget)&&event.relatedTarget!==toggle)closeProjectPicker();});
     nav=$('nav',undefined,'function-nav');nav.setAttribute('aria-label','项目功能');nav.hidden=true;
-    for(const [page,label]of [['development','开发'],['flows','管道'],['tables','数据'],['overview','Readme']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
+    for(const [page,label]of [['flows','管线'],['tables','数据'],['overview','文档']]){const b=button(label,()=>navigate(page),nav);b.dataset.page=page;b.disabled=true;}
     const actions=$('div',undefined,'header-actions');
     const settings=iconButton('设置',settingsDialog,actions,['M4 7h10m4 0h2M4 17h2m4 0h10M14 4v6M10 14v6']);settings.id='project-settings';
     iconButton('刷新当前视图',refreshView,actions,['M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 11-2l3 3M4 16l3 3a7 7 0 0 0 11-2']);

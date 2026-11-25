@@ -97,7 +97,7 @@ def test_browser_conversation_navigation_refresh_and_mobile(tmp_path):
         page.reload();page.locator('.development-status[data-turn-state="completed"][data-turn-cleanup="complete"]').wait_for(state='attached')
         assert server.development.store.show(workspace,sid)['revision']==1
         page.get_by_label('开发要求').fill('draft kept')
-        page.get_by_role('button',name='Readme',exact=True).click()
+        page.get_by_role('button',name='文档',exact=True).click()
         assert page.evaluate('ForgeDevelopment.activeCount()')==0
         page.get_by_role('button',name='开发',exact=True).click();page.get_by_label('开发要求').wait_for()
         page.wait_for_url('**/*development_session*')
@@ -308,7 +308,7 @@ def test_acp_stream_visible_before_completion_and_reconnect(tmp_path):
         expect(page.locator('.dfc-streaming')).to_have_count(0)
         expect(page.locator('.error-box')).to_have_count(0)
         assert len(failures)>=2
-        page.get_by_role('button',name='Readme',exact=True).click()
+        page.get_by_role('button',name='文档',exact=True).click()
         page.get_by_role('button',name='开发',exact=True).click()
         expect(first).to_contain_text('Second streamed paragraph.')
         assert first.inner_text().count('First streamed paragraph.')==1

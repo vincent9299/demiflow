@@ -30,14 +30,14 @@ def test_late_startup_metadata_cannot_replace_user_pipeline_selection(isolated,b
         try:
             page.goto(app.origin+'/#token='+app.token)
             page.wait_for_function('() => typeof window.__releaseInitialChange==="function"')
-            page.get_by_role('button',name='管道',exact=True).click()
+            page.get_by_role('button',name='管线',exact=True).click()
             page.locator('.wb-node').first.wait_for()
             page.wait_for_function('() => ForgeView.decodeView(location.hash)?.kind==="flows"')
             before=page.evaluate('ForgeView.decodeView(location.hash)')
             page.evaluate('fail=>window.__releaseInitialChange(fail)',late_error)
             page.wait_for_timeout(150)
             expect(page.locator('.workbench')).to_be_visible()
-            expect(page.get_by_role('button',name='管道',exact=True)).to_have_attribute('aria-current','page')
+            expect(page.get_by_role('button',name='管线',exact=True)).to_have_attribute('aria-current','page')
             assert page.evaluate('ForgeView.decodeView(location.hash)')==before
             expect(page.locator('main')).not_to_contain_text('owned old startup failure')
             assert not errors,errors
@@ -69,3 +69,27 @@ def test_project_detail_refresh_disposes_previous_text_readers(project,browser,m
             page.wait_for_function('() => window.__metadataLive===0')
             assert page.evaluate('window.__metadataDisposed')==index+1
         assert not errors,errors
+
+
+def test_unified_three_tab_nav_and_three_column_pipeline_workspace(project,browser,monkeypatch,tmp_path):
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
+    with service(project) as app,page_for(browser,app) as (page,errors):
+        nav = page.locator('.function-nav')
+        expect(nav.get_by_role('button')).to_have_text(['管线', '数据', '文档'])
+        nav.get_by_role('button', name='管线', exact=True).click()
+        expect(page.locator('.pw-workspace')).to_be_visible()
+        expect(page.locator('.wb-node').first).to_be_visible(timeout=30000)
+        # Clicking a DAG node opens the right single docked drawer on 节点详情 (no modal dialog).
+        page.locator('.wb-node').first.click()
+        expect(page.locator('.pw-drawer')).to_be_visible()
+        expect(page.get_by_role('tab', name='节点详情', exact=True)).to_have_attribute('aria-selected', 'true')
+        expect(page.get_by_role('dialog')).to_have_count(0)
+        # Switching drawer tab to 开发助手 stays in the same single right drawer.
+        page.get_by_role('tab', name='开发助手', exact=True).click()
+        expect(page.get_by_role('tab', name='开发助手', exact=True)).to_have_attribute('aria-selected', 'true')
+        expect(page.locator('.pw-drawer-pane[data-pane="assistant"]')).to_be_visible()
+        expect(page.locator('.pw-drawer-pane[data-pane="detail"]')).to_be_hidden()
+        # Closing the right drawer expands center DAG back to full width.
+        page.get_by_role('button', name='收起右侧面板', exact=True).click()
+        expect(page.locator('.pw-drawer')).to_be_hidden()
+        assert not errors, errors

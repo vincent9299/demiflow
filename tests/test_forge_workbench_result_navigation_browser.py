@@ -107,7 +107,7 @@ def test_later_explicit_selection_discards_held_fixed_result(completed,browser,t
         page.get_by_role('button',name='查看固定结果',exact=True).click()
         page.wait_for_function('() => window.navRead.tableHeld')
         if later=='Readme':
-            page.locator('.function-nav').get_by_role('button',name='Readme',exact=True).click()
+            page.locator('.function-nav').get_by_role('button',name='文档',exact=True).click()
             expect(page.locator('#project-readme')).to_be_visible()
         elif later=='different_run':
             pipeline(page);select_run(page,b)

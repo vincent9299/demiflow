@@ -95,7 +95,7 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
     path = tmp_path / 'registry.json'; registry.add(path, original)
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):
         errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
         page.locator('.wb-node').first.click()
         expect(page.locator('.wb-source > .wb-source-header')).to_contain_text('流程接线')
@@ -190,11 +190,11 @@ def test_pipeline_ui_read_call_code_config_and_whole_source(original, tmp_path, 
         page.route('**/plan-pipeline-source', delay)
         page.get_by_role('button', name='Pipeline 源码', exact=True).click()
         expect(page.locator('.wb-pipeline-code')).to_contain_text('正在读取')
-        page.locator('.function-nav').get_by_role('button', name='Readme', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='文档', exact=True).click()
         expect(page.locator('.workbench')).to_have_count(0)
         assert len(held)==1
         held[0][0].fulfill(response=held[0][1])
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4, timeout=65000)
         page.get_by_role('button', name='Pipeline 源码', exact=True).click()
         expect(page.locator('.wb-pipeline-text')).to_contain_text('AFTER_FIRST_ACTION_NOT_EXECUTED')

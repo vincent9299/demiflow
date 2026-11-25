@@ -327,7 +327,7 @@ def test_narrow_navigation_keyboard_and_history_preserve_read_only_context(isola
         projects.get_by_role('button',name='question-experiments',exact=True).press('Enter')
         assert not page.locator('#project-picker').is_visible()
         assert toggle.evaluate('(button)=>document.activeElement===button')
-        page.get_by_role('navigation',name='项目功能').get_by_role('button',name='管道',exact=True).focus()
+        page.get_by_role('navigation',name='项目功能').get_by_role('button',name='管线',exact=True).focus()
         page.keyboard.press('Enter')
         page.locator('.workbench').wait_for()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
@@ -481,7 +481,7 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         row(original_id).click()
         page.locator('#workspace-name').filter(has_text=original_name).wait_for()
         page.wait_for_function("id => {const v=ForgeView.decodeView(location.hash);return v?.workspace===id&&v.kind==='overview';}",arg=original_id)
-        assert tabs.get_by_role('button',name='Readme',exact=True).get_attribute('aria-current')=='page'
+        assert tabs.get_by_role('button',name='文档',exact=True).get_attribute('aria-current')=='page'
         navigate(page,'数据')
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='tables'")
         page.locator('#project-switcher').click()
@@ -489,7 +489,7 @@ def test_project_rows_have_independent_tabs_and_restore_history(isolated,origina
         page.locator('.workbench').wait_for()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
         assert row(bound_id).get_attribute('aria-current')=='true'
-        assert tabs.get_by_role('button',name='管道',exact=True).get_attribute('aria-current')=='page'
+        assert tabs.get_by_role('button',name='管线',exact=True).get_attribute('aria-current')=='page'
         page.locator('#project-switcher').click()
         row(original_id).click()
         page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='tables'")

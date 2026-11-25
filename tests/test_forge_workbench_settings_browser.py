@@ -59,7 +59,7 @@ def test_delayed_context_preserves_drafts_and_registers_the_edited_target(unregi
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
     with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
         open_settings(page)
         held,form=edit_while_context_is_held(page)
@@ -85,7 +85,7 @@ def test_context_revocation_keeps_fields_but_invalidates_permission_cas(unregist
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
     with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
         open_settings(page)
         held,form=edit_while_context_is_held(page)
@@ -122,7 +122,7 @@ def test_registration_waits_for_initial_graph_and_keeps_edited_target(unregister
             }return response;
           };
         }''')
-        page.get_by_role('button',name='管道',exact=True).click()
+        page.get_by_role('button',name='管线',exact=True).click()
         page.wait_for_function('() => typeof window.__releaseGraph==="function"')
         open_settings(page)
         form=page.locator('.wb-settings')
@@ -146,7 +146,7 @@ def test_busy_registration_is_unapplied_and_retries_only_on_explicit_click(unreg
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN',str(tmp_path/'domain'))
     registry,key=registered_project(tmp_path,unregistered)
     with service(None,registry=registry,enable_runs=True,enable_config_write=True) as app,page_for(browser,app) as (page,errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-graph')).not_to_have_attribute('aria-busy', 'true')
         open_settings(page)
         form=page.locator('.wb-settings')

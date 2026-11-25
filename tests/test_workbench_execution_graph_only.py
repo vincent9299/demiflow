@@ -23,7 +23,7 @@ def test_original_calls_are_not_execution_nodes_and_canvas_expands(original, tmp
     source = model.get(original, basis_kind='source', entry='dispatch.py:run_pipeline')
     assert any(n['api'] == 'type' for n in source['nodes'])
     with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
         expect(page.locator('.wb-node')).to_have_count(0)
         expect(page.locator('.wb-graph-notices')).to_contain_text('解析执行计划')
@@ -65,7 +65,7 @@ console.log(JSON.stringify(P.buildGraphModel(payload.graph, {choice: P.chooseGra
 """)
     assert report['nodes'] and not preview['nodes'] and preview['execution'] is None
     with fx.open_page(browser) as (page, log):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
         page.locator('.function-nav').get_by_role('button', name='运行', exact=True).click()
         page.locator(f'.wb-run-flow[data-entry="{graph["binding"]["entry"]}"]').click()

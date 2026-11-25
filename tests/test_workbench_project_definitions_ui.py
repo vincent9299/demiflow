@@ -82,7 +82,7 @@ def run(*, limit: int = {default}, label: str = "demo", note: str | None = "defa
         page.get_by_role('button',name='接口与默认值',exact=True).click()
         expect(page.locator('.op-content')).to_contain_text('输出 Schema')
         artifact(page,'project-prompts')
-        nav.get_by_role('button',name='管道',exact=True).click()
+        nav.get_by_role('button',name='管线',exact=True).click()
         page.locator('.wb-flow-record[data-entry="flows/select.py:run"]').click()
         expect(page.locator('.wb-node')).to_have_count(4,timeout=45000)
         assert page.get_by_role('combobox',name='入参文件',exact=True).count()==0
@@ -91,7 +91,7 @@ def run(*, limit: int = {default}, label: str = "demo", note: str | None = "defa
         page.get_by_role('button',name='查看当前定义',exact=True).click()
         expect(page.locator('.op-heading')).to_contain_text('clean')
         expect(page.get_by_role('tab',name='代码算子',exact=True)).to_have_attribute('aria-selected','true')
-        nav.get_by_role('button',name='管道',exact=True).click()
+        nav.get_by_role('button',name='管线',exact=True).click()
         page.get_by_role('button',name='业务参数',exact=True).click()
         expect(page.locator('.flow-arguments')).to_be_visible()
         expect(page.get_by_label('limit',exact=True)).to_have_value('3')

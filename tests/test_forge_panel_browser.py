@@ -60,7 +60,7 @@ def test_case_deep_link_reload_history_and_invalid_node(panel):
     assert app.token not in page.url
     page.reload()
     page.get_by_role("heading", name="单条 case · " + row["_rowid"]).wait_for()
-    page.get_by_role("button", name="Readme", exact=True).click()
+    page.get_by_role("button", name="文档", exact=True).click()
     page.locator("#workspace-name").filter(has_text="question-experiments").wait_for()
     page.go_back()
     page.get_by_role("heading", name="单条 case · " + row["_rowid"]).wait_for()

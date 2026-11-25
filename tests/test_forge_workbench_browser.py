@@ -39,7 +39,7 @@ def page_for(browser,app):
     page.on('response',lambda response:responses.append(dict(url=response.url.split('#')[0],status=response.status)) if len(responses)<512 and '/api/' in response.url else None)
     try:
         page.goto(app.origin+'/#token='+app.token)
-        page.locator('.function-nav').get_by_role('button',name='管道',exact=True).wait_for()
+        page.locator('.function-nav').get_by_role('button',name='管线',exact=True).wait_for()
         yield page,errors
     except BaseException:
         screenshot(page,'failure-current-browser')
@@ -49,7 +49,7 @@ def page_for(browser,app):
 
 
 def pipeline(page):
-    page.locator('.function-nav').get_by_role('button',name='管道',exact=True).click()
+    page.locator('.function-nav').get_by_role('button',name='管线',exact=True).click()
     page.locator('.wb-node').first.wait_for()
 
 

@@ -101,7 +101,7 @@ def test_slow_auto_refresh_cannot_navigate_back_or_accumulate_requests(panel):
         page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
     page.wait_for_timeout(3500)
     assert len(held) == 1
-    page.get_by_role('button', name='管道', exact=True).click()
+    page.get_by_role('button', name='管线', exact=True).click()
     page.locator('.wb-graph').wait_for()
     page.wait_for_function("() => ForgeView.decodeView(location.hash)?.kind==='flows'")
     held[0].continue_()
@@ -166,7 +166,7 @@ def test_external_cli_run_lifecycle_results_and_historical_position(panel, tmp_p
     page.get_by_text('这页运行尚无已核验产物。', exact=True).wait_for(state='hidden')
     page.wait_for_timeout(3500)
     assert page.url == historical_url
-    page.get_by_role('button', name='管道', exact=True).click()
+    page.get_by_role('button', name='管线', exact=True).click()
     page.get_by_role('button',name='运行记录',exact=True).click()
     page.locator('.wb-run-record[data-run=\"'+b['run_id']+'\"]').wait_for()
     command('start', root, b['run_id'], '--expected', b['digest'])

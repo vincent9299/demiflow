@@ -59,7 +59,7 @@ def test_browser_unadmitted_source_keeps_diagnostics_without_fake_execution_grap
     registry=tmp_path/'registry.json';console.add(registry,original)
     with service(None,registry=registry,enable_runs=True) as app,page_for(browser,app) as (page,errors):
         posts=[];page.on('request',lambda r:posts.append(r.url) if r.method=='POST' else None)
-        page.locator('.function-nav').get_by_role('button',name='管道',exact=True).click()
+        page.locator('.function-nav').get_by_role('button',name='管线',exact=True).click()
         # Syntax observations remain available to diagnostics, but the product
         # must never substitute them for a Dataset execution plan.
         expect(page.locator('.wb-graph-empty')).to_contain_text('尚无运行执行图', timeout=15000)

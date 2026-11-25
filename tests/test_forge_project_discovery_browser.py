@@ -31,7 +31,7 @@ def test_original_project_review_and_sync(original, tmp_path):
             client.set_default_timeout(45000)
             client.on('pageerror', lambda error: errors.append(str(error)))
             client.goto(app.origin + '/#token=' + app.token)
-            client.get_by_role('button',name='管道',exact=True).click()
+            client.get_by_role('button',name='管线',exact=True).click()
             project_info(client)
             client.get_by_role('heading', name='原项目识别', exact=True).wait_for()
             client.get_by_role('cell', name='dispatch.py:run_pipeline', exact=True).wait_for()
@@ -40,7 +40,7 @@ def test_original_project_review_and_sync(original, tmp_path):
         page.get_by_role('cell', name='settings/small.json', exact=True).click()
         page.locator('pre').filter(has_text='records/orders.lance').wait_for()
         page.screenshot(path=str(artifact / 'recognized-original.png'), full_page=True)
-        page.get_by_role('button', name='管道', exact=True).click()
+        page.get_by_role('button', name='管线', exact=True).click()
         project_info(page)
         page.get_by_role('cell', name='dispatch.py:run_pipeline', exact=True).wait_for()
         assert page.locator('.wb-actions').get_by_role('button', name='运行', exact=True).is_disabled()
@@ -52,7 +52,7 @@ def test_original_project_review_and_sync(original, tmp_path):
         tables.first.locator('.dictionary-version').filter(has_text='v1').wait_for()
         tables.first.locator('.dictionary-meta').filter(has_text='2 行').wait_for()
         page.screenshot(path=str(artifact / 'original-dictionary.png'), full_page=True)
-        page.get_by_role('button', name='管道', exact=True).click()
+        page.get_by_role('button', name='管线', exact=True).click()
         project_info(page)
         with page.expect_response(lambda response: response.url.endswith('/project-check')) as pending:
             page.get_by_role('button', name='检查当前项目', exact=True).click()
@@ -70,7 +70,7 @@ def test_original_project_review_and_sync(original, tmp_path):
         with (original / 'README.md').open('a') as target:
             target.write('[second](settings/second.json)\n')
         other.get_by_role('cell', name='settings/second.json', exact=True).wait_for()
-        page.get_by_role('button', name='管道', exact=True).click()
+        page.get_by_role('button', name='管线', exact=True).click()
         project_info(page)
         page.get_by_role('cell', name='settings/second.json', exact=True).wait_for()
         assert not errors, errors
