@@ -65,7 +65,9 @@ def test_http_dispatches_two_native_apis_and_attaches_images(APIs, server):
         assert len([p for p in parts if p.get('type') == 'image_url']) == 1
         return {'api_calls': [], 'response': {'result': 'done'}}
     server['respond'] = respond
-    row = collect(node(declaration(APIs, 'demiflow')))[0]
+    # Thread workers share operators.fixtures.calls with this test.
+    with data.local_execution(worker_mode='thread'):
+        row = collect(node(declaration(APIs, 'demiflow')))[0]
     assert row.get('answer') == 'done', row.get('error')
     observations = row['call']['environment']['observations']
     assert [o['call'] for o in observations] == calls
@@ -96,8 +98,9 @@ def test_image_budget_and_read_failure_remain_visible(APIs, app_server, monkeypa
     monkeypatch.setenv('DF_TEST_CODEX_CALLS', json.dumps([
         {'method': 'fixture_pictures', 'arguments': {'query': 'one'}},
         {'method': 'fixture_pictures', 'arguments': {'query': 'again'}}]))
-    row = collect(node(declaration(APIs, 'codex', max_tool_images=1),
-        {'codex_agent': {'bin': str(app_server[0])}, 'timeout_s': 4}))[0]
+    with data.local_execution(worker_mode='thread'):  # shares operators.fixtures.calls
+        row = collect(node(declaration(APIs, 'codex', max_tool_images=1),
+            {'codex_agent': {'bin': str(app_server[0])}, 'timeout_s': 4}))[0]
     observations = row['call']['environment']['observations']
     first, second = (o['images'][0] for o in observations)
     assert first['image_id'] == second['image_id']
@@ -135,7 +138,8 @@ def test_bad_api_arguments_are_returned_for_repair(APIs, app_server, monkeypatch
         {'method': 'fixture_scale', 'arguments': {'value': 'wrong'}},
         {'method': 'fixture_scale', 'arguments': {'value': 2}},
         {'method': 'not_exposed', 'arguments': {}}]))
-    row = collect(node(declaration(APIs, 'codex'), {'codex_agent': {'bin': str(app_server[0])}, 'timeout_s': 4}))[0]
+    with data.local_execution(worker_mode='thread'):  # shares operators.fixtures.calls
+        row = collect(node(declaration(APIs, 'codex'), {'codex_agent': {'bin': str(app_server[0])}, 'timeout_s': 4}))[0]
     assert row.get('answer') == 'done', row.get('error')
     observed = row['call']['environment']['observations']
     assert observed[0]['result']['code'] == 'invalid_arguments'

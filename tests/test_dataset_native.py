@@ -239,7 +239,10 @@ def test_failed_native_query_does_not_rerun_python_or_commit(tmp_path, monkeypat
     assert [e['event'] for e in events(calls)] == ['scan']
     assert len(events(queries)) == 1
     journal = RunJournal(source._executor._run_ref.directory)
-    assert journal.execution_commits('action-1') == []
+    # A cut may record source progress before the failure; none publishes output.
+    assert not any((sink or {}).get('manifest', {}).get('final') or (sink or {}).get('rows')
+                   for commit in journal.execution_commits('action-1')
+                   for sink in ((commit.get('prepared') or {}).get('sinks') or {}).values())
     assert journal.execution_status()['status'] == 'failed'
     assert lance.dataset(str(target)).version==1
     assert lance.dataset(str(target)).to_table().to_pylist() == [{'k': 99}]
