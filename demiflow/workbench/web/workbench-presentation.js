@@ -580,6 +580,90 @@
     if (node.placement.partitionCount !== null) parts.push(node.placement.partitionCount + ' 分区');
     return {label: '阶段', value: bounded(parts.join(' · ') + '（计划声明）', 160), basis: 'sealed', reason: null};
   }
+  const HAS_CJK = /[\u4e00-\u9fff]/;
+  function splitTopLevelArgs(argText) {
+    const out = [];
+    let cur = '', depth = 0, quote = '';
+    for (let i = 0; i < argText.length; i++) {
+      const ch = argText[i];
+      if (quote) {
+        cur += ch;
+        if (ch === '\\' && i + 1 < argText.length) { cur += argText[++i]; continue; }
+        if (ch === quote) quote = '';
+        continue;
+      }
+      if (ch === '\'' || ch === '"') { quote = ch; cur += ch; continue; }
+      if (ch === '(' || ch === '[' || ch === '{') { depth++; cur += ch; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') { depth = Math.max(0, depth - 1); cur += ch; continue; }
+      if (ch === ',' && depth === 0) { if (cur.trim()) out.push(cur.trim()); cur = ''; continue; }
+      cur += ch;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+  }
+  function stripQuotes(s) {
+    return typeof s === 'string' ? s.trim().replace(/^['"]|['"]$/g, '') : '';
+  }
+  const SOURCE_CREATORS = new Set(['read_lance', 'from_items', 'read_parquet', 'read_json', 'read_csv', 'read_records', 'range', 'from_arrow', 'from_pandas']);
+  function compactApiExpr(call, fallbackLabel, dataSource) {
+    const raw = typeof call?.summary === 'string' ? call.summary.trim() : '';
+    if (!raw) return typeof fallbackLabel === 'string' && fallbackLabel.trim() && !HAS_CJK.test(fallbackLabel) ? fallbackLabel.trim() : '';
+    const m = raw.match(/^(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*\(([\s\S]*)\)\s*$/);
+    if (!m) {
+      const clean = raw.replace(/^(?:rows|ds|dataset)\./, '.');
+      return bounded(clean, 64);
+    }
+    const fn = m[1], args = splitTopLevelArgs(m[2]);
+    const prefix = SOURCE_CREATORS.has(fn) ? 'data.' : '.';
+    const kw = {};
+    const pos = [];
+    for (const a of args) {
+      const eq = a.match(/^([A-Za-z_]\w*)\s*=\s*([\s\S]+)$/);
+      if (eq) kw[eq[1]] = eq[2].trim();
+      else pos.push(a);
+    }
+    if (['map', 'flat_map', 'filter', 'map_batches', 'map_async'].includes(fn)) {
+      const target = pos[0] || kw.fn || fallbackLabel || '';
+      return target ? `${prefix}${fn}(${target})` : `${prefix}${fn}()`;
+    }
+    if (fn === 'map_prompt_async' || fn === 'map_prompt') {
+      const name = stripQuotes(pos[0] || kw.name || kw.prompt || '');
+      return name ? `${prefix}${fn}(${name})` : `${prefix}${fn}()`;
+    }
+    if (fn === 'join') {
+      const parts = [];
+      if (kw.on) parts.push(`on=${kw.on}`);
+      if (kw.how) parts.push(`how=${kw.how}`);
+      return `${prefix}join(${parts.join(', ') || pos[0] || ''})`;
+    }
+    if (fn === 'save_lance') {
+      if (kw.stage) return `${prefix}save_lance(stage=${kw.stage})`;
+      if (pos[0]) return `${prefix}save_lance(${pos[0]})`;
+      return `${prefix}save_lance()`;
+    }
+    if (fn === 'write_lance') {
+      const target = pos[0] || kw.uri || '';
+      const keyMatch = target.match(/\[['"]([^'"]+)['"]\]$/);
+      return `${prefix}write_lance(${keyMatch ? keyMatch[1] : target})`;
+    }
+    if (fn === 'read_lance') {
+      const uri = typeof dataSource?.uri === 'string' ? dataSource.uri : '';
+      const base = uri ? uri.split('/').filter(Boolean).pop() : '';
+      return `${prefix}read_lance(${base || pos[0] || kw.uri || ''})`;
+    }
+    if (fn === 'from_items') {
+      return `${prefix}from_items(${pos[0] || ''})`;
+    }
+    const first = pos[0] || Object.entries(kw).slice(0, 1).map(([k, v]) => `${k}=${v}`).join('');
+    return bounded(first ? `${prefix}${fn}(${first})` : `${prefix}${fn}()`, 64);
+  }
+  function semanticHeadline(rawTitle, desc) {
+    const t = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+    const d = typeof desc === 'string' ? desc.trim().replace(/[。.]\s*$/, '') : '';
+    if (t && HAS_CJK.test(t)) return t;
+    if (d) return bounded(d, 48);
+    return t;
+  }
   function buildNodeCard(graph, selection, snapshot, execution = null) {
     const binding = graph.binding;
     if (!selection || selection.execution === null || !execution || !execution.available) {
@@ -625,9 +709,11 @@
       const reportNode = findReportNode(graph, cardSelection.reportNodeId);
       const desc = typeof reportNode?.description === 'string' && reportNode.description.trim() ? reportNode.description.trim() : null;
       const call = reportNode?.api_call;
+      const rawTitle = sealedTitle(graph, node, identity, context, ordinal, sameLogical.length);
       return {
         key: v3Key(identity, node.occurrenceId), selection: cardSelection, occurrences: [],
-        kindLabel: kindLabel(node.kind), title: sealedTitle(graph, node, identity, context, ordinal, sameLogical.length),
+        kindLabel: kindLabel(node.kind), title: semanticHeadline(rawTitle, desc),
+        apiExpr: compactApiExpr(call, rawTitle, reportNode?.data_source),
         summary: [
           ...(desc ? [{label: '说明', value: bounded(desc, 160), basis: 'sealed', reason: null}]
             : typeof call?.summary === 'string' ? [{label: 'API', value: bounded(call.summary, 256), basis: 'sealed', reason: null}] : []),
@@ -866,14 +952,17 @@
     if (queue.length !== dag.nodes.length) reject('数据图含环');
     const nodes = dag.nodes.map(node => {
       const key = keys.get(node.occurrence_id);
+      const rawTitle = typeof node.label === 'string' && node.label.trim()
+        && node.label.length <= 256 ? displayTitle(node.label, node.op_kind) : kindLabel(node.op_kind);
+      const desc = typeof node.description === 'string' && node.description.trim() ? node.description.trim() : null;
       return {key, selection: {key, reportNodeId: null, actionId: dag.action_id,
         logicalNodeId: node.logical_node_id, occurrenceId: node.occurrence_id,
         execution: null, previewDigest: value.basis.digest}, occurrences: [],
         // Optional labels are supplied by the compiler's declaration, never joined from AST nodes.
-        kindLabel: kindLabel(node.op_kind), title: typeof node.label === 'string' && node.label.trim()
-          && node.label.length <= 256 ? displayTitle(node.label, node.op_kind) : kindLabel(node.op_kind),
-        summary: [...(typeof node.description === 'string' && node.description.trim()
-            ? [{label: '说明', value: bounded(node.description.trim(), 160), basis: 'compile', reason: null}]
+        kindLabel: kindLabel(node.op_kind), title: semanticHeadline(rawTitle, desc),
+        apiExpr: compactApiExpr(node.api_call, node.label, node.data_source),
+        summary: [...(desc
+            ? [{label: '说明', value: bounded(desc, 160), basis: 'compile', reason: null}]
             : isRecord(node.api_call) && typeof node.api_call.summary === 'string'
               ? [{label: 'API', value: bounded(node.api_call.summary, 256), basis: 'compile', reason: null}] : []),
           {label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
@@ -981,6 +1070,6 @@
   }
 
   globalThis.ForgeWorkbenchPresentation = Object.freeze({
-    hasOccurrenceIds, chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, buildPlanPreviewModel, normalizeExecutionPlan, matchesExecutionObservation,
+    hasOccurrenceIds, chooseGraphView, buildNodeCard, buildGraphModel, buildNodeDetails, buildPlanPreviewModel, normalizeExecutionPlan, matchesExecutionObservation, compactApiExpr,
   });
 })();

@@ -298,3 +298,5 @@
 .project-python-msg{margin:8px 0 0}
 .project-python-msg[data-tone=ok]{color:#15803d}
 .project-python-msg[data-tone=error]{color:#b91c1c}
+
+.workbench .wb-source-title-api{font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:13.5px;font-weight:600;color:#09090b}

@@ -53,10 +53,11 @@
   transition:stroke .14s ease,fill .14s ease;
 }
 .wb-graph-view .wb-node text{font-family:var(--font-sans,system-ui,-apple-system,"Segoe UI",sans-serif)}
-.wb-graph-view .wb-node-kind{font-size:12px;fill:#a1a1aa}
-.wb-graph-view .wb-node-title{font-size:14px;font-weight:600;fill:#09090b}
+.wb-graph-view .wb-node-kind{font-size:11px;fill:#a1a1aa}
+.wb-graph-view .wb-node-title{font-size:13.5px;font-weight:600;fill:#09090b}
 .wb-graph-view .wb-node-summary{font-size:12px;fill:#71717a}
-.wb-graph-view .wb-node-state{font-size:12px;font-weight:550;fill:#52525b}
+.wb-graph-view .wb-node-api{font-family:var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:11.5px;fill:#52525b}
+.wb-graph-view .wb-node-state{font-size:11.5px;font-weight:550;fill:#52525b}
 .wb-graph-view .wb-node:hover rect{stroke:#a1a1aa;fill:#ffffff;filter:drop-shadow(0 3px 8px rgba(9,9,11,.07))}
 .wb-graph-view .wb-node.selected rect{stroke:#18181b;stroke-width:2;fill:#fafafa;filter:drop-shadow(0 4px 12px rgba(9,9,11,.1))}
 .wb-graph-view .wb-node:focus-visible{outline:none}
