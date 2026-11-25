@@ -26,7 +26,30 @@ body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 
   position: relative; box-sizing: border-box; max-width: none;
   margin: 4px auto 14px; padding: 12px 16px 14px;
 }
-.df-card-mode .jp-CodeCell::before { display: none !important; }
+body.df-card-mode .jp-Notebook .jp-CodeCell,
+body.df-card-mode .jp-Notebook.jp-mod-commandMode .jp-CodeCell,
+body.df-card-mode .jp-Notebook.jp-mod-editMode .jp-CodeCell {
+  border: 1px solid #e4e4e7 !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+body.df-card-mode .jp-Notebook .jp-CodeCell:is(:hover, :focus-within, .jp-mod-active, .jp-mod-selected, .jp-mod-multiSelected),
+body.df-card-mode .jp-Notebook.jp-mod-commandMode .jp-CodeCell:is(.jp-mod-active, .jp-mod-selected, .jp-mod-multiSelected),
+body.df-card-mode .jp-Notebook.jp-mod-editMode .jp-CodeCell:is(.jp-mod-active, .jp-mod-selected, .jp-mod-multiSelected) {
+  border: 1px solid #a1a1aa !important;
+  border-radius: 10px !important;
+  background: #fff !important;
+  box-shadow: 0 2px 8px rgba(9, 9, 11, .05) !important;
+}
+body.df-card-mode .jp-Notebook .jp-MarkdownCell:is(.jp-mod-active, .jp-mod-selected, .jp-mod-multiSelected),
+body.df-card-mode .jp-Notebook.jp-mod-commandMode .jp-MarkdownCell:is(.jp-mod-active, .jp-mod-selected, .jp-mod-multiSelected) {
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.df-card-mode .jp-CodeCell::before,
+.df-card-mode .jp-MarkdownCell::before { display: none !important; }
 .df-card-mode .jp-InputArea-editor {
   background: #fafafa; border: 1px solid var(--df-line); border-radius: 10px; overflow: hidden;
   transition: border-color .14s ease, box-shadow .14s ease;
