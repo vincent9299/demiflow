@@ -303,7 +303,7 @@ SOFTWARE.
         box.focus();
       }
     };
-    state.files=DevelopmentNavigation.filePanel({layout,filesHost:externalFilesHost||filesPane,operatorsHost:externalOperatorsHost||operatorsPane,paneHost:externalCodeHost||null,toggle:filesToggle,api,iconButton,mountText,disposeReaders,project:workspaceId,
+    state.files=DevelopmentNavigation.filePanel({layout,filesHost:externalFilesHost||filesPane,operatorsHost:externalOperatorsHost||(drawerMode?null:operatorsPane),paneHost:externalCodeHost||null,toggle:filesToggle,api,iconButton,mountText,disposeReaders,project:workspaceId,
       onReference:insertReference,
       onRework:prompt=>sendGuidedMessage(prompt),
       onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),

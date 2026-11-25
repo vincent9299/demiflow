@@ -255,6 +255,14 @@
     const treeTitle = node('span', 'dev-section-title', '项目目录');
     treeToggle.append(chevronIcon(), treeTitle);
     const treeHeaderActions = node('div', 'dev-section-actions');
+    const outlineViewToggle = operatorsHost ? null : iconButton('切换大纲视图', 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01');
+    let inlineOutlineMode = false;
+    let inlineOutlineWrap = null;
+    if (outlineViewToggle) {
+      outlineViewToggle.classList.add('dev-outline-view-toggle');
+      outlineViewToggle.setAttribute('aria-pressed', 'false');
+      treeHeaderActions.append(outlineViewToggle);
+    }
     const treeCreateToggle = iconButton('新建文件', 'M12 5v14M5 12h14');
     treeCreateToggle.setAttribute('aria-expanded', 'false');
     const treeSearchToggle = iconButton('搜索项目目录', 'M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14M16.2 16.2L20 20');
@@ -1481,7 +1489,12 @@
       };
     }
 
-    if (operatorsHost) {
+    const outlineTargetHost = operatorsHost || (outlineViewToggle ? (inlineOutlineWrap = node('div', 'dev-inline-outline-wrap')) : null);
+    if (inlineOutlineWrap) {
+      inlineOutlineWrap.hidden = true;
+      treeSection.append(inlineOutlineWrap);
+    }
+    if (outlineTargetHost) {
       outlineExplorer = node('div', 'dev-outline-explorer');
       const allSpecs = [
         ['flows', '管线', '调整管线与配置高度', false],
@@ -1523,8 +1536,27 @@
           wireOutlineDrag(handle, idx, idx + 1);
         }
       });
-      operatorsHost.replaceChildren(outlineExplorer);
+      outlineTargetHost.replaceChildren(outlineExplorer);
       applyOutlineSplits();
+      if (outlineViewToggle && inlineOutlineWrap) {
+        const setInlineOutline = on => {
+          inlineOutlineMode = !!on;
+          outlineViewToggle.setAttribute('aria-pressed', String(inlineOutlineMode));
+          outlineViewToggle.classList.toggle('is-active', inlineOutlineMode);
+          outlineViewToggle.title = inlineOutlineMode ? '切换文件视图' : '切换大纲视图';
+          outlineViewToggle.setAttribute('aria-label', outlineViewToggle.title);
+          treeTitle.textContent = inlineOutlineMode ? '组件大纲' : '项目目录';
+          treeCreateToggle.hidden = inlineOutlineMode;
+          treeSearchToggle.hidden = inlineOutlineMode;
+          treeRefresh.hidden = inlineOutlineMode;
+          treeCreateWrap.hidden = true;
+          treeSearchWrap.hidden = true;
+          treeList.hidden = inlineOutlineMode;
+          inlineOutlineWrap.hidden = !inlineOutlineMode;
+          if (inlineOutlineMode) ensureOperatorsLoaded();
+        };
+        outlineViewToggle.onclick = () => setInlineOutline(!inlineOutlineMode);
+      }
     }
 
     function paintOperatorGroup(listEl, countEl, kind) {

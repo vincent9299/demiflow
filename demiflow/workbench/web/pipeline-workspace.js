@@ -44,8 +44,8 @@
     sidebar.setAttribute('aria-label', '管线导航');
     const navigation = ForgeNavigation.header({
       title: '管线',
-      searchLabel: '搜索管线、会话、组件或文件',
-      placeholder: '搜索管线、会话、组件或文件',
+      searchLabel: '搜索管线、会话或文件',
+      placeholder: '搜索管线、会话或文件',
       onSearch: () => {
         const q = navigation.search.value;
         workbenchHandle?.filterFlows?.(q);
@@ -66,17 +66,15 @@
     };
     const flowsBtn = makeSideTab('管线', ['M6 3v12', 'M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M18 9a9 9 0 0 1-9 9'], true);
     const sessionsBtn = makeSideTab('会话', ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z']);
-    const componentsBtn = makeSideTab('组件', ['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01']);
     const filesBtn = makeSideTab('文件', ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z']);
     const filesBadge = el('span', '0', 'dev-change-badge'); filesBadge.hidden = true;
     filesBtn.append(filesBadge);
-    sideTabs.append(flowsBtn, sessionsBtn, componentsBtn, filesBtn);
+    sideTabs.append(flowsBtn, sessionsBtn, filesBtn);
 
     const flowsPane = el('div', undefined, 'pw-sidebar-pane pw-flows-pane');
     const sessionsPane = el('div', undefined, 'pw-sidebar-pane'); sessionsPane.hidden = true;
-    const componentsPane = el('div', undefined, 'pw-sidebar-pane'); componentsPane.hidden = true;
     const filesPane = el('div', undefined, 'pw-sidebar-pane'); filesPane.hidden = true;
-    sidebar.append(navigation.element, sideTabs, flowsPane, sessionsPane, componentsPane, filesPane);
+    sidebar.append(navigation.element, sideTabs, flowsPane, sessionsPane, filesPane);
 
     // 2. Center wide stage (管线画布 ⇄ 管线开发助手会话)
     const center = el('section', undefined, 'pw-center');
@@ -116,18 +114,6 @@
       }
     };
 
-    const headerAssistantBtn = el('button', '开发助手', 'pw-assistant-toggle');
-    headerAssistantBtn.type = 'button';
-    headerAssistantBtn.setAttribute('aria-expanded', 'false');
-    headerAssistantBtn.onclick = () => {
-      if (stageMode === 'assistant') {
-        setStageMode('canvas');
-      } else {
-        setSidebarTab('sessions');
-        setStageMode('assistant');
-      }
-    };
-
     function setRightMode(next) {
       rightMode = (next === 'detail' || next === 'code') ? next : null;
       const open = !!rightMode;
@@ -145,7 +131,6 @@
       root.dataset.stage = stageMode;
       workbenchHost.hidden = stageMode !== 'canvas';
       assistantHost.hidden = stageMode !== 'assistant';
-      headerAssistantBtn.setAttribute('aria-expanded', String(stageMode === 'assistant'));
       // When switching away from canvas to assistant, hide node detail if it was open (keep code reader if open).
       if (stageMode === 'assistant' && rightMode === 'detail') {
         workbenchHandle?.closeDetail?.();
@@ -154,21 +139,17 @@
     }
 
     function setSidebarTab(next) {
-      sidebarTab = ['flows', 'sessions', 'components', 'files'].includes(next) ? next : 'flows';
+      sidebarTab = ['flows', 'sessions', 'files'].includes(next) ? next : 'flows';
       flowsPane.hidden = sidebarTab !== 'flows';
       sessionsPane.hidden = sidebarTab !== 'sessions';
-      componentsPane.hidden = sidebarTab !== 'components';
       filesPane.hidden = sidebarTab !== 'files';
-      for (const [key, btn] of [['flows', flowsBtn], ['sessions', sessionsBtn], ['components', componentsBtn], ['files', filesBtn]]) {
+      for (const [key, btn] of [['flows', flowsBtn], ['sessions', sessionsBtn], ['files', filesBtn]]) {
         btn.classList.toggle('is-active', sidebarTab === key);
         btn.setAttribute('aria-pressed', String(sidebarTab === key));
       }
       if (sidebarTab === 'files') {
         devHandle?.files?.setFilter(navigation.search.value);
         devHandle?.files?.ensureTreeLoaded?.();
-      } else if (sidebarTab === 'components') {
-        devHandle?.files?.setFilter(navigation.search.value);
-        devHandle?.files?.ensureOperatorsLoaded?.();
       } else if (sidebarTab === 'sessions') {
         devHandle?.setSessionFilter?.(navigation.search.value);
       } else if (sidebarTab === 'flows') {
@@ -178,7 +159,6 @@
 
     flowsBtn.onclick = () => { setSidebarTab('flows'); setStageMode('canvas'); };
     sessionsBtn.onclick = () => { setSidebarTab('sessions'); setStageMode('assistant'); };
-    componentsBtn.onclick = () => setSidebarTab('components');
     filesBtn.onclick = () => setSidebarTab('files');
 
     const isDevView = ['development', 'development_session', 'development_new'].includes(view?.kind);
@@ -209,7 +189,7 @@
           return;
         }
         if (nextView?.panel === 'operators') {
-          setSidebarTab('components');
+          setSidebarTab('files');
           await devHandle?.files?.selectOperatorTarget?.(true);
           return;
         }
@@ -254,7 +234,6 @@
       drawerMode: true,
       externalSessionsHost: sessionsPane,
       externalFilesHost: filesPane,
-      externalOperatorsHost: componentsPane,
       externalCodeHost: codePane,
       excludeFlows: true,
       openOperators: view?.panel === 'operators' || !!operatorTarget,
@@ -304,8 +283,11 @@
       openResult,
       navigate,
       openOperator: async targetOp => {
-        setSidebarTab('components');
-        await devHandle?.files?.selectOperatorTarget?.(targetOp || true);
+        if (targetOp?.path && devHandle?.files?.openFile) {
+          devHandle.files.openFile(targetOp.path, 'source');
+        } else {
+          await devHandle?.files?.selectOperatorTarget?.(targetOp || true);
+        }
       },
       register: h => { workbenchHandle = h; },
       projectCheckState,
@@ -321,7 +303,6 @@
         flowListHost: flowsPane,
         nodeDetailHost: detailPane,
         sourceButton: headerSourceBtn,
-        assistantButton: headerAssistantBtn,
         onFlowSelect: () => setStageMode('canvas'),
         onDetailOpen: () => {
           devHandle?.files?.setOpen?.(false, {skipFocus: true});
