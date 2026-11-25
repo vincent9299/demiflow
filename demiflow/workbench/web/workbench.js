@@ -909,7 +909,7 @@
       target.append(table);
     }
     function upstreamLabelsFor(node){
-      const dag=planPreview?.logical_dag;
+      const dag=planPreview?.dag||planPreview?.logical_dag;
       if(!dag||!node?.occurrence_id)return [];
       const byOcc=new Map((dag.nodes||[]).map(n=>[n.occurrence_id,n]));
       const out=[];
@@ -917,7 +917,7 @@
         if(edge.to?.occurrence_id!==node.occurrence_id)continue;
         const src=byOcc.get(edge.from?.occurrence_id);
         const name=src?.description?.trim()?.replace(/[。.]\s*$/,'')||src?.label||src?.op_kind||'上游节点';
-        out.push({port:edge.to?.port||'main',name:name.length>26?name.slice(0,25)+'…':name});
+        out.push({port:edge.to?.port||'main',name:name.length>28?name.slice(0,27)+'…':name});
       }
       return out;
     }
@@ -957,15 +957,17 @@
       if(bindings.outputs&&typeof bindings.outputs==='object')for(const v of Object.values(bindings.outputs))outCols.push(String(v));
       for(const p of sideOutputs){const v=formatArgValue(p);if(v)outCols.push(v);}
       let outputDesc='新数据行（1→1）';
-      if(outCols.length){
+      if(apiExpr.startsWith('.join')||opKind.includes('join')){
+        const onArg=dataArgs.find(p=>p.name==='on');
+        const howArg=dataArgs.find(p=>p.name==='how');
+        const howLabel=howArg?({left:'左连接',inner:'内连接',right:'右连接',outer:'外连接'}[formatArgValue(howArg)]||formatArgValue(howArg)):'关联';
+        outputDesc=onArg?`按 ${formatArgValue(onArg)} ${howLabel}后的行`:`${howLabel}后的行`;
+      }else if(outCols.length){
         outputDesc=`写回列：${[...new Set(outCols)].join('，')}`;
       }else if(apiExpr.startsWith('.flat_map')||opKind.includes('flat')){
         outputDesc='展开为多行（1→N）';
       }else if(apiExpr.startsWith('.filter')||opKind.includes('filter')){
         outputDesc='筛选保留的数据行';
-      }else if(apiExpr.startsWith('.join')||opKind.includes('join')){
-        const onArg=dataArgs.find(p=>p.name==='on');
-        outputDesc=onArg?`按 ${formatArgValue(onArg)} 关联后的行`:'关联后的行';
       }else if(apiExpr.startsWith('.save_lance')||opKind.includes('checkpoint')||opKind.includes('save')){
         const stageArg=dataArgs.find(p=>p.name==='stage');
         outputDesc=stageArg?`阶段落盘（stage=${formatArgValue(stageArg)}）并继续向下传递`:'阶段落盘并继续向下传递';

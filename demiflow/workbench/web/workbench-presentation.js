@@ -608,7 +608,7 @@
   function compactApiExpr(call, fallbackLabel, dataSource) {
     const raw = typeof call?.summary === 'string' ? call.summary.replace(/\s+/g, ' ').trim() : '';
     if (!raw) return typeof fallbackLabel === 'string' && fallbackLabel.trim() && !HAS_CJK.test(fallbackLabel) ? fallbackLabel.trim() : '';
-    const m = raw.match(/^(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*\(([\s\S]*)\)\s*$/);
+    const m = raw.match(/^(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*\(([\s\S]*?)\)?\s*$/);
     if (!m) {
       const clean = raw.replace(/^(?:rows|ds|dataset)\./, '.');
       return bounded(clean, 64);
