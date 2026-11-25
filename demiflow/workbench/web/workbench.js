@@ -127,10 +127,12 @@
     const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;root.append(accessState);
     const settings=$('div',undefined,'wb-settings');settings.hidden=true;root.append(settings);
     const flowNavigation=$('nav',undefined,'wb-flow-navigation wb-section-navigation');flowNavigation.id='wb-flow-navigation';flowNavigation.setAttribute('aria-label','项目管道');flowNavigation.hidden=true;root.append(flowNavigation);
-    const flowHeader=ForgeNavigation.header({title:'管道',searchLabel:'搜索管道',onSearch:filterFlows});
-    const flowList=$('div',undefined,'wb-navigation-items');flowNavigation.append(flowHeader.element,flowList);
-    function filterFlows(){
-      const term=flowHeader.search.value.trim().toLocaleLowerCase();
+    const flowHeader=ForgeNavigation.header({title:'管线',searchLabel:'搜索管线',onSearch:filterFlows});
+    const flowList=$('div',undefined,'wb-navigation-items');
+    if(embedded?.flowListHost)embedded.flowListHost.append(flowList);
+    else flowNavigation.append(flowHeader.element,flowList);
+    function filterFlows(termArg){
+      const term=String(termArg!==undefined?termArg:flowHeader.search.value).trim().toLocaleLowerCase();
       for(const row of flowList.querySelectorAll('.wb-flow-record'))row.hidden=!(row.title+' '+row.textContent).toLocaleLowerCase().includes(term);
     }
     const monitorTabs=$('div',undefined,'wb-view-tabs wb-monitor-tabs');monitorTabs.hidden=true;
@@ -147,24 +149,29 @@
     const runAlerts=$('div',undefined,'wb-run-alerts');root.append(runAlerts);
     let definitionSource=null;
     const body=$('div',undefined,'wb-body'),graphSection=$('div',undefined,'wb-graph-section'),inspector=$('div',undefined,'wb-inspector');
-    const nodePanel=$('aside',undefined,'wb-node-panel');nodePanel.setAttribute('aria-label','算子详情');
+    const isEmbeddedDetail=!!(embedded?.canvasDetail||embedded?.nodeDetailHost);
+    const nodePanel=$('aside',undefined,'wb-node-panel'+(embedded?.canvasDetail?' wb-canvas-detail-card':''));nodePanel.setAttribute('aria-label','算子详情');
     const nodePanelTools=$('div',undefined,'wb-node-panel-tools');
     const definitionButton=button('项目算子',async()=>{
       const target=definitionSource;
       if(typeof openOperator==='function')await openOperator(target);
     },nodePanelTools);
+    let askAssistantButton=null;
     if(embedded?.onAskAssistant){
-      button('让助手改',()=>embedded.onAskAssistant(definitionSource),nodePanelTools,{cls:'wb-ask-assistant'});
+      askAssistantButton=button('让助手改',()=>embedded.onAskAssistant(definitionSource),nodePanelTools,{cls:'wb-ask-assistant'});
     }
     const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
-    const closeDetail=button('关闭详情',()=>{detailOpen=false;updateActions();embedded?.onDetailClose?.();},nodePanelTools);
-    if(embedded?.nodeDetailHost)closeDetail.hidden=true;
+    const hideCanvasDetail=()=>{detailOpen=false;lastEmbeddedDetail=false;if(embedded?.canvasDetail)nodePanel.hidden=true;embedded?.onDetailClose?.();};
+    const closeDetail=button('关闭详情',hideCanvasDetail,nodePanelTools);
+    if(isEmbeddedDetail){closeDetail.hidden=true;nodePanelTools.hidden=true;}
+    if(embedded?.canvasDetail)nodePanel.hidden=true;
     nodePanel.append(nodePanelTools,inspector);
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
     const tools=$('div',undefined,'wb-canvas-tools');
     const closeChecks=button('收起检查',()=>changeMode('config'),checks);checks.prepend(closeChecks);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),actions);previewButton.title='只解析当前入口与已保存入参，不启动数据处理';
     actions.append(runsContextButton,currentContextButton,previewButton,runButton,refreshRunButton,more);
+    if(embedded?.sourceButton)actions.append(embedded.sourceButton);
     if(embedded?.assistantButton)actions.append(embedded.assistantButton);
     const graph=ForgeWorkbenchGraph.mount(graphHost,{controls:tools,onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
     const nodeJump=select('定位算子',[],null);nodeJump.className='wb-node-jump';tools.append(nodeJump);
@@ -181,7 +188,8 @@
 
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
     graphSection.prepend(actionBar,graphHost);
-    if(embedded?.nodeDetailHost){body.append(graphSection);embedded.nodeDetailHost.append(nodePanel);}
+    if(embedded?.canvasDetail){graphSection.classList.add('wb-canvas-detail-host');body.append(graphSection);graphSection.append(nodePanel);}
+    else if(embedded?.nodeDetailHost){body.append(graphSection);embedded.nodeDetailHost.append(nodePanel);}
     else body.append(graphSection,nodePanel);
     root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
@@ -198,9 +206,22 @@
       for(const[k,b]of detailTabButtons){b.classList.toggle('active',k===tab);b.setAttribute('aria-pressed',String(k===tab));}
     }
     for(const[k,label]of [['wiring','接线'],['behavior','行为']])detailTabButtons.set(k,button(label,()=>selectDetailTab(k),sourceTabs));
-    sourceHeader.append(sourceTitle);bottom.append(sourceHeader,sourceTabs,sourceBody);inspector.before(bottom);
+    sourceHeader.append(sourceTitle);
+    if(isEmbeddedDetail){
+      const inlineActions=$('div',undefined,'wb-source-actions');
+      inlineActions.append(definitionButton);
+      if(askAssistantButton)inlineActions.append(askAssistantButton);
+      const xBtn=button('×',hideCanvasDetail,inlineActions,{cls:'wb-canvas-detail-close'});
+      xBtn.setAttribute('aria-label','关闭详情');xBtn.title='关闭详情';
+      sourceHeader.append(inlineActions);
+    }
+    bottom.append(sourceHeader,sourceTabs,sourceBody);inspector.before(bottom);
     const runInspectorTabs=$('div',undefined,'wb-run-inspector-tabs');runInspectorTabs.hidden=true;nodePanel.prepend(runInspectorTabs);
     for(const[key,label]of [['observations','执行情况'],['definition','定义与接线'],['logs','日志']])button(label,()=>showRunInspector(key),runInspectorTabs).dataset.kind=key;
+    if(isEmbeddedDetail){
+      const runCloseBtn=button('×',hideCanvasDetail,runInspectorTabs,{cls:'wb-canvas-detail-close wb-run-detail-close'});
+      runCloseBtn.setAttribute('aria-label','关闭详情');runCloseBtn.title='关闭详情';
+    }
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
     const documents=details('当前项目检查与来源',checks);
     let projectInfoRendered=false,projectInfoPending=null,projectInfoDirty=false;
@@ -264,6 +285,7 @@
       for(const item of entries){
         const row=button('',async()=>{
           flowCollapse?.closeOnNarrow();
+          embedded?.onFlowSelect?.(item.value);
           if(activePage==='monitor'){await selectRunFlow(item.value);return;}
           if(working?.entry===item.value&&!run)return;
           entryChoice.value=item.value;await entryChoice.onchange();
@@ -312,20 +334,23 @@
       graphHost.hidden=false;
       nodeJump.hidden=false;expandGraph.hidden=!document.fullscreenEnabled;
       const detailVisible=detailOpen||monitoring;
-      if(embedded?.nodeDetailHost){
+      if(embedded?.canvasDetail){
+        nodePanel.hidden=!detailOpen;
+        body.classList.remove('wb-detail-open');
+      }else if(embedded?.nodeDetailHost){
         nodePanel.hidden=false;
         body.classList.remove('wb-detail-open');
-        if(detailVisible&&!lastEmbeddedDetail)embedded.onDetailOpen?.();
-        lastEmbeddedDetail=detailVisible;
+        if(detailOpen&&!lastEmbeddedDetail)embedded.onDetailOpen?.();
+        lastEmbeddedDetail=detailOpen;
       }else{
         nodePanel.hidden=!detailVisible;body.classList.toggle('wb-detail-open',detailVisible);
       }
       const narrowDetail=matchMedia(monitoring?'(max-width:1200px)':'(max-width:950px)').matches;
-      nodePanelResize?.setActive(!embedded?.nodeDetailHost&&!nodePanel.hidden&&!body.hidden&&!narrowDetail);
+      nodePanelResize?.setActive(!isEmbeddedDetail&&!nodePanel.hidden&&!body.hidden&&!narrowDetail);
       nodeOutputs.hidden=!run||!run.outputs?.length;
       bottom.hidden=monitoring?runInspector!=='definition':inspectorWhole;
       inspector.hidden=monitoring||!inspectorWhole;
-      nodePanelTools.hidden=monitoring&&runInspector!=='definition';closeDetail.hidden=monitoring||!!embedded?.nodeDetailHost;
+      nodePanelTools.hidden=isEmbeddedDetail?(!run||!run.outputs?.length):(monitoring&&runInspector!=='definition');closeDetail.hidden=monitoring||isEmbeddedDetail;
       root.dataset.page=activePage;onPageChange(activePage);
       runBar.hidden=!run||!!comparison||activePage!=='monitor';
       if(!checksActive)documents.open=false;
@@ -446,7 +471,7 @@
       const node=planPreview.dag.nodes.find(n=>n.occurrence_id===selection.occurrenceId&&n.logical_node_id===selection.logicalNodeId);
       const card=graphModel?.nodes.find(n=>n.key===selection.key);if(!node||!card)return;
       previewSelection=selection;definitionSource=null;definitionButton.textContent='项目算子';graph.select(card.key);nodeJump.value=card.key;inspectorWhole=false;
-      if(!quiet)detailOpen=true;
+      if(!quiet){detailOpen=true;if(embedded?.canvasDetail)nodePanel.hidden=false;embedded?.onDetailOpen?.();}
       inspector.replaceChildren($('h3',card.title),$('span','编译计划 · 尚未运行','wb-tag'));
       inspector.append($('p','算子类型：'+node.op_kind,'wb-caption'));
       factLines(inspector,'输入端口',node.input_ports.map(port=>({label:port,value:'引擎输入端口',basis:'compile'})));
@@ -554,7 +579,7 @@
         return;
       }
       const member=selection.occurrenceId!==null?card.occurrences.find(o=>o.occurrenceId===selection.occurrenceId)||card.selection:card.selection;
-      if(!quiet){detailOpen=true;sourceOpen=true;sourceBody.hidden=false;}
+      if(!quiet){detailOpen=true;sourceOpen=true;sourceBody.hidden=false;if(embedded?.canvasDetail)nodePanel.hidden=false;embedded?.onDetailOpen?.();}
       const isGroup=member.occurrenceId===null&&card.occurrences.length>1;
       const logical=member.logicalNodeId?{logical_node_id:member.logicalNodeId,occurrence_id:member.occurrenceId}:null;
       state.chooseNode(member.reportNodeId,logical);
@@ -1829,7 +1854,9 @@
         entryChoice.value=entry;
         await entryChoice.onchange();
       },
-      closeDetail:()=>{detailOpen=false;lastEmbeddedDetail=false;updateActions();},
+      currentEntry:()=>run?.entry||working?.entry||null,
+      filterFlows:term=>filterFlows(term),
+      closeDetail:()=>{detailOpen=false;lastEmbeddedDetail=false;if(embedded?.canvasDetail)nodePanel.hidden=true;},
       sync:async(fresh,{graphChanged=false,catalogChanged=false,runsChanged=false,force=false}={})=>{
         const permissionsChanged=json(ctx.run_permissions)!==json(fresh.run_permissions)||json(ctx.capabilities)!==json(fresh.capabilities);
         ctx=fresh;paintSelectors();if(historyOpen&&graphChanged)paintHistory();updateActions();

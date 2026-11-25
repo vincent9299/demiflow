@@ -208,11 +208,12 @@ SOFTWARE.
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
-  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register,drawerMode=false,externalFilesHost=null,externalOperatorsHost=null,externalCodeHost=null,onCodeOpenChange=null,onSelectFlow=null,onShowFilesTab=null,onBadgeChange=null,onTurnCompleted=null}) {
+  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register,drawerMode=false,externalSessionsHost=null,externalFilesHost=null,externalOperatorsHost=null,externalCodeHost=null,excludeFlows=false,onCodeOpenChange=null,onSelectFlow=null,onShowFilesTab=null,onBadgeChange=null,onTurnCompleted=null,onSessionFocus=null,onBackToCanvas=null}) {
     const state={disposed:false,navigationEpoch:0,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
     const layout=el('section',undefined,'development-layout'+(drawerMode?' is-drawer-mode':'')),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);if(!drawerMode)main.classList.add('development-main');active.add(state);
-    const handle={workspaceId,get sessionId(){return state.session?.id;},get files(){return state.files;},insertReference:path=>insertReference(path),navigate:async nextView=>{if(state.disposed)return;await switchView(nextView);},dispose(){if(state.disposed)return;flushDrafts();state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);if(!drawerMode)main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
+    let sessionFilter='';
+    const handle={workspaceId,get sessionId(){return state.session?.id;},get files(){return state.files;},setSessionFilter:q=>{sessionFilter=String(q||'');if(!state.initializing)renderConversations();},insertReference:path=>insertReference(path),navigate:async nextView=>{if(state.disposed)return;await switchView(nextView);},dispose(){if(state.disposed)return;flushDrafts();state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);if(!drawerMode)main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     let sidebarTab='sessions';
@@ -231,7 +232,9 @@ SOFTWARE.
     const sessionList=el('nav',undefined,'development-session-list');sessionList.setAttribute('aria-label','项目会话');
     const sessionPages=el('div',undefined,'development-session-pages'),sessionNote=el('p','正在读取会话…','development-session-note');
     sessionsPane.append(sideHeading,sessionList,sessionPages,sessionNote);
-    sidebar.append(navigation.element,sideTabs,sessionsPane,filesPane,operatorsPane);layout.prepend(sidebar);
+    if(externalSessionsHost){externalSessionsHost.append(sessionsPane);sidebar.append(navigation.element,sideTabs,filesPane,operatorsPane);}
+    else sidebar.append(navigation.element,sideTabs,sessionsPane,filesPane,operatorsPane);
+    layout.prepend(sidebar);
     state.navigationResize=ForgeNavigation.resizable({layout,sidebar,label:'会话目录',active:false});
     const backdrop=el('button',undefined,'development-sidebar-backdrop');backdrop.type='button';backdrop.setAttribute('aria-label','关闭会话列表');layout.append(backdrop);
     const head=el('div',undefined,'development-controls'),sideToggle=iconButton('会话列表','M3 4h18v16H3zM9 4v16');
@@ -253,21 +256,28 @@ SOFTWARE.
     const closeSidebar=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=closeSidebar;
     sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};
     let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!drawerMode&&!narrowViewport);
-    createNew.onclick=()=>{if(!createNew.disabled&&typeof openNew==='function')openNew();};
+    createNew.onclick=()=>{if(!createNew.disabled&&typeof openNew==='function'){onSessionFocus?.();openNew();}};
     const filesToggle=iconButton('打开代码面板','M3 4h18v16H3zM15 4v16');
     let drawerSessionSelect=null,drawerNewBtn=null;
     if(drawerMode){
       sideToggle.hidden=true;filesToggle.hidden=true;sidebar.hidden=true;backdrop.hidden=true;
-      drawerSessionSelect=el('select',undefined,'dev-drawer-session-select');
-      drawerSessionSelect.setAttribute('aria-label','切换开发会话');
-      drawerSessionSelect.onchange=()=>{
-        const val=drawerSessionSelect.value;
-        if(val==='__new__'){if(typeof openNew==='function')openNew();}
-        else if(val&&val!==state.session?.id)openSession(val);
-      };
-      drawerNewBtn=el('button','＋ 新会话','dev-drawer-new-session');drawerNewBtn.type='button';
-      drawerNewBtn.onclick=()=>{if(!drawerNewBtn.disabled&&typeof openNew==='function')openNew();};
-      head.append(drawerSessionSelect,drawerNewBtn);
+      if(typeof onBackToCanvas==='function'){
+        const backBtn=el('button','← 返回画布','pw-back-graph');backBtn.type='button';
+        backBtn.onclick=()=>onBackToCanvas();
+        head.append(backBtn);
+      }
+      if(!externalSessionsHost){
+        drawerSessionSelect=el('select',undefined,'dev-drawer-session-select');
+        drawerSessionSelect.setAttribute('aria-label','切换开发会话');
+        drawerSessionSelect.onchange=()=>{
+          const val=drawerSessionSelect.value;
+          if(val==='__new__'){if(typeof openNew==='function')openNew();}
+          else if(val&&val!==state.session?.id)openSession(val);
+        };
+        drawerNewBtn=el('button','＋ 新会话','dev-drawer-new-session');drawerNewBtn.type='button';
+        drawerNewBtn.onclick=()=>{if(!drawerNewBtn.disabled&&typeof openNew==='function')openNew();};
+        head.append(drawerSessionSelect,drawerNewBtn);
+      }
     }else{
       head.append(filesToggle);
     }
@@ -299,7 +309,7 @@ SOFTWARE.
       onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),
       onShowFilesTab:()=>{if(onShowFilesTab)onShowFilesTab();else{sidebarOpen(true);setSidebarTab('files');}},
       onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;onBadgeChange?.(count);},
-      onOpenChange:onCodeOpenChange,onSelectFlow});
+      onOpenChange:onCodeOpenChange,onSelectFlow,excludeFlows});
     if(openOperators){
       sidebarOpen(true);setSidebarTab('operators');
       state.files.selectOperatorTarget(operatorTarget).catch(()=>{});
@@ -309,7 +319,7 @@ SOFTWARE.
     const running=value=>!!(value?.turn&&value.turn.cleanup!=='complete');
     const sessionReadonly=value=>!!value&&(value.writable===false||value.writable!==true&&(capabilities.multiple_conversations===true||!state.createdHere&&value.id!==state.primaryId));
     function renderConversations(){
-      const term=navigation.search.value.trim().toLocaleLowerCase();
+      const term=(externalSessionsHost?sessionFilter:navigation.search.value).trim().toLocaleLowerCase();
       const fingerprint=JSON.stringify([capabilities.multiple_conversations,capabilities.enabled,capabilities.read_only,state.newDraft,state.session?.id,state.session?.title,state.session?.revision,state.session?.turn?.id,state.session?.turn?.state,state.session?.turn?.cleanup,state.historyOnly,state.listOffset,state.nextListOffset,!!state.listing,term,(state.sessionRows||[]).map(s=>[s.id,s.title,s.revision,s.writable,s.turn?.id,s.turn?.state,s.turn?.cleanup])]);
       if(fingerprint===state.conversationsFingerprint)return;
       state.conversationsFingerprint=fingerprint;
@@ -327,7 +337,7 @@ SOFTWARE.
           ?labels[turn.state]:'';
         if(activeState)button.append(el('span',activeState,'development-session-state'));
         button.hidden=!(title+' '+activeState).toLocaleLowerCase().includes(term);
-        button.onclick=()=>{if(row.id!==state.session?.id||state.historyOnly)openSession(row.id);};sessionList.append(button);
+        button.onclick=()=>{onSessionFocus?.();if(row.id!==state.session?.id||state.historyOnly)openSession(row.id);};sessionList.append(button);
       }
       const pageButton=(label,offset)=>{const button=el('button',label);button.type='button';button.disabled=!!state.listing;button.onclick=()=>{state.listOffset=offset;loadConversations(true).catch(e=>error(body,e));};sessionPages.append(button);};
       if(state.listOffset>0)pageButton('较新的会话',Math.max(0,state.listOffset-20));
@@ -336,12 +346,19 @@ SOFTWARE.
       if(term&&!sessionList.querySelector('button:not([hidden])'))sessionNote.textContent='当前页没有匹配的会话';
       if(drawerSessionSelect){
         drawerSessionSelect.replaceChildren();
+        const seen=new Set();
         if(state.newDraft&&!state.session){
           const opt=el('option','新会话');opt.value='__new__';drawerSessionSelect.append(opt);
         }
+        if(state.session?.id&&!(state.sessionRows||[]).some(s=>s.id===state.session.id)){
+          const opt=el('option',state.session.title||'当前会话');opt.value=state.session.id;drawerSessionSelect.append(opt);seen.add(state.session.id);
+        }
         for(const saved of state.sessionRows||[]){
+          if(seen.has(saved.id))continue;
+          seen.add(saved.id);
           const row=state.session?.id===saved.id?{...saved,...state.session}:saved;
-          const opt=el('option',row.title||'未命名会话');opt.value=row.id;drawerSessionSelect.append(opt);
+          const activeTag=running(row)&&['preparing','starting','running','waiting_input','waiting_approval','stopping'].includes(row.turn?.state)?' · '+labels[row.turn.state]:'';
+          const opt=el('option',(row.title||'未命名会话')+activeTag);opt.value=row.id;drawerSessionSelect.append(opt);
         }
         if(!drawerSessionSelect.options.length){
           const opt=el('option','暂无会话');opt.value='';drawerSessionSelect.append(opt);
@@ -378,7 +395,8 @@ SOFTWARE.
         rail.update();
       } else loadWindow(row.session,row.sequence-1).catch(e=>error(body,e));
     }});
-    head.insertBefore(rail.picker,filesToggle);
+    if(filesToggle.parentNode===head)head.insertBefore(rail.picker,filesToggle);
+    else head.append(rail.picker);
     timeline.onscroll=()=>{follow.sample(scrollMetrics(timeline));newContent.hidden=follow.active;rail.update();};
     const newContent=iconButton('有新内容，滚动到底部','M6 9l6 6 6-6');newContent.classList.add('development-scroll-bottom');newContent.hidden=true;stage.append(newContent);newContent.onclick=()=>{follow.toBottom(timeline,scrollMetrics(timeline),'instant');newContent.hidden=true;};
     let lastTop=-1,lastComposerHeight=-1;
