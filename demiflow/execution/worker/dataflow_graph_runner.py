@@ -32,6 +32,8 @@ from demiflow.execution.storage.streams import frame_stream, read_document
 class WorkerGraphRunner:
     _fixed_key_exclusion = None
     _join_probe = None
+    _busy_owner = None
+    _busy_groups = {}  # Read-only default; __init__ binds the instance mapping.
 
     def __init__(self, executor):
         self.e = executor
@@ -117,6 +119,19 @@ class WorkerGraphRunner:
         for region in self._relational_regions.values():
             region.on_complete_member = self._region_member_completed
             region.on_input_member = self._region_member_inputs
+        # Node busy time is measured on this business thread where the work
+        # happens: the innermost running node owns the clock, so a node's time
+        # excludes downstream nodes it feeds synchronously. A relational region
+        # is computed jointly; its members share one clock (group timing).
+        from demiflow.execution.journal.dataflow_operator_observations import BusyClock
+        self._busy_owner = None
+        self._busy_clocks = {}
+        self._busy_groups = {}
+        for region in self._relational_regions.values():
+            shared, members = BusyClock(), sorted(region.plan.occurrences)
+            for occ in members:
+                self._busy_clocks[occ] = shared
+                self._busy_groups[occ] = members
         # Every source row can occupy several delivery slots at once. Each
         # channel fitting its own window does not prove the aggregate fits the
         # same worker's bounded outstanding-delivery table. Stop between source
@@ -852,10 +867,14 @@ class WorkerGraphRunner:
             from demiflow.execution.storage.record_schema import RecordSchemas
             self._terminal_schema_ref = RecordSchemas(self.services).put(batch.schema)
             self._set_terminal_columns(batch.schema, schema=True)
-        self._terminal_blocks.append_arrow_batch(batch)
+        terminal = self.e._graph.terminals[0]
+        previous = self._enter_node(terminal)
+        try:
+            self._terminal_blocks.append_arrow_batch(batch)
+        finally:
+            self._leave_node(previous)
         self._terminal_rows, self._terminal_bytes = self._terminal_blocks.rows, self._terminal_blocks.bytes
         count = batch.num_rows
-        terminal = self.e._graph.terminals[0]
         self._metrics[source]['rows_output'] += count
         self._metrics[terminal]['rows_input'] += count
         self._metrics[terminal]['rows_output'] += count
@@ -942,9 +961,13 @@ class WorkerGraphRunner:
                           and not (self._paused and self._idle_sent))
         if poll_ready:
             for (occurrence, _), kernel in self.e._kernels.items():
-                for record in kernel.poll():
-                    self._output(occurrence, record)
-                    processed += 1
+                previous = self._enter_node(occurrence)
+                try:
+                    for record in kernel.poll():
+                        self._output(occurrence, record)
+                        processed += 1
+                finally:
+                    self._leave_node(previous)
         with self._condition:
             command = (self._cut_controls.popleft() if self._cut_controls else
                        self._queue.popleft() if self._sealed_cut is None and self._queue else None)
@@ -1009,19 +1032,24 @@ class WorkerGraphRunner:
                         processed += 1
                         break
                 from demiflow.execution.pipeline.run_context import source_run_scope
-                with source_run_scope(self.e._source_run):
-                    if reader is self._batch_source:
-                        self._advance_batch(source, split_id, credit)
-                        processed += 1
-                        break
-                    poll = reader.next_record()
+                previous = self._enter_node(source)
+                try:
+                    with source_run_scope(self.e._source_run):
+                        if reader is self._batch_source:
+                            self._advance_batch(source, split_id, credit)
+                            processed += 1
+                            break
+                        poll = reader.next_record()
+                    if poll.status == 'record':
+                        if credit is not None and self._unconfirmed_bytes + poll.record.encoded_bytes > credit['bytes']:
+                            raise DataflowError('BUDGET_EXCEEDED', 'source row exceeds checkpoint_unconfirmed_bytes')
+                        self._unconfirmed_rows += 1
+                        self._unconfirmed_bytes += poll.record.encoded_bytes
+                        source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
+                        self._output(source, poll.record)
+                finally:
+                    self._leave_node(previous)
                 if poll.status == 'record':
-                    if credit is not None and self._unconfirmed_bytes + poll.record.encoded_bytes > credit['bytes']:
-                        raise DataflowError('BUDGET_EXCEEDED', 'source row exceeds checkpoint_unconfirmed_bytes')
-                    self._unconfirmed_rows += 1
-                    self._unconfirmed_bytes += poll.record.encoded_bytes
-                    source = next(s.source_id for s in self.e.assignment.source_splits if s.split_id == split_id)
-                    self._output(source, poll.record)
                     self._source_rows_since_cut += 1
                     if reader._eoi and not reader._replay_pending:
                         self._finish_source_split(split_id, source)
@@ -1096,11 +1124,43 @@ class WorkerGraphRunner:
                if s.source_id == source):
             self._finish_node(source)
 
+    def _busy_clock(self, occ):
+        clocks = self.__dict__.get('_busy_clocks')
+        if clocks is None:
+            clocks = self._busy_clocks = {}
+        clock = clocks.get(occ)
+        if clock is None:
+            # A kernel's own clock also covers its in-flight concurrent calls.
+            kernel = getattr(self.e, '_kernels', {}).get((occ, self.partition))
+            observations = getattr(kernel, 'observations', None)
+            if observations is not None:
+                return observations.busy
+            from demiflow.execution.journal.dataflow_operator_observations import BusyClock
+            clock = clocks[occ] = BusyClock()
+        return clock
+
+    def _enter_node(self, occ):
+        clock, previous = self._busy_clock(occ), self._busy_owner
+        if previous is not None:
+            previous.end()
+        clock.begin()
+        self._busy_owner = clock
+        return previous
+
+    def _leave_node(self, previous):
+        self._busy_owner.end()
+        self._busy_owner = previous
+        if previous is not None:
+            previous.begin()
+
     def _metrics_payload(self, occ):
         from demiflow.execution.operator_bindings.dataflow_models import worker_prompt_usage
         kernel = self.e._kernels.get((occ, self.partition))
         payload = {'occurrence_id': occ, 'partition_id': self.partition,
-                   'metrics': dict(self._metrics[occ])}
+                   'metrics': dict(self._metrics[occ]),
+                   'busy_ns': self._busy_clock(occ).snapshot()}
+        if occ in self._busy_groups:
+            payload['busy_group'] = list(self._busy_groups[occ])
         from demiflow.execution.operator_bindings.dataflow_models import worker_model_observations
         models = worker_model_observations(kernel)
         if models is not None:
@@ -1286,6 +1346,17 @@ class WorkerGraphRunner:
         self._send('terminal' if edge is None else 'data', payload)
 
     def _receive_data(self, command):
+        # Reading and decoding a delivery is the consuming node's own work.
+        edge = next((e for e in self.e._graph.edges if e.edge_id == command['edge_id']), None)
+        if edge is None or edge.consumer not in self.e._node_specs:
+            return self._receive_delivery(command)
+        previous = self._enter_node(edge.consumer)
+        try:
+            return self._receive_delivery(command)
+        finally:
+            self._leave_node(previous)
+
+    def _receive_delivery(self, command):
         edge_id = command['edge_id']
         edge = next((e for e in self.e._graph.edges if e.edge_id == edge_id), None)
         spec = self._exchange.get(edge_id)
@@ -1333,6 +1404,13 @@ class WorkerGraphRunner:
     def _push(self, occ, port, record):
         if occ in self._finished:
             return
+        previous = self._enter_node(occ)
+        try:
+            self._push_node(occ, port, record)
+        finally:
+            self._leave_node(previous)
+
+    def _push_node(self, occ, port, record):
         self._metrics[occ]['rows_input'] += 1
         self._dirty_metrics.add(occ)
         if (self._observation_rows and self.e._node_specs[occ].kind == 'transform'
@@ -1508,16 +1586,24 @@ class WorkerGraphRunner:
                 iterator = self._finite_finish_iterator(occurrence, kernel, port)
                 self._active_finishes[key] = iterator
             while True:
+                previous = self._enter_node(occurrence)
                 try:
                     record = next(iterator)
                 except StopIteration:
+                    self._leave_node(previous)
                     self._active_finishes.pop(key)
                     for member in region.plan.occurrences:
                         for edge in self._incoming.get(member, ()):
                             self._finished_ports.add(edge.edge_id)
                         self._finish_node(member)
                     break
-                self._output(occurrence, record)
+                except BaseException:
+                    self._leave_node(previous)
+                    raise
+                try:
+                    self._output(occurrence, record)
+                finally:
+                    self._leave_node(previous)
                 processed += 1
                 if self._park_requested and kernel.finish_replayable:
                     self._park_finish_pending = self._park_can_output(occurrence)
@@ -1578,12 +1664,20 @@ class WorkerGraphRunner:
                         if iterator is None:
                             iterator = self._finite_finish_iterator(occurrence, kernel, edge.input_port)
                             self._active_finishes[edge.edge_id] = iterator
+                        previous = self._enter_node(occurrence)
                         try:
                             out = next(iterator)
                         except StopIteration:
+                            self._leave_node(previous)
                             self._active_finishes.pop(edge.edge_id)
+                        except BaseException:
+                            self._leave_node(previous)
+                            raise
                         else:
-                            self._output(occurrence, out)
+                            try:
+                                self._output(occurrence, out)
+                            finally:
+                                self._leave_node(previous)
                             if self._park_requested and kernel.finish_replayable:
                                 self._park_finish_pending = self._park_can_output(occurrence)
                             processed += 1
@@ -1593,9 +1687,13 @@ class WorkerGraphRunner:
                                 return processed
                             continue
                     elif kernel is not None:
-                        for out in self._model_results(occurrence, kernel,
-                                kernel.finish(edge.input_port, wait_for_calls=False)):
-                            self._output(occurrence, out)
+                        previous = self._enter_node(occurrence)
+                        try:
+                            for out in self._model_results(occurrence, kernel,
+                                    kernel.finish(edge.input_port, wait_for_calls=False)):
+                                self._output(occurrence, out)
+                        finally:
+                            self._leave_node(previous)
                     self._finished_ports.add(edge.edge_id)
                     processed += 1
                     advanced = True

@@ -56,9 +56,46 @@ def validated(value):
     return result
 
 
+class BusyClock:
+    """Cumulative busy time of one node (or one fused group) in one executor.
+
+    ``begin``/``end`` nest, so overlapping causes of activity (the worker loop
+    running this node, in-flight concurrent calls) count once: the result is
+    the union of busy intervals, never a sum of overlapping latencies. Only
+    the monotonic clock is read; nothing per row is retained.
+    """
+    __slots__ = ('_lock', '_depth', '_since', '_total')
+
+    def __init__(self):
+        self._lock = Lock()
+        self._depth = 0
+        self._since = 0
+        self._total = 0
+
+    def begin(self):
+        with self._lock:
+            if not self._depth:
+                self._since = time.monotonic_ns()
+            self._depth += 1
+
+    def end(self):
+        with self._lock:
+            if self._depth <= 0:
+                raise DataflowError('INTERNAL_PROTOCOL', 'busy clock ended more often than begun')
+            self._depth -= 1
+            if not self._depth:
+                self._total += time.monotonic_ns() - self._since
+
+    def snapshot(self):
+        """Cumulative nanoseconds, including a still-open interval."""
+        with self._lock:
+            return self._total + (time.monotonic_ns() - self._since if self._depth else 0)
+
+
 class CallbackObservations:
     def __init__(self):
         self._lock = Lock()
+        self.busy = BusyClock()
         self._value = empty()
         self._lifecycle = dict.fromkeys(_LIFECYCLE_FIELDS, 0)
         self._handoff = {'capacity': 1, 'current': 0, 'peak': 0,
@@ -128,7 +165,71 @@ class CallbackObservations:
             self._value = validated(value)
 
 
+def observe_busy(execution, event, payload):
+    """Project a worker's measured node busy time onto the checked observation.
+
+    ``busy_ns`` is cumulative per worker boot and is never restored, so a new
+    boot starts from zero and its whole value is new time. A fused relational
+    region reports one shared clock for all members (``busy_group``); it is
+    projected once as group timing, never split into invented per-node values.
+    """
+    value = payload.get('busy_ns')
+    if value is None:
+        return
+    if type(value) is not int or not 0 <= value < 2**63:
+        raise DataflowError('INVALID_CONTRACT', 'invalid node busy time observation')
+    group = payload.get('busy_group')
+    occurrence = payload['occurrence_id']
+    if group is not None:
+        assigned = {n for stage in execution._endpoints[event.allocation_id]._assignment.stages
+                    for n in stage.occurrences}
+        if (type(group) is not list or not 1 <= len(group) <= 128 or occurrence not in group
+                or len(set(group)) != len(group) or not set(group) <= assigned):
+            raise DataflowError('INVALID_CONTRACT', 'invalid fused group busy observation')
+        slot_key = (tuple(sorted(group)), payload['partition_id'])
+    else:
+        slot_key = (occurrence, payload['partition_id'])
+    slots = getattr(execution, '_operator_busy', None)
+    if slots is None:
+        execution._operator_busy = slots = {}
+    previous = slots.get(slot_key)
+    delta = value
+    if previous is not None and previous[0] == event.boot_id:
+        if value < previous[1]:
+            raise DataflowError('FENCED', 'node busy time moved backwards within one boot')
+        delta = value - previous[1]
+    slots[slot_key] = (event.boot_id, value)
+    checked = getattr(execution, '_checked', None)
+    if checked is None or (not delta and previous is not None):
+        return
+    if group is None:
+        key = execution._report_keys.get(occurrence)
+        if key is not None:
+            checked.duration(key, delta / 1e9)
+        return
+    keys = [execution._report_keys[o] for o in slot_key[0] if o in execution._report_keys]
+    if keys:
+        checked.group_duration(keys, delta / 1e9)
+
+
+def observe_publication(execution, elapsed):
+    """Attribute one measured checkpoint publication to the terminal sink node.
+
+    Publication prepares and commits the terminal's output (e.g. writing and
+    committing Lance fragments) in the driver's publisher. With several
+    reported terminals one commit cannot be split honestly, so it is skipped.
+    """
+    checked = getattr(execution, '_checked', None)
+    if checked is None or not elapsed > 0:
+        return
+    keys = [execution._report_keys[o] for o in execution._graph.terminals
+            if o in execution._report_keys]
+    if len(keys) == 1:
+        checked.duration(keys[0], elapsed)
+
+
 def observe_operator(execution, event, payload):
+    observe_busy(execution, event, payload)
     lifecycle = payload.get('actor_lifecycle')
     if lifecycle is not None:
         lifecycle = validated_lifecycle(lifecycle)
