@@ -276,3 +276,36 @@ def test_validate_python_accepts_venv_directory_and_resolves_interpreter(tmp_pat
     empty_dir.mkdir()
     with pytest.raises(ForgeError, match='bin/python'):
         registry.validate_python(str(empty_dir))
+
+
+def test_data_tool_semantic_exports_and_catalog_metadata(tmp_path):
+    from demiflow.workbench.projects import definitions, registry
+
+    proj = tmp_path / 'proj'
+    reg = tmp_path / 'reg.json'
+    registry.create(reg, proj, name='Demo')
+    tools_dir = proj / 'data_tools'
+    tools_dir.mkdir(exist_ok=True)
+    (tools_dir / 'review.py').write_text(
+        '__demiflow_data_tools__ = {\n'
+        '    "PoolReviewer": {\n'
+        '        "kind": "annotation",\n'
+        '        "title": "训练池全量审核",\n'
+        '        "summary": "分页看图并人工通过/拒绝",\n'
+        '        "when_to_use": "人工复核训练池候选图时使用",\n'
+        '    },\n'
+        '    "quick_stat": "analysis",\n'
+        '}\n'
+        'class PoolReviewer:\n    pass\n'
+        'def quick_stat(df):\n    """统计通过率。"""\n    return len(df)\n',
+        encoding='utf-8',
+    )
+    cat = definitions.catalog(proj, data_tools=True, include_platform=False)
+    by_symbol = {item['symbol']: item for item in cat['definitions']}
+    assert by_symbol['PoolReviewer']['tool_kind'] == 'annotation'
+    assert by_symbol['PoolReviewer']['title'] == '训练池全量审核'
+    assert by_symbol['PoolReviewer']['summary'] == '分页看图并人工通过/拒绝'
+    assert by_symbol['PoolReviewer']['when_to_use'] == '人工复核训练池候选图时使用'
+    assert by_symbol['quick_stat']['tool_kind'] == 'analysis'
+    assert by_symbol['quick_stat']['title'] == 'quick_stat'
+    assert '统计通过率' in by_symbol['quick_stat']['summary']
