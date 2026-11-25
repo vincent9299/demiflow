@@ -179,7 +179,7 @@
 - **现象。** 自 `31c779c6`（main-20261125-20，合入 `eafb549a`）起，封存业务依赖时会读取源码里的绝对 `import`，并且只在该模块已被本进程加载（`sys.modules`）时才计入依赖（`execution/seal/business_sources.py::_ast_import_dependencies`）。驱动进程与 worker 进程加载过的模块不同，两边算出的依赖集合就不同，worker 加载程序时报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`，代码并没有改。
 - **依据（不经过 pytest 的用户写法，2026-11-25）。** 业务函数体内 `import biz_extra`，驱动进程此前已导入过 `biz_extra`：进程 worker 下，`40c0034a`（改动前）正常，最新 main `c00afcb3` 失败；驱动进程没有提前导入时，前后都正常。
 - **同一改动修好了更大的真实问题，不要回退。** 使用相对导入的业务包（顶层 `from ._consts import X`、函数体内 `from . import _lazy`）在 `40c0034a` 上用进程 worker 运行 map、map+reduce、运行内 materialize 全部以 `CORRUPT_ARTIFACT` 加载失败，改动后全部通过。
-- **对测试的影响。** `tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，改动前 23 过 2 败，改动后 23 败 2 过；`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个由通过变为失败；多个文件同会话运行时还有更多测试出现同一报错。都是同一机制：场景模块在函数体内导入了其他测试模块，pytest 进程早已加载它们，worker 没有。
+- **对测试的影响。** `tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，改动前 23 过 2 败，改动后 23 败 2 过；`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个由通过变为失败；`tests/test_runtime_v3_thread_host.py` 整文件运行时有 4 个同样报错（只挑这 4 个用例单独运行则通过）；多个文件同会话运行时还有更多测试出现同一报错。都是同一机制：场景模块在函数体内导入了其他测试模块，pytest 进程早已加载它们，worker 没有。
 - **建议。** 绝对导入的依赖不要按"本进程是否已加载"来确定：改为与相对导入一样按文件系统解析，或只在封存时确定依赖并写入清单，worker 按清单核对而不重新发现。修好后上述测试和用户写法的复现都应通过。
 - **更正。** 本条 11-25 首次发布（main-20261125-37）时写的是"修复或回退"，并把影响描述为路由图与恢复程序被拒绝加载；当时只有测试证据。经独立脚本核实后改为以上内容。
 
