@@ -31,7 +31,7 @@ function detectCellTools(source){
   return found;
 }
 
-export function mountCards({desk,controls,panel,storage,app,api,project,alive,permissions,hasProjectPython,loadTools,openTool,tables,catalogCommand,layout}){
+export function mountCards({desk,controls,panel,storage,app,api,project,alive,permissions,hasProjectPython,loadTools,openTool,writeDataTool,tables,catalogCommand,layout}){
   const book=panel.content,doc=book.node.ownerDocument,win=doc.defaultView;
   const frameTables='.jp-RenderedHTMLCommon table.dataframe';
   const renderTables=node=>{
@@ -292,6 +292,12 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   async function command(id,name,args,pending){
     if(!valid()||path!==panel.context.path)throw Error('目标 Notebook 已关闭或改名。');
     if(name.startsWith('catalog.'))return catalogCommand(name,args);
+    if(name==='tool.write'){
+      if(!writable()||!writeDataTool)throw Error('当前项目未开启写权限，无法写入 data_tools。');
+      const result=await writeDataTool(args);
+      toolDefs=null;await ensureTools();
+      return result;
+    }
     const cell=cellById(id);
     if(!cell||cell.isDisposed||cell.model.type!=='code')throw Error('目标 cell 已删除。');
     const source=sourceOf(cell);

@@ -309,3 +309,54 @@ def test_data_tool_semantic_exports_and_catalog_metadata(tmp_path):
     assert by_symbol['quick_stat']['tool_kind'] == 'analysis'
     assert by_symbol['quick_stat']['title'] == 'quick_stat'
     assert '统计通过率' in by_symbol['quick_stat']['summary']
+
+
+def test_write_data_tool_enforces_path_boundary_and_mandatory_semantics(tmp_path):
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.projects import definitions, registry
+
+    proj = tmp_path / 'proj'
+    reg = tmp_path / 'reg.json'
+    registry.create(reg, proj, name='Demo')
+
+    valid_source = (
+        '__demiflow_data_tools__ = {\n'
+        '    "inspect_batch": {\n'
+        '        "kind": "view",\n'
+        '        "title": "批次看图",\n'
+        '        "summary": "按批次分页浏览合成图与评分",\n'
+        '        "when_to_use": "查看某次管线产出的合成图质量时使用",\n'
+        '    }\n'
+        '}\n'
+        'def inspect_batch(df):\n    return df.head(20)\n'
+    )
+
+    # 1. Path boundary: never allows escaping data_tools/
+    for bad_path in ('../flows/hack.py', 'flows/hack.py', 'sub/mod.py', '_private.py', 'def.py'):
+        with pytest.raises(ForgeError):
+            definitions.write_data_tool(proj, path=bad_path, source=valid_source)
+
+    # 2. Mandatory semantics: rejects missing __demiflow_data_tools__ or missing title/summary/when_to_use
+    with pytest.raises(ForgeError, match='__demiflow_data_tools__'):
+        definitions.write_data_tool(proj, path='no_export.py', source='def f():\n    return 1\n')
+    with pytest.raises(ForgeError, match='缺少必填语义字段'):
+        definitions.write_data_tool(
+            proj, path='no_sem.py',
+            source='__demiflow_data_tools__ = {"f": "analysis"}\ndef f():\n    return 1\n',
+        )
+    with pytest.raises(ForgeError, match='when_to_use'):
+        definitions.write_data_tool(
+            proj, path='partial_sem.py',
+            source='__demiflow_data_tools__ = {"f": {"kind": "analysis", "title": "统计", "summary": "算均值"}}\ndef f():\n    return 1\n',
+        )
+
+    # 3. Valid semantic module succeeds and is immediately discoverable in catalog
+    result = definitions.write_data_tool(proj, path='batch_viewer.py', source=valid_source)
+    assert result['status'] == 'written'
+    assert result['path'] == 'data_tools/batch_viewer.py'
+    assert result['module'] == 'data_tools.batch_viewer'
+    assert (proj / 'data_tools' / 'batch_viewer.py').is_file()
+    cat = definitions.catalog(proj, data_tools=True, include_platform=False)
+    by_symbol = {item['symbol']: item for item in cat['definitions']}
+    assert by_symbol['inspect_batch']['title'] == '批次看图'
+    assert by_symbol['inspect_batch']['when_to_use'] == '查看某次管线产出的合成图质量时使用'
