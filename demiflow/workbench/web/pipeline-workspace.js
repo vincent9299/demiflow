@@ -33,7 +33,7 @@
 
     let disposed = false, workbenchHandle = null, devHandle = null;
     let currentContext = context;
-    let sidebarTab = 'flows', stageMode = 'canvas', rightMode = null;
+    let sidebarTab = 'flows', stageMode = 'canvas', rightMode = null, drawerExpanded = false;
 
     main.classList.add('pipeline-workspace-active');
     const root = el('div', undefined, 'pw-workspace');
@@ -114,21 +114,35 @@
       }
     };
 
+    function setDrawerExpanded(next) {
+      drawerExpanded = !!next && rightMode === 'code';
+      root.dataset.drawerExpanded = drawerExpanded ? 'true' : 'false';
+      devHandle?.files?.setExpandedState?.(drawerExpanded);
+      drawerResize.setActive(!!rightMode && !drawerExpanded && !matchMedia('(max-width:900px)').matches);
+      return drawerExpanded;
+    }
+
     function setRightMode(next) {
       rightMode = (next === 'detail' || next === 'code') ? next : null;
       const open = !!rightMode;
+      if (rightMode !== 'code' && drawerExpanded) {
+        drawerExpanded = false;
+        root.dataset.drawerExpanded = 'false';
+        devHandle?.files?.setExpandedState?.(false);
+      }
       root.dataset.drawer = open ? 'open' : 'closed';
       root.dataset.drawerMode = rightMode || '';
       drawer.hidden = !open;
       detailPane.hidden = rightMode !== 'detail';
       codePane.hidden = rightMode !== 'code';
       headerSourceBtn.setAttribute('aria-pressed', String(rightMode === 'code'));
-      drawerResize.setActive(open && !matchMedia('(max-width:900px)').matches);
+      drawerResize.setActive(open && !drawerExpanded && !matchMedia('(max-width:900px)').matches);
     }
 
     function setStageMode(next) {
       stageMode = next === 'assistant' ? 'assistant' : 'canvas';
       root.dataset.stage = stageMode;
+      if (drawerExpanded) setDrawerExpanded(false);
       workbenchHost.hidden = stageMode !== 'canvas';
       assistantHost.hidden = stageMode !== 'assistant';
       // When switching away from canvas to assistant, hide node detail if it was open (keep code reader if open).
@@ -157,8 +171,8 @@
       }
     }
 
-    flowsBtn.onclick = () => { setSidebarTab('flows'); setStageMode('canvas'); };
-    sessionsBtn.onclick = () => { setSidebarTab('sessions'); setStageMode('assistant'); };
+    flowsBtn.onclick = () => setSidebarTab('flows');
+    sessionsBtn.onclick = () => setSidebarTab('sessions');
     filesBtn.onclick = () => setSidebarTab('files');
 
     const isDevView = ['development', 'development_session', 'development_new'].includes(view?.kind);
@@ -249,6 +263,7 @@
           setRightMode(null);
         }
       },
+      onToggleCodeExpand: () => setDrawerExpanded(!drawerExpanded),
       onSelectFlow: async entry => {
         setStageMode('canvas');
         await workbenchHandle?.selectFlow?.(entry);

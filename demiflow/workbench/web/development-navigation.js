@@ -134,7 +134,7 @@
     return svg;
   }
 
-  function filePanel({layout, filesHost, operatorsHost, paneHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange, onOpenChange, onSelectFlow, excludeFlows = false}) {
+  function filePanel({layout, filesHost, operatorsHost, paneHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange, onOpenChange, onSelectFlow, onToggleExpand, excludeFlows = false}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
     let gitChanges = [], gitBranch = '', gitIsRepo = false;
@@ -389,6 +389,20 @@
 
     const tabBar = node('div', 'dev-code-tabbar');
     const tabList = node('div', 'dev-code-tabs');
+    let expandPanelBtn = null;
+    if (typeof onToggleExpand === 'function') {
+      expandPanelBtn = iconButton('全宽展示代码', 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7');
+      expandPanelBtn.classList.add('dev-code-expand-btn');
+      expandPanelBtn.setAttribute('aria-pressed', 'false');
+      expandPanelBtn.onclick = () => {
+        const expanded = !!onToggleExpand();
+        expandPanelBtn.setAttribute('aria-pressed', String(expanded));
+        expandPanelBtn.classList.toggle('is-active', expanded);
+        expandPanelBtn.title = expanded ? '还原分栏' : '全宽展示代码';
+        expandPanelBtn.setAttribute('aria-label', expandPanelBtn.title);
+      };
+      tabBar.append(expandPanelBtn);
+    }
     const closePanelBtn = iconButton('关闭代码面板', 'M6 6l12 12M18 6L6 18');
     tabBar.append(tabList, closePanelBtn);
 
@@ -2165,6 +2179,14 @@
       openOperator,
       ensureOperatorsLoaded,
       selectOperatorTarget,
+      setExpandedState(expanded) {
+        if (!expandPanelBtn) return;
+        const on = !!expanded;
+        expandPanelBtn.setAttribute('aria-pressed', String(on));
+        expandPanelBtn.classList.toggle('is-active', on);
+        expandPanelBtn.title = on ? '还原分栏' : '全宽展示代码';
+        expandPanelBtn.setAttribute('aria-label', expandPanelBtn.title);
+      },
       setOpen,
       isOpen: () => !pane.hidden,
       ensureTreeLoaded() { if (!treeLoaded) list('/'); refreshChanges(); },

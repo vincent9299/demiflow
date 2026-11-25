@@ -6,8 +6,11 @@
 main.pipeline-workspace-active{padding:0!important;max-width:none!important;overflow:hidden}
 .pw-workspace{display:grid;grid-template-columns:var(--side-navigation-width,244px) minmax(0,1fr);height:calc(100dvh - 44px);min-height:360px;background:#fff;position:relative;overflow:hidden}
 .pw-workspace[data-drawer=open]{grid-template-columns:var(--side-navigation-width,244px) minmax(0,1fr) var(--pw-drawer-width,clamp(340px,36%,540px))}
+.pw-workspace[data-drawer=open][data-drawer-expanded=true]{grid-template-columns:var(--side-navigation-width,244px) minmax(0,1fr)}
+.pw-workspace[data-drawer=open][data-drawer-expanded=true] .pw-center{display:none}
 .pw-workspace.side-navigation-collapsed{grid-template-columns:minmax(0,1fr)}
 .pw-workspace.side-navigation-collapsed[data-drawer=open]{grid-template-columns:minmax(0,1fr) var(--pw-drawer-width,clamp(340px,36%,540px))}
+.pw-workspace.side-navigation-collapsed[data-drawer=open][data-drawer-expanded=true]{grid-template-columns:minmax(0,1fr)}
 
 /* Left sidebar */
 .pw-sidebar{min-width:0;min-height:0;display:flex;flex-direction:column;padding:10px 10px 12px;background:#fafafa;border-right:1px solid #ededf0;overflow:hidden}
@@ -98,6 +101,8 @@ main.pipeline-workspace-active{padding:0!important;max-width:none!important;over
 
 /* Supplementary Panel: Code / Component Reader */
 .pw-drawer-pane[data-pane=code] .development-files-pane{position:static!important;width:100%!important;max-width:none!important;flex:1;min-height:0;border-left:0!important;box-shadow:none!important}
+.pw-drawer-pane[data-pane=code] .dev-code-expand-btn{flex:none;margin-right:2px}
+.pw-drawer-pane[data-pane=code] .dev-code-expand-btn.is-active{background:#e4e4e7;color:#09090b}
 
 @media(max-width:900px){
   .pw-workspace[data-drawer=open]{grid-template-columns:minmax(0,1fr)}

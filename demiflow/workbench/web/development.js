@@ -208,7 +208,7 @@ SOFTWARE.
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
-  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register,drawerMode=false,externalSessionsHost=null,externalFilesHost=null,externalOperatorsHost=null,externalCodeHost=null,excludeFlows=false,onCodeOpenChange=null,onSelectFlow=null,onShowFilesTab=null,onBadgeChange=null,onTurnCompleted=null,onSessionFocus=null,onBackToCanvas=null}) {
+  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register,drawerMode=false,externalSessionsHost=null,externalFilesHost=null,externalOperatorsHost=null,externalCodeHost=null,excludeFlows=false,onCodeOpenChange=null,onToggleCodeExpand=null,onSelectFlow=null,onShowFilesTab=null,onBadgeChange=null,onTurnCompleted=null,onSessionFocus=null,onBackToCanvas=null}) {
     const state={disposed:false,navigationEpoch:0,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
     const layout=el('section',undefined,'development-layout'+(drawerMode?' is-drawer-mode':'')),body=el('div',undefined,'development-conversation');
     layout.append(body);main.append(layout);if(!drawerMode)main.classList.add('development-main');active.add(state);
@@ -309,7 +309,7 @@ SOFTWARE.
       onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),
       onShowFilesTab:()=>{if(onShowFilesTab)onShowFilesTab();else{sidebarOpen(true);setSidebarTab('files');}},
       onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;onBadgeChange?.(count);},
-      onOpenChange:onCodeOpenChange,onSelectFlow,excludeFlows});
+      onOpenChange:onCodeOpenChange,onToggleExpand:onToggleCodeExpand,onSelectFlow,excludeFlows});
     if(openOperators){
       sidebarOpen(true);setSidebarTab('operators');
       state.files.selectOperatorTarget(operatorTarget).catch(()=>{});
