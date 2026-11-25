@@ -16,5 +16,7 @@ def test_image_output_uses_run_protocol_without_request_artifacts(tmp_path,fixtu
     assert len(fixture_http['requests'])==2
     assert rows[0]['image']['uri']!=rows[1]['image']['uri']
     assert rows[0]['image']['sha256']==rows[1]['image']['sha256']
-    assert sorted(p.name for p in tmp_path.iterdir())==['objects','run0','run1']
+    # Each run owns a sibling '-driver-resources' directory for its worker units; nothing else
+    # (no request or response archive) may appear next to the runs.
+    assert sorted(p.name for p in tmp_path.iterdir())==['objects','run0','run0-driver-resources','run1','run1-driver-resources']
     assert len(list(tmp_path.rglob('*.sqlite')))==2

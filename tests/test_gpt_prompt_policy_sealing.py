@@ -4,6 +4,8 @@ import inspect
 import cloudpickle
 import pytest
 
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+
 from demiflow import data
 from demiflow.data.dataset import Dataset
 from demiflow.data.flow_contract import field, scalar
@@ -68,7 +70,10 @@ def test_tampered_or_unsealed_runtime_resources_remain_rejected(mutation, tmp_pa
     elif mutation == 'clients': runtime._clients = {'x':object()}
     elif mutation == 'owner': runtime._service_owner = object()
     elif mutation == 'owners': runtime._service_owners = [object()]
-    with pytest.raises(ValueError, match='configuration copies differ'):
+    # A replaced service object already fails the service type check before copies are compared.
+    error, message = ((DataflowError, 'passive native ManagedHTTPService') if mutation == 'service'
+                      else (ValueError, 'configuration copies differ'))
+    with pytest.raises(error, match=message):
         prompt_facts(actor)
 
 
@@ -88,12 +93,11 @@ def test_policy_preserves_real_stream_concurrency_and_usage(sse_server, tmp_path
     ds = prompt(data.from_items([{'item':i} for i in range(6)]), concurrency=3,
         request_policy=POLICY, options={'stream':True,'gateway':'litellm','trust_env':False},
         call_output='call')
-    gate = ds._stages[-1]._runtime.request_gate
     with RunContext.start(tmp_path/'run'):
         rows = ds.materialize().take_all()
     assert sorted(json.loads(r['answer']) for r in rows) == list(range(6))
-    assert 1 < sse_server['peak'] <= 2 and gate.peak == 2
-    assert gate.fresh_responses == 6
+    # The gate lives in the worker; the server sees what it admitted.
+    assert sse_server['peak'] == 2 and len(sse_server['requests']) == 6
     assert len(set(sse_server['ports'])) <= 2
     assert all(r['call']['stream_complete'] and not r['call']['reused'] for r in rows)
     assert journal_totals(tmp_path/'run'/'run.sqlite')['input_tokens'] == 66

@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
+from demiflow import data
 from demiflow.data.api import DataAPI
 from demiflow.operator_llm.client import AsyncOperatorLLMClient
 from demiflow.operator_llm.errors import PromptStreamError
@@ -16,6 +17,7 @@ from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPar
 from demiflow.operator_llm.call_ref import PromptRecordRef, journal_totals
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.services.request_limits import ServiceStopped
+from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.pipeline.run_context import RunContext
 from test_map_prompt_async import PACK, prompt
 
@@ -135,8 +137,10 @@ def test_truncation_saved_once_never_schema_retried_or_automatically_requeued(ss
 
 
 def test_read_idle_and_total_timeouts_are_distinct(sse_server,tmp_path):
+    # The server holds each chunk for .5 s: a .3 s total deadline still fires first, and
+    # leaves time to deliver the request, so each run sends exactly one.
     for name, options in [('read_idle',{'read_timeout_s':.06,'timeout_s':1}),
-                          ('total',{'read_timeout_s':1,'timeout_s':.06})]:
+                          ('total',{'read_timeout_s':1,'timeout_s':.3})]:
         sse_server['hold']=True
         ds=prompt(DataAPI().from_items([{'item':name}]),options={'stream':True,'trust_env':False,**options},error_output='error')
         with RunContext.start(tmp_path/(name+'-run')):
@@ -214,11 +218,14 @@ def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
              else sqlite3.OperationalError('database is locked'))
     monkeypatch.setenv('TEST_PROMPT_URL','http://fixture/v1')
     monkeypatch.setenv('TEST_PROMPT_KEY','fixture')
-    original=httpx.AsyncClient;state={'received':None,'requests':0,'closed':False}
+    original=httpx.AsyncClient;state={'requests':0,'closed':False}
+    # Row callables are rebuilt from their sealed programs, so closure objects are
+    # copies: the upstream waits on a file the response body creates.
+    received=tmp_path/'first-chunk-received'
     class Body(httpx.AsyncByteStream):
         async def __aiter__(self):
             yield event(chunk('{"result":'))
-            state['received'].set()
+            received.touch()
             await asyncio.sleep(.4)  # survives watchdog cancellation and old drain deadline
             yield event(chunk('"saved"}','stop'))+event('[DONE]')
         async def aclose(self):state['closed']=True
@@ -227,25 +234,30 @@ def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
         return httpx.Response(200,stream=Body(),headers={'content-type':'text/event-stream'})
     monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:original(**{**kw,'transport':httpx.MockTransport(handler)}))
     async def upstream(row):
-        if state['received'] is None:state['received']=asyncio.Event()
         if row['item']=='stop':
-            await state['received'].wait()
-            # Construct inside the row callable: managed recovery identity cannot
-            # capture an exception instance in a closure cell.
-            raised = (ServiceStopped('search engine unavailable') if failure_kind == 'service'
-                      else sqlite3.OperationalError('database is locked'))
-            state['raised']=raised
-            raise raised
+            for _ in range(500):
+                if received.exists():
+                    break
+                await asyncio.sleep(.01)
+            raise (ServiceStopped('search engine unavailable') if failure_kind == 'service'
+                   else sqlite3.OperationalError('database is locked'))
         return row
-    published=[]
-    ds=prompt(DataAPI().from_items([{'item':'paid'},{'item':'stop'}]).map_async(upstream,concurrency=2),
-        options={'stream':True,'timeout_s':request_timeout})
-    with pytest.raises(type(error), match=str(error)) as caught:
-        with RunContext.start(tmp_path/'run'):
-            ds.map(lambda row:published.append(row) or row).materialize().take_all()
-    assert caught.value is state['raised']
+    with pytest.raises(type(error), match=str(error)):
+        # Thread workers send through the transport patched in this process; one-row
+        # batches let the paid row reach the prompt while the other row is still upstream.
+        # Nothing follows the prompt: a later operator lets a finite action run the prompt
+        # only after its whole input is complete, and no call would be in flight.
+        with RunContext.start(tmp_path/'run'), data.local_execution(worker_mode='thread', batch_rows=1, block_size=1):
+            prompt(data.from_items([{'item':'paid'},{'item':'stop'}]).map_async(upstream,concurrency=2),
+                   options={'stream':True,'timeout_s':request_timeout}).materialize().take_all()
     totals=journal_totals(tmp_path/'run'/'run.sqlite')
-    assert state['requests']==1 and state['closed'] and not published
+    assert received.exists() and state['requests']==1 and state['closed']
+    # No partial success is published: no action result and no final sink manifest.
+    journal=RunJournal(tmp_path/'run')
+    assert journal.execution_action('action-1')['result'] is None
+    assert not any((sink or {}).get('manifest', {}).get('final')
+                   for commit in journal.execution_commits('action-1')
+                   for sink in ((commit.get('prepared') or {}).get('sinks') or {}).values())
     assert totals['responses'] == expected_responses
     assert totals['transport_errors'] == 1 - expected_responses
 
@@ -278,8 +290,9 @@ def test_failure_evidence_and_no_hidden_retries(monkeypatch,tmp_path,status,body
         return httpx.Response(status,stream=Body(),headers={'content-type':content_type})
     monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:original(**{**kw,'transport':httpx.MockTransport(handler)}))
     options={'stream':True}
-    with RunContext.start(tmp_path/'run'):
-        row=prompt(DataAPI().from_items([{'item':'test'}]),options=options,error_output='error').materialize().take_all()[0]
+    # Thread workers send through the transport patched in this process.
+    with RunContext.start(tmp_path/'run'), data.local_execution(worker_mode='thread'):
+        row=prompt(data.from_items([{'item':'test'}]),options=options,error_output='error').materialize().take_all()[0]
     assert row['error']['category']==expected and len(requests)==1 and 'answer' not in row
     call=row['error']['call']
     ref=call['response_ref'] if status!=200 else call['error_ref']
