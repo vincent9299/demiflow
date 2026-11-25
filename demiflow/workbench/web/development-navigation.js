@@ -1550,8 +1550,8 @@
           treeSearchToggle.hidden = inlineOutlineMode;
           treeRefresh.hidden = inlineOutlineMode;
           treeCreateWrap.hidden = true;
-          treeSearchWrap.hidden = true;
-          treeList.hidden = inlineOutlineMode;
+          treeSearchBar.hidden = true;
+          treeBody.hidden = inlineOutlineMode;
           inlineOutlineWrap.hidden = !inlineOutlineMode;
           if (inlineOutlineMode) ensureOperatorsLoaded();
         };
@@ -1737,7 +1737,7 @@
       const sec = outlineSections.apis;
       if (!sec) return;
       sec.list.replaceChildren();
-      const term = filterQuery.trim().toLowerCase();
+      const term = filterTerm.trim().toLocaleLowerCase();
       const matches = opStandardApis.filter(item =>
         !term || (item.display_name + ' ' + (item.description || '') + ' ' + (item.group || '')).toLowerCase().includes(term));
       sec.count.textContent = String(matches.length);

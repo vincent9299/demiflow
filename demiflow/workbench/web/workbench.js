@@ -210,7 +210,6 @@
     if(isEmbeddedDetail){
       const inlineActions=$('div',undefined,'wb-source-actions');
       inlineActions.append(definitionButton);
-      if(askAssistantButton)inlineActions.append(askAssistantButton);
       const xBtn=button('×',hideCanvasDetail,inlineActions,{cls:'wb-canvas-detail-close'});
       xBtn.setAttribute('aria-label','关闭详情');xBtn.title='关闭详情';
       sourceHeader.append(inlineActions);
