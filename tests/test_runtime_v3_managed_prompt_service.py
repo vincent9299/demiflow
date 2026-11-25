@@ -109,7 +109,7 @@ def test_prompt_service_mutations_are_rejected_before_start(tmp_path, monkeypatc
     elif mutation == 'removed': actor._runtime._service = None
     elif mutation == 'owner': actor._runtime._service_owner = object()
     else: value['service'].bind = lambda model: None
-    with pytest.raises(Exception, match='differ|removed|modified'):
+    with pytest.raises((ValueError, DataflowError), match='differ|removed|modified'):
         native_model_declaration(op)
     assert events(value) == []
 
@@ -140,6 +140,7 @@ def test_prompt_cancel_reaps_original_service_and_leaves_no_success(tmp_path, mo
 
 
 from test_runtime_v3_managed_service_gpu import gpu_service
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 @pytest.mark.parametrize('gpu_service', ['cancel'], indirect=True)

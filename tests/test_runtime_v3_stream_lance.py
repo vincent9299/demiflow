@@ -11,6 +11,7 @@ import pyarrow as pa
 import pytest
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 SCHEMA=pa.schema([('id',pa.string()),('value',pa.int64())])
 
@@ -55,7 +56,7 @@ def test_overwrite_preparation_failure_preserves_original_table_version_and_byte
     target=tmp_path/'old.lance'
     old=lance.write_dataset(pa.Table.from_pylist([{'id':'old','value':7}],schema=SCHEMA),str(target),mode='create')
     before={str(path.relative_to(target)):path.read_bytes() for path in target.rglob('*') if path.is_file()}
-    with pytest.raises(Exception,match='int64|convert|integer'):
+    with pytest.raises(ValueError,match='int64|convert|integer'):
         with RunContext.start(tmp_path/'run') as run,data.local_execution():
             data.from_items([{'id':'bad','value':'not an integer'}]).save_lance(target,schema=SCHEMA,key='id',stage='out').run_stream()
     assert lance.dataset(str(target)).version==old.version
@@ -70,7 +71,7 @@ def test_append_identical_keys_reuse_prior_version_and_conflicts_cannot_publish(
         output=data.from_items([{'id':'a','value':1},{'id':'a','value':1},{'id':'b','value':2}]).save_lance(
             target,schema=SCHEMA,key='id',stage='out',mode='append',max_batch=1,output_ref='ref').take_all()
         assert [row['ref']['version'] for row in output]==[1,1,2]
-    with pytest.raises(Exception,match='conflicting saved content'):
+    with pytest.raises(ValueError,match='conflicting saved content'):
         with RunContext.start(tmp_path/'conflict'),data.local_execution():
             data.from_items([{'id':'a','value':9}]).save_lance(target,schema=SCHEMA,key='id',stage='out',mode='append').run_stream()
     assert lance.dataset(str(target)).version==2
@@ -79,7 +80,7 @@ def test_append_identical_keys_reuse_prior_version_and_conflicts_cannot_publish(
 
 def test_later_failure_retains_visible_confirmed_microbatch(tmp_path):
     target=tmp_path/'partial.lance'
-    with pytest.raises(Exception,match='unique'):
+    with pytest.raises(ValueError,match='unique'):
         with RunContext.start(tmp_path/'run') as run,data.local_execution():
             data.from_items([{'id':'a','value':1},{'id':'a','value':1}]).save_lance(target,schema=SCHEMA,
                 key='id',stage='out',max_batch=1).run_stream()
@@ -178,7 +179,7 @@ def test_changed_record_membership_cannot_reuse_confirmed_invocation(tmp_path,mo
         return original(self,altered,request)
     monkeypatch.setattr(NativeStreamLanceService,'request',corrupt)
     target=tmp_path/'membership.lance'
-    with pytest.raises(Exception,match='changed payload or record membership'):
+    with pytest.raises(DataflowError,match='changed payload or record membership'):
         with RunContext.start(tmp_path/'run') as run,data.local_execution():
             data.from_items([{'id':'a','value':1}]).save_lance(target,schema=SCHEMA,key='id',stage='saved').run_stream()
     assert lance.dataset(str(target)).version==1
@@ -224,7 +225,7 @@ def test_cancel_preserves_only_acknowledged_microbatches_and_releases_writer_loc
 def test_native_arrow_conversion_rejects_coexisting_copies_before_overwrite(tmp_path):
     schema=pa.schema([('id',pa.string()),('value',pa.large_string())]);target=tmp_path/'bounded.lance'
     lance.write_dataset(pa.Table.from_pylist([{'id':'old','value':'preserved'}],schema=schema),str(target),mode='create')
-    with pytest.raises(Exception,match='coexistence'):
+    with pytest.raises(DataflowError,match='coexistence'):
         with RunContext.start(tmp_path/'run',limits={'max_row_bytes':12288,'max_batch_bytes':16384}),data.local_execution():
             data.from_items([{'id':'a','value':'x'*10000}]).save_lance(target,schema=schema,key='id',stage='out',max_batch=1).run_stream()
     assert lance.dataset(str(target)).version==1

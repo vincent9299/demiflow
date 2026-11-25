@@ -21,6 +21,7 @@ from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.seal.sealed_plans import load_execution_bindings, load_sealed_plan
 from demiflow.workbench.runs.facts import read_sealed_plan
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def enrich(id):
@@ -196,7 +197,7 @@ def test_relational_drift_fail_closed_before_publication(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sealing, "_stage_one_program", drift_payload)
     target, run_dir = tmp_path / "out.lance", tmp_path / "run"
-    with pytest.raises(Exception, match="Loaded program code differs from the sealed pin"):
+    with pytest.raises(DataflowError, match="Loaded program code differs from the sealed pin"):
         with RunContext.start(run_dir):
             relational_dataset().write_lance(str(target), mode="create", return_receipt=True)
     assert len(altered) == 1
@@ -441,7 +442,7 @@ def test_streamed_wide_row_rejected_by_sealed_byte_budget(tmp_path):
               "batch_rows": 16, "checkpoint_rows": 4, "checkpoint_interval_ms": 60000,
               "checkpoint_unconfirmed_rows": 1024,
               "checkpoint_unconfirmed_bytes": 8 * 1024 ** 2}
-    with pytest.raises(Exception, match="byte budget") as exc_info:
+    with pytest.raises(DataflowError, match="byte budget") as exc_info:
         with RunContext.start(tmp_path / "run", limits=limits):
             ds.write_lance(str(target), mode="create", return_receipt=True)
     assert "byte budget" in str(exc_info.value).lower()

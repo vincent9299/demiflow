@@ -14,6 +14,7 @@ from demiflow.execution.hosts.managed_devices import physical_devices as _physic
 from demiflow.execution.hosts.devices import device_pool
 from runtime_v3_managed_http_scenarios import managed_fixture, events
 from test_runtime_v3_managed_embedding_service import dataset
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 @pytest.fixture
@@ -129,7 +130,7 @@ def test_real_managed_gpu_uses_original_uuid_grant_and_releases_tree(tmp_path, g
 def test_gpu_service_requires_explicit_model_rss_before_launch(tmp_path, monkeypatch, request):
     fixture = managed_fixture(tmp_path, monkeypatch, request=request)
     fixture['service'].gpus = (0,)
-    with pytest.raises(Exception, match='explicit native_resources.max_rss_bytes'):
+    with pytest.raises(DataflowError, match='explicit native_resources.max_rss_bytes'):
         dataset(fixture, tmp_path).take_all()
     assert events(fixture) == []
 
@@ -142,7 +143,7 @@ def test_gpu_service_rejects_ambiguous_or_undeployed_devices_before_launch(tmp_p
     monkeypatch.delenv('CUDA_DEVICE_ORDER', raising=False)
     if missing == 'inventory':
         monkeypatch.setenv('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
-    with pytest.raises(Exception, match='PCI_BUS_ID' if missing == 'device_order' else 'explicit deployment inventory'):
+    with pytest.raises(DataflowError, match='PCI_BUS_ID' if missing == 'device_order' else 'explicit deployment inventory'):
         with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 4*1024**3,
                 'max_rss_bytes': 2*1024**3}), data.local_execution(
                 memory_bytes=4*1024**3, native_resources={'max_rss_bytes': 2*1024**3}):
@@ -159,10 +160,10 @@ def test_gpu_service_profile_does_not_expand_run_or_admit_ray_indices():
                                            'accelerators': [{'type': 'gpu', 'count': 1}]}))
     bounds = SimpleNamespace(max_resident_bytes=256*1024**2)
     policy = SimpleNamespace(provider='local', worker_mode=None, native_limits={'max_rss_bytes': 512*1024**2})
-    with pytest.raises(Exception, match='original run envelope'):
+    with pytest.raises(DataflowError, match='original run envelope'):
         service_profile(kernel, policy=policy, bounds=bounds)
     policy.provider = 'ray_core'
-    with pytest.raises(Exception, match='Local process host'):
+    with pytest.raises(DataflowError, match='Local process host'):
         service_profile(kernel, policy=policy, bounds=bounds)
 
 

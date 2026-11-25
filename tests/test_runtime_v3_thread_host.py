@@ -13,6 +13,7 @@ def _bind_test_process_to_worktree():
     assert Path(demiflow.__file__).resolve().is_relative_to(Path(__file__).resolve().parents[1])
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.planning.dataflow_policy import resolve_runtime_policy
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def _pid(row):
@@ -189,7 +190,7 @@ def test_explicit_process_does_not_silently_adopt_live_thread_program(tmp_path):
     def transform(row):
         with lock:
             return row
-    with pytest.raises(Exception, match='live handle'):
+    with pytest.raises(DataflowError, match='live handle'):
         with RunContext.start(tmp_path/'run'), data.local_execution(workers=2, worker_mode='process'):
             data.from_items([{'n': 1}]).map(transform, execution='thread').take_all()
 
@@ -200,7 +201,7 @@ def test_plain_task_nonpickleable_program_does_not_become_shared(tmp_path):
     def transform(row):
         with lock:
             return row
-    with pytest.raises(Exception, match='task/process scope'):
+    with pytest.raises(DataflowError, match='task/process scope'):
         with RunContext.start(tmp_path/'run'), data.local_execution(worker_mode='thread', workers=2):
             data.from_items([{'n': 1}]).map(transform).take_all()
 

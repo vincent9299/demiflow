@@ -95,7 +95,7 @@ def test_failed_materialize_cleans_only_its_spills(tmp_path):
     refs = handle._blocks
     event_path = tmp_path / 'failed-events'
     actor = CountingActor(event_path, fail_at=2)
-    with pytest.raises(Exception, match='injected materialize failure'):
+    with pytest.raises(ValueError, match='injected materialize failure'):
         data.from_items([{'i': i} for i in range(4)]).map_async(actor, concurrency=1).materialize()
     assert any(e['event'] == 'close' for e in events(event_path))
     failed = RunJournal(executor._run_ref.directory)

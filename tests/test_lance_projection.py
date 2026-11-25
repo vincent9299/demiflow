@@ -42,5 +42,5 @@ def test_invalid_projection_rejected_before_io(kwargs):
 def test_bad_expression_does_not_become_empty_result(tmp_path):
     uri = str(tmp_path / 'rows.lance')
     lance.write_dataset(pa.table({'id': [1]}), uri)
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match='missing_column'):
         data.read_lance(uri, version=1, projection={'n': 'missing_column + 1'}).take_all()

@@ -9,6 +9,7 @@ import pytest
 from demiflow import data
 from demiflow.data.aggregate import AggregateFnV2, Count, Sum
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 @contextmanager
@@ -120,7 +121,7 @@ def test_failed_aggregate_does_not_publish(tmp_path, fault):
     limits = {'max_row_bytes': 512, 'max_batch_bytes': 4096, 'max_state_bytes': 128 * 1024}
     rows = [{'n': 1}, {'n': b'x'*1024}] if fault == 'row' else [{'n': 1}]
     agg = {'row': Count(), 'state': TooLarge(), 'column': Sum('missing')}[fault]
-    with pytest.raises(Exception, match='missing' if fault == 'column' else 'BUDGET_EXCEEDED'):
+    with pytest.raises(KeyError if fault == 'column' else DataflowError, match='missing' if fault == 'column' else 'BUDGET_EXCEEDED'):
         with RunContext.start(tmp_path/'run', limits=limits) as run, data.local_execution(
                 workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
             data.from_items(rows).aggregate(agg)

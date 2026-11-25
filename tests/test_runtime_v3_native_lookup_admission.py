@@ -7,6 +7,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.data.runtime_contract import RuntimeContractError
 
 
 def table(tmp_path):
@@ -114,7 +115,7 @@ def test_native_query_factory_is_passive_binds_policy_and_rejects_live_handles(t
         actor.table = object()
     else:
         actor.spec = {**actor.spec, 'top_k': 2}
-        with pytest.raises(Exception, match='differs'):
+        with pytest.raises(RuntimeContractError, match='differs'):
             native_model_declaration(op)
         changed = replace(op, search_spec=dict(actor.spec))
         assert _callable_code_identity(native_model_declaration(changed)) != original

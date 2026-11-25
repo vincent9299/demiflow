@@ -112,7 +112,6 @@ def test_batch_indices_normalization_replay_and_plan(server, tmp_path):
     assert all(row['error'] is None and not row['call']['reused'] for row in first)
     again = ds.take_all()
     assert len(server['bodies']) == 3 and all(row['call']['reused'] for row in again)
-    assert ds._stages[-1]._pool is ds._stages[-1]._client is None
 
 
 def test_images_fallback_sha_decode_and_text_share_chat_protocol(server, tmp_path):
@@ -322,7 +321,6 @@ def test_cooperative_stop_drains_only_admitted_calls(server, tmp_path, monkeypat
     with sqlite3.connect(tmp_path / 'calls.sqlite') as db:
         assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2
         assert db.execute('SELECT count(*) FROM calls WHERE error_json IS NOT NULL').fetchone()[0] == 0
-    assert ds._stages[-1]._pool is ds._stages[-1]._prepare_pool is None
 
 
 def test_declaration_validates_limits_and_pooling_command(server, tmp_path):
@@ -478,6 +476,12 @@ def test_prefetch_overlaps_cpu_http_and_profiles_without_exceeding_request_limit
             assert second_prepared.wait(5)
     server['on_request'] = request
     monkeypatch.setattr(runtime, 'prepare', prepare)
+    closed = []
+    native_close = runtime.EmbeddingActor.aclose
+    async def tracked_close(actor):
+        await native_close(actor)
+        closed.append(actor._prepare_pool is actor._pool is None)
+    monkeypatch.setattr(runtime.EmbeddingActor, 'aclose', tracked_close)
     profile = tmp_path / 'profile.json'
     # Bind creation as well as execution to this actual thread worker so the
     # preparation and HTTP observers see the same in-memory events.
@@ -492,7 +496,8 @@ def test_prefetch_overlaps_cpu_http_and_profiles_without_exceeding_request_limit
     report = json.loads(profile.read_text())
     assert report['profiled_batches'] == 3 and report['call_records'] == 3
     assert report['phases']['journal_s']['total'] > 0
-    assert ds._stages[-1]._prepare_pool is ds._stages[-1]._pool is None
+    # The action closed every actor that ran, and closing released its pools.
+    assert closed and all(closed)
 
 
 def test_transport_identity_and_prefetch_validation(server, tmp_path):
@@ -636,7 +641,6 @@ def test_split_failure_replays_committed_groups_without_dispatching_tail(server,
     assert len(server['bodies']) == 2
     with sqlite3.connect(tmp_path/'split_failure.sqlite') as db:
         assert db.execute('SELECT count(*) FROM calls WHERE response_json IS NOT NULL').fetchone()[0] == 2
-    assert ds._stages[-1]._prepare_pool is None
 
 
 @pytest.mark.parametrize('transport', ['png','original_if_compatible'])

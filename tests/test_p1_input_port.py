@@ -7,6 +7,7 @@ import pytest
 from demiflow.data.execution_contract import InputSpec, _current_executor, _use_executor
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.executors.base import prepare_public_items
+from demiflow.data.runtime_contract import RuntimeContractError
 
 
 def test_managed_input_rejection_precedes_host_selection(monkeypatch):
@@ -16,7 +17,7 @@ def test_managed_input_rejection_precedes_host_selection(monkeypatch):
         pytest.fail('invalid managed input selected a host')
     with pytest.raises(ValueError, match='1..128'):
         prepare_public_items(InputSpec('public_items', []), select_executor=select)
-    with pytest.raises(Exception, match='budget|limit|bytes'):
+    with pytest.raises(RuntimeContractError, match='budget|limit|bytes'):
         prepare_public_items(InputSpec('public_items', [{'x': 'x' * (256 * 1024)}]), select_executor=select)
 
 

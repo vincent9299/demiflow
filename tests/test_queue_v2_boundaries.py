@@ -62,7 +62,7 @@ def test_invalid_task_topology_rejected_before_claim(channel,tmp_path,kind):
         elif kind=='flat_map':ds=ds.flat_map(expand)
         elif kind=='double_ack':ds=ds.ack_queue(channel.config)
         sink=object() if kind=='wrong_sink' else QueueResultSink(channel.config,pool='p')
-        with pytest.raises((RecoveryContractError,TypeError,ValueError)):
+        with pytest.raises(RecoveryContractError):
             ds.write_datasink(sink)
         assert not calls and channel.state('p')['counts']=={'pending':1}
 

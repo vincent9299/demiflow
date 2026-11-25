@@ -107,7 +107,7 @@ def test_bad_domain_binding_rejected_without_creating_files(tmp_path,kind):
     elif kind=='missing_root':
         store=LocalObjectStore(tmp_path/'unavailable',read_domain='shared',domain_id='team')
     before={str(p.relative_to(tmp_path)) for p in tmp_path.rglob('*')}
-    with pytest.raises((ValueError,RecoveryContractError,OSError)):
+    with pytest.raises((ValueError,FileNotFoundError)):
         store.resolve(candidate,domain=bad)
     assert {str(p.relative_to(tmp_path)) for p in tmp_path.rglob('*')}==before
 

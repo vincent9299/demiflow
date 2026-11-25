@@ -14,6 +14,7 @@ from demiflow.execution.pipeline.run_context import RunContext, current_run
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.contracts.recovery_contract import UnresolvedCommit
 from demiflow.kv import KVDatasink, SQLiteKV
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 WORKTREE = Path(__file__).resolve().parents[1]
 CHILD = r'''
@@ -201,7 +202,7 @@ def test_corrupt_prepared_payload_rolls_back_prior_upserts(tmp_path, monkeypatch
         path.write_bytes(raw[:-1]+bytes([raw[-1]^1]))
         return prepared
     monkeypatch.setattr(KVDatasink, 'prepare', corrupt)
-    with pytest.raises(Exception, match='checksum'):
+    with pytest.raises(DataflowError, match='checksum'):
         with RunContext.start(tmp_path/'run'), data.local_execution(workers=1, worker_mode='thread'):
             data.from_items([{'key':'a','value':1}, {'key':'b','value':2}]).write_datasink(store.datasink())
     assert store.get('a')['value'] == 50 and not store.get('b')['hit']

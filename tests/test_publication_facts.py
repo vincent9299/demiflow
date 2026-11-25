@@ -5,6 +5,7 @@ import pytest
 from demiflow.execution.journal import publication_facts as facts
 from demiflow.execution.storage.object_resources import object_namespace
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
+from demiflow.errors import ExecutionConflict
 
 
 def test_observation_context_is_the_shape_every_copy_built(tmp_path):
@@ -29,7 +30,7 @@ def test_observation_action_cannot_advance_a_real_journal(tmp_path):
     action = facts.observation_action(journal, 'action-1', {'kind': 'write_table'})
     assert action.context.fence == 'observation-only' != native_fence
     assert action.context.ref.run_id == journal.recovery_identity()['run_id']
-    with pytest.raises(Exception):
+    with pytest.raises(ExecutionConflict, match='Stale execution owner'):
         action.complete({'status': 'forged'})
     assert journal.execution_action('action-1') is None
 

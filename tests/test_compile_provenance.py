@@ -17,6 +17,7 @@ from test_dataflow_compile_inputs import _request, BOUNDS
 from test_plan_capture import no_execution, forbidden
 from test_workbench_operator_contracts import compile_code
 import compile_contract_corpus as corpus
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def test_observation_never_enters_compiled_identity_or_report(no_execution):
@@ -149,7 +150,7 @@ def test_observer_failure_cleans_capture_and_profile_and_never_executes(tmp_path
         capture_pipeline(lambda: data.range(1).take_all(), {}, on_compiled=failed)
     assert current_capture() is None and sys.getprofile() is None
     events = []
-    with pytest.raises(Exception):
+    with pytest.raises(DataflowError, match='did not reach a Dataset action'):
         capture_pipeline(lambda: None, {}, on_compiled=events.append)
     assert events == [] and current_capture() is None
 

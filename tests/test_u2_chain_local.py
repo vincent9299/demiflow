@@ -78,12 +78,10 @@ def test_local_chain_full_real_worker(tmp_path):
     assert records, "managed worker process identity was not recorded"
     pid = json.loads(records[0].read_text())["identity"]["pid"]
     assert pid != os.getpid()
-    # Capacity was released after confirmed exit evidence.
-    from demiflow.resources.capacity import LocalCapacityPool
-    from demiflow.execution.hosts.capacity import local_capacity
-    root, capacity = local_capacity()
-    pool = LocalCapacityPool(root / 'capacity', capacity=capacity)
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
+    # Capacity was released after confirmed exit evidence. Only this run's allocations
+    # are examined: every run of a test session shares one capacity pool.
+    from runtime_v3_owned_crash import assert_released
+    assert assert_released(tmp_path / "run")
 
 
 def test_default_in_driver_path_unchanged(tmp_path):

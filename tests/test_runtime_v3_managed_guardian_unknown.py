@@ -10,6 +10,7 @@ from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit, birth_start
 from demiflow.resources.process_observation import unit_stopped
 from runtime_v3_managed_http_scenarios import managed_fixture, assert_reaped
+from demiflow.resources.contracts import ResourceError
 
 
 def test_cleanup_helper_unknown_keeps_original_fd_and_charge_until_observation_recovers(tmp_path, monkeypatch, request):
@@ -154,7 +155,7 @@ asyncio.run(run())
         assert not unknown['confirmed']
         assert birth_start(guardian['guardian']) == guardian['birth']
         assert not unit_stopped(unit.directory('service', 'worker') / 'unit.lock', spawned['identity']['unit'])
-        with pytest.raises(Exception, match='capacity stays charged'):
+        with pytest.raises(ResourceError, match='capacity stays charged'):
             pool.release('worker', unknown)
         assert pool.snapshot()['charged']['memory_bytes'] == 256*1024**2
         port_locks = assert_port_ownership(locked=True)

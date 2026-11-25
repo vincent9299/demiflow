@@ -21,6 +21,7 @@ from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.sqlite_journal import SQLitePromptJournal
 from test_embeddings import server
 from test_runtime_v3_native_rpc_replay import service, event, interrupted_run
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def dataset(server, path, *, rows=None, maximum=None, read_only=False, concurrency=1):
@@ -262,7 +263,7 @@ def test_duplicate_reserve_rpc_one_original_admission_and_private_intent(tmp_pat
         with sqlite3.connect(path) as db:
             assert db.execute('SELECT count(*) FROM calls').fetchone()[0] == 2
         stale = replace(request, attempt=run.attempt + 1, payload=_thaw_json(request.payload))
-        with pytest.raises(Exception, match='FENCED'):
+        with pytest.raises(DataflowError, match='FENCED'):
             authority.dispatch(stale)
 
 

@@ -51,7 +51,7 @@ def test_arrow_callback_failure_does_not_publish_or_retry(tmp_path):
     # successful enclosing native run. Preserve both failure boundaries.
     with pytest.raises(RecoveryContractError, match='unconfirmed actions'):
         with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)) as session:
-            with pytest.raises(Exception, match='deliberate callback failure'):
+            with pytest.raises(ValueError, match='deliberate callback failure'):
                 data.read_lance(source, version=1).map_batches(fail, batch_size=2, batch_format='pyarrow').write_lance(
                     target, mode='overwrite', expected_version=1, schema=table.schema)
             journal = RunJournal(session.run_ref.directory)

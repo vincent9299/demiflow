@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 import pytest
 from runtime_v3_resource_scenarios import arrow_worker_preallocation, observe_execution
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def test_small_legal_arrow_batch_reaches_terminal_under_original_budget(tmp_path):
@@ -20,7 +21,7 @@ def test_insufficient_terminal_state_fails_before_any_launch(tmp_path):
     from demiflow import data
     from demiflow.execution.pipeline.run_context import RunContext
     with observe_execution(workers=4, memory_bytes=4 * 1024**2) as observed:
-        with pytest.raises(Exception, match='terminal state budget cannot hold one block and root'):
+        with pytest.raises(DataflowError, match='terminal state budget cannot hold one block and root'):
             with RunContext.start(tmp_path/'run', limits=dict(memory_bytes=4*1024**2,
                     max_row_bytes=1024, max_batch_bytes=4096, max_state_bytes=2048)), data.local_execution(workers=4):
                 data.from_items([{'v': 1}]).count()
@@ -34,10 +35,10 @@ def test_sealed_window_requires_original_grant_and_legacy_keeps_old_window():
     services = SimpleNamespace(bounds=bounds, assignment=SimpleNamespace(stages=()))
     legacy = TerminalBlocks(services, 'old')
     assert legacy._metadata_limit == 3072
-    with pytest.raises(Exception, match='terminal payload and metadata exceed the original grant'):
+    with pytest.raises(DataflowError, match='terminal payload and metadata exceed the original grant'):
         TerminalBlocks(services, 'underfunded', budget={'payload_bytes':5120,'metadata_bytes':3072})
     bounds.max_resident_bytes = 8192
     current = TerminalBlocks(services, 'new', budget={'payload_bytes':5120,'metadata_bytes':3072})
     current._admit_metadata(blocks=1, roots=1)
-    with pytest.raises(Exception, match='terminal block index exceeds'):
+    with pytest.raises(DataflowError, match='terminal block index exceeds'):
         current._admit_metadata(blocks=1, roots=2)

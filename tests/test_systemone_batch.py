@@ -11,6 +11,7 @@ from demiflow.operator_llm.model import OperatorLLMRequest, PromptModel, TextPar
 from demiflow.operator_llm.systemone_batch import BatchTransport
 from demiflow.services.model_worker import make_server
 from demiflow.services.quality import read_evidence
+from demiflow.operator_llm.journal import UncertainPromptCall
 
 
 def request(index, *, choice=None):
@@ -258,7 +259,7 @@ async def test_malformed_batch_response_is_uncertain_and_never_automatically_res
         assert result[0] is not result[1]
         assert result[0].call!=result[1].call
         assert len(posts)==1
-        with pytest.raises(Exception): await client.execute(request(0))
+        with pytest.raises(UncertainPromptCall,match='without complete response'): await client.execute(request(0))
         assert len(posts)==1
     finally: await client.aclose()
 
