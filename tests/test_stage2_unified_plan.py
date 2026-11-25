@@ -63,12 +63,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from runtime_v3_owned_crash import kill_owned_worker
+from runtime_v3_owned_crash import kill_owned_worker, run_capacity
 
 import demiflow.data as data
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.pipeline.run_context import RunContext, RunAction
-from demiflow.resources.capacity import LocalCapacityPool
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="Local managed units require Linux")
@@ -540,9 +539,7 @@ def test_chain_failure_releases_capacity(tmp_path, monkeypatch):
             with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 _pipeline(biz, 8).materialize().take_all()
     assert faulted, "the after_prepared fault window did not fire"
-    snapshot = _capacity_snapshot()
-    assert snapshot["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert snapshot["active"] == []
+    _assert_capacity_released(root)
 
 
 @requires_real_source
@@ -556,9 +553,7 @@ def test_chain_success_releases_capacity(tmp_path, monkeypatch):
         with data.local_execution(workers=1, worker_mode="thread", partitions=1):
             rows = _pipeline(biz, 8).materialize().take_all()
     assert {r["concept_id"]: r for r in rows} == _expected(slice_rows, {})
-    snapshot = _capacity_snapshot()
-    assert snapshot["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert snapshot["active"] == []
+    _assert_capacity_released(root)
 
 
 # --- Gate 4: worker modules never construct a CommitCoordinator (AST) ---
@@ -731,10 +726,12 @@ def test_f7e_budget_and_dynamic_fail_closed(tmp_path, monkeypatch):
 
 # --- F8: worker failure frame -> immediate identifiable error + capacity release ---
 
-def _capacity_snapshot():
-    from demiflow.execution.hosts.capacity import local_capacity
-    domain, capacity = local_capacity()
-    return LocalCapacityPool(domain / "capacity", capacity=capacity).snapshot()
+def _assert_capacity_released(root, *, provisioned=True):
+    """The run holds none of its capacity; when it provisioned workers, it returned them."""
+    held, released = run_capacity(root)
+    assert not held, held
+    if provisioned:
+        assert released, "the run never charged a worker to the capacity pool"
 
 
 # F8-a: chain LOAD failure (helper edited between seal and worker load) -> F8 frame.
@@ -758,9 +755,7 @@ def test_f8a_chain_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.transform, concurrency=1).materialize().take_all())
     assert not isinstance(excinfo.value, TimeoutError)
-    snap = _capacity_snapshot()
-    assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert snap["active"] == []
+    _assert_capacity_released(root)
 
 
 # F8-b: queue carrier LOAD failure (plan artifact corrupted after seal) -> F8 frame.
@@ -787,9 +782,8 @@ def test_f8b_queue_load_failure_identifiable_releases_capacity(tmp_path, monkeyp
         with pytest.raises((DataflowError, RuntimeError), match="size differs|do not match") as excinfo:
             _settle(cfg, root, url=url)
     assert not isinstance(excinfo.value, TimeoutError)
-    snap = _capacity_snapshot()
-    assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert snap["active"] == []
+    # The driver verifies the staged artifact before provisioning any worker.
+    _assert_capacity_released(root, provisioned=False)
 
 
 # F8-c: chain ROW error outside an outstanding cut (_pending None) -> F8 frame.
@@ -804,9 +798,7 @@ def test_f8c_chain_row_error_identifiable_releases_capacity(tmp_path, monkeypatc
             with data.local_execution(workers=1, worker_mode="thread", partitions=1):
                 (data.from_items([{"x": i} for i in range(4)])
                  .map_async(biz.boom, concurrency=1).materialize().take_all())
-    snap = _capacity_snapshot()
-    assert snap["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
-    assert snap["active"] == []
+    _assert_capacity_released(root)
 
 
 # --- §4: real native fetch, content==SHA, missing != corrupt, two row types ---

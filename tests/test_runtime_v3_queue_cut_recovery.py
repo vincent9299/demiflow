@@ -171,5 +171,6 @@ def test_completed_native_ack_before_reply_is_reused_by_original_cut(tmp_path, m
             assert observed['next_page_token'] is None
             assert observed['allocations'] and all(r['phase']=='TERMINATED' and r['observation']=='FRESH'
                                                    for r in observed['allocations'])
-        snapshot = pool.snapshot()
-        assert not snapshot['active'] and snapshot['charged'] == {'cpu_millis':0,'memory_bytes':0}
+        from runtime_v3_owned_crash import run_capacity
+        held, released = run_capacity(root)
+        assert not held and {r[1] for r in allocations} <= released

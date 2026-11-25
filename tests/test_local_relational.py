@@ -318,7 +318,9 @@ def test_sort_and_join_cleanup_on_consumer_error(tmp_path, monkeypatch):
     for provider, exact, proof in last.values():
         assert proof['cleanup'] == 'CONFIRMED'
         assert provider.pool.reservation_view(exact['allocation_id'])['state'] == 'RELEASED'
-        assert provider.pool.snapshot()['charged']['cpu_millis'] == 0
+    from runtime_v3_owned_crash import run_capacity
+    held, released = run_capacity(tmp_path / 'run')
+    assert not held and set(last) <= released
 
 
 @pytest.mark.parametrize('how,expected_rows', [('inner', 2), ('semi', 2), ('left', 100), ('anti', 100)])
