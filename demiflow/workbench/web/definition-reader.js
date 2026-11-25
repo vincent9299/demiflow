@@ -31,6 +31,26 @@
   }
   function render(host,value,{mountText,mode='full'}={}){
     const root=el('section',null,'definition-reader');root.dataset.kind=value.kind;host.append(root);
+    if(mode==='behavior'){
+      if(value.role_badge||value.model){
+        const meta=el('div',null,'definition-meta');
+        if(value.role_badge)meta.append(el('span',value.role_badge,'definition-role'));
+        const modelName=typeof value.model==='object'?(value.model.name||value.model.model||value.model.id):value.model;
+        if(modelName)meta.append(el('span',[modelName,value.transport].filter(Boolean).join(' · '),'definition-model'));
+        root.append(meta);
+      }
+      const source=value.kind==='prompt'?(value.template??(value.messages?json(value.messages):value.source)):value.source;
+      if(typeof source==='string'){
+        const body=el('div',null,'definition-source');root.append(body);mountText(body,source,{sourceOnly:true,compactSource:true,continuousSource:true,
+          pythonLine:['code','data_tool'].includes(value.kind)?(value.line||1):undefined});
+        const status=body.querySelector('.reading-status');if(status?.textContent==='源码完整显示。')status.hidden=true;
+      }else root.append(el('p','这份绑定版本没有可读取的定义正文。','definition-note'));
+      if(value.kind==='prompt'&&value.output_schema){
+        const fold=el('details',null,'definition-contract');fold.append(el('summary','输出 Schema'),el('pre',json(value.output_schema),'definition-schema'));root.append(fold);
+      }
+      if(value.truncated)root.append(el('p','正文超过展示预算，当前为有界片段。','definition-note'));
+      return root;
+    }
     if(value.basis||value.declared_version||value.role_badge){
       const meta=el('div',null,'definition-meta');
       if(value.role_badge)meta.append(el('span',value.role_badge,'definition-role'));
