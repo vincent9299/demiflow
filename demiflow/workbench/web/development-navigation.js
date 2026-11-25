@@ -1484,10 +1484,10 @@
     if (operatorsHost) {
       outlineExplorer = node('div', 'dev-outline-explorer');
       const specs = [
-        ['flows', '管道', '调整管道与配置高度', true],
-        ['configs', '配置', '调整配置与代码算子高度', true],
-        ['code', '代码算子', '调整代码算子与 Prompt 算子高度', true],
-        ['prompt', 'Prompt 算子', '调整 Prompt 算子与标准 API 高度', true],
+        ['flows', '管道', '调整管道与配置高度', false],
+        ['configs', '配置', '调整配置与代码算子高度', false],
+        ['code', '代码算子', '调整代码算子与 Prompt 算子高度', false],
+        ['prompt', 'Prompt 算子', '调整 Prompt 算子与标准 API 高度', false],
         ['apis', '标准 API', null, false],
       ];
       specs.forEach(([key, label, handleLabel, defaultOpen], idx) => {
@@ -1748,6 +1748,14 @@
       paintOperatorGroup(outlineSections.code?.list, outlineSections.code?.count, 'code');
       paintOperatorGroup(outlineSections.prompt?.list, outlineSections.prompt?.count, 'prompt');
       paintStandardApisOutline();
+      if (filterTerm.trim()) {
+        let changed = false;
+        for (const k of OUTLINE_KEYS) {
+          const sec = outlineSections[k];
+          if (sec && Number(sec.count.textContent) > 0 && !sec.open) { sec.open = true; changed = true; }
+        }
+        if (changed) applyOutlineSplits();
+      }
     }
 
     function paintOperatorCard(parent, title, contentFn) {
