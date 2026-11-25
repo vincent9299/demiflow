@@ -18,10 +18,17 @@ CHROME = '/yzp/zhaozy/yangzepeng/0905/.cache/ms-playwright/chromium-1243/chrome-
 
 
 @contextmanager
-def conversation_app(tmp_path):
+def conversation_app(tmp_path, *, enable_config_write=False):
     root, config_path, config = configuration(tmp_path)
     registry_path = tmp_path / 'registry.json'
     workspace = registry.add(registry_path, root)['workspace_id']
+    if enable_config_write:
+        cur = registry.load_registry(registry_path)
+        migrated = registry.migrate(registry_path, expected=registry.content_digest(cur))
+        registry.set_capabilities(
+            registry_path, workspace, expected=migrated['digest'],
+            capabilities={k: (k == 'config_write') for k in registry.CAPABILITIES},
+        )
     config['projects'][workspace] = config['projects'].pop('wfixture')
     # Distinct CLI conversations must have distinct provider IDs; a resumed
     # process adopts the requested existing ID instead of inventing another.
@@ -33,7 +40,8 @@ def conversation_app(tmp_path):
     executable = Path(config['providers']['codex']['executable'])
     executable.write_text('#!' + sys.executable + '\nimport runpy\nrunpy.run_path(' + repr(str(fixture_path)) + ',run_name="__main__")\n')
     config_path.write_text(json.dumps(config))
-    server = WorkspaceServer(registry=registry_path, development_config=config_path)
+    server = WorkspaceServer(registry=registry_path, development_config=config_path,
+                             enable_config_write=enable_config_write)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -433,3 +441,63 @@ def test_command_control_enter_steer_existing_turn_and_promote_queue(tmp_path):
         events = server.development.store.events(workspace,sid)['events']
         assert {event['turn_id'] for event in events}=={tid}
         assert [event['data']['text'] for event in events if event['type']=='message.steer']==['先看输入表','再核对版本','继续汇总']
+
+
+def test_explorer_order_empty_collapse_and_json_formatting(tmp_path):
+    import subprocess
+    with conversation_app(tmp_path, enable_config_write=True) as (server, workspace, root):
+        (root / 'configs').mkdir(exist_ok=True)
+        (root / 'configs' / 'compact.json').write_text('{"alpha":1,"nested":{"beta":true}}', encoding='utf-8')
+        (root / 'workspace.json').write_text('{"name":"demo","budgets":{"cancel_grace_s":30,"max_batch_bytes":1024}}', encoding='utf-8')
+        git = lambda *args: subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True)
+        git('init')
+        git('config', 'user.email', 'test@example.com')
+        git('config', 'user.name', 'Test')
+        git('add', '.')
+        git('commit', '-m', 'init')
+        # Modify an editable file so 待审核变更 initially has 1 pending change.
+        (root / 'configs' / 'compact.json').write_text('{"alpha":2,"nested":{"beta":false}}', encoding='utf-8')
+
+        with browser_page(server) as (page, expect):
+            sidebar = page.locator('.development-session-sidebar')
+            sidebar.get_by_role('button', name='文件').click()
+            tree_sec = sidebar.locator('.dev-tree-section')
+            changed_sec = sidebar.locator('.dev-changed-section')
+            changed_toggle = changed_sec.locator('.dev-section-toggle')
+            expect(tree_sec).to_be_visible()
+            expect(changed_sec).to_be_visible()
+            expect(changed_toggle).to_have_attribute('aria-expanded', 'true')
+            # 项目目录 must appear above 待审核变更.
+            tree_box = tree_sec.bounding_box()
+            changed_box = changed_sec.bounding_box()
+            assert tree_box['y'] < changed_box['y'], (tree_box, changed_box)
+
+            # Approving all pending changes leaves count=0 and auto-collapses 待审核变更.
+            sidebar.get_by_role('button', name='全部通过', exact=True).click()
+            expect(changed_sec.locator('.dev-section-count').first).to_have_text('0')
+            expect(changed_toggle).to_have_attribute('aria-expanded', 'false')
+            expect(changed_sec.locator('.dev-changed-list')).to_be_hidden()
+
+            # Read-only compact workspace.json auto-formats into multiple lines with 查看原文 toggle.
+            sidebar.get_by_role('button', name='workspace.json').click()
+            pane = page.get_by_role('complementary', name='代码面板')
+            expect(pane.locator('.cm-editor')).to_be_visible()
+            fmt_btn = pane.get_by_role('button', name='查看原文', exact=True)
+            expect(fmt_btn).to_be_visible()
+            expect(fmt_btn).to_have_attribute('aria-pressed', 'true')
+            assert pane.locator('.cm-line').count() > 2
+            fmt_btn.click()
+            expect(pane.get_by_role('button', name='格式化', exact=True)).to_be_visible()
+            assert pane.locator('.cm-line').count() == 1
+
+            # Editable compact configs/compact.json formats in-place into unsaved draft.
+            sidebar.get_by_role('button', name='configs', exact=True).click()
+            sidebar.get_by_role('button', name='compact.json').click()
+            pane.get_by_role('button', name='完整源码', exact=True).click()
+            expect(pane.locator('.cm-editor')).to_be_visible()
+            assert pane.locator('.cm-line').count() == 1
+            pane.get_by_role('button', name='格式化', exact=True).click()
+            assert pane.locator('.cm-line').count() > 2
+            expect(pane.locator('.dev-code-status')).to_have_text('未保存')
+            pane.get_by_role('button', name='还原', exact=True).click()
+            assert pane.locator('.cm-line').count() == 1

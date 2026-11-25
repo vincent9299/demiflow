@@ -192,13 +192,14 @@
     let latestChecks = {native_flow: null, project_layout: null, review: null, reviewDetails: []};
     let activeCheckKey = null;
 
-    // === LEFT SIDEBAR: Changed files + Project tree (collapsible + resizable split) ===
+    // === LEFT SIDEBAR: Project tree (top) + Changed files (bottom, collapsible & resizable split) ===
     const explorer = node('div', 'dev-file-explorer');
-    let changedOpen = true, treeOpen = true, treeSearchOpen = false;
+    let changedOpen = false, changedUserToggled = false, prevPendingCount = 0;
+    let treeOpen = true, treeSearchOpen = false;
     let treeSearchTimer = null, treeSearchEpoch = 0;
-    let splitRatio = 0.4;
+    let splitRatio = 0.6;
     try {
-      const saved = Number(localStorage.getItem('forge-dev-explorer-split'));
+      const saved = Number(localStorage.getItem('forge-dev-explorer-tree-split'));
       if (Number.isFinite(saved) && saved >= 0.15 && saved <= 0.85) splitRatio = saved;
     } catch {}
 
@@ -207,7 +208,7 @@
     const changedHeader = node('div', 'dev-section-header');
     const changedToggle = node('button', 'dev-section-toggle');
     changedToggle.type = 'button';
-    changedToggle.setAttribute('aria-expanded', 'true');
+    changedToggle.setAttribute('aria-expanded', 'false');
     const changedTitle = node('span', 'dev-section-title', '待审核变更');
     const changedCount = node('span', 'dev-section-count', '0');
     changedToggle.append(chevronIcon(), changedTitle, changedCount);
@@ -242,7 +243,7 @@
     const splitHandle = node('div', 'dev-split-resizer');
     splitHandle.setAttribute('role', 'separator');
     splitHandle.setAttribute('aria-orientation', 'horizontal');
-    splitHandle.setAttribute('aria-label', '调整已改文件与项目目录高度');
+    splitHandle.setAttribute('aria-label', '调整项目目录与待审核变更高度');
     splitHandle.tabIndex = 0;
     splitHandle.hidden = true;
 
@@ -296,7 +297,7 @@
     const treeHost = node('ul', files.level);
     treeBody.append(treeSearchResults, treeHost);
     treeSection.append(treeHeader, treeCreateWrap, treeSearchBar, treeBody);
-    explorer.append(changedSection, splitHandle, treeSection);
+    explorer.append(treeSection, splitHandle, changedSection);
     if (filesHost) filesHost.append(explorer);
 
     let treeCreateOpen = false, creatingFile = false;
@@ -317,29 +318,29 @@
       if (!hasChanges) {
         changedSection.style.flex = '';
         treeSection.style.flex = treeOpen ? '1 1 0%' : '0 0 auto';
-      } else if (changedOpen && treeOpen) {
+      } else if (treeOpen && changedOpen) {
         const pct = Math.round(splitRatio * 1000) / 10;
-        changedSection.style.flex = '0 0 ' + pct + '%';
-        treeSection.style.flex = '1 1 0%';
-      } else if (changedOpen && !treeOpen) {
+        treeSection.style.flex = '0 0 ' + pct + '%';
         changedSection.style.flex = '1 1 0%';
-        treeSection.style.flex = '0 0 auto';
-      } else if (!changedOpen && treeOpen) {
-        changedSection.style.flex = '0 0 auto';
+      } else if (treeOpen && !changedOpen) {
         treeSection.style.flex = '1 1 0%';
-      } else {
         changedSection.style.flex = '0 0 auto';
+      } else if (!treeOpen && changedOpen) {
         treeSection.style.flex = '0 0 auto';
+        changedSection.style.flex = '1 1 0%';
+      } else {
+        treeSection.style.flex = '0 0 auto';
+        changedSection.style.flex = '0 0 auto';
       }
     }
     function setSplitRatio(next) {
       splitRatio = Math.max(0.15, Math.min(0.85, next));
-      try { localStorage.setItem('forge-dev-explorer-split', String(splitRatio)); } catch {}
+      try { localStorage.setItem('forge-dev-explorer-tree-split', String(splitRatio)); } catch {}
       applyExplorerSplit();
     }
-    changedToggle.onclick = () => { changedOpen = !changedOpen; applyExplorerSplit(); };
+    changedToggle.onclick = () => { changedUserToggled = true; changedOpen = !changedOpen; applyExplorerSplit(); };
     treeToggle.onclick = () => { treeOpen = !treeOpen; applyExplorerSplit(); };
-    splitHandle.ondblclick = () => setSplitRatio(0.4);
+    splitHandle.ondblclick = () => setSplitRatio(0.6);
     splitHandle.onkeydown = e => {
       if (e.key === 'ArrowUp') { e.preventDefault(); setSplitRatio(splitRatio - 0.05); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); setSplitRatio(splitRatio + 0.05); }
@@ -406,6 +407,10 @@
     approveFileBtn.type = 'button';
     approveFileBtn.title = '标记当前文件改动已审核通过（保留修改历史）';
     approveFileBtn.hidden = true;
+    const formatJsonBtn = node('button', 'dev-action-btn', '格式化');
+    formatJsonBtn.type = 'button';
+    formatJsonBtn.title = '格式化 JSON';
+    formatJsonBtn.hidden = true;
     const saveBtn = node('button', 'dev-action-btn dev-action-save', '保存');
     saveBtn.type = 'button';
     saveBtn.title = '保存修改 (Ctrl/⌘+S)';
@@ -420,7 +425,7 @@
     const copyBtn = node('button', 'dev-action-btn', '复制');
     copyBtn.type = 'button';
     const reloadFileBtn = iconButton('刷新当前文件', 'M20 10a8 8 0 1 0-1 7M20 4v6h-6');
-    toolActions.append(modeSwitch, saveBtn, revertBtn, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
+    toolActions.append(modeSwitch, formatJsonBtn, saveBtn, revertBtn, approveFileBtn, refBtn, searchBtn, copyBtn, reloadFileBtn);
     toolbar.append(pathMeta, toolActions);
 
     const viewport = node('div', 'dev-code-viewport');
@@ -534,6 +539,16 @@
       const visiblePending = term ? pending.filter(item => item.path.toLocaleLowerCase().includes(term)) : pending;
       const visibleHistory = term ? approvedHistory.filter(item => item.path.toLocaleLowerCase().includes(term)) : approvedHistory;
       changedSection.hidden = pending.length === 0 && approvedHistory.length === 0;
+      if (pending.length === 0 && prevPendingCount > 0) {
+        changedOpen = false;
+        changedUserToggled = false;
+      } else if (pending.length > 0 && prevPendingCount === 0) {
+        changedOpen = true;
+        changedUserToggled = false;
+      } else if (!changedUserToggled) {
+        changedOpen = pending.length > 0;
+      }
+      prevPendingCount = pending.length;
       historyCount.textContent = String(approvedHistory.length);
       applyExplorerSplit();
       changedList.replaceChildren();
@@ -741,6 +756,88 @@
     }
 
     let savingFile = false;
+    const MAX_JSON_FORMAT_CHARS = 2 * 1024 * 1024;
+    function isJsonPath(rel) {
+      return typeof rel === 'string' && /\.json$/i.test(rel.trim());
+    }
+    function formatJsonText(raw) {
+      if (typeof raw !== 'string' || !raw.trim() || raw.length > MAX_JSON_FORMAT_CHARS) return null;
+      try {
+        return JSON.stringify(JSON.parse(raw), null, 2) + '\n';
+      } catch {
+        return null;
+      }
+    }
+    function isCompactJsonText(raw) {
+      if (typeof raw !== 'string') return false;
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.includes('\n')) return false;
+      const formatted = formatJsonText(trimmed);
+      return formatted !== null && formatted.trim() !== trimmed;
+    }
+    function displayTextFor(entry) {
+      if (!entry) return '';
+      if (typeof entry.draft === 'string') return entry.draft;
+      const raw = entry.modified ?? '';
+      if (!entry.writable && viewMode === 'source' && entry.jsonFormatted && isJsonPath(entry.path)) {
+        return formatJsonText(raw) ?? raw;
+      }
+      return raw;
+    }
+    function syncJsonFormatButton(entry) {
+      const show = Boolean(entry && viewMode === 'source' && isJsonPath(entry.path));
+      if (!show) {
+        formatJsonBtn.hidden = true;
+        return;
+      }
+      if (entry.writable) {
+        formatJsonBtn.hidden = false;
+        formatJsonBtn.disabled = savingFile;
+        formatJsonBtn.textContent = '格式化';
+        formatJsonBtn.title = '格式化 JSON（生成未保存改动，按 Ctrl/⌘+S 保存）';
+        formatJsonBtn.classList.remove('is-active');
+        formatJsonBtn.removeAttribute('aria-pressed');
+        return;
+      }
+      const raw = entry.modified ?? '';
+      const formatted = formatJsonText(raw);
+      const canFormat = formatted !== null && formatted.trim() !== raw.trim();
+      formatJsonBtn.hidden = !canFormat && !entry.jsonFormatted;
+      if (formatJsonBtn.hidden) return;
+      formatJsonBtn.disabled = false;
+      const active = Boolean(entry.jsonFormatted && formatted !== null);
+      formatJsonBtn.textContent = active ? '查看原文' : '格式化';
+      formatJsonBtn.title = active ? '当前已格式化展示 JSON，点击切换为原始文本' : '按 2 空格缩进格式化展示 JSON';
+      formatJsonBtn.classList.toggle('is-active', active);
+      formatJsonBtn.setAttribute('aria-pressed', String(active));
+    }
+    function handleJsonFormatClick() {
+      const rel = activePath;
+      const entry = rel ? fileCache.get(rel) : null;
+      if (!entry || viewMode !== 'source' || !isJsonPath(entry.path)) return;
+      if (!entry.writable) {
+        if (formatJsonText(entry.modified ?? '') === null) return;
+        entry.jsonFormatted = !entry.jsonFormatted;
+        paintActiveCode();
+        return;
+      }
+      if (savingFile) return;
+      const current = viewerHandle?.getText ? viewerHandle.getText() : (typeof entry.draft === 'string' ? entry.draft : (entry.modified ?? ''));
+      const formatted = formatJsonText(current);
+      if (formatted === null) {
+        entry.saveError = 'JSON 语法无效，无法格式化';
+        syncEditControls();
+        return;
+      }
+      entry.saveError = '';
+      if (formatted !== current) {
+        entry.draft = formatted === (entry.modified ?? '') ? null : formatted;
+        entry.justSaved = false;
+        if (viewerHandle?.setText) viewerHandle.setText(formatted);
+        else paintActiveCode();
+      }
+      syncEditControls();
+    }
 
     function syncEditControls() {
       const entry = activePath ? fileCache.get(activePath) : null;
@@ -750,6 +847,7 @@
       const canEdit = Boolean(viewMode === 'source' && entry.writable);
       const dirty = hasUnsavedDraft(activePath);
 
+      syncJsonFormatButton(entry);
       saveBtn.hidden = !canEdit;
       saveBtn.disabled = savingFile || !dirty;
       saveBtn.textContent = savingFile ? '保存中…' : '保存';
@@ -868,7 +966,7 @@
       approveFileBtn.hidden = !pendingHit;
 
       const canEdit = Boolean(viewMode === 'source' && entry.writable);
-      const activeText = typeof entry.draft === 'string' ? entry.draft : (entry.modified ?? '');
+      const activeText = displayTextFor(entry);
       const currentRel = activePath;
       syncEditControls();
 
@@ -941,6 +1039,9 @@
           writable: data.writable === true,
           readonlyReason: data.readonly_reason || '',
           draft: keepDraft,
+          jsonFormatted: prevEntry && typeof prevEntry.jsonFormatted === 'boolean'
+            ? prevEntry.jsonFormatted
+            : (!(data.writable === true) && isJsonPath(clean) && isCompactJsonText(typeof data.modified === 'string' ? data.modified : '')),
           justSaved: false,
           saveError: '',
         };
@@ -1844,6 +1945,7 @@
 
     diffModeBtn.onclick = () => { if (!diffModeBtn.disabled) { viewMode = 'diff'; paintActiveCode(); } };
     sourceModeBtn.onclick = () => { viewMode = 'source'; paintActiveCode(); };
+    formatJsonBtn.onclick = () => { handleJsonFormatClick(); };
     saveBtn.onclick = () => { saveActiveFile(); };
     revertBtn.onclick = () => { revertActiveFile(); };
     approveFileBtn.onclick = () => {
@@ -1868,7 +1970,7 @@
     copyBtn.onclick = async () => {
       const entry = activePath ? fileCache.get(activePath) : null;
       if (!entry) return;
-      const text = viewerHandle?.getText ? viewerHandle.getText() : (typeof entry.draft === 'string' ? entry.draft : (entry.modified ?? ''));
+      const text = viewerHandle?.getText ? viewerHandle.getText() : displayTextFor(entry);
       try {
         await navigator.clipboard.writeText(text);
         copyBtn.textContent = '已复制';
