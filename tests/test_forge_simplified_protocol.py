@@ -716,3 +716,28 @@ def test_op_e1_example_and_ast_field_flow_extraction(tmp_path):
         'input': '{"id": "r1", "score": 5}',
         'output': '{"id": "r1", "passed": True}',
     }
+
+    # Drift detection: renaming output field or leaving deleted parameter in Args: must fail check.
+    drifted_src = (
+        'def enrich(row, scale=2):\n'
+        '    """补齐归一化分数字段。\n'
+        '\n'
+        '    Args:\n'
+        '        scale: 分数缩放倍数。\n'
+        '        old_limit: 已删除的旧参数。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": "r1", "raw_score": 4}\n'
+        '        输出: {"id": "r1", "old_score": 8}\n'
+        '    """\n'
+        '    return {**row, "normalized_score": row.get("raw_score", 0) * scale}\n'
+    )
+    (proj / 'operators' / 'transforms.py').write_text(drifted_src, encoding='utf-8')
+    _, drift_diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/transforms.py'},
+        parameter_digests={},
+    )
+    drift_msgs = [d['detail'] for d in drift_diags if d['path'] == 'operators/transforms.py']
+    assert any('OP-P1' in m and 'old_limit' in m for m in drift_msgs), drift_diags
+    assert any('OP-E1' in m and 'old_score' in m for m in drift_msgs), drift_diags

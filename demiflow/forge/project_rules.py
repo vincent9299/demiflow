@@ -787,6 +787,312 @@ def parse_docstring_example(doc: str | None) -> dict[str, str] | None:
     return None
 
 
+def _str_const(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value:
+        return node.value
+    return None
+
+
+def extract_field_flow(node: ast.AST, *, max_fields: int = 24, include_analysis: bool = False) -> dict | None:
+    """Passively extract read/written row field names from an operator function or callable Actor AST."""
+    entry = node
+    if isinstance(node, ast.ClassDef):
+        entry = next((n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == '__call__'), None)
+    if not isinstance(entry, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None
+
+    pos_args = [*entry.args.posonlyargs, *entry.args.args]
+    if pos_args and pos_args[0].arg in {'self', 'cls'}:
+        pos_args = pos_args[1:]
+    if not pos_args:
+        return None
+    row_param = pos_args[0].arg
+    row_vars = {row_param}
+    out_vars: set[str] = set()
+    passes_through = False
+    has_unknown_write = False
+    reads: list[str] = []
+    writes: list[str] = []
+
+    def add_read(key: str | None):
+        if key and key not in reads and len(reads) < max_fields:
+            reads.append(key)
+
+    def add_write(key: str | None):
+        if key and key not in writes and len(writes) < max_fields:
+            writes.append(key)
+
+    def is_row_expr(expr: ast.AST) -> bool:
+        return isinstance(expr, ast.Name) and expr.id in row_vars
+
+    def collect_dict_keys(expr: ast.AST):
+        nonlocal passes_through, has_unknown_write
+        if isinstance(expr, ast.Dict):
+            for k, v in zip(expr.keys, expr.values):
+                if k is None:
+                    if is_row_expr(v):
+                        passes_through = True
+                    else:
+                        has_unknown_write = True
+                else:
+                    k_str = _str_const(k)
+                    if k_str:
+                        add_write(k_str)
+                    else:
+                        has_unknown_write = True
+        elif isinstance(expr, ast.DictComp):
+            # Support `{k: row[k] for k in ('a', 'b')}` statically; mark dynamic schema comprehensions as unknown.
+            if (len(expr.generators) == 1
+                    and isinstance(expr.generators[0].target, ast.Name)
+                    and isinstance(expr.key, ast.Name)
+                    and expr.key.id == expr.generators[0].target.id
+                    and isinstance(expr.generators[0].iter, (ast.Tuple, ast.List, ast.Set))
+                    and all(_str_const(e) is not None for e in expr.generators[0].iter.elts)):
+                for elt in expr.generators[0].iter.elts:
+                    k_str = _str_const(elt)
+                    add_write(k_str)
+                    if any(isinstance(n, ast.Name) and n.id in row_vars for n in ast.walk(expr.value)):
+                        add_read(k_str)
+            else:
+                has_unknown_write = True
+                if any(isinstance(n, ast.Name) and n.id in row_vars for n in ast.walk(expr.value)):
+                    passes_through = True
+        elif isinstance(expr, (ast.List, ast.Tuple)):
+            for elt in expr.elts:
+                collect_dict_keys(elt)
+        elif isinstance(expr, ast.Call):
+            has_unknown_write = True
+
+    # First pass: discover loop aliases of row/batch and output dict containers.
+    for sub in ast.walk(entry):
+        if isinstance(sub, (ast.For, ast.AsyncFor)):
+            if isinstance(sub.target, ast.Name) and is_row_expr(sub.iter):
+                row_vars.add(sub.target.id)
+        elif isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Name):
+            tgt = sub.targets[0].id
+            val = sub.value
+            if isinstance(val, ast.Call):
+                if isinstance(val.func, ast.Name) and val.func.id == 'dict' and val.args and is_row_expr(val.args[0]):
+                    out_vars.add(tgt)
+                    passes_through = True
+                elif isinstance(val.func, ast.Attribute) and val.func.attr == 'copy' and is_row_expr(val.func.value):
+                    out_vars.add(tgt)
+                    passes_through = True
+            elif isinstance(val, ast.Dict):
+                if any(k is None and is_row_expr(v) for k, v in zip(val.keys, val.values)):
+                    out_vars.add(tgt)
+                    passes_through = True
+        elif isinstance(sub, (ast.Return, ast.Yield)) and isinstance(sub.value, ast.Name):
+            if sub.value.id in row_vars:
+                passes_through = True
+            else:
+                out_vars.add(sub.value.id)
+
+    # Second pass: collect read keys, written keys, and detect unknown external dict builders.
+    for sub in ast.walk(entry):
+        if isinstance(sub, ast.Subscript) and isinstance(sub.value, ast.Name):
+            key = _str_const(sub.slice)
+            if isinstance(sub.ctx, ast.Load) and sub.value.id in row_vars:
+                add_read(key)
+            elif isinstance(sub.ctx, ast.Store) and (sub.value.id in out_vars or sub.value.id in row_vars):
+                if key:
+                    add_write(key)
+                else:
+                    has_unknown_write = True
+        elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and isinstance(sub.func.value, ast.Name):
+            recv = sub.func.value.id
+            attr = sub.func.attr
+            if recv in row_vars and attr in {'get', 'pop'} and sub.args:
+                add_read(_str_const(sub.args[0]))
+            elif (recv in out_vars or recv in row_vars) and attr == 'update':
+                if sub.args and isinstance(sub.args[0], ast.Dict):
+                    collect_dict_keys(sub.args[0])
+                elif sub.args:
+                    has_unknown_write = True
+                for kw in sub.keywords:
+                    if kw.arg:
+                        add_write(kw.arg)
+            elif attr == 'append' and sub.args:
+                if isinstance(sub.args[0], ast.Dict):
+                    collect_dict_keys(sub.args[0])
+                elif isinstance(sub.args[0], ast.Call):
+                    has_unknown_write = True
+        elif isinstance(sub, ast.Compare) and len(sub.ops) == 1 and isinstance(sub.ops[0], (ast.In, ast.NotIn)):
+            if len(sub.comparators) == 1 and is_row_expr(sub.comparators[0]):
+                add_read(_str_const(sub.left))
+        elif isinstance(sub, (ast.Return, ast.Yield)) and sub.value is not None:
+            collect_dict_keys(sub.value)
+        elif isinstance(sub, ast.Assign) and len(sub.targets) == 1 and isinstance(sub.targets[0], ast.Name):
+            tgt = sub.targets[0].id
+            if tgt in out_vars:
+                if isinstance(sub.value, (ast.Dict, ast.DictComp)):
+                    collect_dict_keys(sub.value)
+                elif isinstance(sub.value, ast.Call):
+                    is_shallow_copy = (
+                        (isinstance(sub.value.func, ast.Name) and sub.value.func.id == 'dict' and sub.value.args and is_row_expr(sub.value.args[0]))
+                        or (isinstance(sub.value.func, ast.Attribute) and sub.value.func.attr == 'copy' and is_row_expr(sub.value.func.value))
+                    )
+                    if not is_shallow_copy:
+                        has_unknown_write = True
+
+    if not reads and not writes:
+        return None
+    result = dict(reads=reads, writes=writes, passes_through=passes_through)
+    if include_analysis:
+        result['has_unknown_write'] = has_unknown_write
+    return result
+
+
+def _extract_example_dict_keys(text: str) -> set[str] | None:
+    """Extract top-level string keys if an example snippet represents a dict or list of dicts."""
+    if not text or '{' not in text:
+        return None
+    # Find the first balanced `{...}` block (handles `row={...}` or `[{...}]`).
+    start = text.find('{')
+    depth = 0
+    in_str: str | None = None
+    escaped = False
+    end = -1
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == '\\':
+                escaped = True
+            elif ch == in_str:
+                in_str = None
+            continue
+        if ch in ('"', "'"):
+            in_str = ch
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end <= start:
+        return None
+    snippet = text[start:end + 1]
+    # Remove trailing `, ...` or `...` placeholder inside dicts before parsing.
+    cleaned = re.sub(r',\s*\.\.\.\s*(?=\})', '', snippet)
+    cleaned = re.sub(r'\{\s*\.\.\.\s*\}', '{}', cleaned)
+    try:
+        parsed = ast.literal_eval(cleaned)
+        if isinstance(parsed, dict) and all(isinstance(k, str) for k in parsed):
+            return set(parsed.keys())
+    except Exception:
+        pass
+    try:
+        parsed_json = json.loads(cleaned)
+        if isinstance(parsed_json, dict):
+            return {k for k in parsed_json if isinstance(k, str)}
+    except Exception:
+        pass
+    return None
+
+
+def _stale_operator_example_docs(path: Path) -> list[tuple[int, str, str]]:
+    """OP-E1 drift guard: detect Example:/示例: outputs that contradict AST-extracted written fields."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    issues: list[tuple[int, str, str]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
+            doc = ast.get_docstring(node) or ''
+            example = parse_docstring_example(doc)
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith('_'):
+            call_fn = next(
+                (m for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == '__call__'),
+                None,
+            )
+            if call_fn is None:
+                continue
+            example = parse_docstring_example(ast.get_docstring(node) or '') or parse_docstring_example(ast.get_docstring(call_fn) or '')
+        else:
+            continue
+        if not example:
+            continue
+        flow = extract_field_flow(node, include_analysis=True)
+        if not flow or not flow['writes'] or flow.get('has_unknown_write'):
+            continue
+        out_keys = _extract_example_dict_keys(example['output'])
+        if not out_keys:
+            continue
+        in_keys = _extract_example_dict_keys(example['input']) or set()
+        writes = set(flow['writes'])
+        reads = set(flow['reads'])
+        allowed = writes | (reads | in_keys if flow['passes_through'] else set())
+        ghost = sorted(out_keys - allowed)
+        if ghost:
+            g_text = ', '.join(ghost[:3]) + ('…' if len(ghost) > 3 else '')
+            issues.append((node.lineno, node.name, f'示例输出包含代码未产出的过期字段 {g_text}'))
+        elif not (out_keys & writes):
+            w_text = ', '.join(flow['writes'][:3]) + ('…' if len(flow['writes']) > 3 else '')
+            issues.append((node.lineno, node.name, f'示例输出字段与代码真实产出字段（{w_text}）完全脱节'))
+    return issues
+
+
+def _stale_operator_param_docs(path: Path) -> list[tuple[int, str, list[str]]]:
+    """OP-P1 drift guard: detect docstring Args:/参数: entries referencing removed/renamed parameters."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+
+    def all_sig_names(args: ast.arguments) -> tuple[set[str], bool]:
+        names = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+        if args.vararg:
+            names.add(args.vararg.arg)
+        if args.kwarg:
+            names.add(args.kwarg.arg)
+        return names, args.kwarg is not None
+
+    issues: list[tuple[int, str, list[str]]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
+            doc = ast.get_docstring(node) or ''
+            arg_docs = _parse_docstring_arg_docs(doc)
+            if not arg_docs:
+                continue
+            sig_names, has_varkw = all_sig_names(node.args)
+            if has_varkw:
+                continue
+            stale = [k for k in arg_docs if k not in sig_names]
+            if stale:
+                issues.append((node.lineno, node.name, stale))
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith('_'):
+            init_fn = next((m for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == '__init__'), None)
+            call_fn = next((m for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == '__call__'), None)
+            if init_fn is None and call_fn is None:
+                continue
+            cls_doc = ast.get_docstring(node) or ''
+            init_doc = ast.get_docstring(init_fn) if init_fn else ''
+            arg_docs = {**_parse_docstring_arg_docs(cls_doc), **_parse_docstring_arg_docs(init_doc)}
+            if not arg_docs:
+                continue
+            sig_names: set[str] = set()
+            has_varkw = False
+            for fn in (init_fn, call_fn):
+                if fn is not None:
+                    n, kw = all_sig_names(fn.args)
+                    sig_names |= n
+                    has_varkw = has_varkw or kw
+            if has_varkw:
+                continue
+            stale = [k for k in arg_docs if k not in sig_names]
+            if stale:
+                issues.append((node.lineno, node.name, stale))
+    return issues
+
+
 def _missing_operator_example_docs(path: Path) -> list[tuple[int, str]]:
     """OP-E1: Detect public operator functions/callable Actors lacking a minimal input->output Example:/示例: section."""
     if path.stem.startswith('_'):
@@ -1142,7 +1448,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                            f'公开算子 {first_name} 缺少首行语义描述 docstring{extra}；按 DF-02/OP-S1 规范，每个公开代码算子（函数/Actor 类）须在首行 docstring 中写清业务语义，供工作台执行图节点直接展示。',
                            line=first_line)
             )
-        # OP-P1: Mandatory Args:/参数: semantic descriptions for non-row operator parameters.
+        # OP-P1: Mandatory Args:/参数: semantic descriptions + stale-param drift guard.
         missing_param_docs = _missing_operator_param_docs(root / rel)
         if missing_param_docs:
             first_line, first_name, first_params = missing_param_docs[0]
@@ -1154,7 +1460,18 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                            f'公开算子 {first_name} 的参数 {p_list} 缺少语义说明{extra}；按 DF-02/OP-P1 规范，非数据行参数须在 docstring 的 Args:/参数: 段逐个写清中文业务含义，供工作台接口面板直接展示。',
                            line=first_line)
             )
-        # OP-E1: Mandatory minimal input -> output example in docstring for public operators.
+        stale_param_docs = _stale_operator_param_docs(root / rel)
+        if stale_param_docs:
+            first_line, first_name, first_stale = stale_param_docs[0]
+            p_list = ', '.join(first_stale[:3]) + ('…' if len(first_stale) > 3 else '')
+            extra = f' 等 {len(stale_param_docs)} 个算子' if len(stale_param_docs) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('stale_operator_param_description', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开算子 {first_name} 的 docstring Args:/参数: 段残留已不存在的参数 {p_list}{extra}；按 DF-02/OP-P1 规范，参数变更后须同步更新或删除过期参数说明，确保与函数签名一致。',
+                           line=first_line)
+            )
+        # OP-E1: Mandatory minimal input -> output example + AST field-flow drift guard.
         missing_examples = _missing_operator_example_docs(root / rel)
         if missing_examples:
             first_line, first_name = missing_examples[0]
@@ -1163,6 +1480,16 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             by_category.setdefault('missing_operator_example', []).append(
                 diagnostic('DF-02', rel,
                            f'公开算子 {first_name} 缺少输入输出变换示例{extra}；按 DF-02/OP-E1 规范，须在 docstring 的 Example:/示例: 段补充 1 条最小「输入: ...」「输出: ...」对比样例（仅列关键变化字段，支持行变换、展开列表或过滤布尔值），供工作台接口面板直观展示。',
+                           line=first_line)
+            )
+        stale_examples = _stale_operator_example_docs(root / rel)
+        if stale_examples:
+            first_line, first_name, first_reason = stale_examples[0]
+            extra = f' 等 {len(stale_examples)} 个算子' if len(stale_examples) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('stale_operator_example', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开算子 {first_name} 的变换示例与当前代码不一致（{first_reason}）{extra}；按 DF-02/OP-E1 规范，代码字段变更后须同步更新 docstring 的 Example:/示例: 段。',
                            line=first_line)
             )
         if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
