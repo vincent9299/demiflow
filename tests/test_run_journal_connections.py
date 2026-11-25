@@ -173,3 +173,39 @@ def test_forked_owner_is_rejected_before_inherited_lock_acquisition(tmp_path):
         thread.join(3)
         _, status = os.waitpid(pid, 0)
         assert os.waitstatus_to_exitcode(status) == 0
+
+
+def test_reader_opens_after_a_writer_was_killed_inside_a_transaction(tmp_path):
+    """SIGKILL inside a write transaction leaves a hot rollback journal; the next reader
+    must still open, see the committed state and none of the unfinished transaction."""
+    import signal
+    import subprocess
+    import sys
+    import time
+    directory, ready = tmp_path / 'run', tmp_path / 'ready'
+    writer = (
+        "import sys, time\n"
+        "from pathlib import Path\n"
+        "from demiflow.execution.pipeline.run_context import RunContext\n"
+        "with RunContext.start(sys.argv[1]) as run:\n"
+        "    with run.journal._connection(write=True) as db:\n"
+        "        db.execute('BEGIN IMMEDIATE')\n"
+        "        db.execute('CREATE TABLE unfinished (k INTEGER PRIMARY KEY, v TEXT)')\n"
+        "        db.executemany('INSERT INTO unfinished VALUES (?, hex(randomblob(2000)))',\n"
+        "                       [(k,) for k in range(4000)])\n"
+        "        Path(sys.argv[2]).write_text(run.ref.run_id)\n"
+        "        time.sleep(120)\n")
+    child = subprocess.Popen([sys.executable, '-B', '-c', writer, str(directory), str(ready)])
+    try:
+        deadline = time.monotonic() + 60
+        while not ready.exists() or not ready.read_text():
+            assert child.poll() is None and time.monotonic() < deadline, 'writer did not reach its transaction'
+            time.sleep(.01)
+    finally:
+        child.send_signal(signal.SIGKILL)
+        child.wait()
+    assert (directory / 'run.sqlite-journal').exists(), 'the kill did not leave a rollback journal'
+    journal = RunJournal(directory)
+    assert journal.recovery_identity()['run_id'] == ready.read_text()
+    with journal._connection() as db:
+        assert db.execute("SELECT 1 FROM sqlite_master WHERE name='unfinished'").fetchone() is None

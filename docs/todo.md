@@ -131,12 +131,6 @@
 - **现象。** 涉及 40 个 `test_forge_*` / `test_workbench_*` 文件，低并发重跑后同样失败。大多数是等一个按钮或节点等到超时：`检查问题`、`业务参数`、`整图配置`、导航里的 `算子` 和 `运行`、`.wb-node`。这些文字和样式名在产品源码里大多还在，说明是入口位置或流程变了，而不是整块功能被删。
 - **建议。** 由熟悉当前界面的人逐个文件判断：界面有意改了就按新流程改测试或删掉；界面不该变就是缺陷。原因摘要在 `_demiflow/shared-review/CLAUDE-test-audit-20261124/ui-waits.txt`。
 
-### T-024 强杀后续跑偶尔打不开运行记录库
-
-- **现象。** 进程被 SIGKILL 后 `RunContext.resume` 读取恢复身份时，只读连接执行 `PRAGMA cache_size` 报 `sqlite3.OperationalError: attempt to write a readonly database`（`execution/journal/run_journal.py:161-166`），续跑失败。推测是强杀留下的 WAL/共享内存需要恢复，而只读连接不能做这一步；未逐行证实。
-- **依据。** 2026-11-25 `tests/test_queue_v2_crash.py::test_sigkill_and_native_recovery[sqlite-True-claimed]` 在 main `aa997f1e` 上单独复跑 5 次失败 2 次，原因都是这条；同一时期带 T-019 修复的分支 5 次全过（该场景在下载前就被杀，不经过 T-019 改动的代码）。
-- **建议。** 续跑时第一次打开运行记录库改用可写连接完成 WAL 恢复，或在只读连接失败时按这一错误重试一次可写打开；修复后用该测试加压复跑验证。
-
 ### T-025 reduce、join 和单 worker 计划不再能在小额度下运行
 
 - **现象。** 两类计划被 `RESOURCE_INFEASIBLE` 拒绝，之前都能运行：
@@ -208,6 +202,10 @@
 - **建议。** 引擎负责人指出新路径里对应的有界性观察点（或确认这些界限已由别的测试覆盖），据此改写探测；后三个需逐一判断是行为变化还是性能退步。在此之前这 5 个测试保持失败。
 
 ## 已完成
+
+### T-024 强杀后续跑偶尔打不开运行记录库
+
+已修（2026-11-25，用户同意改平台）。原因不是原先推测的 WAL：运行记录库用的是 SQLite 默认的回滚日志，写进程在事务中途被 SIGKILL 会留下未回滚的 `run.sqlite-journal`；下一次打开必须先回滚它，而回滚需要写权限，只读连接被拒绝（`SQLITE_READONLY_ROLLBACK`，报文 "attempt to write a readonly database"）。只有强杀落在事务中途才出现，所以是偶发。用纯 SQLite 脚本 5 次全部复现。修复：`RunJournal` 的只读打开遇到这一错误时，先用可写连接读一次（SQLite 随即回滚，不写任何表或行），再重新只读打开；无法以可写方式打开时抛出原错误。写进程仍存活时不会走到这一步（实测读者得到 `SQLITE_BUSY`，写进程随后正常提交 4000 行）。`execution/journal/run_reader.py` 等约定"什么都不写"的历史读取入口不变。新增 `tests/test_run_journal_connections.py::test_reader_opens_after_a_writer_was_killed_inside_a_transaction`（不改引擎时以该错误失败）；`tests/test_queue_v2_crash.py::test_sigkill_and_native_recovery[sqlite-True-claimed]` 修复后连跑 10 次全过。提交 `572d58d0`。
 
 ### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
 
