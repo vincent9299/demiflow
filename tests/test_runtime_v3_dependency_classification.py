@@ -180,3 +180,37 @@ def test_module_count_limit_is_independent_of_source_size(tmp_path):
             stream.write(b'#' + b'x'*65534 + b'\n')
     pin = business_sources.plan_code_pin(_captured_plan(_module('owned_wide_business', path)))
     assert pin['dependencies']['owned_wide_business']['bytes'] == path.stat().st_size
+
+
+def test_ast_relative_constant_and_lazy_imports_are_bundled(tmp_path, monkeypatch):
+    """Constant-only relative imports (`from ._schemas import TAG`) and function-body lazy
+    relative imports (`from . import _lazy`) must be captured into business_dependency_modules
+    so isolated workers can import the operator module without ModuleNotFoundError.
+    """
+    pkg = tmp_path / 'ast_dep_pkg'
+    ops = pkg / 'operators'
+    ops.mkdir(parents=True)
+    (pkg / '__init__.py').write_text('', encoding='utf-8')
+    (ops / '__init__.py').write_text('', encoding='utf-8')
+    (ops / '_schemas.py').write_text('TAG = "v1"\n', encoding='utf-8')
+    (ops / '_lazy.py').write_text('def suffix():\n    return "-ok"\n', encoding='utf-8')
+    (ops / 'worker_op.py').write_text(
+        'from ._schemas import TAG\n'
+        'def transform(row):\n'
+        '    from . import _lazy\n'
+        '    return {"x": f"{row[\'x\']}:{TAG}{_lazy.suffix()}"}\n',
+        encoding='utf-8',
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import importlib
+    mod = importlib.import_module('ast_dep_pkg.operators.worker_op')
+    try:
+        plan = data.from_items([{'x': 1}]).map(mod.transform)._plan
+        deps = business_sources.business_dependency_modules(plan)
+        assert 'ast_dep_pkg.operators.worker_op' in deps
+        assert 'ast_dep_pkg.operators._schemas' in deps
+        assert 'ast_dep_pkg.operators._lazy' in deps
+    finally:
+        for name in list(sys.modules):
+            if name == 'ast_dep_pkg' or name.startswith('ast_dep_pkg.'):
+                sys.modules.pop(name, None)

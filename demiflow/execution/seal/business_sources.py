@@ -737,6 +737,86 @@ def source_callable_roots(source):
     return tuple(roots)
 
 
+def _ast_import_dependencies(module_name: str, path: Path):
+    """Passively discover business module imports from a module's AST.
+
+    Runtime object traversal misses two common valid patterns:
+    1. Top-level constant/schema imports (`from ._schemas import SCHEMA, PROTOCOL`)
+       where the bound values are primitives/PyArrow schemas with no defining module.
+    2. Function-body lazy relative imports (`from . import _codex`) not yet executed
+       at seal time.
+
+    Never imports or executes code. Resolves relative imports directly against the
+    module's own filesystem directory (so driver and worker see identical results
+    after `mount_sources`), and checks already-loaded `sys.modules` for absolute
+    imports.
+    """
+    import ast
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return ()
+
+    is_pkg_init = path.name == '__init__.py'
+    pkg_parts = module_name.split('.') if is_pkg_init else module_name.split('.')[:-1]
+    base_dir = path.parent
+
+    discovered = []
+    seen = set()
+
+    def add_rel(target_parts, target_dir):
+        if not target_parts or not all(p.isidentifier() for p in target_parts):
+            return
+        cand_name = '.'.join(target_parts)
+        if cand_name in seen:
+            return
+        py_file = target_dir.with_suffix('.py')
+        init_file = target_dir / '__init__.py'
+        chosen = py_file if py_file.is_file() else (init_file if init_file.is_file() else None)
+        if chosen is not None:
+            seen.add(cand_name)
+            discovered.append((cand_name, chosen))
+
+    def add_loaded(cand_name):
+        if not cand_name or cand_name in seen:
+            return
+        mod = sys.modules.get(cand_name)
+        if mod is not None:
+            seen.add(cand_name)
+            discovered.append((cand_name, mod))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.level >= 1:
+                up = node.level - 1
+                if up > len(pkg_parts):
+                    continue
+                anchor_parts = pkg_parts[:len(pkg_parts) - up] if up else list(pkg_parts)
+                anchor_dir = base_dir
+                for _ in range(up):
+                    anchor_dir = anchor_dir.parent
+                if node.module:
+                    mod_parts = node.module.split('.')
+                    mod_dir = anchor_dir.joinpath(*mod_parts)
+                    add_rel([*anchor_parts, *mod_parts], mod_dir)
+                    for alias in node.names:
+                        if alias.name != '*':
+                            add_rel([*anchor_parts, *mod_parts, alias.name], mod_dir / alias.name)
+                else:
+                    for alias in node.names:
+                        if alias.name != '*':
+                            add_rel([*anchor_parts, alias.name], anchor_dir / alias.name)
+            elif node.module:
+                add_loaded(node.module)
+                for alias in node.names:
+                    if alias.name != '*':
+                        add_loaded(f'{node.module}.{alias.name}')
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                add_loaded(alias.name)
+    return tuple(discovered)
+
+
 def business_dependency_modules(plan, *, source=None):
     """Transitive closure of business modules a plan's pure UDF maps import.
 
@@ -817,19 +897,41 @@ def business_dependency_modules(plan, *, source=None):
             pending.extend(_by_value_business_modules(function))
     visited, found = set(), {}
     while pending:
-        module = pending.popleft()
-        name = getattr(module, "__name__", "")
-        if not name or name in visited:
-            continue
-        visited.add(name)
-        path = _classify_dependency_module(module)
+        item = pending.popleft()
+        if isinstance(item, tuple):
+            name, raw_path = item
+            if not name or name in visited:
+                continue
+            visited.add(name)
+            loaded = sys.modules.get(name)
+            if loaded is not None:
+                path = _classify_dependency_module(loaded)
+                module = loaded
+            else:
+                path = raw_path if raw_path.suffix == '.py' and raw_path.is_file() else None
+                module = None
+        else:
+            module = item
+            name = getattr(module, "__name__", "")
+            if not name or name in visited:
+                continue
+            visited.add(name)
+            path = _classify_dependency_module(module)
         if path is None:
             continue
         if len(found) >= _DEP_MAX_MODULES:
             raise RecoveryContractError(
                 "Business dependency manifest exceeds budget; code-pin refuses (fail-closed)")
         found[name] = SourceFile.capture(path)
-        pending.extend(candidates(vars(module)))
+        if module is not None:
+            pending.extend(candidates(vars(module)))
+        for dep_name, dep_target in _ast_import_dependencies(name, path):
+            if dep_name in visited:
+                continue
+            if isinstance(dep_target, Path):
+                pending.append((dep_name, dep_target))
+            else:
+                pending.append(dep_target)
     return {name: found[name] for name in sorted(found)}
 
 
