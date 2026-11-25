@@ -300,6 +300,10 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
                 call = detail.get('callsite', {})
                 if call.get('availability') == 'available':
                     node['api_call'] = {k: call['metadata'][k] for k in ('api', 'summary')}
+                from demiflow.workbench.graph.preview import _node_description
+                desc = _node_description(detail)
+                if desc:
+                    node['description'] = desc
         edges = [{**e,'type':'data'} for e in report.get('edges', [])]
         edges += [{**e,'type':'value'} for e in report.get('value_edges', [])]
         edges += [{**e,'type':'action'} for e in report.get('action_edges', [])]

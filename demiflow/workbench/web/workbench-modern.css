@@ -207,6 +207,7 @@
 .definition-chip{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#f4f4f5;color:#3f3f46;font-weight:500;font-family:var(--font-mono,ui-monospace,monospace);font-size:11px}
 .definition-role{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;font-weight:550;font-size:11px}
 .wb-wiring-section{padding:0 0 14px;margin:0 0 14px;border-bottom:1px solid #ededf0}
+.wb-node-semantic-desc{margin:0 0 12px;padding:8px 10px;border-radius:8px;background:#f8fafc;border:1px solid #e2e8f0;color:#334155;font-size:12.5px;line-height:1.55}
 .wb-wiring-section:last-of-type{border-bottom:0;margin-bottom:8px;padding-bottom:6px}
 .wb-wiring-section>h4{font-size:12.5px;font-weight:600;color:#09090b;margin:0 0 8px}
 .wb-runtime-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}

@@ -58,6 +58,28 @@ class _Discard(io.TextIOBase):
         return len(value)
 
 
+def _node_description(detail: dict) -> str | None:
+    """Return the first non-empty line of the bound Prompt or code operator description."""
+    for kind in ('prompt', 'implementation'):
+        item = detail.get(kind)
+        if not isinstance(item, dict) or item.get('availability') != 'available':
+            continue
+        meta = item.get('metadata') or {}
+        candidates = []
+        if isinstance(meta.get('definition'), dict):
+            candidates.append(meta['definition'].get('description'))
+        for route in meta.get('routes') or ():
+            if isinstance(route, dict) and isinstance(route.get('definition'), dict):
+                candidates.append(route['definition'].get('description'))
+        for raw in candidates:
+            if isinstance(raw, str):
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if line:
+                        return line[:160]
+    return None
+
+
 def preview(root, *, entry, params=None, table_resolver=None, source_modules=None):
     """Delegate to the one-shot reader unless called by its trusted dispatcher."""
     if table_resolver is None:
@@ -142,11 +164,15 @@ def preview(root, *, entry, params=None, table_resolver=None, source_modules=Non
                  limitations=['仅解析首个 Dataset 执行动作；依赖执行结果的后续动作尚未解析。',
                               '未启动 Dataset 数据读取与执行；不包含实际资源分配、运行状态或结果。'])
     for node in value['dag']['nodes']:
-        call = details.get(node['occurrence_id'], {}).get('callsite', {})
+        occ_detail = details.get(node['occurrence_id'], {})
+        call = occ_detail.get('callsite', {})
         if call.get('availability') == 'available':
             node['api_call'] = {k: call['metadata'][k] for k in ('api', 'summary')}
+        desc = _node_description(occ_detail)
+        if desc:
+            node['description'] = desc
         node['source_views'] = {kind: dict(available=detail['availability'] == 'available', referenced=detail.get('referenced', False), reason=detail['reason'])
-                                for kind, detail in details.get(node['occurrence_id'], {}).items()}
+                                for kind, detail in occ_detail.items()}
     bounded_json(value, 1024**2)
     value['pipeline_source'] = dict(available=pipeline['availability'] == 'available', path=pipeline['path'])
     value['_pipeline_detail'] = pipeline
