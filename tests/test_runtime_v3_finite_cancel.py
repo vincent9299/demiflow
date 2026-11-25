@@ -201,17 +201,15 @@ def test_real_dataset_cancel_interrupts_finite_authentication_and_releases_worke
                     cancelled.set()
     assert decoded and len(decoded) == 1
     from demiflow.execution.journal.run_journal import RunJournal
-    from demiflow.execution.hosts.capacity import local_capacity
-    from demiflow.resources.capacity import LocalCapacityPool
+    from runtime_v3_owned_crash import run_capacity
     with RunJournal(tmp_path/'run')._connection() as db:
         allocations = db.execute('SELECT allocation_id,cleanup FROM resource_allocations').fetchall()
         scopes = db.execute('SELECT state FROM resource_scopes').fetchall()
     assert allocations and all(cleanup == 'CONFIRMED' for _, cleanup in allocations)
     assert scopes and all(state == 'CLOSED' for state, in scopes)
-    domain, capacity = local_capacity()
-    assert str(domain).startswith('/tmp/demiflow-')
-    snapshot = LocalCapacityPool(domain/'capacity', capacity=capacity).snapshot()
-    assert not snapshot['active'] and snapshot['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    # Only this run's allocations: every run of a test session shares one capacity pool.
+    held, released = run_capacity(tmp_path/'run')
+    assert not held and released
 
 
 def test_cancel_inside_intermediate_sort_merge_stops_before_next_spill_frame(tmp_path, monkeypatch):
