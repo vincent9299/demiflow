@@ -159,13 +159,13 @@
 ### T-027 prompt 节点的有状态 `when` 判断器不存盘也不恢复
 
 - **现象。** 判断器提供 `snapshot_state` / `restore_state`，运行在第一次存盘后中断再续跑：整个过程中这两个方法一次都没被调用，续跑时判断器从初始状态重新计数，重复判断已判过的行。用“只对前 3 行为真”的判断器，续跑后有回答的是第 0 到 4 行，多发了请求。
-- **依据。** 2026-11-25 `tests/test_native_prompt_owners.py::test_stateful_model_predicate_resumes_from_its_snapshot`，在判断器里记录每次调用、存盘和恢复，日志里只有调用。原测试按 v3 之前的逐节点状态键检查判断器快照，至迟 11-22 起就因找不到旧键名失败，这个问题一直没被发现；已改写为按行为检查。
+- **依据。** 2026-11-25 `tests/test_native_prompt_owners.py::test_stateful_model_predicate_resumes_from_its_snapshot`，在判断器里记录每次调用、存盘和恢复，日志里只有调用。引擎仍把非普通函数的判断器标记为语义所有者（`execution/operator_bindings/dataflow_model_journal.py` 的 `semantic_owners`），但全仓没有任何代码读取这个标记去保存或恢复它。带状态的 `when` 判断器是少见用法，影响面小。原测试按 v3 之前的逐节点状态键检查判断器快照，至迟 11-22 起就因找不到旧键名失败，这个问题一直没被发现；已改写为按行为检查。
 - **建议。** 引擎负责人确认 `when` 判断器是否应作为语义状态存盘。应该：在 cut 中保存并在续跑时恢复。不支持：对带 `snapshot_state` 的判断器在声明时拒绝，不要静默从头开始。
 
 ### T-028 上游出错时，prompt 在途的付费请求没有按期限收完
 
-- **现象。** prompt 请求已发出、响应正在流式返回时，上游另一行报错使 action 失败。期限 2 秒、响应 0.4 秒可收完的请求每次都被切断，记为传输错误，响应丢失；期限 0.1 秒的请求有时记下传输错误、有时什么也没记，只剩“已发出、无回复”，两次运行中失败的参数不同。文档写明取消时在原生 actor 的期限内收完在途调用再关闭客户端（`docs/prompt_http.md` "Cancellation drains active calls…"，`docs/native-barrier-checkpoints.md` "drains native calls/writers under their deadlines"）。
-- **依据。** 2026-11-25 `tests/test_prompt_http_stream.py::test_service_stop_drains_paid_response_but_does_not_publish_partial_success` 4 个参数中每次 3 个失败：期限 2 秒的两个固定失败（`responses` 为 0），期限 0.1 秒的两个随时序其一失败（`transport_errors` 为 0）。原测试在驱动进程里替换 HTTP 客户端、靠闭包对象和 `asyncio.Event` 跨阶段传信号，在 v3 里一直测不到这个场景，至迟 11-22 起以存盘超时失败；已改为线程 worker、文件信号，并按运行记录核对“没有发布部分结果”。另：prompt 后面若接其他算子，有限输入的 action 会等上游全部完成后才开始 prompt，因此测试里 prompt 后面不接算子。
+- **现象。** prompt 请求已发出、响应正在流式返回时，上游另一行报错使 action 失败。此时在途请求不会被收完：即使请求期限远未到、响应很快就能收完，连接也被直接关闭，响应丢失，账本只记一条错误。文档写明取消时在原生 actor 的期限内收完在途调用再关闭客户端（`docs/prompt_http.md` "Cancellation drains active calls…"，`docs/native-barrier-checkpoints.md` "drains native calls/writers under their deadlines"）。
+- **依据。** 2026-11-25 用真实的本地 HTTP 流式服务、默认进程 worker、不替换任何代码的独立脚本复现：请求期限 5 秒、响应 0.4 秒即可收完，另一行在上游报错后，在途请求被切断（服务端看到客户端提前断开），运行账本里该调用没有响应，只记了一条错误。`tests/test_prompt_http_stream.py::test_service_stop_drains_paid_response_but_does_not_publish_partial_success` 中期限 2 秒的两个参数因此固定失败；期限 0.1 秒的两个参数在测试的线程 worker 加模拟传输下随时序其一失败（偶尔连错误也没记），真实 HTTP 下每次都记下了错误。原测试在驱动进程里替换 HTTP 客户端、靠闭包对象和 `asyncio.Event` 跨阶段传信号，在 v3 里一直测不到这个场景；已改为线程 worker、文件信号，并按运行记录核对"没有发布部分结果"。另：prompt 后面若接其他算子，有限输入的 action 会等上游全部完成后才开始 prompt，因此测试里 prompt 后面不接算子。
 - **建议。** 对齐实现与文档：action 失败或取消时，在途的 prompt 调用在其期限内收完并记录响应，超过期限的记为传输错误。
 
 ### T-029 工作台读不到托管运行的模型调用证据
@@ -174,12 +174,14 @@
 - **依据。** 2026-11-25 `tests/test_operator_foundation_runs.py::test_managed_model_results_evidence_and_read_only_access`，打印了引用和清单；至迟 11-22 起失败。同文件的取消测试原先打开 `evidence/calls.sqlite`，已改为读 `run.sqlite`。
 - **建议。** 工作台把运行自己的调用记录作为有界证据读取（按引用核对属于本次运行），或由运行在清单中声明它；修好后该测试应通过。
 
-### T-033 封存改动后，路由图与恢复测试大面积报"加载的程序代码与封存时不一致"
+### T-033 封存指纹取决于进程里已加载的模块：函数体内延迟导入同级模块时，worker 误判"代码已改"
 
-- **现象。** 自 `31c779c6`（main-20261125-20，合入 `eafb549a` "seal(business_sources): capture AST static relative and constant-only imports for worker bundling"）起，worker 加载程序时报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`，代码并没有改。
-- **依据。** 2026-11-25 对照，同一批测试文件分别在 `40c0034a`（其前一提交）和 `31c779c6` 上运行：`tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，之前 23 过 2 败，之后 23 败 2 过，失败都是这条报错，单独运行文件也如此。另：`tests/test_native_prompt_barrier.py` 的崩溃续跑测试单独运行通过（前后各 5 次），与 `tests/test_prompt_without_journal.py` 同会话时在 `31c779c6` 上失败、在 `40c0034a` 上通过。`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个也是如此：`40c0034a` 上通过，`31c779c6` 上期望的 `BUDGET_EXCEEDED` 变成 `INVALID_CONTRACT`。在同一个大会话里一起运行 35 个文件时，`reducer_values` 另有 8 个、`cache_composition` 4 个、`value_shuffle_integration` 1 个出现同一报错，逐文件单独运行时不出现。其他文件的影响未逐一核对。
-- **影响。** 路由图、恢复等路径上真实存在的程序被拒绝加载；业务代码若有类似的导入写法，可能同样受影响（未证实）。
-- **建议。** 封存改动负责人用上述文件对照复现，修复或回退该提交，并在标准线上复跑；修好后上述测试应恢复到 `40c0034a` 的结果。
+- **现象。** 自 `31c779c6`（main-20261125-20，合入 `eafb549a`）起，封存业务依赖时会读取源码里的绝对 `import`，并且只在该模块已被本进程加载（`sys.modules`）时才计入依赖（`execution/seal/business_sources.py::_ast_import_dependencies`）。驱动进程与 worker 进程加载过的模块不同，两边算出的依赖集合就不同，worker 加载程序时报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`，代码并没有改。
+- **依据（不经过 pytest 的用户写法，2026-11-25）。** 业务函数体内 `import biz_extra`，驱动进程此前已导入过 `biz_extra`：进程 worker 下，`40c0034a`（改动前）正常，最新 main `c00afcb3` 失败；驱动进程没有提前导入时，前后都正常。
+- **同一改动修好了更大的真实问题，不要回退。** 使用相对导入的业务包（顶层 `from ._consts import X`、函数体内 `from . import _lazy`）在 `40c0034a` 上用进程 worker 运行 map、map+reduce、运行内 materialize 全部以 `CORRUPT_ARTIFACT` 加载失败，改动后全部通过。
+- **对测试的影响。** `tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，改动前 23 过 2 败，改动后 23 败 2 过；`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个由通过变为失败；多个文件同会话运行时还有更多测试出现同一报错。都是同一机制：场景模块在函数体内导入了其他测试模块，pytest 进程早已加载它们，worker 没有。
+- **建议。** 绝对导入的依赖不要按"本进程是否已加载"来确定：改为与相对导入一样按文件系统解析，或只在封存时确定依赖并写入清单，worker 按清单核对而不重新发现。修好后上述测试和用户写法的复现都应通过。
+- **更正。** 本条 11-25 首次发布（main-20261125-37）时写的是"修复或回退"，并把影响描述为路由图与恢复程序被拒绝加载；当时只有测试证据。经独立脚本核实后改为以上内容。
 
 ### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
 
