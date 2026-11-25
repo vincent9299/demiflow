@@ -987,18 +987,47 @@
       renderKvTable(flowSec,['方向','说明'],flowRows);
       target.append(flowSec);
 
-      // 2. 业务入参（固定侧输入，大对象默认折叠）
+      // 2. 调用参数（固定入参，大对象默认折叠）
       const paramRows=[];
+      const fnKwargKeys=[];
+      const otherParamNames=[];
       for(const p of dataArgs){
         if(p.name==='fn_kwargs'&&p.value&&typeof p.value==='object'&&!Array.isArray(p.value)&&!p.value.unavailable){
           for(const[k,v]of Object.entries(p.value)){
+            fnKwargKeys.push(k);
             const txt=typeof v==='string'?v:json(v);
             paramRows.push([k,renderParamValueCell(v,txt)]);
           }
         }else if(p.name==='label'){
           continue;
         }else{
+          otherParamNames.push(p.name);
           paramRows.push([p.name,renderParamValueCell(p.value,formatArgValue(p))]);
+        }
+      }
+      if(apiExpr&&(fnKwargKeys.length||otherParamNames.length||Object.keys(bindings.inputs||{}).length||bindings.output)){
+        const sigMatch=apiExpr.match(/^([A-Za-z_.]+\w*)\(([\s\S]*)\)$/);
+        if(sigMatch){
+          const head=sigMatch[1],baseInner=sigMatch[2].trim();
+          const parts=[];
+          if(baseInner&&!['data.read_lance','.join','.save_lance'].includes(head))parts.push(baseInner);
+          if(fnKwargKeys.length)parts.push(`fn_kwargs={${fnKwargKeys.join(', ')}}`);
+          if(bindings.inputs&&typeof bindings.inputs==='object'&&Object.keys(bindings.inputs).length){
+            parts.push(`inputs={${Object.keys(bindings.inputs).join(', ')}}`);
+          }
+          if(bindings.output&&!head.endsWith('join'))parts.push(`output='${bindings.output}'`);
+          for(const name of otherParamNames){
+            if(['inputs','output','outputs'].includes(name))continue;
+            const argObj=dataArgs.find(p=>p.name===name);
+            const rawVal=argObj?.value;
+            if(typeof rawVal==='string'&&rawVal.length<=24&&!rawVal.includes('/'))parts.push(`${name}='${rawVal}'`);
+            else if(typeof rawVal==='number'||typeof rawVal==='boolean')parts.push(`${name}=${rawVal}`);
+            else parts.push(name);
+          }
+          if(parts.length){
+            sourceTitle.textContent=`${head}(${parts.join(', ')})`;
+            sourceTitle.classList.add('wb-source-title-api');
+          }
         }
       }
       if(paramRows.length){
