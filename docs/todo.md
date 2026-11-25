@@ -121,7 +121,7 @@
 - **内存额度与放置。** 已核对（2026-11-25）。`test_local_kernel.py` 10 个、`test_local_union_plan.py` 3 个、`test_stream_map.py` 1 个是引擎行为退步，测试保持原样，见 T-025。`test_runtime_v3_stream_suffix.py` 5 个是测试按旧公式重算融合阶段的内存；同一次引擎提交有意改成按选定布局分配，测试改为核对实际分配等于封存计划、同时驻留的阶段合计不超过额度、融合后的 CPU 规则。`test_upgrade_business_acceptance.py` 的 2 个已在第 2 批处理。
 - **崩溃与恢复。** 已处理（2026-11-25，分支 `claude/tests/effectiveness-20261124`）。主因是测试按旧的落盘环节名 `output` 找杀进程的位置，现在叫 `materialize` / `take_all`，子进程因此一直没被杀。改对之后恢复行为正常。同时按"测的是否是用户可依赖的保证、保证坏了是否会失败、是否重复"复查了整个文件，不只是失败的用例：删掉了永远走不到的分支、在主进程里替换但代码在子进程跑的替身、读不存在目录因而恒为空的资源检查、和专门文件重复的用例。剩下要裁定的引擎行为见 T-019 到 T-023。
 - **prompt。** 已核对（2026-11-25）18 个。测试写法过时、已改 12 个：在驱动进程里替换 HTTP 客户端或 actor 而 prompt 跑在 worker 进程里（改用线程 worker）；读驱动端请求闸门副本的计数（改读服务端）；用旧的落盘环节名 `output` 找故障点；`map` 写成了一行变多行的 `flat_map`；列目录时没算每次运行的 `-driver-resources`；总超时短到请求可能送不到服务端；替换服务对象后改由更早的类型检查拒绝；取消测试按旧位置打开调用记录。删 1 个：`test_exact_source_threshold_uses_one_final_cut` 检查的“恰好 1 次提交”是 v3 之前设计的实现细节，v3 多出的最终提交引用同一数据块。其余 6 个是引擎问题，测试保持失败：T-025 1 个、T-027 1 个、T-028 3 个、T-029 1 个。提交 `9d5563d2`。
-- **向量检索。** `tests/test_vector_search_stream.py` 19 个：查询向量校验的错误以 `INTERNAL_PROTOCOL` 报出，以及结果为空。
+- **向量检索。** 已核对（2026-11-25）19 个。结果为空的 9 个是测试在行回调里往闭包列表追加结果：回调从封存的程序重建，线程 worker 下也是副本，调用方的列表永远为空；改为经文件取回行（共用的 `tests/_row_capture.py`），背压测试的消费计数同样改用文件。同样的写法还在 `tests/test_document_library.py`（`capture()`，2 个测试）和 `tests/test_google_backends.py`（1 个测试）里，一并改了；这 3 个在 `9f3d4e53` 之前就因结果为空失败，之后又被 T-025 拒绝，调大默认额度验证新写法 3 个全过。另 1 个回调捕获了 pyarrow `Schema`，见 T-032，测试改为在回调里读表的 schema。几处检查驱动端 actor 对象 `_dataset`/`_version` 的断言永远成立，改为替换 `open_lance_dataset` 和 `VectorSearch.aclose` 记录真实的打开与关闭。仍失败 10 个：T-030 8 个、T-031 2 个（这两个测试的其他断言都已通过，资源统计放在最后检查）。提交 `979363a1`。
 - **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）。改测试即可。
 - **其余**见 `_demiflow/shared-review/CLAUDE-test-audit-20261124/engine-lines.txt`，每个测试一行。
 
@@ -144,7 +144,7 @@
   - 默认额度下并发 8 的 prompt 节点：`tests/test_sqlite_journal.py::test_concurrent_first_requests_verify_model_once` 需要 336MB，可用 224MB；`ab3b4d45` 上通过，`9f3d4e53` 上失败。
   - `workers=1` 时，union 后接 reduce（普通函数或类回调都一样），以及类回调后接 semi join，报“memory group cannot fit and its source/state cannot safely park (max_active_workers required=2 或 4, available=1)”。内存从 256MB 加到 4GB 结果不变；普通函数后接 semi join 能跑。
 - **依据。** 二分定位到 `9f3d4e53`（11-22，“Derive physical stage grants from the selected layout…”）。它的前一提交 `ab3b4d45` 上 `test_local_kernel.py`、`test_local_union_plan.py`、`test_runtime_v3_stream_suffix.py` 共 42 个全部通过；到 `9f3d4e53` 有 18 个失败，至今未变。这次提交删除了 `planning/dataflow_policy.py::fit_default_stream_windows`。原函数按实际同时驻留的工作量缩小行、批次和状态窗口，并对单 worker 计划整体核算（见其说明）。替代它的 `planning/dataflow_budget.py::minimum_workspace_graph` 只调整声明了 `codec_min_bytes` 的算子（数据源、map 等），reduce、join 仍按默认窗口计。单 worker 的放置失败未逐行证实，可能与同一提交给类回调加的完整物化规则有关。
-- **影响。** 用户给本机执行设置几十 MB 的额度，或用 1 个 worker 跑带 union/join 的计划，会在启动前被拒绝；默认额度下并发较高的计划也可能被拒。`tests/test_local_kernel.py` 10 个、`tests/test_local_union_plan.py` 3 个、`tests/test_stream_map.py` 1 个、`tests/test_sqlite_journal.py` 1 个因此失败，测试未改；它们在 `ab3b4d45` 上都通过。`tests/test_prompt_stream_recovery.py` 守的是 prompt 崩溃续跑，第 2 批（`7a74d464`）为了让它测到续跑行为，把运行条件从 1 个 worker、128MB 改成默认 worker 数、512MB，绕开的就是这里的问题。这个 prompt 测试在 `ab3b4d45` 上能被接受，到 `9f3d4e53` 被拒绝。
+- **影响。** 用户给本机执行设置几十 MB 的额度，或用 1 个 worker 跑带 union/join 的计划，会在启动前被拒绝；默认额度下并发较高的计划也可能被拒。`tests/test_local_kernel.py` 10 个、`tests/test_local_union_plan.py` 3 个、`tests/test_stream_map.py` 1 个、`tests/test_sqlite_journal.py` 1 个因此失败，测试未改；它们在 `ab3b4d45` 上都通过。默认额度下被拒的还有 `tests/test_document_library.py` 2 个、`tests/test_google_backends.py::test_dataset_http_backend_receipt_schema`（第 5 批修好结果收集后，调大默认额度可通过）。`tests/test_prompt_stream_recovery.py` 守的是 prompt 崩溃续跑，第 2 批（`7a74d464`）为了让它测到续跑行为，把运行条件从 1 个 worker、128MB 改成默认 worker 数、512MB，绕开的就是这里的问题。这个 prompt 测试在 `ab3b4d45` 上能被接受，到 `9f3d4e53` 被拒绝。
 - **建议。** 由引擎负责人确认是否有意。如果不是：给没有 `codec_min_bytes` 的算子恢复按额度缩小窗口和状态，并恢复单 worker 计划的放置；修好后以上 42 个测试和 `test_stream_map`、`test_sqlite_journal` 各 1 个应全部通过。如果是有意：在 `local_execution` 的文档里写明 reduce、join 的最低额度和单 worker 的限制，再按新规则改这 15 个测试。
 
 ### T-026 `local_execution(temp_directory=...)` 被接受但不起作用
@@ -178,6 +178,24 @@
 - **依据。** 2026-11-25 对照：单独运行，在 `40c0034a`（其前一提交）和 `31c779c6` 上各 5 次全过；两个测试同会话，在 `40c0034a` 上通过，在 `31c779c6` 上失败，两种执行顺序都失败（pytest 先导入全部测试模块再执行）。该测试此前因 `map` / `flat_map` 写错走不到续跑，第 4 批修正后才暴露。
 - **影响。** 推测：notebook 或长期运行的进程里导入过引用同一辅助模块的其他代码后，续跑可能被误拒；未逐行证实。
 - **建议。** 封存改动负责人用上述两个测试同会话复现；修好后两者同会话应通过。
+
+### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
+
+- **现象。** `search_vectors` 的查询向量不合法（空、维度不对、非有限、非数值）或超过 `max_query_dimensions` 时，worker 里抛出 `InvalidLanceRequest`；结果超过 `max_result_bytes` / `max_python_result_bytes` 时抛出 `MemoryError`。调用方拿到的都是 `DataflowError: INTERNAL_PROTOCOL`，无法按类型捕获，也被归为内部错误。
+- **依据。** worker 失败按 `execution/contracts/dataflow_failures.py` 的 `_KNOWN` 名单恢复类型，不在名单里的一律成为 `INTERNAL_PROTOCOL`。11-24 的 `e908557c` 为 prompt 错误做过同样的修复（"They were not in the fixed failure vocabulary, so the caller … could not catch the prompt error"）。`tests/test_vector_search_stream.py` 中 `test_invalid_queries_fail_instead_of_dropping_rows` 7 个与 `test_query_and_result_byte_admission` 因此失败。`docs/vector_search.md` 写的是"超限明确报错"。
+- **建议。** 把 `demiflow.errors.InvalidLanceRequest` 和 `MemoryError` 加入失败类型名单（后者带原消息）；修好后这 8 个测试应通过。
+
+### T-031 向量检索的资源统计缺失
+
+- **现象。** `docs/vector_search.md` 写明 `stats.metrics['resources']['VectorSearch:0']` 记录实际版本、查询数和命中数；v3 的 `run_stream()` 统计里没有 `resources` 这一项。
+- **依据。** 2026-11-25 实测 `StreamStats.metrics` 的键为 `committed_output`、`queues`、`stage_processing_latency`、`models` 等。`test_lazy_native_node_preserves_queries_and_duplicates`、`test_head_pinned_for_action_and_explicit_version` 只在这项检查上失败（固定版本、打开与关闭次数等其余断言都已通过）。
+- **建议。** 恢复这项统计，或改文档并删除对应断言。
+
+### T-032 行回调捕获 pyarrow 对象后，短的流式链在默认 4 个 worker 下被拒
+
+- **现象。** 检索后接两个 map 再 `run_stream()` 可以运行；其中一个 map 的闭包若捕获了 `pa.Schema`，同样的链报 `RESOURCE_INFEASIBLE: memory group cannot fit and its source/state cannot safely park (max_active_workers required=5, available=4)`。把 schema 改为在回调内部构造即可运行。
+- **依据。** 2026-11-25 对照实测（同一流水线、同一数据，只换回调）。`ab3b4d45` 上已是如此，不是 T-025 的那次提交引起的。推测捕获不透明对象的回调被当作需要单独加载的程序，既不能与相邻阶段合并，也不能挂起让出 worker；未逐行证实。
+- **建议。** 引擎负责人确认：这类回调是否必须独占 worker；若是，在报错里指出是哪个回调、并在文档中说明，或允许其挂起。
 
 ## 已完成
 
