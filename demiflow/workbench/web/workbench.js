@@ -884,16 +884,24 @@
       const dataArgs=provided.filter(p=>!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
       const bindings=schema?.metadata?.bindings||{};
 
-      const ioRows=[];
-      if(bindings.inputs&&typeof bindings.inputs==='object')for(const[k,v]of Object.entries(bindings.inputs))ioRows.push(['输入 · '+k,String(v)]);
-      if(bindings.output)ioRows.push(['主输出',String(bindings.output)]);
-      if(bindings.outputs&&typeof bindings.outputs==='object')for(const[k,v]of Object.entries(bindings.outputs))ioRows.push(['输出 · '+k,String(v)]);
-      for(const p of sideOutputs)ioRows.push(['伴随输出 · '+p.name,formatArgValue(p)]);
-      if(ioRows.length){
-        const ioSec=$('section',undefined,'wb-wiring-section');
-        ioSec.append($('h4','输入 / 输出'));
-        materialTable(ioSec,['字段角色','绑定列'],ioRows);
-        target.append(ioSec);
+      const inputRows=[];
+      if(bindings.inputs&&typeof bindings.inputs==='object')for(const[k,v]of Object.entries(bindings.inputs))inputRows.push([k,String(v)]);
+      if(inputRows.length){
+        const inSec=$('section',undefined,'wb-wiring-section');
+        inSec.append($('h4','输入'));
+        materialTable(inSec,['输入字段','绑定列'],inputRows);
+        target.append(inSec);
+      }
+
+      const outputRows=[];
+      if(bindings.output)outputRows.push(['主输出',String(bindings.output)]);
+      if(bindings.outputs&&typeof bindings.outputs==='object')for(const[k,v]of Object.entries(bindings.outputs))outputRows.push([k,String(v)]);
+      for(const p of sideOutputs)outputRows.push(['伴随输出 · '+p.name,formatArgValue(p)]);
+      if(outputRows.length){
+        const outSec=$('section',undefined,'wb-wiring-section');
+        outSec.append($('h4','输出'));
+        materialTable(outSec,['输出角色','绑定列'],outputRows);
+        target.append(outSec);
       }
 
       const paramRows=[];
