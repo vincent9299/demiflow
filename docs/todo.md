@@ -137,34 +137,34 @@
 - **现象。** 涉及 40 个 `test_forge_*` / `test_workbench_*` 文件，低并发重跑后同样失败。大多数是等一个按钮或节点等到超时：`检查问题`、`业务参数`、`整图配置`、导航里的 `算子` 和 `运行`、`.wb-node`。这些文字和样式名在产品源码里大多还在，说明是入口位置或流程变了，而不是整块功能被删。
 - **建议。** 由熟悉当前界面的人逐个文件判断：界面有意改了就按新流程改测试或删掉；界面不该变就是缺陷。原因摘要在 `_demiflow/shared-review/CLAUDE-test-audit-20261124/ui-waits.txt`。
 
+### T-024 强杀后续跑偶尔打不开运行记录库
+
+- **现象。** 进程被 SIGKILL 后 `RunContext.resume` 读取恢复身份时，只读连接执行 `PRAGMA cache_size` 报 `sqlite3.OperationalError: attempt to write a readonly database`（`execution/journal/run_journal.py:161-166`），续跑失败。推测是强杀留下的 WAL/共享内存需要恢复，而只读连接不能做这一步；未逐行证实。
+- **依据。** 2026-11-25 `tests/test_queue_v2_crash.py::test_sigkill_and_native_recovery[sqlite-True-claimed]` 在 main `aa997f1e` 上单独复跑 5 次失败 2 次，原因都是这条；同一时期带 T-019 修复的分支 5 次全过（该场景在下载前就被杀，不经过 T-019 改动的代码）。
+- **建议。** 续跑时第一次打开运行记录库改用可写连接完成 WAL 恢复，或在只读连接失败时按这一错误重试一次可写打开；修复后用该测试加压复跑验证。
+
+## 已完成
+
 ### T-019 经过队列 `fetch` 的行不再保留元组和字节类型
 
-- **现象。** `read_queue(...).map(...).fetch(...)` 里，上游 map 产生的元组到下游变成列表，字节类型直接报 `Object of type bytes is not JSON serializable`。原因是 worker 把整行用 JSON 编码后交给驱动侧的队列服务（`execution/native_queue/dataflow_acquisition_call.py:58`）。
-- **依据。** `tests/test_mvp2_queue_unified.py` 的 `..._preserves_tuple_intermediate` / `..._preserves_bytes_intermediate`，保留为失败。11-12 的 `9192ebd5` 专门做过"保留类型的队列载体"，11-15 的 `397c1f96` 改成 JSON 编码。普通（非队列）图的类型保真由 `tests/test_u3_graph_type_fidelity.py` 覆盖且通过。
-- **建议。** 定口径：若队列行只承诺 JSON 值，就在文档写明并删掉这两个测试；否则按退步修。
+按退步修复。v3 重写（`397c1f96`，11-15）让 worker 和驱动侧队列服务之间用 JSON 传整行，丢掉了 11-12 `9192ebd5` 在旧路径上做的类型保真；v3 协议只要求控制消息是 JSON，业务行本应走 `record_codec` 的行编码。现在下载与检索的业务行、以及返回给 worker 的回执都用 `RECORD_MEDIA_TYPE` 存放；读取按存档的媒体类型区分，旧运行里按 JSON 存的回执仍可读、可恢复。结算行仍是 JSON（写入队列数据库，冻结的 `queue_sinks.py` 不变）。冻结文件均未改动。新增"下载后丢失 worker、续跑后类型仍保留且不重新下载"和"JSON 旧存档可读"两个测试；去掉修复后前者以 `bytes is not JSON serializable` 失败。提交 `f8dfc3b5`。
 
 ### T-020 `graph_spec` 适配器没有产品调用方
 
-- **现象。** `LocalDatasetExecutor.materialize_graph` / `planning/dataflow_graph_adapter.py`（文件头自称 internal）在 `demiflow/` 里没有调用方，只有约 19 个测试文件驱动它。
-- **建议。** 确认它是否还是产品路径。不是的话连同这些测试一起删除；是的话说明入口。
+查证后保留，不删除。`docs/unified-runtime-v3-20261114/MIGRATION.md` 把 Local/Ray 的 `materialize_graph` 列为执行带路由的图的 v3 入口；`docs/p1-sdk-engine-boundary-20261119.md` 删除 16 个重复执行器方法时明确保留了它；引擎负责人至 11-24 仍在维护。规划代码里的 7 个钩子只在出现 `RoutedGraphSource` / `graph_route` 时生效，这两者只由该适配器产生。仓库与工作区（不含测试、文档）没有其他调用方，它的测试是目前唯一的调用者，应保留。
 
 ### T-021 `docs/prompt_http.md` 对 `sqlite_journal` 自相矛盾
 
-- **现象。** 第 5 行说 `map_prompt_async` 不再接受 `sqlite_journal`；同一文档约第 178 行的示例在用它，代码也接受（2026-11-25 实测，声明阶段不报错）。
-- **建议。** 按实际行为改第 5 行。
+2026-11-25 实测（声明并执行）：两种 prompt 节点都接受 `sqlite_journal` 的 `path`、`max_requests`、`read_only`、`timeout_s`，会建私有缓存；`throughput` 和 `journal_dir` 都被拒绝（11-16 `b150e748` 恢复了受限的私有缓存）。文档首段按此改写，`throughput` 一节注明 prompt 节点不接受。提交 `7b039a08`。
 
 ### T-022 子进程在第一次存盘之前崩溃，运行不能续跑
 
-- **现象。** 第一次存盘之前丢失 worker，续跑报 `INCOMPATIBLE_HISTORY`（`coordinator.py:449`），只能重新开一次运行。
-- **依据。** 2026-11-24 改 `tests/test_runtime_builtin_recovery.py` 时实测，原 `during_batch` 用例因此删除。
-- **建议。** 确认是有意设计（没有任何已确认进度时不续跑）就写进恢复文档；否则作为缺陷。
+有意的设计：`docs/regression-closure-20261119/graph-lifecycle.md` 第 24 行写明没有确认进度时续跑按 `INCOMPATIBLE_HISTORY` 拒绝，并有真实杀进程测试守着。实测范围：物化被拒；写当时不存在的新 Lance 表可以续跑；代码另允许"只登记了第一个 cut 的意图"和"绑定原生模型账本"两种情况。写进 `docs/streaming-map.md` 的"顺序和恢复"。提交 `7b039a08`。
 
 ### T-023 其他待确认
 
-- `max_output_bytes` 不约束 `materialize()`，物化只受磁盘额度和行数上限约束。若这是有意的，文档里写明适用范围。
-- `tests/test_gpt_integration_repairs.py::test_embedding_actual_process_loss[after_prepared]` 在机器负载高时失败过 1 次，之后串行 6 次、并行 5 次都通过，原因未抓到。
-
-## 已完成
+- 输出字节限额：实测 `max_output_bytes` 只管对外发布的输出（Lance、文件、对象、键值、队列结果）；`materialize()` / `take_all()` 的结果计入 `max_scratch_bytes` 和 `max_output_rows`。写进 `docs/execution-payload-budget.md`。提交 `7b039a08`。
+- `test_embedding_actual_process_loss...[after_prepared]` 的偶发失败：复跑 50 次（单独 10 次、四路并行 40 次）抓到 1 次失败，原因是测试本身的时序竞争——存盘时模型请求照常继续，崩溃那一刻偶尔有请求已发出未回复，续跑按设计拒绝重发（`UncertainPromptCall`）。测试改为在 8 个请求都已回复后再丢进程，续跑必须复用全部回复。不是产品缺陷，不登记为偶发。提交 `61822648`。
 
 ### T-013 prompt 节点的 `max_requests` 按每次运行重新计
 
