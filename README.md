@@ -58,7 +58,7 @@ pip install "https://github.com/vincent9299/demiflow/releases/download/v0.3.0/py
 git clone https://github.com/vincent9299/demiflow.git
 cd demiflow
 pip install -e ".[llm]"          # core + LLM clients
-# optional extras: ray, embeddings, search, fetch, crawl, images, pdf, analysis, notebook
+# optional extras: ray, embeddings, search, fetch, images, pdf, analysis, notebook
 ```
 
 > **Why a separate Lance wheel?** Official `pylance` up to 14.0.3 crashes when it writes sliced or nullable nested structs. The wheel above is Lance 12.0.0 rebuilt with the two Apache Arrow fixes that address this ([#10835](https://github.com/apache/arrow-rs/pull/10835), [#10709](https://github.com/apache/arrow-rs/pull/10709)); the patches and build steps are in [patches/lance-12.0.0](patches/lance-12.0.0/README.md). DemiFlow will return to the official package once a release includes them.
@@ -230,7 +230,7 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 
 **A great fit:**
 - **Row-level AI enrichment over large tables:** labeling, extraction, scoring, translation, embeddings.
-- **Long-running acquisition pipelines:** search, crawl, fetch and parse, which must survive restarts and must not re-download or re-bill.
+- **Long-running acquisition pipelines:** search, fetch and parse, which must survive restarts and must not re-download or re-bill.
 - **Dataset ablations and model evaluation:** you need lineage from every score back to its sample, model weights and data version.
 
 **Not the right tool:**
@@ -281,7 +281,7 @@ The Workbench bundles a few front-end libraries under their own permissive licen
 DemiFlow stands on the shoulders of
 [Apache Arrow](https://arrow.apache.org/), [Lance](https://github.com/lancedb/lance),
 [Apache DataFusion](https://datafusion.apache.org/), [Ray](https://www.ray.io/),
-[SearXNG](https://github.com/searxng/searxng) and [Crawl4AI](https://github.com/unclecode/crawl4ai).
+and [SearXNG](https://github.com/searxng/searxng).
 It was spun out of [Demiurge](https://github.com/vincent9299/Demiurge) in September 2026.
 
 <div align="center">

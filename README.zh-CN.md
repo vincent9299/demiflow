@@ -58,7 +58,7 @@ pip install "https://github.com/vincent9299/demiflow/releases/download/v0.3.0/py
 git clone https://github.com/vincent9299/demiflow.git
 cd demiflow
 pip install -e ".[llm]"          # 核心 + 大模型客户端
-# 可选 extras：ray、embeddings、search、fetch、crawl、images、pdf、analysis、notebook
+# 可选 extras：ray、embeddings、search、fetch、images、pdf、analysis、notebook
 ```
 
 > **为什么要单独装一个 Lance？** 官方 `pylance` 直到 14.0.3，写入切片过或可空的嵌套 struct 时会崩溃。上面的 wheel 是 Lance 12.0.0 加上两个已合入 Apache Arrow 上游的修复（[#10835](https://github.com/apache/arrow-rs/pull/10835)、[#10709](https://github.com/apache/arrow-rs/pull/10709)）重新构建的，补丁和构建步骤见 [patches/lance-12.0.0](patches/lance-12.0.0/README.md)。官方版本带上这两个修复后，DemiFlow 会改回官方包。
@@ -237,7 +237,7 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 
 **适合：**
 - **大表上的逐行 AI 加工：** 打标、抽取、打分、翻译、向量化。
-- **长时间运行的数据获取管线：** 搜索、爬取、抓取、解析，必须扛得住重启，不能重复下载，也不能重复计费。
+- **长时间运行的数据获取管线：** 搜索、抓取、解析，必须扛得住重启，不能重复下载，也不能重复计费。
 - **数据消融和模型评测：** 需要从每一条评分追溯到样本、模型权重和数据版本。
 
 **不适合：**
@@ -286,7 +286,7 @@ Workbench 内置了少量前端库，它们各自采用宽松许可，声明文�
 DemiFlow 构建在这些优秀项目之上：
 [Apache Arrow](https://arrow.apache.org/)、[Lance](https://github.com/lancedb/lance)、
 [Apache DataFusion](https://datafusion.apache.org/)、[Ray](https://www.ray.io/)、
-[SearXNG](https://github.com/searxng/searxng) 和 [Crawl4AI](https://github.com/unclecode/crawl4ai)。
+和 [SearXNG](https://github.com/searxng/searxng)。
 项目于 2026 年 9 月从 [Demiurge](https://github.com/vincent9299/Demiurge) 独立出来。
 
 <div align="center">
