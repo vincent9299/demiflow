@@ -37,8 +37,10 @@ def check(deadline=None):
 
 
 @contextmanager
-def scope(*, deadline=None):
-    limit = time.monotonic() + OPERATION_SECONDS
+def scope(*, deadline=None, max_seconds=OPERATION_SECONDS):
+    if type(max_seconds) not in (int, float) or not math.isfinite(max_seconds) or max_seconds <= 0:
+        raise ForgeError('Invalid control deadline', code='resource_limit')
+    limit = time.monotonic() + max_seconds
     if deadline is not None:
         if type(deadline) not in (int, float) or not math.isfinite(deadline):
             raise ForgeError('Invalid control deadline', code='resource_limit')

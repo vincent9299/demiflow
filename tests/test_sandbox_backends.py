@@ -1138,3 +1138,226 @@ def test_unlimited_dev_turn_seconds_and_sandbox_seconds_zero(tmp_path):
         out, err = proc.communicate(timeout=15)
         assert proc.returncode == 0, f'out={out!r} err={err!r}'
         assert out.strip() == b'UNLIMITED_OK'
+
+
+def test_sandbox_sample_ignores_exiting_process_lookup_error(monkeypatch):
+    import builtins
+    import errno
+    import time
+    from demiflow.workbench.conversations import sandbox_child
+
+    real_open = builtins.open
+
+    class _VanishingStat:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, n=-1):
+            raise ProcessLookupError(errno.ESRCH, 'No such process')
+
+    class _FakeStat:
+        def __init__(self, line):
+            self._data = line.encode()
+            self._pos = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, n=-1):
+            chunk = self._data[self._pos:] if n < 0 else self._data[self._pos:self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+    class _Entry:
+        def __init__(self, path, fail=False):
+            self.path = path
+            self._fail = fail
+
+        def stat(self):
+            if self._fail:
+                raise ProcessLookupError(errno.ESRCH, 'No such process')
+            raise FileNotFoundError()
+
+    class _Scandir:
+        def __init__(self, items):
+            self._items = items
+
+        def __enter__(self):
+            return self
+
+        def __iter__(self):
+            return iter(self._items)
+
+        def __exit__(self, *args):
+            return False
+
+    owner_stat = '100 (python) S ' + ' '.join(['0'] * 20) + ' 4 0 0'
+
+    def fake_open(path, *args, **kwargs):
+        if path == '/proc/100/stat':
+            return _FakeStat(owner_stat)
+        if path in ('/proc/200/stat', '/proc/201/stat'):
+            return _VanishingStat()
+        if path == '/proc/100/task/100/children':
+            return _FakeStat('200 201')
+        if path == '/proc/100/task/101/children':
+            raise ProcessLookupError(errno.ESRCH, 'No such process')
+        return real_open(path, *args, **kwargs)
+
+    def fake_scandir(path):
+        if path == '/proc/100/fd':
+            return _Scandir([_Entry('/proc/100/fd/3', fail=True)])
+        if path == '/proc/100/task':
+            return _Scandir([_Entry('/proc/100/task/100'), _Entry('/proc/100/task/101')])
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(builtins, 'open', fake_open)
+    monkeypatch.setattr(sandbox_child.os, 'scandir', fake_scandir)
+    rss, anonymous = sandbox_child.sample(100, 16, files=True, deadline=time.monotonic() + 5)
+    assert rss == 4 * sandbox_child.os.sysconf('SC_PAGE_SIZE')
+    assert anonymous == 0
+
+    # Process count budget enforcement must remain strict.
+    with pytest.raises(RuntimeError, match='Sandbox process budget exceeded'):
+        sandbox_child.sample(100, 1, files=False, deadline=time.monotonic() + 5)
+
+
+def test_store_replay_preserves_prior_turns_past_4096_and_during_active_turn(tmp_path):
+    from demiflow.workbench.conversations.policy import Limits
+    from demiflow.workbench.conversations.store import Store
+
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    identity = {'path': str(proj), 'dev': 1, 'ino': 1}
+    store = Store(tmp_path / 'state', Limits(), initialize=True)
+    sess = store.create('ws1', identity, 'deepseek', 'req-long', 'pol1')
+    sid = sess['id']
+
+    # Turn 1: completed, >2500 events so it sits far beyond the 4096-event tail scan.
+    t1, _ = store.submit('ws1', sid, 'sub-1', 0, '第一轮需求', identity, 'pol1')
+    b1 = [('message.delta', {'item_id': 'p1', 'channel': 'process', 'text': f't{i} '}, False) for i in range(2500)]
+    b1.append(('usage.observed', {'kind': 'step'}, False))
+    b1.append(('message.completed', {'item_id': 'p1', 'channel': 'process', 'text': 'think-1'}, False))
+    b1.append(('message.completed', {'item_id': 'a1', 'text': '第一轮最终结论'}, False))
+    b1.append(('turn.state', {'state': 'completed', 'cleanup': 'complete'}, False))
+    store.events_batch(t1['id'], b1)
+    store.update(t1['id'], state='completed', cleanup='complete')
+
+    # Turn 2: completed, >2500 events + file changes.
+    t2, _ = store.submit('ws1', sid, 'sub-2', 1, '第二轮需求', identity, 'pol1')
+    b2 = [('message.delta', {'item_id': 'p2', 'channel': 'process', 'text': f's{i} '}, False) for i in range(2500)]
+    b2.append(('change.observed', {'files': [{'path': 'flows/demo.py'}]}, False))
+    b2.append(('turn.state', {'state': 'completed', 'cleanup': 'complete'}, False))
+    store.events_batch(t2['id'], b2)
+    store.update(t2['id'], state='completed', cleanup='complete')
+
+    # Turn 3: active, with closed deltas + 130 tool updates + 1 live streaming delta.
+    t3, _ = store.submit('ws1', sid, 'sub-3', 2, '第三轮进行中', identity, 'pol1')
+    b3 = []
+    for i in range(20):
+        b3.append(('message.delta', {'item_id': f'tp-{i}', 'channel': 'process', 'text': 'x'}, False))
+        b3.append(('message.completed', {'item_id': f'tp-{i}', 'channel': 'process', 'text': f'done-{i}'}, False))
+    b3.append(('usage.observed', {'kind': 'step'}, False))
+    for i in range(130):
+        b3.append(('item.updated', {'id': f'call-{i}', 'type': 'tool', 'title': f'cmd {i}', 'status': 'completed'}, False))
+    b3.append(('message.delta', {'item_id': 'live', 'text': '正在输出第三轮'}, False))
+    store.events_batch(t3['id'], b3)
+
+    # While Turn 3 is active, switching tabs back (before_sequence=None) must keep Turns 1 & 2 AND Turn 3 live tail.
+    active = store.replay('ws1', sid, limit=50, max_turns=12)
+    users = [e['data']['text'] for e in active['events'] if e['type'] == 'message.user']
+    assert users == ['第一轮需求', '第二轮需求', '第三轮进行中']
+    assert any(e['type'] == 'message.completed' and e['data'].get('text') == '第一轮最终结论' for e in active['events'])
+    assert any(e['type'] == 'change.observed' and e['turn_id'] == t2['id'] for e in active['events'])
+    assert any(e['type'] == 'message.delta' and e['data'].get('text') == '正在输出第三轮' for e in active['events'])
+    assert not any(e['type'] == 'usage.observed' for e in active['events'])
+    t3_user_seq = next(e['sequence'] for e in active['events'] if e['type'] == 'message.user' and e['turn_id'] == t3['id'])
+    assert active['first_sequence'] > t3_user_seq
+    assert active['has_earlier'] is True
+
+    # Upward pagination into Turn 3's middle steps does not duplicate Turns 1 & 2.
+    older = store.replay('ws1', sid, limit=50, max_turns=8, before_sequence=active['first_sequence'])
+    assert {e['turn_id'] for e in older['events']} == {t3['id']}
+    assert any(e['type'] == 'message.user' and e['turn_id'] == t3['id'] for e in older['events'])
+
+    # Once Turn 3 completes, initial replay covers all 3 turns cleanly from sequence 1 with has_earlier=False.
+    store.event(t3['id'], 'message.completed', {'item_id': 'live', 'text': '第三轮完成'})
+    store.event(t3['id'], 'turn.state', {'state': 'completed', 'cleanup': 'complete'})
+    store.update(t3['id'], state='completed', cleanup='complete')
+    done = store.replay('ws1', sid, limit=50, max_turns=12)
+    assert [e['data']['text'] for e in done['events'] if e['type'] == 'message.user'] == ['第一轮需求', '第二轮需求', '第三轮进行中']
+    assert [e['data']['text'] for e in done['events'] if e['type'] == 'message.completed' and e['data'].get('channel') not in ('process', 'summary')] == ['第一轮最终结论', '第三轮完成']
+    assert done['first_sequence'] == 1
+    assert done['has_earlier'] is False
+
+
+def test_check_project_memoizes_table_describer_and_allows_high_budget(tmp_path):
+    import time
+    from demiflow.forge import operation_budget
+    from demiflow.forge.pipeline_check import CHECK_SECONDS, MAX_VARIANTS, check_project
+    from demiflow.forge.project import initialize_project, register_flow
+
+    assert operation_budget.OPERATION_SECONDS == 60
+    assert CHECK_SECONDS >= 180
+    assert MAX_VARIANTS >= 64
+
+    proj = tmp_path / 'proj'
+    initialize_project(proj, name='budget-cache')
+    (proj / 'flows').mkdir(exist_ok=True)
+    (proj / 'configs').mkdir(exist_ok=True)
+    shared_table = proj / 'data' / 'shared.lance'
+    shared_table.mkdir(parents=True)
+
+    for name in ('flow_a', 'flow_b'):
+        (proj / 'flows' / f'{name}.py').write_text(
+            'from demiflow import data\n\n'
+            'def run(source: dict, out: dict):\n'
+            '    ds = data.read_lance(source["uri"], version=source.get("version"))\n'
+            '    return ds.write_lance(out["uri"], mode=out.get("mode", "create"), return_receipt=True)\n',
+            encoding='utf-8',
+        )
+        (proj / 'configs' / f'{name}.json').write_text(
+            json.dumps({
+                'source': {'kind': 'table', 'uri': 'data/shared.lance'},
+                'out': {'kind': 'output', 'uri': f'data/{name}_out.lance', 'mode': 'create'},
+            }),
+            encoding='utf-8',
+        )
+
+    from demiflow.data.flow_contract import field, scalar
+
+    calls = []
+
+    def counting_describer(uri, version):
+        calls.append((str(uri), version))
+        return {
+            'version': 1,
+            'schema_hash': 'sha256:demo',
+            'row_count': 4,
+            'fields': {'id': field(scalar('int64', nullable=False), evidence='metadata')},
+        }
+
+    # Register directly in workspace.json so check_project inspects both flows in one call.
+    ws_path = proj / 'workspace.json'
+    ws = json.loads(ws_path.read_text(encoding='utf-8'))
+    ws['entries'] = {
+        'flows/flow_a.py:run': ['configs/flow_a.json'],
+        'flows/flow_b.py:run': ['configs/flow_b.json'],
+    }
+    ws_path.write_text(json.dumps(ws, indent=2), encoding='utf-8')
+
+    report = check_project(proj, seconds=180, max_variants=64, table_describer=counting_describer)
+    assert report['status'] == 'passed', report['diagnostics']
+    assert len(report['entries']) == 2
+    assert len(calls) == 1, f'Expected shared table to be described once, got {calls}'
+
+    # Enclosing tighter scope must still bound an inner wider max_seconds scope.
+    with operation_budget.scope(deadline=time.monotonic() + 2) as outer:
+        with operation_budget.scope(deadline=time.monotonic() + 300, max_seconds=300) as inner:
+            assert inner <= outer + 1e-6

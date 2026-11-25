@@ -738,14 +738,48 @@ class Store:
             oldest_seq_row = db.execute('SELECT min(sequence) FROM events WHERE turn=?', (selected[-1]['id'],)).fetchone()
             turn_start = oldest_seq_row[0] if oldest_seq_row and oldest_seq_row[0] is not None else 1
             window_end = upper_bound - 1
-            start_after = max(archive_seq - 1 if archive_seq > 0 else 0, turn_start - 1, max(0, window_end - 4096))
-            truncated_scan = start_after > 0
+            archive_floor = archive_seq - 1 if archive_seq > 0 else 0
+            scan_floor = max(archive_floor, turn_start - 1)
+            start_after = max(scan_floor, max(0, window_end - 4096))
+            truncated_scan = False
             raw_rows = [(row['sequence'], row['size'], json.loads(row['body']))
                         for row in db.execute(
                             'SELECT sequence,size,body FROM events WHERE session=? AND sequence>? AND sequence<? ORDER BY sequence LIMIT 4096',
                             (sid, start_after, upper_bound),
                         )]
-        # Compact display-redundant events in completed turns only; keep active turns verbatim.
+            if start_after > scan_floor:
+                backfilled = []
+                for row in selected:
+                    tid = row['id']
+                    t_min_row = db.execute('SELECT min(sequence) FROM events WHERE turn=?', (tid,)).fetchone()
+                    t_min = t_min_row[0] if t_min_row else None
+                    if t_min is None or t_min > start_after:
+                        continue
+                    if row['cleanup'] != 'complete':
+                        truncated_scan = True
+                        continue
+                    # Backfill display-essential events for completed turns predating the
+                    # 4096-event tail scan so long sessions never drop earlier turns.
+                    for erow in db.execute(
+                        """SELECT sequence, size, body FROM events
+                           WHERE turn=? AND sequence>? AND sequence<=? AND sequence<?
+                             AND (json_extract(body,'$.type') IN (
+                                   'message.user','turn.state','change.observed','review.completed',
+                                   'protected.violation','compaction.completed','history.gap','check.reference')
+                                  OR (json_extract(body,'$.type')='message.completed'
+                                      AND COALESCE(json_extract(body,'$.data.channel'),'') NOT IN ('process','summary')))
+                           ORDER BY sequence""",
+                        (tid, archive_floor, start_after, upper_bound),
+                    ):
+                        backfilled.append((erow['sequence'], erow['size'], json.loads(erow['body'])))
+                if backfilled:
+                    by_seq = {seq: (seq, size, ev) for seq, size, ev in backfilled}
+                    for seq, size, ev in raw_rows:
+                        by_seq[seq] = (seq, size, ev)
+                    raw_rows = [by_seq[seq] for seq in sorted(by_seq)]
+        # Compact display-redundant events in completed turns, and drop non-display noise
+        # plus already-closed message.delta chunks in active turns while keeping in-flight
+        # streaming deltas and tool rows verbatim.
         # 1) Identify message spans terminated by message.completed without intervening tool events.
         completed_msg_final = {}
         span_id = {}
@@ -758,8 +792,6 @@ class Store:
         span_counter = 0
         for seq, _, ev in raw_rows:
             tid = ev.get('turn_id')
-            if tid in active_turns:
-                continue
             kind = ev.get('type')
             data = ev.get('data') or {}
             epoch = ev.get('provider_epoch') or ''
@@ -768,33 +800,32 @@ class Store:
                 sid_span = span_id.setdefault(mkey, span_counter)
                 if kind == 'message.completed':
                     completed_msg_final[(mkey, sid_span)] = (seq, bool(data.get('paged')))
-            else:
-                if kind.startswith('item.') or kind == 'output.delta':
-                    span_counter += 1
-                    span_id.clear()
-                if kind == 'item.updated':
-                    tkey = (tid, epoch, data.get('id'))
-                    tool_first.setdefault(tkey, seq)
-                    tool_last[tkey] = seq
-                elif kind == 'output.delta':
-                    tool_has_delta.add((tid, epoch, data.get('item_id')))
-                elif kind == 'turn.state':
-                    last_turn_state[tid] = seq
-                elif kind == 'change.observed':
-                    change_last[tid] = seq
-                    bucket = change_files.setdefault(tid, {})
-                    for f in data.get('files') or ():
-                        if isinstance(f, dict) and isinstance(f.get('path'), str):
-                            bucket[f['path']] = f
+                continue
+            if kind.startswith('item.') or kind == 'output.delta':
+                span_counter += 1
+                span_id.clear()
+            if tid in active_turns:
+                continue
+            if kind == 'item.updated':
+                tkey = (tid, epoch, data.get('id'))
+                tool_first.setdefault(tkey, seq)
+                tool_last[tkey] = seq
+            elif kind == 'output.delta':
+                tool_has_delta.add((tid, epoch, data.get('item_id')))
+            elif kind == 'turn.state':
+                last_turn_state[tid] = seq
+            elif kind == 'change.observed':
+                change_last[tid] = seq
+                bucket = change_files.setdefault(tid, {})
+                for f in data.get('files') or ():
+                    if isinstance(f, dict) and isinstance(f.get('path'), str):
+                        bucket[f['path']] = f
 
         compacted = []
         span_id.clear()
         span_counter = 0
         for seq, size, ev in raw_rows:
             tid = ev.get('turn_id')
-            if tid in active_turns:
-                compacted.append((seq, size, ev))
-                continue
             kind = ev.get('type')
             data = ev.get('data') or {}
             epoch = ev.get('provider_epoch') or ''
@@ -806,15 +837,18 @@ class Store:
                 final_info = completed_msg_final.get((mkey, sid_span))
                 if final_info is not None:
                     final_seq, is_paged = final_info
-                    if kind == 'message.delta':
+                    if kind == 'message.delta' and (tid not in active_turns or seq < final_seq):
                         continue
-                    if seq != final_seq and not is_paged:
+                    if tid not in active_turns and seq != final_seq and not is_paged:
                         continue
                 compacted.append((seq, size, ev))
                 continue
             if kind.startswith('item.') or kind == 'output.delta':
                 span_counter += 1
                 span_id.clear()
+            if tid in active_turns:
+                compacted.append((seq, size, ev))
+                continue
             if kind == 'item.updated':
                 tkey = (tid, epoch, data.get('id'))
                 if tkey in tool_has_delta:
@@ -884,32 +918,67 @@ class Store:
             kept.append(ev); used += size
         kept.reverse()
         first_seq = kept[0]['sequence'] if kept else last_seq
-        # Always preserve the user prompt bubble (`message.user`) for every turn shown in
-        # the replay window (both initial tail and upward pagination pages) even when a
-        # long turn exceeds the 4096-event scan or `limit` cap, while keeping `first_seq`
-        # anchored to the contiguous tail so upward pagination never skips intermediate events.
+        # Always preserve prior completed turns' compact summaries on initial/reconnect replay
+        # (so switching tabs during or after a long turn never hides earlier turns) and preserve
+        # the user prompt bubble (`message.user`) for every turn shown in the replay window
+        # (both initial tail and upward pagination pages), while keeping `first_seq` anchored to
+        # the contiguous tail so upward pagination never skips intermediate events.
         if kept:
+            kept_seqs = {ev['sequence'] for ev in kept}
+            anchored = []
+            if before_sequence is None and omitted:
+                prior_budget = budget_bytes + 128 * 1024
+                prior_by_turn = {}
+                for seq, size, ev in compacted:
+                    tid = ev.get('turn_id')
+                    if not tid or tid == newest_tid or tid in active_turns or seq in kept_seqs:
+                        continue
+                    prior_by_turn.setdefault(tid, []).append((seq, size, ev))
+                prior_order = [row['id'] for row in selected if row['id'] in prior_by_turn]
+                prior_limit = max_turns * 8
+                prior_count = 0
+                for tid in prior_order:
+                    turn_items = prior_by_turn[tid]
+                    if prior_count + len(turn_items) > prior_limit:
+                        break
+                    turn_bytes = sum(size for _, size, _ in turn_items)
+                    if used + turn_bytes > prior_budget:
+                        minimal = [item for item in turn_items if item[2].get('type') in ('message.user', 'turn.state')]
+                        min_bytes = sum(size for _, size, _ in minimal)
+                        if minimal and used + min_bytes <= prior_budget:
+                            for seq, size, ev in minimal:
+                                anchored.append(ev)
+                                kept_seqs.add(seq)
+                                used += size
+                                prior_count += 1
+                        continue
+                    for seq, size, ev in turn_items:
+                        anchored.append(ev)
+                        kept_seqs.add(seq)
+                        used += size
+                        prior_count += 1
             seen_user_turns = {ev.get('turn_id') for ev in kept if ev.get('type') == 'message.user'}
+            seen_user_turns.update(ev.get('turn_id') for ev in anchored if ev.get('type') == 'message.user')
             missing_tids = []
             for ev in kept:
                 tid = ev.get('turn_id')
                 if tid and tid not in seen_user_turns and tid not in missing_tids:
                     missing_tids.append(tid)
             if missing_tids:
-                anchored = []
                 with self.connect() as db:
                     for tid in missing_tids[:max_turns]:
                         row = db.execute(
-                            """SELECT size, body FROM events
+                            """SELECT sequence, size, body FROM events
                                WHERE session=? AND turn=? AND json_extract(body,'$.type')='message.user'
                                ORDER BY sequence LIMIT 1""",
                             (sid, tid),
                         ).fetchone()
-                        if row is not None and used + row['size'] <= budget_bytes + 65536:
+                        if row is not None and row['sequence'] not in kept_seqs and used + row['size'] <= budget_bytes + 196608:
                             anchored.append(json.loads(row['body']))
+                            kept_seqs.add(row['sequence'])
                             used += row['size']
-                if anchored:
-                    kept = sorted(anchored + kept, key=lambda item: item['sequence'])
+            if anchored:
+                kept = sorted(anchored + kept, key=lambda item: item['sequence'])
         has_earlier = bool(older_turns or truncated_scan or omitted or archive_seq > 0)
         return dict(events=kept, first_sequence=first_seq, next_sequence=last_seq,
                     last_sequence=last_seq, has_earlier=has_earlier)

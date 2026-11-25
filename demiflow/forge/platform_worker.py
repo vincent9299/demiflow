@@ -158,7 +158,7 @@ def run_inspection(modules, limits, *, version=3):
 
 def describe_fixed_table(uri, version):
     """Load native table metadata in a one-shot inspection process."""
-    limits = {'timeout_seconds': 24, 'catalog_bytes': 2*1024**2, 'stderr_bytes': 64*1024}
+    limits = {'timeout_seconds': 45, 'catalog_bytes': 2*1024**2, 'stderr_bytes': 64*1024}
     response = capture([sys.executable, '-I', '-B', str(Path(__file__).resolve())],
                        {'fixed_table': str(uri), 'version': version}, limits,
                        response_formats={'demiflow_forge_fixed_table_metadata_v1'})

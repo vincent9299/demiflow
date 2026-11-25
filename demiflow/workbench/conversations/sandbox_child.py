@@ -82,8 +82,8 @@ def sample(owner, maximum, *, files, deadline):
                             raise RuntimeError('Sandbox observed descriptor budget exceeded')
                         try:
                             info = entry.stat()
-                        except FileNotFoundError:
-                            continue  # a closed FD has released its reference
+                        except (FileNotFoundError, ProcessLookupError):
+                            continue  # a closed FD or exiting task has released its reference
                         identity = info.st_dev, info.st_ino
                         if stat.S_ISREG(info.st_mode) and info.st_nlink == 0 and identity not in seen_files:
                             seen_files.add(identity)
@@ -94,9 +94,9 @@ def sample(owner, maximum, *, files, deadline):
                         raise RuntimeError('Sandbox thread budget exceeded')
                     try:
                         pending.extend(int(p) for p in bounded_read(task.path + '/children').split())
-                    except FileNotFoundError:
+                    except (FileNotFoundError, ProcessLookupError):
                         pass
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             pass
     return rss, anonymous
 

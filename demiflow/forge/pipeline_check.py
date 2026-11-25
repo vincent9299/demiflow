@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 from hashlib import sha256
 from pathlib import Path
 import time
@@ -20,12 +21,16 @@ from .project_bindings import resolve_arguments, resolve_flow_resources, table_b
 from .project_io import decode_control, relative_path
 from .project_rules import ROLE_DIRS, RULES_ID, check_layout, check_project_hygiene, diagnostic
 from .schema import ForgeError
-from .source import Definition, InspectionError, SourceTree
+from .source import Definition, InspectionError, SOURCE_LIMITS, SourceTree
 
 
-MAX_VARIANTS = 24
-CHECK_SECONDS = 24
+MAX_VARIANTS = 64
+CHECK_SECONDS = 180
 MAX_SOURCE_BYTES = 16 * 1024**2
+
+
+def _tree_seconds(deadline):
+    return max(1, min(SOURCE_LIMITS['seconds'], int(deadline - time.monotonic())))
 
 
 _SUPPRESSED_INCOMPLETE_RULES = frozenset({'OP-06', 'OP-03'})
@@ -199,7 +204,7 @@ def _binding_files(root, binding, sources, table_files):
 def _check_agent_tools(root, references, *, deadline, exclude, sources):
     """Verify project-owned tool definitions and their statically supported Python closure."""
     from demiflow.data.callable_contract import bind_parameters
-    tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
+    tree = SourceTree(root, {'seconds': _tree_seconds(deadline)}, exclude=exclude)
     checker = OperatorChecker(tree)
     try:
         for reference in references:
@@ -262,7 +267,7 @@ def _definition(root, path, deadline, exclude, sources, published):
         return None
     if relative.parts[0] == 'operators' and relative.suffix == '.py' and relative.name != '__init__.py':
         module = path[:-3].replace('/', '.')
-        tree = SourceTree(root, {'seconds': max(1, int(deadline - time.monotonic()))}, exclude=exclude)
+        tree = SourceTree(root, {'seconds': _tree_seconds(deadline)}, exclude=exclude)
         try:
             namespace = tree.load(module)
             checker = OperatorChecker(tree)
@@ -304,14 +309,27 @@ def check_project(root, *, paths=(), entry=None, params=None, reference=None, ta
             raise ForgeError('Requested input is outside the visible scope', code='operation_rejected')
         relative_path(root, name)
     if any(type(n) is not int or not 1 <= n <= cap for n, cap in (
-            (max_variants, 32), (seconds, 35), (max_bytes, 32*1024**2))):
+            (max_variants, 128), (seconds, 600), (max_bytes, 64*1024**2))):
         raise ForgeError('Invalid project inspection limits', code='invalid_request')
-    with operation_budget.scope(deadline=time.monotonic() + seconds) as deadline:
+    with operation_budget.scope(
+            deadline=time.monotonic() + seconds,
+            max_seconds=max(operation_budget.OPERATION_SECONDS, seconds)) as deadline:
         reference = reference or build_reference()
         if content_digest(reference['catalog']) != reference['catalog_id']:
             raise ForgeError('SDK catalogue differs from its supplied identity', code='inputs_changed')
         view = discover_project_sources(root, exclude=exclude, include_roles=bool(paths))
-        return _check(root, view, paths, entry, params, reference, table_resolver, table_describer,
+        describer = table_describer
+        if table_describer is not None:
+            table_cache = {}
+            def describer(uri, version):
+                raw = str(uri.absolute()) if isinstance(uri, Path) else (
+                    str(Path(uri).absolute()) if '://' not in str(uri) else str(uri)
+                )
+                key = (raw, version)
+                if key not in table_cache:
+                    table_cache[key] = table_describer(uri, version)
+                return copy.deepcopy(table_cache[key])
+        return _check(root, view, paths, entry, params, reference, table_resolver, describer,
                       exclude, deadline, publish, max_variants, max_bytes, include_hygiene=include_hygiene)
 
 
@@ -366,7 +384,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
                 _record(parameter_digests, param, sha256(raw).hexdigest())
                 parameters = decode_control(raw)
             report = inspect_variant(root, control, candidate, parameters, reference['catalog'],
-                                     table_resolver=resolve, limits={'seconds': seconds},
+                                     table_resolver=resolve, limits={'seconds': min(SOURCE_LIMITS['seconds'], seconds)},
                                      exclude=exclude, table_describer=table_describer)
             binding = report['binding']
             dependencies = _binding_files(root, binding, sources, table_files)
