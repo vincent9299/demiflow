@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 from demiflow.data.api import DataAPI
 from demiflow.operator_llm.call_ref import journal_totals, read_call
+from demiflow.operator_llm.errors import PromptResponseContractError
 from demiflow.operator_llm.http_retry import http_error_retry_policy
 from demiflow.operator_llm.runtime import AsyncOperatorLLMRuntime, InProcessOperatorLLMCoordinator
 from demiflow.operator_llm.parser import parse_prompt_pack
@@ -99,3 +100,67 @@ def test_stale_retry_cannot_replace_new_success(tmp_path):
         assert read_call(new['response_ref'])['status_code']==200
         assert journal_totals(path)['requests']==2
     finally:journal.close()
+
+
+def test_declared_content_error_stays_in_its_row_without_retry_or_stopping_others(retry_server,tmp_path):
+    retry_server.update(statuses=[400,200],error_body=b'{"error":{"code":"content_blocked","message":"Input rejected"}}')
+    path=tmp_path/'calls.sqlite';cfg=options(path)
+    cfg.pop('http_error_retry');cfg['nonfatal_http_errors']=[{'status':400,'code':'content_blocked'}]
+    def run():
+        return prompt(DataAPI().from_items([{'item':'blocked'},{'item':'allowed'}]),options=cfg,
+                      concurrency=1,error_output='error',call_output='call').take_all()
+    rows=run()
+    assert rows[0]['error']['call']['http_status']==400
+    assert rows[0]['error']['call']['provider_error_code']=='content_blocked'
+    assert 'answer' not in rows[0] and rows[1]['answer']=='ok'
+    assert len(retry_server['requests'])==2
+    again=run()
+    assert again[0]['error']['call']['reused'] and len(retry_server['requests'])==2
+    assert journal_totals(path)['requests']==2
+
+
+@pytest.mark.parametrize('status',[429,500,503])
+def test_pressure_status_is_not_retried_and_replay_neither_resends_nor_recounts(retry_server,tmp_path,status):
+    retry_server['statuses']=[status]
+    path=tmp_path/'pressure.sqlite'
+    def run():
+        return prompt(DataAPI().from_items([{'item':'a'}]),options=options(path,limit=1),
+                      error_output='error',max_requests=1).take_all()
+    rows=run()
+    assert rows[0]['error']['call']['http_status']==status and 'answer' not in rows[0]
+    assert len(retry_server['requests'])==1 and journal_totals(path)['requests']==1
+    again=run()
+    assert again[0]['error']['call']['reused']
+    assert len(retry_server['requests'])==1 and journal_totals(path)['requests']==1
+
+
+def test_declared_retries_succeed_keep_every_attempt_and_replay_without_requests(retry_server,tmp_path):
+    path=tmp_path/'calls.sqlite';ctx=DataAPI()
+    def run(api):
+        return prompt(api.from_items([{'item':'a'},{'item':'b'}]),options=options(path),
+                      concurrency=1,call_output='call',max_requests=4).take_all()
+    rows=run(ctx)
+    assert [r['answer'] for r in rows]==['ok','ok']
+    attempts=rows[0]['call']['attempts']
+    assert [a['http_status'] for a in attempts]==[401,401,200]
+    assert [read_call(a['response_ref'])['status_code'] for a in attempts]==[401,401,200]
+    assert attempts[-1]['response_ref']['attempt']==3
+    assert retry_server['requests'][0]==retry_server['requests'][1]==retry_server['requests'][2]
+    assert all(r['num_retries']==0 and r['fallbacks']==[] for r in retry_server['requests'])
+    totals=journal_totals(path)
+    assert (totals['requests'],totals['responses'],totals['http_errors'],totals['http_successes'])==(4,4,2,2)
+    usage=ctx.prompt_usage()
+    assert usage['provider_requests_started']==4 and usage['provider_requests_failed']==2
+    assert usage['provider_requests_completed']==2
+    again=run(DataAPI())
+    assert len(retry_server['requests'])==4 and all(r['call']['reused'] for r in again)
+
+
+def test_incomplete_stream_and_unlisted_http_status_are_never_retried(retry_server,tmp_path):
+    retry_server['statuses']=[200];retry_server['done']=False
+    rows=prompt(DataAPI().from_items([{'item':'a'}]),options=options(tmp_path/'stream.sqlite'),error_output='error').take_all()
+    assert rows[0]['error']['category']=='incomplete_response' and len(retry_server['requests'])==1
+    retry_server['statuses']=[403]
+    with pytest.raises(PromptResponseContractError,match='HTTP 403'):
+        prompt(DataAPI().from_items([{'item':'b'}]),options=options(tmp_path/'403.sqlite')).run_stream()
+    assert len(retry_server['requests'])==2

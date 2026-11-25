@@ -184,7 +184,8 @@ def test_managed_model_cancel_stops_dispatch_and_preserves_request(root, server,
     assert result['status'] == 'cancelled', result
     assert elapsed < 12 and len(server['requests']) == 1
     assert all(output['result'] is None for output in result['outputs'])
-    ledger = runs.directory(root, prepared['run_id'])/'evidence/calls.sqlite'
+    # Model calls are recorded in the run's own journal.
+    ledger = runs.directory(root, prepared['run_id'])/'run.sqlite'
     with sqlite3.connect(ledger.resolve().as_uri() + '?mode=ro', uri=True) as db:
         calls = db.execute('SELECT request_json, response_json, error_json FROM calls').fetchall()
     assert len(calls) == 1 and calls[0][0] is not None and calls[0][1] is None

@@ -32,7 +32,7 @@ def test_nondeterministic_text_expansion_preserves_known_image_identity(tmp_path
         return data.from_items([{'instruction': 'make a plan'}]).map_prompt_async(
             'answer', config=text, inputs=['instruction'], output='plan', max_requests=1,
             options={'trust_env': False, 'max_request_bytes': 8192, 'max_response_bytes': 8192, 'max_event_bytes': 8192}
-        ).map(planned_children).map_prompt_async(
+        ).flat_map(planned_children).map_prompt_async(
             'generate', config=image, inputs=['instruction'], output='image', call_output='call',
             error_output='error', max_requests=2,
             options={'object_store': str(tmp_path/'assets'), 'image_encoding': 'preserve',

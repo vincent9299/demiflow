@@ -108,14 +108,6 @@
 | 140 | 引擎测试，未判定（T-017） |
 | 108 | 界面测试，未判定（T-018） |
 
-### T-015 已删除的过时测试里，仍然有效但现在没有测试的保证
-
-26 个测试已删除：调用引擎明确拒绝的已退役用法（显式 checkpoint、节点上的 journal 选项、搜索 checkpoint）18 个；在驱动进程里替换类或函数、而执行发生在 worker 进程 5 个；替换已不存在的内部函数 3 个（另 1 个把执行器换成空对象）。以下保证仍然有效，需要按 v3 的写法补测试：
-
-- prompt 节点：带编号的多张图片按顺序进入请求；`when` 跳过的行和出错的行保留原始数据；响应不符合 schema 时不发布结果。（原 `tests/test_map_prompt_async.py`）
-- prompt HTTP 重试：声明为非致命的内容错误保留在行内且不中断其他行；429/500/503 不重试、重放时不重复计数；未完成的流不重试。（原 `tests/test_prompt_http_retry.py`）
-- Dataset：已物化数据的 `count()` 只读元数据；`schema(fetch_if_missing=False)` 不触发读取；`take_all` 成功和超限时观察者的完成/失败各记一次。（原 `tests/test_upgrade_v2_unit_A004.py`、`A013.py`、`tests/test_dataset_api_contract.py`）
-
 ### T-016 标准线里排进了需要 Ray 的测试
 
 - **现象。** 标准线（没有 Ray）每天有 45 个测试因 `No module named 'ray'` 或 `NOT_RUN` 记为失败，涉及 11 个 `test_runtime_v3_*` 文件；同样的文件在 Ray 线里有真实结果。
@@ -128,6 +120,7 @@
 
 - **内存额度与放置。** 已核对（2026-11-25）。`test_local_kernel.py` 10 个、`test_local_union_plan.py` 3 个、`test_stream_map.py` 1 个是引擎行为退步，测试保持原样，见 T-025。`test_runtime_v3_stream_suffix.py` 5 个是测试按旧公式重算融合阶段的内存；同一次引擎提交有意改成按选定布局分配，测试改为核对实际分配等于封存计划、同时驻留的阶段合计不超过额度、融合后的 CPU 规则。`test_upgrade_business_acceptance.py` 的 2 个已在第 2 批处理。
 - **崩溃与恢复。** 已处理（2026-11-25，分支 `claude/tests/effectiveness-20261124`）。主因是测试按旧的落盘环节名 `output` 找杀进程的位置，现在叫 `materialize` / `take_all`，子进程因此一直没被杀。改对之后恢复行为正常。同时按"测的是否是用户可依赖的保证、保证坏了是否会失败、是否重复"复查了整个文件，不只是失败的用例：删掉了永远走不到的分支、在主进程里替换但代码在子进程跑的替身、读不存在目录因而恒为空的资源检查、和专门文件重复的用例。剩下要裁定的引擎行为见 T-019 到 T-023。
+- **prompt。** 已核对（2026-11-25）18 个。测试写法过时、已改 12 个：在驱动进程里替换 HTTP 客户端或 actor 而 prompt 跑在 worker 进程里（改用线程 worker）；读驱动端请求闸门副本的计数（改读服务端）；用旧的落盘环节名 `output` 找故障点；`map` 写成了一行变多行的 `flat_map`；列目录时没算每次运行的 `-driver-resources`；总超时短到请求可能送不到服务端；替换服务对象后改由更早的类型检查拒绝；取消测试按旧位置打开调用记录。删 1 个：`test_exact_source_threshold_uses_one_final_cut` 检查的“恰好 1 次提交”是 v3 之前设计的实现细节，v3 多出的最终提交引用同一数据块。其余 6 个是引擎问题，测试保持失败：T-025 1 个、T-027 1 个、T-028 3 个、T-029 1 个。提交 `9d5563d2`。
 - **向量检索。** `tests/test_vector_search_stream.py` 19 个：查询向量校验的错误以 `INTERNAL_PROTOCOL` 报出，以及结果为空。
 - **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）。改测试即可。
 - **其余**见 `_demiflow/shared-review/CLAUDE-test-audit-20261124/engine-lines.txt`，每个测试一行。
@@ -148,10 +141,11 @@
 - **现象。** 两类计划被 `RESOURCE_INFEASIBLE` 拒绝，之前都能运行：
   - 含 `reduce_by_key` 或 `join` 的计划，在不大的 `memory_bytes` 下装不下。例：120 行的 map→filter→reduce（3 个 worker、7 个分区、线程模式），以前 192KB 就能跑；现在 64MB、128MB 都被拒绝，要到 192MB 才行。reduce 阶段的最低需求是两份默认状态上限（各 16MB）加十几个批次窗口，窗口不随额度缩小。把 `max_state_bytes` 降到 16KB，192KB 下仍差 3 倍以上。join 在 128KB 下要 224KB。
   - 默认额度（256MB）下也有计划被拒：`tests/test_stream_map.py::test_thread_map_allows_async_consumer_to_release_other_workers`（线程 map 并发 3、后接异步消费）需要 240MB，可用 224MB。
+  - 默认额度下并发 8 的 prompt 节点：`tests/test_sqlite_journal.py::test_concurrent_first_requests_verify_model_once` 需要 336MB，可用 224MB；`ab3b4d45` 上通过，`9f3d4e53` 上失败。
   - `workers=1` 时，union 后接 reduce（普通函数或类回调都一样），以及类回调后接 semi join，报“memory group cannot fit and its source/state cannot safely park (max_active_workers required=2 或 4, available=1)”。内存从 256MB 加到 4GB 结果不变；普通函数后接 semi join 能跑。
 - **依据。** 二分定位到 `9f3d4e53`（11-22，“Derive physical stage grants from the selected layout…”）。它的前一提交 `ab3b4d45` 上 `test_local_kernel.py`、`test_local_union_plan.py`、`test_runtime_v3_stream_suffix.py` 共 42 个全部通过；到 `9f3d4e53` 有 18 个失败，至今未变。这次提交删除了 `planning/dataflow_policy.py::fit_default_stream_windows`。原函数按实际同时驻留的工作量缩小行、批次和状态窗口，并对单 worker 计划整体核算（见其说明）。替代它的 `planning/dataflow_budget.py::minimum_workspace_graph` 只调整声明了 `codec_min_bytes` 的算子（数据源、map 等），reduce、join 仍按默认窗口计。单 worker 的放置失败未逐行证实，可能与同一提交给类回调加的完整物化规则有关。
-- **影响。** 用户给本机执行设置几十 MB 的额度，或用 1 个 worker 跑带 union/join 的计划，会在启动前被拒绝；默认额度下并发较高的计划也可能被拒。`tests/test_local_kernel.py` 10 个、`tests/test_local_union_plan.py` 3 个、`tests/test_stream_map.py` 1 个因此失败，测试未改；三者在 `ab3b4d45` 上都通过。`tests/test_prompt_stream_recovery.py` 守的是 prompt 崩溃续跑，第 2 批（`7a74d464`）为了让它测到续跑行为，把运行条件从 1 个 worker、128MB 改成默认 worker 数、512MB，绕开的就是这里的问题。这个 prompt 测试在 `ab3b4d45` 上能被接受，到 `9f3d4e53` 被拒绝。
-- **建议。** 由引擎负责人确认是否有意。如果不是：给没有 `codec_min_bytes` 的算子恢复按额度缩小窗口和状态，并恢复单 worker 计划的放置；修好后以上 42 个测试和 `test_stream_map` 那 1 个应全部通过。如果是有意：在 `local_execution` 的文档里写明 reduce、join 的最低额度和单 worker 的限制，再按新规则改这 14 个测试。
+- **影响。** 用户给本机执行设置几十 MB 的额度，或用 1 个 worker 跑带 union/join 的计划，会在启动前被拒绝；默认额度下并发较高的计划也可能被拒。`tests/test_local_kernel.py` 10 个、`tests/test_local_union_plan.py` 3 个、`tests/test_stream_map.py` 1 个、`tests/test_sqlite_journal.py` 1 个因此失败，测试未改；它们在 `ab3b4d45` 上都通过。`tests/test_prompt_stream_recovery.py` 守的是 prompt 崩溃续跑，第 2 批（`7a74d464`）为了让它测到续跑行为，把运行条件从 1 个 worker、128MB 改成默认 worker 数、512MB，绕开的就是这里的问题。这个 prompt 测试在 `ab3b4d45` 上能被接受，到 `9f3d4e53` 被拒绝。
+- **建议。** 由引擎负责人确认是否有意。如果不是：给没有 `codec_min_bytes` 的算子恢复按额度缩小窗口和状态，并恢复单 worker 计划的放置；修好后以上 42 个测试和 `test_stream_map`、`test_sqlite_journal` 各 1 个应全部通过。如果是有意：在 `local_execution` 的文档里写明 reduce、join 的最低额度和单 worker 的限制，再按新规则改这 15 个测试。
 
 ### T-026 `local_execution(temp_directory=...)` 被接受但不起作用
 
@@ -160,7 +154,36 @@
 - **影响。** 几个测试原本靠“运行后这个目录为空”证明清理，这样的断言永远成立。第 3 批已改为检查本次运行的 worker 退出、分配归还（`tests/test_local_kernel.py`），或删掉重复的检查（`tests/test_plan_capture.py`、`tests/test_stream_map.py`）。
 - **建议。** 引擎负责人决定：去掉这个参数并改掉工作台的调用；或者保留但在说明里写明不再使用。
 
+### T-027 prompt 节点的有状态 `when` 判断器不存盘也不恢复
+
+- **现象。** 判断器提供 `snapshot_state` / `restore_state`，运行在第一次存盘后中断再续跑：整个过程中这两个方法一次都没被调用，续跑时判断器从初始状态重新计数，重复判断已判过的行。用“只对前 3 行为真”的判断器，续跑后有回答的是第 0 到 4 行，多发了请求。
+- **依据。** 2026-11-25 `tests/test_native_prompt_owners.py::test_stateful_model_predicate_resumes_from_its_snapshot`，在判断器里记录每次调用、存盘和恢复，日志里只有调用。原测试按 v3 之前的逐节点状态键检查判断器快照，至迟 11-22 起就因找不到旧键名失败，这个问题一直没被发现；已改写为按行为检查。
+- **建议。** 引擎负责人确认 `when` 判断器是否应作为语义状态存盘。应该：在 cut 中保存并在续跑时恢复。不支持：对带 `snapshot_state` 的判断器在声明时拒绝，不要静默从头开始。
+
+### T-028 上游出错时，prompt 在途的付费请求没有按期限收完
+
+- **现象。** prompt 请求已发出、响应正在流式返回时，上游另一行报错使 action 失败。期限 2 秒、响应 0.4 秒可收完的请求每次都被切断，记为传输错误，响应丢失；期限 0.1 秒的请求有时记下传输错误、有时什么也没记，只剩“已发出、无回复”，两次运行中失败的参数不同。文档写明取消时在原生 actor 的期限内收完在途调用再关闭客户端（`docs/prompt_http.md` "Cancellation drains active calls…"，`docs/native-barrier-checkpoints.md` "drains native calls/writers under their deadlines"）。
+- **依据。** 2026-11-25 `tests/test_prompt_http_stream.py::test_service_stop_drains_paid_response_but_does_not_publish_partial_success` 4 个参数中每次 3 个失败：期限 2 秒的两个固定失败（`responses` 为 0），期限 0.1 秒的两个随时序其一失败（`transport_errors` 为 0）。原测试在驱动进程里替换 HTTP 客户端、靠闭包对象和 `asyncio.Event` 跨阶段传信号，在 v3 里一直测不到这个场景，至迟 11-22 起以存盘超时失败；已改为线程 worker、文件信号，并按运行记录核对“没有发布部分结果”。另：prompt 后面若接其他算子，有限输入的 action 会等上游全部完成后才开始 prompt，因此测试里 prompt 后面不接算子。
+- **建议。** 对齐实现与文档：action 失败或取消时，在途的 prompt 调用在其期限内收完并记录响应，超过期限的记为传输错误。
+
+### T-029 工作台读不到托管运行的模型调用证据
+
+- **现象。** `runs.evidence`（工作台 API 与 `runs evidence` 命令）只读取运行清单 `evidence` 中声明的账本。v3 把调用记录写进运行自己的 `run.sqlite`，行里的 `request_ref.journal_path` 指向它，而清单的 `evidence` 为空，所以每次读取都报 "Evidence is not a declared bounded resource of this run"。
+- **依据。** 2026-11-25 `tests/test_operator_foundation_runs.py::test_managed_model_results_evidence_and_read_only_access`，打印了引用和清单；至迟 11-22 起失败。同文件的取消测试原先打开 `evidence/calls.sqlite`，已改为读 `run.sqlite`。
+- **建议。** 工作台把运行自己的调用记录作为有界证据读取（按引用核对属于本次运行），或由运行在清单中声明它；修好后该测试应通过。
+
+### T-033 封存改动后，同一进程导入过另一个测试模块时，续跑误判"代码已改"
+
+- **现象。** 自 `31c779c6`（`agy/seal/bundle-relative-imports-20261125`，main-20261125-20）起，`tests/test_native_prompt_barrier.py::test_nondeterministic_text_expansion_preserves_known_image_identity` 在同一 pytest 进程里也收集了 `tests/test_prompt_without_journal.py` 时，续跑一步报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`。两个文件都导入 `image_http_fixture`。
+- **依据。** 2026-11-25 对照：单独运行，在 `40c0034a`（其前一提交）和 `31c779c6` 上各 5 次全过；两个测试同会话，在 `40c0034a` 上通过，在 `31c779c6` 上失败，两种执行顺序都失败（pytest 先导入全部测试模块再执行）。该测试此前因 `map` / `flat_map` 写错走不到续跑，第 4 批修正后才暴露。
+- **影响。** 推测：notebook 或长期运行的进程里导入过引用同一辅助模块的其他代码后，续跑可能被误拒；未逐行证实。
+- **建议。** 封存改动负责人用上述两个测试同会话复现；修好后两者同会话应通过。
+
 ## 已完成
+
+### T-015 已删除的过时测试里，仍然有效但现在没有测试的保证
+
+全部按现在的写法补回（2026-11-25）。prompt 节点：带编号的多张图片按顺序进入请求；图片与多个输出映射回原行；`when` 跳过的行和出错的行保留原始数据；不符合 schema 的响应不发布结果。prompt HTTP：声明为非致命的内容错误留在行内、不重试、不影响下一行；429/500/503 不重试，再跑一次既不重发也不重复计数；声明的 401 重试保留每次尝试、重放不再发请求；不完整的流和未列出的 403 不重试。重放都用私有 `sqlite_journal` 缓存。Dataset：已物化数据的 `count()` 不读任何数据块、不加载程序（与同一句柄的 `take_all` 对照）；`schema(fetch_if_missing=False)` 不启动 action、不打开数据源；`take_all` 成功只记一次完成、超限只记一次失败（按日志事件）。提交 `06ab6aeb`、`2323bc8d`。
 
 ### T-019 经过队列 `fetch` 的行不再保留元组和字节类型
 
