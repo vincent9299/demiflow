@@ -479,7 +479,7 @@
         }
         if(context.capabilities?.analysis_write){
           const delBtn=node('button',undefined,'df-nb-action df-nb-del');delBtn.type='button';
-          delBtn.title='从目录删除「'+title+'」';delBtn.setAttribute('aria-label',delBtn.title);
+          delBtn.title='删除「'+title+'」';delBtn.setAttribute('aria-label',delBtn.title);
           delBtn.append(trashIcon());delBtn.onclick=()=>askDelete(path);
           row.append(delBtn);
         }
@@ -600,11 +600,6 @@
         const close=node('button','×','df-close-book');close.type='button';
         close.title='关闭「'+title+'」（不删除文件）';close.setAttribute('aria-label','关闭「'+title+'」');
         close.onclick=()=>askClose(path);bookTabs.append(close);
-        if(selected&&context.capabilities?.analysis_write){
-          const remove=node('button',undefined,'df-delete-book');remove.type='button';
-          remove.title='删除「'+title+'」';remove.setAttribute('aria-label',remove.title);
-          remove.append(trashIcon());remove.onclick=()=>askDelete(path);bookTabs.append(remove);
-        }
         if(selected&&focus){tab.focus();tab.scrollIntoView({block:'nearest',inline:'nearest'});}
       }
       paintSidebarNotebooks();
