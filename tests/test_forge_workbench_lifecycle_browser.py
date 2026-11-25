@@ -99,12 +99,10 @@ def test_unified_three_tab_nav_and_three_column_pipeline_workspace(project,brows
         # Clicking 关闭详情 cleanly closes the right supplementary panel without bouncing back.
         page.locator('.pw-drawer-pane[data-pane="detail"]').get_by_role('button', name='关闭详情', exact=True).first.click()
         expect(page.locator('.pw-drawer')).to_be_hidden()
-        # Clicking 会话 switches center stage to wide assistant and hides canvas.
+        # Switching sidebar tabs does NOT disrupt the center workspace until a specific item is selected.
         sidebar.get_by_role('button', name='会话', exact=True).click()
-        expect(page.locator('.pw-assistant-host')).to_be_visible()
-        expect(page.locator('.pw-workbench-host')).to_be_hidden()
-        # Switching back to 管线 restores the wide canvas.
-        sidebar.get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.pw-workbench-host')).to_be_visible()
         expect(page.locator('.pw-assistant-host')).to_be_hidden()
+        sidebar.get_by_role('button', name='管线', exact=True).click()
+        expect(page.locator('.pw-workbench-host')).to_be_visible()
         assert not errors, errors
