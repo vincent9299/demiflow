@@ -10,7 +10,22 @@ from demiflow.data.api import DataAPI
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from tests.test_local_relational import _oracle_join, assert_same_rows
 from _worker_event_fixtures import emit, events
+from runtime_v3_owned_crash import assert_released, run_capacity
 from test_dataset_native import sealed_plan
+
+
+def _assert_workers_returned(session, mode):
+    """The action's workers exited and every allocation went back to the pool.
+
+    `local_execution(temp_directory=...)` is not read by the v3 engine, so an
+    empty temp directory proves nothing; the run's own allocations do.
+    """
+    directory = Path(session.run_ref.directory)
+    if mode == 'process':
+        assert_released(directory)
+    else:
+        held, released = run_capacity(directory)
+        assert not held and released, (held, released)
 
 
 def _slow_map(row):
@@ -20,9 +35,9 @@ def _slow_map(row):
 
 @pytest.mark.slow
 @pytest.mark.parametrize('mode', ['thread', 'process'])
-def test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order(tmp_path, mode):
+def test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order(mode):
     with data.local_execution(workers=3, worker_mode=mode, partitions=7, batch_rows=12,
-                              memory_bytes=3*65536, temp_directory=str(tmp_path)) as local:
+                              memory_bytes=3*65536) as local:
         result = (data.range(120).map(_slow_map).filter(lambda r: r['v'] % 2 == 0)
                   .reduce_by_key('k', lambda a,r: {'k':r['k'], 'values':(a or {}).get('values',[])+[r['v']],
                                                 'pid':os.getpid()}, chunk_bytes=300).take_all())
@@ -38,21 +53,21 @@ def test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order(tmp_path
         assert 0 < local.stats['peak_active_workers'] <= 3
         assert local.stats['engine'] == 'dataflow_v3'
         assert {'MapOp', 'FilterOp', 'reduce'} <= {s['name'] for s in local.stats['stages']}
-    assert list(tmp_path.iterdir()) == []
+    _assert_workers_returned(local, mode)
 
 
 @pytest.mark.parametrize('how', ['inner','left','semi','anti'])
 @pytest.mark.parametrize('mode', ['thread','process'])
-def test_join_matches_legacy_canonical_semantics(tmp_path, how, mode):
+def test_join_matches_legacy_canonical_semantics(how, mode):
     from datetime import datetime, timezone
     keys=[None,True,False,1,1.0,'1','中"文',['nested'],{'k':2}]
     left=[{'a':keys[i%len(keys)],'b':i%2,'v':i,'native':datetime(2026,1,1,tzinfo=timezone.utc),'bytes':b'\xff'} for i in range(36)]
     right=[{'x':keys[i%len(keys)],'y':i%2,'v':[i]} for i in range(29)]
     with data.local_execution(workers=2, worker_mode=mode, partitions=5, batch_rows=7,
-                              memory_bytes=2*65536, temp_directory=str(tmp_path)):
+                              memory_bytes=2*65536) as local:
         result=data.from_items(left).join(data.from_items(right),on=['a','b'],right_on=['x','y'],how=how,chunk_bytes=150).take_all()
     assert_same_rows(result, _oracle_join(left,right,['a','b'],['x','y'],how))
-    assert list(tmp_path.iterdir()) == []
+    _assert_workers_returned(local, mode)
 
 
 def test_join_fold_fusion_retains_hidden_key_and_unfuses_after_map():
@@ -102,28 +117,27 @@ def test_narrow_chain_batch_boundaries_and_limit_match_serial():
 @pytest.mark.parametrize('mode',['thread','process'])
 def test_failure_and_early_consumer_close_cleanup_owned_work(tmp_path,mode):
     path = str(tmp_path / 'reads.jsonl')
-    owned = tmp_path / 'owned'; owned.mkdir()
     def source():
         for n in range(10000):
             emit(path, 'read', n=n)
             yield {'id':n}
-    with data.local_execution(workers=2,worker_mode=mode,batch_rows=5,temp_directory=str(owned)) as local:
+    with data.local_execution(workers=2,worker_mode=mode,batch_rows=5) as local:
         assert len(data.from_iter(source).map(lambda r:r).take(1))==1
         assert len(events(path)) <= 25
         assert local.stats['status']=='closed_early'
-        assert list(owned.iterdir())==[]
+        _assert_workers_returned(local, mode)
     def fail(row):
         if row['id']==9: raise ValueError('worker failure')
         return row
     # Let the genuine failed action leave its RunContext. Swallowing it inside
     # that scope would separately request a false successful run completion.
     with pytest.raises(ValueError,match='worker failure'):
-        with data.local_execution(workers=2,worker_mode=mode,batch_rows=5,temp_directory=str(owned)) as local:
+        with data.local_execution(workers=2,worker_mode=mode,batch_rows=5) as local:
             try:
                 data.range(20).map(fail).reduce_by_key('id',lambda a,r:r).take_all()
             finally:
                 assert local.stats['status']=='failed'
-    assert list(owned.iterdir())==[]
+    _assert_workers_returned(local, mode)
 
 
 def test_lance_fixed_version_narrow_columns_and_normal_writer(tmp_path):
@@ -182,8 +196,7 @@ def test_context_and_configuration_do_not_silently_change_existing_execution():
 
 def test_supported_shuffled_child_plan_is_lazy_and_keeps_distinct_sources(tmp_path):
     path = str(tmp_path / 'reads.jsonl')
-    owned = tmp_path / 'owned'; owned.mkdir()
-    with data.local_execution(workers=2,worker_mode='thread',temp_directory=str(owned)):
+    with data.local_execution(workers=2,worker_mode='thread'):
         def source():
             emit(path, 'read')
             yield {'k':1}
@@ -193,7 +206,6 @@ def test_supported_shuffled_child_plan_is_lazy_and_keeps_distinct_sources(tmp_pa
         assert events(path) == []
         assert plan.take_all() == [{'k': 1}]
     assert len(events(path)) == 2  # Equal factories are two distinct declarations.
-    assert not list(owned.iterdir())
 
 
 def test_worker_exception_cannot_publish_partial_lance_output(tmp_path):

@@ -68,11 +68,49 @@ def action_process_records(run, action_id):
             if path.parent.parent.name in scopes}
 
 
-def assert_released(directory):
-    """Observe the real allocator and birth/lock evidence; do no cleanup here."""
+def run_capacity(directory):
+    """This run's allocations in the shared local capacity pool: (held, released) ids.
+
+    Every allocation records the directory of the unit hosting it, which lies under
+    the run's `-driver-resources`; allocations of other runs in the same session
+    are not counted. `released` covers the allocations the run journal knows about.
+    """
     from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.hosts.capacity import local_capacity
     from demiflow.resources.capacity import LocalCapacityPool
+    directory = Path(directory)
+    own = directory.with_name(directory.name+'-driver-resources').resolve()
+    domain, capacity = local_capacity()
+    assert str(domain).startswith('/tmp/demiflow-')
+    pool = LocalCapacityPool(domain/'capacity', capacity=capacity)
+
+    def owned(record):
+        origin = record.get('origin')
+        return bool(origin) and Path(origin['directory']).resolve().is_relative_to(own)
+    held = sorted(r['allocation_id'] for r in pool.live_records() if owned(r))
+    with RunJournal(directory)._connection() as db:
+        known = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='resource_allocations'").fetchone()
+        ids = [i for i, in db.execute('SELECT allocation_id FROM resource_allocations')] if known else []
+    released = set()
+    for allocation_id in ids:
+        record = pool.record(allocation_id)
+        # None: the reservation was withdrawn before any host existed.
+        if record is not None:
+            assert owned(record), record.get('origin')
+            if record['state'] == 'RELEASED':
+                assert record['release_evidence'], record
+                released.add(allocation_id)
+    return held, frozenset(released)
+
+
+def assert_released(directory):
+    """Observe the real allocator and birth/lock evidence; do no cleanup here.
+
+    Only this run's allocations are examined: other runs in the same test session
+    share the capacity pool and may legitimately still hold theirs. Returns the
+    ids of this run's allocations the pool records as released.
+    """
+    from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.resources.process_unit import ManagedProcessUnit
     records = process_records(directory)
     assert records, 'no actual process allocation evidence'
@@ -87,8 +125,8 @@ def assert_released(directory):
         scopes = db.execute('SELECT state FROM resource_scopes').fetchall()
     assert allocations and all(cleanup == 'CONFIRMED' for _, cleanup in allocations)
     assert scopes and all(state == 'CLOSED' for state, in scopes)
-    domain, capacity = local_capacity()
-    assert str(domain).startswith('/tmp/demiflow-')
-    snapshot = LocalCapacityPool(domain/'capacity', capacity=capacity).snapshot()
-    assert not snapshot['active'] and snapshot['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
-    return snapshot['charged']
+    held, released = run_capacity(directory)
+    assert not held, ('allocations of this run still charged', held)
+    # Every process that actually ran was charged to the pool and released.
+    assert set(records) <= released, sorted(set(records) - released)
+    return released

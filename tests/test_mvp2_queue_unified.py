@@ -337,9 +337,8 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
             crashed = True
         assert crashed
         assert_worker_killed(crash_marker, root)
-        assert_released(root)
         before_processes = process_records(root)
-        charged_after_kill = assert_released(root)
+        released_after_kill = assert_released(root)
         ref = RunRef(**json.loads(ref_file.read_text()))
         with channel.database.connection(write=True) as db:
             db.execute('UPDATE queue_tasks SET lease_until=0 WHERE generation=?', (p.generation,))
@@ -348,7 +347,7 @@ def test_unified_queue_carrier_crash_resume_reclaims_quota_no_live_worker(tmp_pa
                 build(cfg, root, url).write_datasink(QueueResultSink(cfg, pool='p'))
         # Original allocator confirms both attempts released their own allocations.
         assert before_processes.keys() < process_records(root).keys()
-        assert assert_released(root) == charged_after_kill
+        assert released_after_kill < assert_released(root)
         assert channel.state('p')['queue_drained'] and calls['/file'] == n
 
 

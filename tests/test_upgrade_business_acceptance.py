@@ -58,12 +58,12 @@ from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.operator_llm.journal import UncertainPromptCall
 from demiflow.operator_llm.stream_recovery import CALL_RESERVATION
 from demiflow.execution.journal.prompt import RunPromptJournal
-from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.workbench.graph import model as graph_model
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.runs import facts, manager as runs
 
 from test_raw_fetch import origin_server
+from runtime_v3_owned_crash import run_capacity
 
 LIMITS = {"checkpoint_rows": 2, "checkpoint_interval_ms": 60000}
 ENTRY = 'flows/questions.py:select'
@@ -141,12 +141,10 @@ def assert_semantics_equal(expected, actual, *, ordering='declared'):
 
 def _resource_evidence(run_dir, *, started=None):
     """Observe real allocated quotas / disk after a return; never claim RSS."""
-    from demiflow.execution.hosts.capacity import local_capacity
     run_dir = Path(run_dir)
-    domain, capacity = local_capacity()
     files = [p for p in run_dir.rglob('*') if p.is_file()] if run_dir.exists() else []
     sqlite_files = sorted(p.name for p in run_dir.rglob('*.sqlite')) if run_dir.exists() else []
-    charged = LocalCapacityPool(domain / 'capacity', capacity=capacity).snapshot()['charged']
+    held, released = run_capacity(run_dir) if (run_dir / 'run.sqlite').exists() else ([], frozenset())
     requests_budget = None
     if (run_dir / 'run.sqlite').exists():
         try:
@@ -155,7 +153,8 @@ def _resource_evidence(run_dir, *, started=None):
             requests_budget = None
     return dict(elapsed_s=None if started is None else round(time.monotonic() - started, 3),
                 file_count=len(files), sqlite_files=sqlite_files,
-                capacity_charged=charged, requests_budget=requests_budget)
+                capacity_held=held, capacity_released=len(released),
+                requests_budget=requests_budget)
 
 
 def _chain_child_id(run):
@@ -356,7 +355,7 @@ def _chain_recovery(fixture, *, fault):
     prefix = RunJournal(run_dir).execution_commits('action-1')
     assert prefix and all(f['status'] == 'acked' for f in prefix), 'crash must retain a genuine ACK prefix'
     before = _resource_evidence(run_dir, started=started)
-    assert before['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    assert before['capacity_held'] == [] and before['capacity_released'] > 0
 
 
     if fault == 'edit_helper':
@@ -587,7 +586,7 @@ def test_workbench_normal_flow_real_worker(tmp_path, pidfds):
         assert len(docs) >= len(bridge['entries'])
         assert all(d['rows_output'] is not None and d['state'] == 'succeeded' for d in docs)
     # Real resource state after success: capacity released, single control database.
-    assert observed['evidence']['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    assert observed['evidence']['capacity_held'] == [] and observed['evidence']['capacity_released'] > 0
 
 
 def test_workbench_cancel_releases_resources(tmp_path, pidfds):
@@ -635,7 +634,7 @@ def test_workbench_cancel_releases_resources(tmp_path, pidfds):
     assert value['status'] == 'cancelled'
     target = runs.directory(root, run_id)
     evidence = _resource_evidence(target)
-    assert evidence['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    assert evidence['capacity_held'] == []
 
 
 # ===========================================================================
@@ -652,7 +651,8 @@ def test_chain_unedited_resume_recovers_exactly_once(tmp_path, monkeypatch, pidf
     assert sequences == list(range(1, len(sequences) + 1))
     assert all(f['status'] == 'acked' for f in observed['commits'])
     assert len({f['commit_id'] for f in observed['commits']}) == len(observed['commits'])
-    assert observed['after']['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    assert observed['after']['capacity_held'] == []
+    assert observed['after']['capacity_released'] > observed['before']['capacity_released']
 
 
 @pytest.mark.parametrize('form', ['module_helper', 'closure', 'default_args'])
@@ -662,7 +662,7 @@ def test_chain_edited_business_dependency_resume_refused(tmp_path, monkeypatch, 
     assert observed['refused'] is True
     assert observed['rows'] is None, 'a refused resume must not produce mixed results'
     # The sealed prefix stays acked; no new-code (9999) row was ever committed.
-    assert observed['after']['capacity_charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    assert observed['after']['capacity_held'] == []
 
 
 # ===========================================================================

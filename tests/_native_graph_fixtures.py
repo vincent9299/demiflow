@@ -117,8 +117,6 @@ def assert_managed_graph(executor, run_directory, result):
     assert os.getpid() not in pids
     assert {w['worker_process_id'] for w in workers} <= pids
     assert len(pids) > 1
-    from demiflow.execution.hosts.capacity import local_capacity
-    from demiflow.resources.capacity import LocalCapacityPool
-    domain, capacity = local_capacity()
-    pool = LocalCapacityPool(domain / 'capacity', capacity=capacity)
-    assert pool.snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    from runtime_v3_owned_crash import run_capacity
+    held, released = run_capacity(run_directory)
+    assert not held and {path.parent.name for path in records} <= released

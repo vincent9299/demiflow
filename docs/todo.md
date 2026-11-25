@@ -126,7 +126,7 @@
 
 逐个看过报错，没有一个能仅凭报错判成"过时"，都需要对着当前设计逐条判断是测试的场景失效还是引擎行为变了。按报错形态分组：
 
-- **内存额度与放置。** `RESOURCE_INFEASIBLE`（`test_local_kernel.py` 10 个、`test_local_union_plan.py` 3 个、`test_prompt_stream_recovery.py` 3 个等）；断言里写死的额度数字对不上（`test_runtime_v3_stream_suffix.py` 5 个、`test_upgrade_business_acceptance.py` 2 个）。
+- **内存额度与放置。** 已核对（2026-11-25）。`test_local_kernel.py` 10 个、`test_local_union_plan.py` 3 个、`test_stream_map.py` 1 个是引擎行为退步，测试保持原样，见 T-025。`test_runtime_v3_stream_suffix.py` 5 个是测试按旧公式重算融合阶段的内存；同一次引擎提交有意改成按选定布局分配，测试改为核对实际分配等于封存计划、同时驻留的阶段合计不超过额度、融合后的 CPU 规则。`test_upgrade_business_acceptance.py` 的 2 个已在第 2 批处理。
 - **崩溃与恢复。** 已处理（2026-11-25，分支 `claude/tests/effectiveness-20261124`）。主因是测试按旧的落盘环节名 `output` 找杀进程的位置，现在叫 `materialize` / `take_all`，子进程因此一直没被杀。改对之后恢复行为正常。同时按"测的是否是用户可依赖的保证、保证坏了是否会失败、是否重复"复查了整个文件，不只是失败的用例：删掉了永远走不到的分支、在主进程里替换但代码在子进程跑的替身、读不存在目录因而恒为空的资源检查、和专门文件重复的用例。剩下要裁定的引擎行为见 T-019 到 T-023。
 - **向量检索。** `tests/test_vector_search_stream.py` 19 个：查询向量校验的错误以 `INTERNAL_PROTOCOL` 报出，以及结果为空。
 - **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）。改测试即可。
@@ -142,6 +142,23 @@
 - **现象。** 进程被 SIGKILL 后 `RunContext.resume` 读取恢复身份时，只读连接执行 `PRAGMA cache_size` 报 `sqlite3.OperationalError: attempt to write a readonly database`（`execution/journal/run_journal.py:161-166`），续跑失败。推测是强杀留下的 WAL/共享内存需要恢复，而只读连接不能做这一步；未逐行证实。
 - **依据。** 2026-11-25 `tests/test_queue_v2_crash.py::test_sigkill_and_native_recovery[sqlite-True-claimed]` 在 main `aa997f1e` 上单独复跑 5 次失败 2 次，原因都是这条；同一时期带 T-019 修复的分支 5 次全过（该场景在下载前就被杀，不经过 T-019 改动的代码）。
 - **建议。** 续跑时第一次打开运行记录库改用可写连接完成 WAL 恢复，或在只读连接失败时按这一错误重试一次可写打开；修复后用该测试加压复跑验证。
+
+### T-025 reduce、join 和单 worker 计划不再能在小额度下运行
+
+- **现象。** 两类计划被 `RESOURCE_INFEASIBLE` 拒绝，之前都能运行：
+  - 含 `reduce_by_key` 或 `join` 的计划，在不大的 `memory_bytes` 下装不下。例：120 行的 map→filter→reduce（3 个 worker、7 个分区、线程模式），以前 192KB 就能跑；现在 64MB、128MB 都被拒绝，要到 192MB 才行。reduce 阶段的最低需求是两份默认状态上限（各 16MB）加十几个批次窗口，窗口不随额度缩小。把 `max_state_bytes` 降到 16KB，192KB 下仍差 3 倍以上。join 在 128KB 下要 224KB。
+  - 默认额度（256MB）下也有计划被拒：`tests/test_stream_map.py::test_thread_map_allows_async_consumer_to_release_other_workers`（线程 map 并发 3、后接异步消费）需要 240MB，可用 224MB。
+  - `workers=1` 时，union 后接 reduce（普通函数或类回调都一样），以及类回调后接 semi join，报“memory group cannot fit and its source/state cannot safely park (max_active_workers required=2 或 4, available=1)”。内存从 256MB 加到 4GB 结果不变；普通函数后接 semi join 能跑。
+- **依据。** 二分定位到 `9f3d4e53`（11-22，“Derive physical stage grants from the selected layout…”）。它的前一提交 `ab3b4d45` 上 `test_local_kernel.py`、`test_local_union_plan.py`、`test_runtime_v3_stream_suffix.py` 共 42 个全部通过；到 `9f3d4e53` 有 18 个失败，至今未变。这次提交删除了 `planning/dataflow_policy.py::fit_default_stream_windows`。原函数按实际同时驻留的工作量缩小行、批次和状态窗口，并对单 worker 计划整体核算（见其说明）。替代它的 `planning/dataflow_budget.py::minimum_workspace_graph` 只调整声明了 `codec_min_bytes` 的算子（数据源、map 等），reduce、join 仍按默认窗口计。单 worker 的放置失败未逐行证实，可能与同一提交给类回调加的完整物化规则有关。
+- **影响。** 用户给本机执行设置几十 MB 的额度，或用 1 个 worker 跑带 union/join 的计划，会在启动前被拒绝；默认额度下并发较高的计划也可能被拒。`tests/test_local_kernel.py` 10 个、`tests/test_local_union_plan.py` 3 个、`tests/test_stream_map.py` 1 个因此失败，测试未改；三者在 `ab3b4d45` 上都通过。`tests/test_prompt_stream_recovery.py` 守的是 prompt 崩溃续跑，第 2 批（`7a74d464`）为了让它测到续跑行为，把运行条件从 1 个 worker、128MB 改成默认 worker 数、512MB，绕开的就是这里的问题。这个 prompt 测试在 `ab3b4d45` 上能被接受，到 `9f3d4e53` 被拒绝。
+- **建议。** 由引擎负责人确认是否有意。如果不是：给没有 `codec_min_bytes` 的算子恢复按额度缩小窗口和状态，并恢复单 worker 计划的放置；修好后以上 42 个测试和 `test_stream_map` 那 1 个应全部通过。如果是有意：在 `local_execution` 的文档里写明 reduce、join 的最低额度和单 worker 的限制，再按新规则改这 14 个测试。
+
+### T-026 `local_execution(temp_directory=...)` 被接受但不起作用
+
+- **现象。** `LocalKernelOptions` 保存这个参数，但 v3 执行代码不读它，运行中的文件都在运行目录的存储里。`local_execution` 的说明没有提这个参数。工作台的运行进程（`workbench/runs/worker.py`）仍然传 `temp_directory=str(work)`，可能以为溢出文件会落在那里。
+- **依据。** 2026-11-25 全仓检索，`demiflow/` 下除 DataFusion 主机自己的同名参数外没有读取方。最后几处读取在 11-23 的退役提交里删除（`96a55963`、`2cb25ec5`、`bf8bb2bf`）。
+- **影响。** 几个测试原本靠“运行后这个目录为空”证明清理，这样的断言永远成立。第 3 批已改为检查本次运行的 worker 退出、分配归还（`tests/test_local_kernel.py`），或删掉重复的检查（`tests/test_plan_capture.py`、`tests/test_stream_map.py`）。
+- **建议。** 引擎负责人决定：去掉这个参数并改掉工作台的调用；或者保留但在说明里写明不再使用。
 
 ## 已完成
 

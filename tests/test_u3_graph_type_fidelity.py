@@ -25,7 +25,6 @@ from demiflow.data.sources import ItemsSource
 from demiflow.execution.outputs.block_sink import BlockSink
 from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.pipeline.run_context import RunAction, RunContext
-from demiflow.resources.capacity import LocalCapacityPool
 from demiflow.resources.process_unit import ManagedProcessUnit
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
@@ -83,13 +82,12 @@ def _committed_rows(run, action_id, rid, facts):
     return [entry['row'] for entry in rows if entry['reader_id'] == rid]
 
 
-def _release(root):
+def _release(run_dir):
     # The native driver must already have reclaimed its allocations; do not
     # force-stop workers here and disguise a lifecycle leak as a passing test.
-    from demiflow.execution.hosts.capacity import local_capacity
-    domain, capacity = local_capacity()
-    pool = LocalCapacityPool(domain / 'capacity', capacity=capacity)
-    assert pool.snapshot()['charged'] == {'cpu_millis': 0, 'memory_bytes': 0}
+    from runtime_v3_owned_crash import run_capacity
+    held, _ = run_capacity(run_dir)
+    assert not held, held
 
 
 def _run_default_graph(tmp_path, special, n=8, cut_rows=4):
@@ -108,7 +106,7 @@ def _run_default_graph(tmp_path, special, n=8, cut_rows=4):
             rows = {rid: _committed_rows(run, action_id, rid, facts) for rid in readers}
         return rows, result["egress_rows"], readers
     finally:
-        _release(run_dir.with_name(run_dir.name + "-resources"))
+        _release(run_dir)
 
 
 @pytest.mark.parametrize("special", ["tuple", "bytes"])

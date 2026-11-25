@@ -63,7 +63,7 @@ def test_union_rejects_unsupported_child_before_any_source_read(tmp_path):
     # Shuffle is now supported. An actually unregistered child must still
     # reject the entire graph before either source factory executes.
     with pytest.raises(DataflowError, match='UndeclaredOp') as failure:
-        with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
+        with data.local_execution(workers=1, worker_mode='thread'):
             left = data.from_iter(source)
             right = Dataset(left._source, LogicalPlan((UndeclaredOp(),)), left._executor)
             left.union(right).take_all()
@@ -76,7 +76,7 @@ def test_union_accepts_shuffle_and_keeps_each_independent_source(tmp_path):
         with (tmp_path/'source-opened').open('a') as stream:
             stream.write('opened\n')
         yield from ({'key': i} for i in range(4))
-    with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
+    with data.local_execution(workers=1, worker_mode='thread'):
         left = data.from_iter(source)
         right = data.from_iter(source).random_shuffle(seed=7)
         assert not (tmp_path/'source-opened').exists()
@@ -102,7 +102,7 @@ def test_many_plain_unions_do_not_allocate_identity_worker_layers(tmp_path, monk
     monkeypatch.setattr(DataflowExecution, 'prepare', inspect)
     uri = str(tmp_path/'source.lance')
     lance.write_dataset(pa.table({'key':['a'], 'n':[1]}), uri)
-    with data.local_execution(workers=2, partitions=2, temp_directory=str(tmp_path)):
+    with data.local_execution(workers=2, partitions=2):
         leaf = data.read_lance(uri, version=1)
         combined = leaf
         for _ in range(14):
@@ -114,8 +114,8 @@ def test_many_plain_unions_do_not_allocate_identity_worker_layers(tmp_path, monk
     assert 'MapOp' not in prepared[0] and 'MapBatchesOp' not in prepared[0]
 
 
-def test_union_flatten_keeps_intervening_transform_scope(tmp_path):
-    with data.local_execution(workers=1, worker_mode='thread', temp_directory=str(tmp_path)):
+def test_union_flatten_keeps_intervening_transform_scope():
+    with data.local_execution(workers=1, worker_mode='thread'):
         a = data.from_items([{'key':'a','n':1}])
         b = data.from_items([{'key':'b','n':2}])
         c = data.from_items([{'key':'c','n':3}])

@@ -31,6 +31,24 @@ def _capture(monkeypatch):
     return plans, allocations
 
 
+def _check_budget(physical):
+    """Every group of stages resident together, plus the control reservation, fits memory_bytes.
+
+    Memory grants come from the selected layout (docs/dataset-engine-architecture.md),
+    so they are checked against the budget rather than re-derived per operator.
+    """
+    stages = {s.stage_id: s for s in physical.stages}
+    grouped = set()
+    for ids in physical.residency.simultaneous_groups:
+        group = [stages[i] for i in ids]
+        def replicas(s):
+            return min(len(s.partitions), s.replica_target) if len(group) == 1 else len(s.partitions)
+        footprint = sum(max(s.resident_bytes, s.profile.requests['memory_bytes']) * replicas(s) for s in group)
+        assert footprint + physical.residency.control_reserved_bytes <= physical.bounds.max_resident_bytes
+        grouped.update(ids)
+    assert grouped == set(stages)
+
+
 def _check_profiles(graph, physical, *, shared_cpu=False):
     from demiflow.planning.dataflow_place import partition_stages
     originals = partition_stages(graph, policy=physical.policy, bounds=physical.bounds)
@@ -40,10 +58,8 @@ def _check_profiles(graph, physical, *, shared_cpu=False):
             continue
         assert stage.profile.requests['cpu_millis'] == (max if shared_cpu else sum)(
             by_node[o].profile.requests['cpu_millis'] for o in stage.occurrences)
-        assert stage.profile.requests['memory_bytes'] == sum(
-            max(by_node[o].resident_bytes, by_node[o].profile.requests['memory_bytes'])
-            for o in stage.occurrences)
         assert not set(stage.occurrences) & set(graph.sources)
+    _check_budget(physical)
 
 
 def test_live_native_write_uses_two_allocations_and_final_replay_never_recreates_actor(tmp_path, monkeypatch):
@@ -190,14 +206,14 @@ def test_plain_iterator_map_early_close_keeps_original_demand_in_one_pure_worker
     assert len(physical.stages) == len(allocations) == 1
     # max_workers is a ceiling: this pure synchronous chain has no native
     # completion or timer that could be starved by the source. All original
-    # logical nodes stay visible; actual CPU shares and memory still sums.
+    # logical nodes stay visible; the one business thread takes the largest CPU
+    # share, and the worker is granted exactly what the plan sealed.
     from demiflow.planning.dataflow_place import partition_stages
     originals = partition_stages(graph, policy=physical.policy, bounds=physical.bounds)
     stage = physical.stages[0]
     assert set(stage.occurrences) == {node.occurrence_id for node in graph.nodes}
     assert stage.profile.requests['cpu_millis'] == max(s.profile.requests['cpu_millis'] for s in originals)
-    assert stage.profile.requests['memory_bytes'] == sum(
-        max(s.resident_bytes, s.profile.requests['memory_bytes']) for s in originals)
+    _check_budget(physical)
     assert _actual_grants(run, allocations) == sorted(
         (s.profile.requests['cpu_millis'], s.profile.requests['memory_bytes'])
         for s in physical.stages)
@@ -267,7 +283,9 @@ def test_unfused_independent_workers_keep_summed_grants(tmp_path, monkeypatch):
     originals = partition_stages(graph, policy=physical.policy, bounds=physical.bounds)
     assert len(originals) == len(physical.stages) == len(allocations) == 3
     assert all(len(s.occurrences) == 1 for s in physical.stages)
+    # Each independent worker gets its own sealed grant; nothing is pooled.
     grants = _actual_grants(run, allocations)
     assert grants == sorted((s.profile.requests['cpu_millis'], s.profile.requests['memory_bytes'])
-                            for s in originals)
+                            for s in physical.stages)
     assert sum(cpu for cpu, _ in grants) == 3000
+    _check_budget(physical)
