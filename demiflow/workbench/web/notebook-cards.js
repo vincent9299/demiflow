@@ -2,7 +2,7 @@ import {presentDataFrame} from './notebook-dataframe.js';
 import {notebookTranscript} from './notebook-transcript.js';
 import {notebookConversation} from './notebook-assistant.js';
 
-const icons={save:'M4 3h13l3 3v15H4zM8 3v6h8V3M8 20v-7h8v7',cell:'M3 4h18v11H3zM8 20h8m-4-4v8',chat:'M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1Z',close:'m6 6 12 12M6 18 18 6',run:'m8 5 11 7-11 7z',code:'m8 7-5 5 5 5m8-10 5 5-5 5',up:'M12 19V5m-6 6 6-6 6 6'};
+const icons={save:'M4 3h13l3 3v15H4zM8 3v6h8V3M8 20v-7h8v7',cell:'M3 4h18v11H3zM8 20h8m-4-4v8',markdown:'M4 6h16M4 12h11M4 18h14',check:'m5 12 5 5 9-10',edit:'M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3',chat:'M5 4h14a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1Z',close:'m6 6 12 12M6 18 18 6',run:'m8 5 11 7-11 7z',code:'m8 7-5 5 5 5m8-10 5 5-5 5',up:'M12 19V5m-6 6 6-6 6 6'};
 function element(doc,tag,cls,text){
   const node=doc.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;
 }
@@ -246,14 +246,31 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     book.model.sharedModel.insertCell(index,{id:crypto.randomUUID(),cell_type:'code',source,metadata:{},outputs:[],execution_count:null});
     book.deselectAll();book.activeCellIndex=index;book.activeCell?.node.scrollIntoView({block:'nearest'});return book.activeCell;
   }
+  function newMarkdownCell(source='## '){
+    if(!writable())return null;
+    const index=Math.max(0,book.activeCellIndex+1);
+    book.model.sharedModel.insertCell(index,{id:crypto.randomUUID(),cell_type:'markdown',source,metadata:{}});
+    book.deselectAll();book.activeCellIndex=index;
+    const cell=book.activeCell;
+    if(cell){
+      if('rendered' in cell)cell.rendered=false;
+      book.mode='edit';
+      cell.node.scrollIntoView({block:'nearest'});
+      cell.editor?.focus();
+    }
+    schedulePaint();
+    return cell;
+  }
   function showAssistant(value){
     assistantOpen=value;desk.dataset.assistant=value?'open':'closed';aside.hidden=!value;divider.setActive(value);
     if(value){renderThread();loadProviders();input.focus();}else transcript.select(null);
     schedulePaint();
     layout();
   }
-  const add=icon(document,'cell','新建卡片',()=>{const cell=newCell();cell?.editor?.focus();});
-  add.disabled=!writable();controls.append(add);
+  const addMd=icon(document,'markdown','新建说明（Markdown）',()=>{newMarkdownCell();});
+  addMd.disabled=!writable();
+  const add=icon(document,'cell','新建代码卡片',()=>{const cell=newCell();cell?.editor?.focus();});
+  add.disabled=!writable();controls.append(addMd,add);
   head.append(heading,targetName,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(toolPopover,reference,input,composerFooter,send);aside.append(head,thread,form,statsDock);desk.append(aside);
   const divider=ForgeNavigation.resizable({layout:desk,sidebar:aside,label:'卡片助手',right:true,active:false});
   function ask(item){
@@ -488,8 +505,26 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       if(cell.model.type!=='code'){
         let bar=decorated.get(cell);
         if(!bar){
-          bar=element(doc,'header','df-cell-tools');bar.append(element(doc,'span','df-cell-title'),element(doc,'small','df-save-state'),saveButton(cell));
+          const toggle=icon(doc,'check','完成并预览说明',()=>{
+            if(!('rendered' in cell))return;
+            focusCell(cell);
+            cell.rendered=!cell.rendered;
+            book.mode=cell.rendered?'command':'edit';
+            if(!cell.rendered)cell.editor?.focus();
+            schedulePaint();
+          });
+          bar=element(doc,'header','df-cell-tools');bar.append(element(doc,'span','df-cell-title'),element(doc,'small','df-save-state'),toggle,saveButton(cell));
           bar.release=()=>{};cell.node.prepend(bar);decorated.set(cell,bar);
+        }
+        const toggleBtn=bar.children[2];
+        const isMd=cell.model.type==='markdown'&&'rendered' in cell;
+        toggleBtn.hidden=!isMd;
+        if(isMd){
+          const rendered=!!cell.rendered;
+          toggleBtn.title=rendered?'编辑说明':'完成并预览说明';
+          toggleBtn.setAttribute('aria-label',toggleBtn.title);
+          toggleBtn.querySelector('path')?.setAttribute('d',rendered?icons.edit:icons.check);
+          toggleBtn.disabled=!writable()&&rendered;
         }
         bar.children[1].textContent=storage.status(cell.model);bar.lastChild.disabled=!writable();
         continue;
@@ -616,6 +651,6 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     document.removeEventListener('click',onDocClick,true);
     win.removeEventListener('keydown',saveShortcut,true);window.removeEventListener('keydown',saveShortcut,true);
     remember();dead=true;outputObserver.disconnect();book.node.querySelectorAll('.df-dataframe-view').forEach(view=>view.remove());win.removeEventListener('pagehide',remember);observer.disconnect();win.cancelAnimationFrame(paintFrame);book.activeCellChanged.disconnect(trackSelection);panel.model?.contentChanged.disconnect(changed);panel.context.pathChanged.disconnect(rename);
-    win.removeEventListener('keydown',onResizeKey,true);divider.dispose();for(const [cell,bar] of decorated){cell.model.stateChanged.disconnect(onExecution);bar.release();bar.remove();}transcript.dispose();aside.remove();add.remove();delete desk.dataset.assistant;
+    win.removeEventListener('keydown',onResizeKey,true);divider.dispose();for(const [cell,bar] of decorated){cell.model.stateChanged.disconnect(onExecution);bar.release();bar.remove();}transcript.dispose();aside.remove();addMd.remove();add.remove();delete desk.dataset.assistant;
   }};
 }
