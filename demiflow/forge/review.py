@@ -61,58 +61,115 @@ def _prompt(goal, guide, captured, observations):
     return prompt
 
 
-def _report_error():
-    return ForgeError('独立评审报告缺少必要字段或源码依据，请重新评审。', code='inspection_incomplete')
+def _report_error(reason=None):
+    prefix = '独立评审报告缺少必要字段或源码依据'
+    if reason:
+        return ForgeError(f'{prefix}（{reason}），请重新评审。', code='inspection_incomplete')
+    return ForgeError(f'{prefix}，请重新评审。', code='inspection_incomplete')
 
 
-def _text(value, maximum):
-    if not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > maximum:
-        raise _report_error()
+def _clip(value, limit=80):
+    text = ' '.join(str(value).split())
+    return text if len(text) <= limit else text[:limit - 1] + '…'
+
+
+def _text(value, maximum, label='文本字段'):
+    if not isinstance(value, str) or not value.strip():
+        raise _report_error(f'{label} 缺失或为空')
+    if len(value.encode('utf-8')) > maximum:
+        raise _report_error(f'{label} 超过长度上限 ({maximum} 字节)')
     return value.strip()
 
 
-def _items(value, limit):
-    if not isinstance(value, list) or len(value) > limit:
-        raise _report_error()
+def _items(value, limit, label='列表字段'):
+    if not isinstance(value, list):
+        raise _report_error(f'{label} 不是列表')
+    if len(value) > limit:
+        raise _report_error(f'{label} 数量超过上限 ({len(value)} > {limit})')
     return value
 
 
-def _citation(item, files):
-    if not isinstance(item, dict) or item.get('topic') not in TOPICS:
-        raise _report_error()
+def _citation(item, files, label='引用'):
+    if not isinstance(item, dict):
+        raise _report_error(f'{label} 不是对象')
+    if item.get('topic') not in TOPICS:
+        raise _report_error(f'{label}.topic 无效: {item.get("topic")!r}')
     path, side, line = item.get('path'), item.get('side'), item.get('line')
-    if not isinstance(path, str) or path not in files or side not in ('before', 'after') or type(line) is not int:
-        raise _report_error()
+    if not isinstance(path, str) or path not in files:
+        raise _report_error(f'{label}.path 不在本次评审材料中: {path!r}')
+    if side not in ('before', 'after'):
+        raise _report_error(f'{label}.side 必须为 before 或 after: {side!r}')
+    if type(line) is not int:
+        raise _report_error(f'{label}.line 必须为整数: {line!r}')
     source = files[path].get(side)
-    lines = source.splitlines() if source is not None else ()
-    quote = _text(item.get('quote'), 1024)
-    if not 1 <= line <= len(lines) or quote not in lines[line - 1]:
-        raise _report_error()
+    if source is None:
+        raise _report_error(f'{label} 缺少 {path} 的 {side} 版本源码')
+    lines = source.splitlines()
+    quote = _text(item.get('quote'), 1024, f'{label}.quote')
+    if not 1 <= line <= len(lines):
+        raise _report_error(f'{label} 行号越界: {path}:{line} ({side}, 共 {len(lines)} 行)')
+    if quote not in lines[line - 1]:
+        raise _report_error(f'{label} 引用与 {path}:{line} ({side}) 源码不匹配: {_clip(quote, 60)!r}')
     return dict(topic=item['topic'], path=path, side=side, line=line, quote=quote)
 
 
 def _checked_report(response, files):
     if not isinstance(response, dict):
-        raise _report_error()
-    identity = {key: _text(response.get(key), 256) for key in ('provider', 'model', 'session_id')}
+        raise _report_error('评审返回顶层结构不是对象')
+    identity = {key: _text(response.get(key), 256, f'评审身份 {key}') for key in ('provider', 'model', 'session_id')}
     body = response.get('report')
-    if not isinstance(body, dict) or len(json.dumps(body, ensure_ascii=False).encode()) > MAX_REPORT_BYTES:
-        raise _report_error()
+    if not isinstance(body, dict):
+        raise _report_error('report 缺失或不是 JSON 对象')
+    if len(json.dumps(body, ensure_ascii=False).encode()) > MAX_REPORT_BYTES:
+        raise _report_error(f'report 超过单次大小上限 ({MAX_REPORT_BYTES} 字节)')
     checks, findings = [], []
-    for row in _items(body.get('checks'), 24):
-        checks.append({**_citation(row, files), 'reason': _text(row.get('reason'), 2048)})
+    for idx, row in enumerate(_items(body.get('checks'), 24, 'checks'), 1):
+        checks.append({**_citation(row, files, f'checks[{idx}]'),
+                       'reason': _text(row.get('reason'), 2048, f'checks[{idx}].reason')})
     if not checks:
-        raise _report_error()
-    for row in _items(body.get('findings'), 24):
-        finding = _citation(row, files)
+        raise _report_error('checks 为空，至少需要 1 条带源码依据的核查')
+    for idx, row in enumerate(_items(body.get('findings'), 24, 'findings'), 1):
+        finding = _citation(row, files, f'findings[{idx}]')
         if row.get('severity') not in ('blocking', 'suggestion'):
-            raise _report_error()
+            raise _report_error(f'findings[{idx}].severity 无效: {row.get("severity")!r}')
         finding['severity'] = row['severity']
         for field in ('trigger', 'impact', 'suggestion'):
-            finding[field] = _text(row.get(field), 2048)
+            finding[field] = _text(row.get(field), 2048, f'findings[{idx}].{field}')
         findings.append(finding)
-    gaps = [_text(gap, 1024) for gap in _items(body.get('gaps'), 24)]
+    gaps = [_text(gap, 1024, f'gaps[{idx}]') for idx, gap in enumerate(_items(body.get('gaps'), 24, 'gaps'), 1)]
     return identity, checks, findings, gaps
+
+
+def _draft_summary(response):
+    body = response.get('report') if isinstance(response, dict) else None
+    if not isinstance(body, dict):
+        return None
+    parts = []
+    checks = body.get('checks')
+    findings = body.get('findings')
+    gaps = body.get('gaps')
+    if isinstance(checks, list):
+        parts.append(f'checks={len(checks)}')
+    if isinstance(findings, list):
+        preview = []
+        for row in findings[:3]:
+            if isinstance(row, dict):
+                loc = f"{row.get('path', '?')}:{row.get('line', '?')}"
+                msg = row.get('impact') or row.get('suggestion') or row.get('trigger') or ''
+                sev = row.get('severity') or ''
+                item = ' '.join(x for x in (f'[{sev}]' if sev else '', loc, _clip(msg, 48) if msg else '') if x)
+                if item:
+                    preview.append(item)
+        text = f'findings={len(findings)}'
+        if preview:
+            text += ' (' + '; '.join(preview) + ')'
+        parts.append(text)
+    if isinstance(gaps, list) and gaps:
+        first_gap = _clip(gaps[0], 60)
+        parts.append(f'gaps={len(gaps)} ({first_gap})')
+    if not parts:
+        return None
+    return '未通过校验的评审原始输出摘要：' + _clip('，'.join(parts), 240)
 
 
 def _requested_sources(response, root, files):
@@ -120,10 +177,10 @@ def _requested_sources(response, root, files):
     if not isinstance(body, dict) or 'request_files' not in body:
         return []
     if set(body) != {'request_files'} or not body['request_files']:
-        raise _report_error()
+        raise _report_error('request_files 补读请求必须单独返回且非空')
     paths = []
-    for path in _items(body['request_files'], 4):
-        name = _text(path, 1024)
+    for idx, path in enumerate(_items(body['request_files'], 4, 'request_files'), 1):
+        name = _text(path, 1024, f'request_files[{idx}]')
         relative_path(root, name)
         if (name.split('/')[0] not in ('flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests')
                 or name in files or name in paths):
@@ -159,6 +216,7 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
         return bundle
 
     captured = capture(evidence)
+    response = None
     try:
         if not captured['files']:
             report['gaps'].append('没有可供评审的源码，请选择入口或变更文件。')
@@ -172,7 +230,8 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
                     or any(captured['files'].get(name) != item for name, item in first['files'].items())
                     or not verify_evidence(root, first, exclude=exclude, prior_sources=prior_sources)):
                 raise ForgeError('补读期间评审材料发生变化。', code='inputs_changed')
-            report['additional_read'] = dict(paths=requested, session_id=_text(response.get('session_id'), 256))
+            report['additional_read'] = dict(paths=requested,
+                                             session_id=_text(response.get('session_id'), 256, '评审身份 session_id'))
             prompt = _prompt(goal.strip(), guide.decode(), captured, observations)
             response = reviewer(prompt + '\nThe additional read is complete. Return the final report now.')
         identity, checks, findings, gaps = _checked_report(response, captured['files'])
@@ -187,6 +246,10 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
             return report
     except ForgeError as exc:
         report['diagnostics'].append(dict(code=exc.code, detail=str(exc)))
+        if exc.code == 'inspection_incomplete':
+            summary = _draft_summary(response)
+            if summary:
+                report['diagnostics'].append(dict(code=exc.code, detail=summary))
         return report
     if any(row['severity'] == 'blocking' for row in findings):
         report['status'] = 'invalid'

@@ -37,12 +37,42 @@ def test_each_review_has_its_own_identity_and_bound_evidence(project):
 
 
 def test_review_must_cite_source_at_the_claimed_location(project):
-    for updates in ({'line': 1}, {'line': True}, {'path': '../elsewhere'}, {'side': 'before'},
-                    {'quote': 'return row["name"].upper()'}):
+    cases = (
+        ({'line': 1}, '源码不匹配'),
+        ({'line': 99}, '行号越界'),
+        ({'line': True}, 'line 必须为整数'),
+        ({'path': '../elsewhere'}, 'path 不在本次评审材料中'),
+        ({'side': 'before'}, '缺少 operators/normalize.py 的 before 版本源码'),
+        ({'quote': 'return row["name"].upper()'}, '源码不匹配'),
+    )
+    for updates, expected in cases:
         candidate = response()
         candidate['report']['checks'][0].update(updates)
         outcome = invoke(project, candidate)
         assert outcome['status'] == 'incomplete' and outcome['diagnostics']
+        detail = outcome['diagnostics'][0]['detail']
+        assert '独立评审报告缺少必要字段或源码依据' in detail
+        assert expected in detail, (updates, detail)
+
+
+def test_incomplete_review_includes_specific_reason_and_draft_summary(project):
+    candidate = response()
+    candidate['report']['findings'] = [dict(
+        topic='wiring', path='operators/normalize.py', line=2, side='after',
+        quote='wrong quote', severity='blocking',
+        trigger='missing key', impact='KeyError on name', suggestion='use row.get("name")',
+    )]
+    outcome = invoke(project, candidate)
+    assert outcome['status'] == 'incomplete'
+    details = [row['detail'] for row in outcome['diagnostics']]
+    assert any('findings[1]' in d and '源码不匹配' in d for d in details), details
+    assert any('原始输出摘要' in d and 'KeyError on name' in d for d in details), details
+
+    empty_checks = response()
+    empty_checks['report']['checks'] = []
+    outcome_empty = invoke(project, empty_checks)
+    assert outcome_empty['status'] == 'incomplete'
+    assert 'checks 为空' in outcome_empty['diagnostics'][0]['detail']
 
 
 def test_blocker_optional_suggestion_and_gap_have_distinct_effects(project):

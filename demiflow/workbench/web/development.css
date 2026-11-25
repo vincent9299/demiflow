@@ -106,9 +106,9 @@ dialog pre{max-width:75vw;max-height:65vh;overflow:auto;white-space:pre-wrap;ove
 .dev-sidebar-pane{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
 .dev-file-explorer{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
 .dev-changed-section{display:flex;flex-direction:column;min-height:28px;overflow:hidden}
-.dev-changed-section.is-collapsed{min-height:auto;border-bottom:1px solid #ececef;padding-bottom:4px;margin-bottom:4px}
+.dev-changed-section.is-collapsed{min-height:auto;border-top:1px solid #ececef;padding-top:4px;margin-top:4px}
 .dev-tree-section{display:flex;flex-direction:column;min-height:28px;flex:1 1 0%;overflow:hidden}
-.dev-tree-section.is-collapsed{min-height:auto}
+.dev-tree-section.is-collapsed{min-height:auto;border-bottom:1px solid #ececef;padding-bottom:4px;margin-bottom:4px}
 .dev-section-header{display:flex;align-items:center;gap:4px;padding:2px 2px 4px;flex:none}
 .dev-section-toggle{display:flex;align-items:center;gap:5px;flex:1;min-width:0;border:0;background:transparent;padding:3px 4px;border-radius:6px;cursor:pointer;text-align:left;color:#52525b;font:inherit}
 .dev-section-toggle:hover{background:#f1f1f4;color:#09090b}
@@ -218,6 +218,7 @@ dialog pre{max-width:75vw;max-height:65vh;overflow:auto;white-space:pre-wrap;ove
 .dev-mode-btn:disabled{opacity:.4;cursor:default}
 .dev-action-btn{border:1px solid #e4e4e7;background:#fff;color:#27272a;font:inherit;font-size:12px;font-weight:500;padding:3px 9px;border-radius:6px;cursor:pointer;line-height:20px;white-space:nowrap;flex-shrink:0}
 .dev-action-btn:hover{background:#f4f4f5;color:#09090b}
+.dev-action-btn.is-active{background:#f4f4f5;border-color:#a1a1aa;color:#09090b}
 .dev-action-btn:disabled{opacity:.45;cursor:default}
 .dev-action-btn:disabled:hover{background:#fff;color:#27272a}
 .dev-action-primary{background:#18181b;border-color:#18181b;color:#fff}
