@@ -405,35 +405,104 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
     return sdk_issues, cross_issues
 
 
-def _thin_operator_wrapper_issues(path: Path) -> list[tuple[int, str, str]]:
-    """Detect zero-logic shim operators in operators/*.py that only forward or re-export another operator module."""
+def _operator_import_targets(root: Path, tree: ast.AST, *, in_operators: bool) -> list[tuple[int, str, bool]]:
+    """Return [(lineno, op_stem, is_private)] for every import of an operators/<stem>.py module (including nested)."""
+    prefixes = _project_import_prefixes(root)
+    hits: list[tuple[int, str, bool]] = []
+    seen: set[tuple[int, str]] = set()
+
+    def record(lineno: int, stem: str):
+        if not stem or stem == '*' or stem == '__init__':
+            return
+        key = (lineno, stem)
+        if key not in seen:
+            seen.add(key)
+            hits.append((lineno, stem, stem.startswith('_')))
+
+    def extract_after_operators(parts: tuple[str, ...]) -> tuple[str, ...] | None:
+        if not parts:
+            return None
+        if parts[0] == 'operators':
+            return parts[1:]
+        for pref in prefixes:
+            if len(parts) > len(pref) and parts[:len(pref)] == pref and parts[len(pref)] == 'operators':
+                return parts[len(pref) + 1:]
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ''
+            if node.level >= 1 and in_operators:
+                if not mod:
+                    for alias in node.names:
+                        record(node.lineno, alias.name)
+                else:
+                    record(node.lineno, mod.split('.')[0])
+            elif node.level == 0 and mod:
+                after = extract_after_operators(tuple(mod.split('.')))
+                if after is None:
+                    continue
+                if len(after) == 0:
+                    for alias in node.names:
+                        record(node.lineno, alias.name)
+                else:
+                    record(node.lineno, after[0])
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                after = extract_after_operators(tuple(alias.name.split('.')))
+                if after and len(after) >= 1:
+                    record(node.lineno, after[0])
+    return hits
+
+
+def _thin_operator_wrapper_issues(root: Path, path: Path) -> list[tuple[int, str, str]]:
+    """OP-O1: Detect zero-logic shim operators in operators/*.py that only forward or re-export another operator module."""
     try:
         tree = ast.parse(path.read_text(encoding='utf-8'))
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []
+    prefixes = _project_import_prefixes(root)
+
+    def extract_after_operators(parts: tuple[str, ...]) -> tuple[str, ...] | None:
+        if not parts:
+            return None
+        if parts[0] == 'operators':
+            return parts[1:]
+        for pref in prefixes:
+            if len(parts) > len(pref) and parts[:len(pref)] == pref and parts[len(pref)] == 'operators':
+                return parts[len(pref) + 1:]
+        return None
+
     op_modules: set[str] = set()
     op_symbols: dict[str, str] = {}
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
             mod = node.module or ''
-            is_op_mod = (
-                (node.level >= 1 and (not mod or not mod.startswith('_')))
-                or mod == 'operators'
-                or mod.startswith('operators.')
-            )
-            if not is_op_mod:
-                continue
-            for alias in node.names:
-                if alias.name == '*':
+            if node.level >= 1:
+                for alias in node.names:
+                    if alias.name == '*':
+                        continue
+                    local = alias.asname or alias.name
+                    if not mod:
+                        op_modules.add(local)
+                    else:
+                        op_symbols[local] = f'{mod}.{alias.name}'
+            elif mod:
+                after = extract_after_operators(tuple(mod.split('.')))
+                if after is None:
                     continue
-                local = alias.asname or alias.name
-                if (node.level >= 1 and not mod) or mod == 'operators':
-                    op_modules.add(local)
-                else:
-                    op_symbols[local] = f'{mod}.{alias.name}'
+                for alias in node.names:
+                    if alias.name == '*':
+                        continue
+                    local = alias.asname or alias.name
+                    if len(after) == 0:
+                        op_modules.add(local)
+                    else:
+                        op_symbols[local] = f'{after[0]}.{alias.name}'
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith('operators.') and alias.asname:
+                after = extract_after_operators(tuple(alias.name.split('.')))
+                if after and len(after) >= 1 and alias.asname:
                     op_modules.add(alias.asname)
     if not op_modules and not op_symbols:
         return []
@@ -479,46 +548,150 @@ def _thin_operator_wrapper_issues(path: Path) -> list[tuple[int, str, str]]:
     return issues
 
 
-def _cross_operator_module_imports(path: Path) -> list[tuple[int, str]]:
-    """Detect public operator modules importing another public operator module (preventing half-shim chains)."""
+def _cross_operator_module_imports(root: Path, path: Path) -> list[tuple[int, str]]:
+    """OP-L1: Detect public operator modules importing another public operator module (including nested imports)."""
     if path.stem.startswith('_'):
         return []
     try:
         tree = ast.parse(path.read_text(encoding='utf-8'))
     except (OSError, UnicodeDecodeError, SyntaxError):
         return []
-    issues: list[tuple[int, str]] = []
+    return [
+        (lineno, stem)
+        for lineno, stem, is_priv in _operator_import_targets(root, tree, in_operators=True)
+        if not is_priv and stem != path.stem
+    ]
+
+
+def _private_operator_cross_imports(root: Path, path: Path) -> list[tuple[int, str]]:
+    """OP-L2: Private utility modules (operators/_*.py) must be pure leaf utilities without importing other operators/."""
+    if not path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    return [
+        (lineno, stem)
+        for lineno, stem, _ in _operator_import_targets(root, tree, in_operators=True)
+        if stem != path.stem
+    ]
+
+
+def _flow_private_operator_imports(root: Path, path: Path) -> list[tuple[int, str]]:
+    """OP-L2: Flows may only reference public operator modules, never private operators/_*.py utilities."""
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    return [
+        (lineno, stem)
+        for lineno, stem, is_priv in _operator_import_targets(root, tree, in_operators=False)
+        if is_priv
+    ]
+
+
+def _top_level_callables(path: Path) -> set[str]:
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return set()
+    return {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+
+
+def _declared_string_list(tree: ast.Module, var_name: str) -> set[str]:
+    names: set[str] = set()
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom):
-            mod = node.module or ''
-            if node.level >= 1:
-                if not mod:
-                    for alias in node.names:
-                        if alias.name != '*' and not alias.name.startswith('_'):
-                            issues.append((node.lineno, alias.name))
-                else:
-                    head = mod.split('.')[0]
-                    if head and not head.startswith('_'):
-                        issues.append((node.lineno, mod))
-            elif mod == 'operators':
-                for alias in node.names:
-                    if alias.name != '*' and not alias.name.startswith('_'):
-                        issues.append((node.lineno, f'operators.{alias.name}'))
-            elif mod.startswith('operators.'):
-                sub = mod.split('.', 1)[1].split('.')[0]
-                if sub and not sub.startswith('_'):
-                    issues.append((node.lineno, mod))
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name.startswith('operators.'):
-                    sub = alias.name.split('.', 1)[1].split('.')[0]
-                    if sub and not sub.startswith('_'):
-                        issues.append((node.lineno, alias.name))
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == var_name:
+                    if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                names.add(elt.value)
+    return names
+
+
+def _private_operator_reexport_issues(
+    root: Path, path: Path, private_callables_cache: dict[str, set[str]]
+) -> list[tuple[int, str, str]]:
+    """OP-O2: Detect public operator modules re-exporting functions/classes imported from operators/_*.py."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    prefixes = _project_import_prefixes(root)
+
+    def extract_private_stem(node: ast.ImportFrom) -> str | None:
+        mod = node.module or ''
+        if node.level >= 1 and mod:
+            head = mod.split('.')[0]
+            return head if head.startswith('_') else None
+        if node.level == 0 and mod:
+            parts = tuple(mod.split('.'))
+            after = None
+            if parts[0] == 'operators':
+                after = parts[1:]
+            else:
+                for pref in prefixes:
+                    if len(parts) > len(pref) and parts[:len(pref)] == pref and parts[len(pref)] == 'operators':
+                        after = parts[len(pref) + 1:]
+                        break
+            if after and len(after) >= 1 and after[0].startswith('_'):
+                return after[0]
+        return None
+
+    imported_callables: list[tuple[int, str, str]] = []
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        stem = extract_private_stem(node)
+        if not stem:
+            continue
+        if stem not in private_callables_cache:
+            priv_file = root / 'operators' / f'{stem}.py'
+            private_callables_cache[stem] = _top_level_callables(priv_file) if priv_file.is_file() else set()
+        priv_callables = private_callables_cache[stem]
+        for alias in node.names:
+            if alias.name == '*':
+                continue
+            local = alias.asname or alias.name
+            if alias.name in priv_callables and not local.startswith('_'):
+                imported_callables.append((node.lineno, local, f'{stem}.{alias.name}'))
+
+    if not imported_callables:
+        return []
+
+    exported_names = _declared_string_list(tree, '__demiflow_operators__') | _declared_string_list(tree, '__all__')
+    used_internally: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        # Exclude __demiflow_operators__ / __all__ assignments from counting as internal use.
+        if isinstance(node, ast.Assign) and all(
+            isinstance(t, ast.Name) and t.id in ('__demiflow_operators__', '__all__')
+            for t in node.targets
+        ):
+            continue
+        for child in ast.walk(node):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+                used_internally.add(child.id)
+
+    issues: list[tuple[int, str, str]] = []
+    for lineno, local, target in imported_callables:
+        if local in exported_names or local not in used_internally:
+            issues.append((lineno, local, target))
     return issues
 
 
 def _missing_operator_description_issues(path: Path) -> list[tuple[int, str]]:
-    """Detect public operator functions/classes in operators/*.py lacking a semantic first-line docstring."""
+    """OP-S1: Detect public operator functions/classes in operators/*.py lacking a semantic first-line docstring."""
     if path.stem.startswith('_'):
         return []
     try:
@@ -662,7 +835,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         if not param_files and not any(p.startswith('parameters/') for p in bound_params):
             add('legacy_parameters', 'parameters', 'parameters/ 为已废弃的空兼容目录，请清理。')
 
-    # 3. Orphan unregistered files in flows/.
+    # 3. Orphan unregistered files & private-operator import guard in flows/.
     for rel in _iter_tree_files(root, 'flows', exclude=exclude):
         p = Path(rel)
         if p.name == '__init__.py' or p.suffix == '.pyc':
@@ -670,11 +843,28 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         if p.suffix == '.py':
             if rel not in registered_flows:
                 add('orphan_flows', rel, 'flows/ 下存在未在 workspace.json 登记的孤儿文件；请登记为正式入口，共享逻辑迁入 operators/，废弃文件请清理。')
+            flow_priv = _flow_private_operator_imports(root, root / rel)
+            if flow_priv:
+                first_line, first_mod = flow_priv[0]
+                extra = f' 等 {len(flow_priv)} 处' if len(flow_priv) > 1 else ''
+                inspected.add(rel)
+                by_category.setdefault('flow_imports_private_operator', []).append(
+                    diagnostic('DF-02', rel,
+                               f'Flow 直接导入了私有工具模块 operators/{first_mod}.py{extra}；按 DF-02/OP-L2 规范，Flow 仅允许引用公开业务算子模块，若该能力需作为流程节点编排请定义在公开算子模块中。',
+                               line=first_line)
+                )
         else:
             add('orphan_flows', rel, 'flows/ 仅存放已登记的 Python Flow 入口文件；配置或辅助文件请迁入对应标准目录。')
 
-    # 4. Unreferenced / non-operator / Notebook-UI files in operators/.
-    for rel in _iter_tree_files(root, 'operators', exclude=exclude):
+    # 4. Unreferenced / non-operator / Notebook-UI / MECE rich-operator checks in operators/.
+    operator_files = _iter_tree_files(root, 'operators', exclude=exclude)
+    public_operator_stems = {
+        Path(rel).stem
+        for rel in operator_files
+        if Path(rel).suffix == '.py' and Path(rel).name != '__init__.py' and not Path(rel).stem.startswith('_')
+    }
+    private_callables_cache: dict[str, set[str]] = {}
+    for rel in operator_files:
         p = Path(rel)
         if p.name == '__init__.py' or p.suffix == '.pyc':
             continue
@@ -684,26 +874,60 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         if _imports_notebook_ui(root / rel):
             add('notebook_tool_in_operators', rel, 'operators/ 模块导入了 Notebook 交互库（IPython/ipywidgets），属于 Notebook 查看/分析/标注工具；按 DF-02 规范请迁入 data_tools/。')
             continue
-        shims = _thin_operator_wrapper_issues(root / rel)
+        # OP-L2: Private utility modules (operators/_*.py) — no 1:1 shadow mirrors and pure leaf utilities only.
+        if p.stem.startswith('_'):
+            shadow_pub = p.stem[1:]
+            if shadow_pub in public_operator_stems:
+                inspected.add(rel)
+                by_category.setdefault('shadow_private_operator_module', []).append(
+                    diagnostic('DF-02', rel,
+                               f'私有模块 {rel} 与公开模块 operators/{shadow_pub}.py 同名（1:1 影子私仓）；按 DF-02/OP-L2 规范，禁止通过建同名私有镜像绕过模块边界，请按底层通用能力命名纯工具模块（如 _codec.py、_hash.py）并将业务算子保留在公开模块中。',
+                               line=1)
+                )
+            priv_cross = _private_operator_cross_imports(root, root / rel)
+            if priv_cross:
+                first_line, first_mod = priv_cross[0]
+                extra = f' 等 {len(priv_cross)} 处' if len(priv_cross) > 1 else ''
+                inspected.add(rel)
+                by_category.setdefault('private_operator_cross_import', []).append(
+                    diagnostic('DF-02', rel,
+                               f'私有工具模块 {rel} 导入了另一算子模块 {first_mod}{extra}；按 DF-02/OP-L2 规范，operators/_*.py 必须为无业务依赖的纯底层叶节点工具，禁止私有模块之间互相导入或依赖公开算子模块。',
+                               line=first_line)
+                )
+        # OP-O1: Zero-logic forwarding shims or assignment re-exports.
+        shims = _thin_operator_wrapper_issues(root, root / rel)
         if shims:
             first_line, first_name, first_target = shims[0]
             extra = f' 等 {len(shims)} 处' if len(shims) > 1 else ''
             inspected.add(rel)
             by_category.setdefault('thin_operator_wrapper', []).append(
                 diagnostic('DF-02', rel,
-                           f'算子 {first_name} 仅为转调或重导出 {first_target} 的无逻辑垫片{extra}；按 DF-02 规范，请在 Flow 中直接引用目标算子并用 fn_kwargs 传参，或将逻辑内联为自包含算子，避免多层转包增加阅读负担。',
+                           f'算子 {first_name} 仅为转调或重导出 {first_target} 的无逻辑垫片{extra}；按 DF-02/OP-O1 规范，请在 Flow 中直接引用目标算子并用 fn_kwargs 传参，或将逻辑内联为自包含算子，避免多层转包增加阅读负担。',
                            line=first_line)
             )
-        cross_ops = _cross_operator_module_imports(root / rel)
+        # OP-L1: Public operator modules must not import each other.
+        cross_ops = _cross_operator_module_imports(root, root / rel)
         if cross_ops:
             first_line, first_mod = cross_ops[0]
             extra = f' 等 {len(cross_ops)} 处' if len(cross_ops) > 1 else ''
             inspected.add(rel)
             by_category.setdefault('cross_operator_module_import', []).append(
                 diagnostic('DF-02', rel,
-                           f'公开业务算子模块导入了另一公开算子模块 {first_mod}{extra}；为避免“半垫片”多层套娃、保证算子自包含充血，公开业务算子模块之间禁止互相导入调用；纯底层通用工具（编解码、序列化、hash 等）请统一命名为 operators/_<name>.py。',
+                           f'公开业务算子模块导入了另一公开算子模块 {first_mod}{extra}；按 DF-02/OP-L1 规范，公开业务算子模块之间禁止互相导入调用（含函数内延迟导入），请保持算子自包含充血，仅共享无业务协议依赖的纯底层叶节点工具 operators/_<util>.py。',
                            line=first_line)
             )
+        # OP-O2: Public operator modules must not re-export callables imported from operators/_*.py.
+        reexports = _private_operator_reexport_issues(root, root / rel, private_callables_cache)
+        if reexports:
+            first_line, first_name, first_target = reexports[0]
+            extra = f' 等 {len(reexports)} 处' if len(reexports) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('private_operator_reexport', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开算子模块直接重导出了私有模块函数/类 {first_name}（来自 {first_target}）{extra}；按 DF-02/OP-O2 规范，公开算子必须直接定义在公开模块中，私有模块仅可作为模块内部调用的底层工具函数。',
+                           line=first_line)
+            )
+        # OP-S1: Mandatory first-line semantic docstring on public operators.
         missing_docs = _missing_operator_description_issues(root / rel)
         if missing_docs:
             first_line, first_name = missing_docs[0]
@@ -711,7 +935,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             inspected.add(rel)
             by_category.setdefault('missing_operator_description', []).append(
                 diagnostic('DF-02', rel,
-                           f'公开算子 {first_name} 缺少首行语义描述 docstring{extra}；按 DF-02 规范，每个公开代码算子（函数/Actor 类）须在首行 docstring 中写清业务语义，供工作台执行图节点直接展示。',
+                           f'公开算子 {first_name} 缺少首行语义描述 docstring{extra}；按 DF-02/OP-S1 规范，每个公开代码算子（函数/Actor 类）须在首行 docstring 中写清业务语义，供工作台执行图节点直接展示。',
                            line=first_line)
             )
         if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
