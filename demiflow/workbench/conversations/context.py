@@ -386,7 +386,7 @@ class BridgeServer:
                 if isinstance(p, str) and p:
                     recorded.add(p)
         elif action in ('register_flow', 'bind_params'):
-            recorded.add('workspace.json')
+            recorded.update(('workspace.json', '.forge/state.json'))
             params = answer.get('params')
             if isinstance(params, str) and params:
                 recorded.add(params)
@@ -397,7 +397,7 @@ class BridgeServer:
             if answer.get('gitignore_updated'):
                 recorded.add('.gitignore')
         elif action == 'slim_manifest':
-            recorded.add('workspace.json')
+            recorded.update(('workspace.json', '.forge/state.json'))
         if recorded:
             with self.lock:
                 self.authorized_layout_paths.update(recorded)

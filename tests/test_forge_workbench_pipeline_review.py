@@ -47,13 +47,27 @@ def test_author_requests_one_independent_review_and_replays_unavailable_model(tm
         assert events[-1]['data']['scope']['changed'] == ['flows/fixture.py']
         assert events[-1]['data']['goal'] == 'Describe the flow\n\nrequest delivery review fixture'
         assert warm.process.wait(timeout=5)==0
-        follow = service.start_project(workspace, root, session, 'follow', 2, 'Explain the previous review')
+        # Free static checks fail on the synthetic fixture, triggering one bounded rework round
+        # without re-running the paid independent LLM review.
+        assert result.get('auto_rework', {}).get('scheduled') is True, result
+        until = time.monotonic() + 20
+        while time.monotonic() < until:
+            current = service.store.show(workspace, session)
+            rework = current.get('turn')
+            if (current['revision'] >= 3 and rework and rework['id'] != turn['id']
+                    and rework['state'] == 'completed' and rework['cleanup'] == 'complete'
+                    and not current.get('queued_messages')):
+                break
+            time.sleep(.05)
+        current = service.store.show(workspace, session)
+        assert current['revision'] == 3 and current['turn']['state'] == 'completed' and current['turn']['cleanup'] == 'complete', current
+        follow = service.start_project(workspace, root, session, 'follow', current['revision'], 'Explain the previous review')
         later = wait_turn(service,follow['id'])
         assert later['state']=='completed'
         assert 'forge_review_result' in later['context']
         all_events = service.store.replay(workspace,session)['events']
         assert sum(ev['type']=='review.completed' for ev in all_events)==1
-        assert any(ev['type']=='history.gap' for ev in all_events if ev['turn_id']==follow['id'])
+        assert any(ev['type']=='history.gap' for ev in all_events if ev['turn_id'] not in {first['id'], turn['id']})
         assert '凭证' in str(recent_review(service.store, session))
         other = service.create_project(workspace, root, 'another', 'deepseek', new_conversation=True)['id']
         assert recent_review(service.store, other) is None

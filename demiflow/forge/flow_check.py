@@ -1169,7 +1169,9 @@ class FlowChecker:
             if receipt_origin is None and (type(version) is not int or not table):
                 self.fail(
                     "FL-05",
-                    "Input must match a bound table root and fixed version",
+                    "Input table must come from a Flow parameter declared in configs/*.json as "
+                    "{\"uri\": \"data/in.lance\", \"version\": 1} that resolves to a readable Lance table "
+                    "at a fixed version (do not hard-code the path or version in Flow code)",
                     node,
                     module,
                 )

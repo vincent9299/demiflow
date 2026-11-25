@@ -448,7 +448,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
     if pipeline_paths and not checked and not definitions and not native:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
-    if (scope['kind'] == 'project' or include_hygiene) and control.get('entries'):
+    # Hygiene applies to every declared project, including new ones without registered entries.
+    if (scope['kind'] == 'project' or include_hygiene) and view['control'] is not None:
         hygiene_paths, hygiene_issues = check_project_hygiene(
             root, control, checked_sources=sources, parameter_digests=parameter_digests,
             exclude=exclude, structural_only=(scope['kind'] != 'project'))

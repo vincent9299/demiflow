@@ -27,13 +27,13 @@
   function snapshot(parent,value){
     parent.replaceChildren(node('h3','本次参数与版本'));
     const dl=node('dl',undefined,'wb-run-definition');
-    for(const[label,text]of [['流程',value.entry],['业务参数文件',value.parameter_path||'本次内联参数'],
+    for(const[label,text]of [['流程',value.entry],['参数文件',value.parameter_path||'本次内联参数'],
       ['封存标识',value.digest],['执行经历','第 '+value.attempt+' 次启动'+(value.attempt!==value.current_attempt?' · 历史只读':'')]]){
       dl.append(node('dt',label),node('dd',text));
     }
     parent.append(dl,node('p','参数及引用来自本次封存；修改当前流程不会改变它们。','wb-caption'));
     const parameters=node('pre',JSON.stringify(value.original_parameters?.arguments??{},null,2),'wb-code');
-    parameters.setAttribute('aria-label','封存业务参数');parent.append(parameters);
+    parameters.setAttribute('aria-label','封存参数');parent.append(parameters);
     const bindings=value.report?.binding;
     if(bindings){
       const inputs=node('details');inputs.append(node('summary','固定输入与代码版本'));

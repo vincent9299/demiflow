@@ -1197,6 +1197,14 @@ class Dataset:
         This transform executes on workers when a terminal action runs. More
         than one action on a non-materialized Dataset may repeat model calls;
         materialize before reuse when repetition is unintended.
+
+        ``temperature`` is sent only when given (finite, >= 0); the platform
+        never injects a default. It applies to HTTP transports only, merges into
+        ``options['request_options']`` and rejects a conflicting value there.
+
+        ``options={'cli': {...}}`` runs any local CLI as the model transport
+        instead of HTTP (the CLI manages its own login and credentials; same
+        options contract as ``map_prompt_async``, see its docstring).
         """
         name = str(prompt or "").strip()
         if not name:
@@ -1485,6 +1493,26 @@ class Dataset:
         stop/service failures in error_output; user stop and storage failures
         still stop the action. Upstream assignment must bound route backlog to
         avoid filling all workers with one route's waiting rows.
+
+        ``temperature`` is sent only when given (finite, >= 0); the platform
+        never injects a default. It applies to HTTP transports only, merges into
+        ``options['request_options']`` and rejects a conflicting value there.
+
+        ``options={'cli': {...}}`` runs any local CLI (or script) as the model
+        transport instead of HTTP; the CLI manages its own login/credentials.
+        Keys: ``command`` (required argv list, no shell) may use placeholders
+        ``{model}``, ``{prompt_file}``, ``{messages_file}``, ``{schema_file}``,
+        ``{output_file}``, ``{work_dir}``, ``{images_dir}``, ``{artifacts_dir}``;
+        ``input`` is ``'stdin'`` (default) or ``'file'``; ``output`` is
+        ``'stdout'`` (default) or ``'file'`` (requires ``{output_file}``);
+        optional ``cwd`` (absolute path), ``env_passthrough`` (environment
+        variable names), ``artifact_store`` with ``max_artifact_files`` /
+        ``max_artifact_bytes`` (required for ``{artifacts_dir}``). A sibling
+        ``options['timeout_s']`` bounds each call. Responses are journaled,
+        replayed and schema-validated like HTTP; ``temperature`` is rejected.
+        Example: ``options={'cli': {'command': ['my-llm', '--model', '{model}',
+        '--prompt-file', '{prompt_file}', '--out', '{output_file}'],
+        'output': 'file'}}``.
         """
         if 'journal_dir' in (options or {}):
             raise ValueError('map_prompt_async recovery is execution-owned; remove journal options')

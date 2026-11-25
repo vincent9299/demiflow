@@ -31,6 +31,7 @@ from demiflow.workbench.conversations.common import read_file
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import snapshot
 from demiflow.workbench.conversations.common import wire
+from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.policy import Deployment, turn_deadline
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.transport import Transport
@@ -97,8 +98,62 @@ def _project_has_business_python(project_root) -> bool | None:
     return isinstance(py, str) and bool(py.strip())
 
 
-_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'AGENTS.md', 'PIPELINE_SPEC.md')
+_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md')
+_PROTECTED_GUARD_TREES = ('data_tools',)
 _PROTECTED_GUARD_MAX_BYTES = 512 * 1024
+_PROTECTED_TREE_MAX_ENTRIES = 2048
+_PROTECTED_TREE_MAX_BYTES = 16 * 1024**2
+
+
+class _ProtectedSnapshot(dict):
+    """Pre-turn bytes of guarded files plus the exact file/dir listing of guarded trees."""
+
+    def __init__(self):
+        super().__init__()
+        self.trees: dict[str, tuple[frozenset, frozenset]] = {}
+
+
+def _tree_listing(root: Path, top: str):
+    """Return (files, dirs) relative paths under a guarded tree, or None when it exceeds budget."""
+    base = root / top
+    files, dirs = set(), set()
+    try:
+        if base.is_symlink() or not base.is_dir():
+            return frozenset(), frozenset()
+    except OSError:
+        return frozenset(), frozenset()
+    pending = [base]
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    rel = Path(entry.path).relative_to(root).as_posix()
+                    if entry.name == '__pycache__':
+                        continue
+                    if len(files) + len(dirs) >= _PROTECTED_TREE_MAX_ENTRIES:
+                        return None
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.add(rel)
+                        pending.append(Path(entry.path))
+                    else:
+                        files.add(rel)
+        except OSError:
+            continue
+    return frozenset(files), frozenset(dirs)
+
+
+def _authorized_by_host(rel: str, authorized) -> bool:
+    """Host manage_project_layout writes are legitimate; single-segment role dirs authorize only themselves."""
+    for item in authorized or ():
+        if not isinstance(item, str) or not item:
+            continue
+        item = item.strip('/')
+        if rel == item:
+            return True
+        if len(Path(item).parts) >= 2 and rel.startswith(item + '/'):
+            return True
+    return False
 
 
 def _protected_guard_paths(root: Path) -> list[str]:
@@ -117,31 +172,81 @@ def _protected_guard_paths(root: Path) -> list[str]:
 
 
 def _capture_protected_files(project_root) -> dict[str, tuple[bytes, int]]:
-    """Snapshot pre-existing protected files before a developer turn (OS-independent Forge hook)."""
+    """Snapshot protected files and guarded trees (data_tools/) before a developer turn (OS-independent Forge hook)."""
     root = Path(project_root)
-    snap: dict[str, tuple[bytes, int]] = {}
-    for rel in _protected_guard_paths(root):
+    snap = _ProtectedSnapshot()
+
+    def remember(rel):
         path = root / rel
         try:
             info = path.lstat()
         except OSError:
-            continue
+            return
         if not stat.S_ISREG(info.st_mode) or info.st_size > _PROTECTED_GUARD_MAX_BYTES:
-            continue
+            return
         try:
             snap[rel] = (path.read_bytes(), info.st_mode & 0o777)
         except OSError:
+            return
+
+    for rel in _protected_guard_paths(root):
+        remember(rel)
+    for top in _PROTECTED_GUARD_TREES:
+        listing = _tree_listing(root, top)
+        if listing is None:
             continue
+        files, dirs = listing
+        total = 0
+        for rel in sorted(files):
+            try:
+                total += (root / rel).lstat().st_size
+            except OSError:
+                continue
+            if total > _PROTECTED_TREE_MAX_BYTES:
+                break
+            remember(rel)
+        snap.trees[top] = (files, dirs, (root / top).is_dir() and not (root / top).is_symlink())
     return snap
 
 
-def _enforce_protected_files(project_root, before_snapshot: dict[str, tuple[bytes, int]]) -> list[str]:
-    """Detect and restore any unauthorized mutation/deletion of protected files after a developer turn."""
-    if not before_snapshot:
+def _enforce_protected_files(project_root, before_snapshot: dict[str, tuple[bytes, int]], authorized=()) -> list[str]:
+    """Detect and restore unauthorized mutation/deletion/creation of protected files after a developer turn.
+
+    Paths written by host ``manage_project_layout`` actions (``authorized``) are legitimate and kept.
+    """
+    trees = getattr(before_snapshot, 'trees', {}) or {}
+    if not before_snapshot and not trees:
         return []
     root = Path(project_root)
     violations: list[str] = []
+    for top, (old_files, old_dirs, existed) in sorted(trees.items()):
+        listing = _tree_listing(root, top)
+        if listing is None:
+            continue
+        files, dirs = listing
+        for rel in sorted(files - old_files):
+            if _authorized_by_host(rel, authorized):
+                continue
+            violations.append(rel)
+            try:
+                (root / rel).unlink()
+            except OSError:
+                pass
+        for rel in sorted(dirs - old_dirs, key=lambda item: -len(Path(item).parts)):
+            if _authorized_by_host(rel, authorized):
+                continue
+            try:
+                (root / rel).rmdir()
+            except OSError:
+                pass
+        if not existed and not _authorized_by_host(top, authorized):
+            try:
+                (root / top).rmdir()
+            except OSError:
+                pass
     for rel, (orig_bytes, orig_mode) in sorted(before_snapshot.items()):
+        if _authorized_by_host(rel, authorized):
+            continue
         path = root / rel
         mutated = False
         try:
@@ -175,7 +280,7 @@ def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, p
     """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
     issues = []
     for rel in (protected_violations or ()):
-        issues.append(f"- [受保护文件钩子] `{rel}` 属于项目受保护文件不允许修改，Forge 钩子已自动恢复原内容；请勿改动 `.env` / `.forge/state.json` / `AGENTS.md` / `PIPELINE_SPEC.md`。")
+        issues.append(f"- [受保护文件钩子] `{rel}` 属于 Forge 受保护范围（`.env*` / `.forge/state.json` / `workspace.json` / `AGENTS.md` / `PIPELINE_SPEC.md` / `data_tools/`），开发助手不能直接修改，钩子已自动还原；登记入口、整理目录请调用 `manage_project_layout`，`data_tools/` 由数据页 Cell 助手维护。")
     if isinstance(pipeline_checks, dict):
         for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
             item = pipeline_checks.get(key)
@@ -218,6 +323,27 @@ def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, p
     else:
         header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并复跑 demiflow forge check 与项目测试验证后交付：\n'
     return (header + '\n'.join(issues))[:8000]
+
+
+_ROOT_OBSERVE_SKIP = {'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'notebooks', 'data_tools'}
+
+
+def _root_entry_names(project_root) -> set[str]:
+    """Visible top-level project entries; used to observe newly created root files/directories."""
+    from demiflow.workbench.conversations.changes import IGNORED_DIRS
+    names = set()
+    try:
+        with os.scandir(project_root) as entries:
+            for count, entry in enumerate(entries):
+                if count >= 4096:
+                    break
+                if (entry.name.startswith('.') or entry.name in IGNORED_DIRS or entry.name in _ROOT_OBSERVE_SKIP
+                        or entry.is_symlink()):
+                    continue
+                names.add(entry.name)
+    except OSError:
+        pass
+    return names
 
 
 def _declared_readonly_locations(root: Path, denied: list[Path], private_home: Path) -> list[Path]:
@@ -905,6 +1031,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     flush_events()
 
             protected_snapshot = {}
+            root_names_before = None
             try:
                 tick()
                 if requested: raise InterruptedError(reason)
@@ -924,6 +1051,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if sdk_identity(coding['catalog']) != coding['sdk_revision']:
                         reject('Native SDK changed before context delivery', 'conflict')
                 baseline = capture(project['root'], watched, exclude=excluded)
+                root_names_before = _root_entry_names(project['root']) if guided else None
                 protected_snapshot = _capture_protected_files(project['root']) if (not compact and not notebook) else {}
                 store.update(tid, baseline=wire(baseline).decode())
                 if compact:
@@ -1291,18 +1419,30 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 process = transport = provider = model_broker = control_bridge = shims = None
             protected_violations = []
             try:
-                protected_violations = _enforce_protected_files(project['root'], protected_snapshot)
+                protected_violations = _enforce_protected_files(project['root'], protected_snapshot,
+                                                                authorized=host_layout_paths)
                 if protected_violations:
                     store.event(tid, 'protected.violation', dict(paths=protected_violations, restored=True))
             except BaseException:
                 pass
             try:
-                changes = []; revision = None
+                changes = []; revision = None; watched_after = list(watched); new_root_entries = []
                 saved = store.turn(tid)
                 if saved['baseline'] and watched:
-                    before = json.loads(saved['baseline']); after = capture(project['root'], watched, exclude=excluded)
+                    # New top-level entries created this turn (e.g. tables/, scripts/, debug.py) are
+                    # outside the static watch list; observe them so the Forge hook still runs.
+                    if root_names_before is not None:
+                        new_root_entries = sorted(_root_entry_names(project['root']) - root_names_before
+                                                  - set(watched) - set(excluded))
+                    before = json.loads(saved['baseline'])
+                    try:
+                        after = capture(project['root'], [*watched, *new_root_entries], exclude=excluded)
+                        watched_after = [*watched, *new_root_entries]
+                    except ForgeError:
+                        # An oversized new tree is still reported to DF-02 below without hashing it.
+                        after = capture(project['root'], watched, exclude=excluded)
                     if project.get('kind') == 'pipeline' and project.get('phase') == 'implementation' and not compact and not notebook:
-                        authorized_writes = list(dict.fromkeys([*project['writes'], *watched, *host_layout_paths]))
+                        authorized_writes = list(dict.fromkeys([*project['writes'], *watched_after, *host_layout_paths]))
                     else:
                         authorized_writes = list(dict.fromkeys([*project['writes'], *host_layout_paths]))
                     changes = list(differences(before, after, authorized_writes, root=project['root']))
@@ -1331,19 +1471,19 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     result['protected_violations'] = protected_violations
                 result['execution_assurance'] = assurance
                 checked_entries = []
-                if (coding is not None and changes and drained and completed and final == 'completed'
+                if (coding is not None and (changes or new_root_entries) and drained and completed and final == 'completed'
                         and not saved['stop_at'] and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
                     from demiflow.forge.pipeline_check import check_project, result as check_result
                     from demiflow.forge.project_rules import diagnostic
                     try:
                         changed_paths = [change['path'] for change in changes]
-                        # Large cleanup/reorganization turns (>256 changed paths) fall back
-                        # to full-project inspection instead of hitting the changed-path cap.
-                        check_paths = () if len(changed_paths) > 256 else changed_paths
+                        # Large cleanup/reorganization turns (>256 changed paths), or new top-level
+                        # entries without hashable sources, fall back to full-project inspection.
+                        check_paths = () if (len(changed_paths) > 256 or not changed_paths) else changed_paths
                         report = check_project(project['root'], paths=check_paths,
                                                reference=coding, exclude=excluded, include_hygiene=True)
                         if (sdk_identity(coding['catalog']) != coding['sdk_revision']
-                                or capture(project['root'], watched, exclude=excluded) != after):
+                                or capture(project['root'], watched_after, exclude=excluded) != after):
                             reject('SDK or project source changed before checks could be reported', 'conflict')
                         checked_entries = report.get('entries') or []
                         result['pipeline_checks'] = {key: report[key] for key in (
@@ -1410,7 +1550,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     else:
                         report = dict(status='incomplete', diagnostics=[dict(detail='开发回合未完成，评审尚未执行。')])
                 result['cleanup'] = 'complete' if drained else 'unknown'
-                if (auto_review and rework_depth == 0 and final == 'completed' and drained
+                # Free static checks and the protected-file hook always drive one rework round when
+                # they fail; the composer "自动评审" toggle only controls the paid LLM review.
+                if (rework_depth == 0 and final == 'completed' and drained
                         and not saved['stop_at'] and not requested and turn.get('operation') == 'message'):
                     rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report,
                                                          project_root=project['root'],
@@ -1419,7 +1561,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         try:
                             existing_queue = store.show(session['workspace'], session['id']).get('queued_messages') or []
                             if not existing_queue:
-                                store.enqueue(session['workspace'], session['id'], tid, 'forge-rework-' + tid, rework_prompt)
+                                # 'forge-rework-r-' keeps the paid LLM review on for the rework turn only
+                                # when the user had it enabled; free checks always run.
+                                prefix = 'forge-rework-r-' if auto_review else 'forge-rework-'
+                                store.enqueue(session['workspace'], session['id'], tid, prefix + tid, rework_prompt)
                                 result['auto_rework'] = dict(scheduled=True, round=1, max_rounds=1)
                         except (OSError, ValueError):
                             pass

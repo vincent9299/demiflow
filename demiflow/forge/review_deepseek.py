@@ -251,7 +251,12 @@ def _result(returncode, raw, model, home):
             try:
                 report = decode_control(fence[1] if fence else content)
             except ValueError as exc:
-                raise _unavailable('DeepSeek reviewer returned an invalid JSON report') from exc
+                # Keep a bounded single-line excerpt so the 评审 panel shows what the model returned.
+                excerpt = ' '.join(content.split())[:300]
+                if any(w in excerpt.lower() for w in ('http://', 'https://', 'bearer ', 'token', 'sk-')):
+                    excerpt = ''
+                suffix = f' (excerpt: {excerpt}{"…" if len(content) > 300 else ""})' if excerpt else ''
+                raise _unavailable('DeepSeek reviewer returned an invalid JSON report' + suffix) from exc
             if not isinstance(report, dict):
                 raise _unavailable('DeepSeek reviewer returned an invalid report')
         elif kind not in ('status', 'text', 'thinking'):

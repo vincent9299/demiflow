@@ -757,7 +757,7 @@
     }}));
     const info=$('details');info.append($('summary','项目内容、能力与依据'));viewer.append(info);
     info.append($('p',context.flows.length+' 个登记流程 · '+context.tables.length+' 个固定数据引用 · '+context.report_total+' 份报告；报告数量不代表全部通过。','muted small'));
-    button('查看管道与检查',()=>navigate('flows'),info);button('查看数据',()=>navigate('tables'),info);
+    button('查看管线与检查',()=>navigate('flows'),info);button('查看数据',()=>navigate('tables'),info);
     if(Object.keys(context.locations).length)table(info,['位置','根目录','权限'],Object.entries(context.locations).map(([name,value])=>({cells:[name,value.root,value.writable?'可声明输出':'只读']})));
     raw(info,'原生能力覆盖',context.native_api_coverage);raw(info,'版本化工程规范',context.standard);
   }

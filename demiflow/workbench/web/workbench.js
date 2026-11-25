@@ -126,7 +126,7 @@
     const notice=$('div',undefined,'wb-notice');notice.hidden=true;notice.setAttribute('role','status');root.append(notice);
     const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;root.append(accessState);
     const pendingBox=$('section',undefined,'wb-pending');root.append(pendingBox);
-    const flowNavigation=$('nav',undefined,'wb-flow-navigation wb-section-navigation');flowNavigation.id='wb-flow-navigation';flowNavigation.setAttribute('aria-label','项目管道');flowNavigation.hidden=true;root.append(flowNavigation);
+    const flowNavigation=$('nav',undefined,'wb-flow-navigation wb-section-navigation');flowNavigation.id='wb-flow-navigation';flowNavigation.setAttribute('aria-label','项目管线');flowNavigation.hidden=true;root.append(flowNavigation);
     const flowHeader=ForgeNavigation.header({title:'管线',searchLabel:'搜索管线',onSearch:filterFlows});
     const flowList=$('div',undefined,'wb-navigation-items');
     if(embedded?.flowListHost)embedded.flowListHost.append(flowList);
@@ -280,7 +280,7 @@
       const activeEntry=activePage==='monitor'?(runFlowFilter||run?.entry||working?.entry):(working?.entry||run?.entry);
       if(activeEntry&&!seen.has(activeEntry))entries.push({value:activeEntry,label:activeEntry,historical:true});
       flowList.replaceChildren();
-      if(!entries.length)flowList.append($('p','当前项目尚无管道。','wb-caption'));
+      if(!entries.length)flowList.append($('p','当前项目尚无管线。','wb-caption'));
       for(const item of entries){
         const row=button('',async()=>{
           flowCollapse?.closeOnNarrow();
@@ -301,7 +301,7 @@
       const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks';
       const monitoring=activePage==='monitor',hasRun=!!run;
       const activeEntry=monitoring?(runFlowFilter||run?.entry||working?.entry):(working?.entry||run?.entry);
-      pipelineTitle.textContent=activeEntry?runUI.flowName(ctx,activeEntry):'管道';
+      pipelineTitle.textContent=activeEntry?runUI.flowName(ctx,activeEntry):'管线';
       pipelineTitle.title=activeEntry||'';
       historyBadge.hidden=!monitoring;
       runsContextButton.hidden=monitoring;
@@ -362,9 +362,9 @@
       const invalidEntry=declaredEntry()?.status==='invalid';
       runButton.disabled ||= invalidEntry;
       previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||invalidEntry||dirty||needsConfiguration||graphHost.hasAttribute('aria-busy');
-      const previewHelp=invalidEntry?entryIssue():needsConfiguration?'请先绑定这条流程的业务参数。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
+      const previewHelp=invalidEntry?entryIssue():needsConfiguration?'请先为这条流程绑定 configs/ 参数文件。入口需要：'+requiredPreviewArguments().slice(0,8).join('、')+'。':'只编译当前入口与已保存配置，不启动数据处理。';
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
-      previewButton.title=dirty?'先保存业务参数，解析使用已保存值':previewHelp;
+      previewButton.title=dirty?'先保存参数配置，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
       accessState.hidden=monitoring||!!run||!working?.entry||(!invalidEntry&&registered()&&can('run_submit'));
       accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数。':'当前项目尚未开启管线运行权限，可在右上角「项目设置」中开启。';
@@ -429,7 +429,7 @@
       if(previewBusy||busy||run||data().run)return;
       if(!working?.entry)throw new Error('请先选择流程入口。');
       if(declaredEntry()?.status==='invalid'){message(working.entry+' · '+entryIssue(),'error-box');return;}
-      if(Object.keys(getDraft().values).length)throw new Error('请先保存业务参数；计划解析只使用已保存值。');
+      if(Object.keys(getDraft().values).length)throw new Error('请先保存参数配置；计划解析只使用已保存值。');
       clearPlanPreview(true);
       const ticket=state.capture(),sequence=++previewSequence,entry=working.entry,params=(working?.params||'')||null;
       previewBusy=true;updateActions();message('正在由引擎解析执行计划；不会启动数据处理或模型请求。');
@@ -453,7 +453,7 @@
       graphModel=model;graph.update(model);graph.select(model.selected);
       graphTitle.textContent='编译计划 · '+model.nodes.length+' 节点 / '+model.edges.length+' 条边';
       basisLabel.textContent=model.choice.label;
-      graphLegend.textContent='点击算子查看实现与 Prompt；箭头表示引擎编译的数据流。';
+      graphLegend.textContent='点击算子查看接口与实现；箭头表示引擎编译的数据流。';
       paintNodeJump(model);
       actionBar.hidden=locator.hidden=true;
       advancedButton.hidden=false;more.hidden=false;advancedContent.replaceChildren();
@@ -504,7 +504,7 @@
       basisLabel.textContent=(model.execution?'封存运行图':g.binding.basis_kind==='report'?'静态检查 · '+g.status+' · 尚无运行执行图':choice.label)+(scopeNode?' · 节点邻域':'');
       paintActionSelector(g,choice);
       paintAdvancedDiagnostics(g,choice,model);
-      graphLegend.textContent=model.execution?'箭头表示数据流向；点击算子查看 Dataset API、Prompt 算子、代码算子与流程接线。':'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
+      graphLegend.textContent=model.execution?'箭头表示数据流向；点击算子查看接口与实现。':'这里只展示引擎执行计划；源码调用关系与静态检查报告不会作为替代图。';
       return model;
     }
     function afterGraphPaint(){
@@ -855,35 +855,6 @@
       return node?.source_views?.[kind]?.available===true
         ||kind==='configuration'&&['schema','callsite'].some(k=>node?.source_views?.[k]?.available===true);
     }
-    function schemaMaterial(parent,meta,{input=false,advanced=parent}={}){
-      function schemaBlock(title,schema,folded=false){
-        const section=$('section',undefined,'wb-schema-section');section.append($('h4',title));parent.append(section);
-        section.append($('p',schema.basis||schema.reason||'尚无 Schema 声明','wb-caption'));
-        if(schema.fields?.length)materialTable(folded?details('展开 Schema · '+schema.fields.length+' 个字段',section):section,
-          ['字段','类型','允许空值'],schema.fields.map(f=>[f.name,f.type??'未知',f.nullable===null?'未知':f.nullable?'是':'否']));
-        if(schema.truncated)section.append($('p','字段较多，仅显示前 256 个。','wb-caption'));
-      }
-      if(input){
-        if(!meta.inputs.length)parent.append($('p','数据源节点：没有上游 Dataset 输入。','wb-caption'));
-        for(const item of meta.inputs){const upstream=planPreview?.dag.nodes.find(n=>n.occurrence_id===item.producer);
-          const port=({left:'左侧 Dataset',right:'右侧 Dataset',main:'上游 Dataset'})[item.port]||'上游 Dataset · '+item.port;
-          schemaBlock(port+(upstream?' · '+upstream.label:''),item.schema,true);}
-        for(const declared of meta.declarations||[])schemaBlock('Schema 参数 · '+declared.parameter+(declared.expression?' = '+declared.expression:''),
-          {fields:declared.fields,basis:'调用者显式传入的 Schema 约束；不同于上游数据已验证的完整结构。'},true);
-      }else{
-        schemaBlock('输出行 Schema',meta.output,(meta.output?.fields?.length||0)>12);
-        if(meta.note)parent.append($('p',meta.note,'wb-caption'));
-      }
-      const bindings=Object.fromEntries(Object.entries(meta.bindings||{}).filter(([key])=>input?key==='inputs':key!=='inputs'));
-      if(Object.keys(bindings).length){const box=details('字段绑定（不等于完整 Schema）',advanced);box.append($('pre',json(bindings),'wb-code'));}
-    }
-    function readDefinition(host,definition,value){
-      const definitionDigest=definition.file_sha256||value.sha256;
-      DemiFlowDefinition.render(host,{...definition,
-        line:definition.line||value.start_line, source:definition.source||value.text,template:definition.template??(definition.kind==='prompt'?value.text:undefined),
-        basis:(value.source_basis==='compiled_snapshot'?'计划绑定版本':value.source_basis==='sealed'?'运行封存版本':'')+(definitionDigest?' · '+definitionDigest.slice(0,8):''),
-        truncated:value.truncated},{mountText});
-    }
     const OUTPUT_SIDE_ARGS=new Set(['call_output','error_output','output_ref']);
     const API_PARAM_DOCS={
       uri:'数据表路径或目标地址',
@@ -973,7 +944,7 @@
     function extractOperatorArgDocs(implVal){
       if(!implVal)return {};
       const out={};
-      const def=implVal.metadata?.definition;
+      const def=implVal.metadata?.definition||implVal.definition;
       if(Array.isArray(def?.parameters)){
         for(const p of def.parameters){if(p?.name&&p?.description)out[p.name]=String(p.description).trim();}
       }
@@ -1006,10 +977,6 @@
       if(p.value?.type==='Schema'&&p.value.fields)return 'Schema · '+p.value.fields.length+' 个字段（见下方声明）';
       if(p.value?.unavailable)return p.value.type+' · '+p.value.unavailable;
       return typeof p.value==='string'?p.value:json(p.value);
-    }
-    function renderArgTable(target,items){
-      materialTable(target,['配置项','来源','当前值'],items.map(p=>[p.name,
-        p.expression||(p.origin==='default'?'API 默认值':'传入值'),formatArgValue(p)]));
     }
     function summarizeComplexValue(val){
       if(Array.isArray(val))return `[${val.length} 项]`;
@@ -1087,6 +1054,10 @@
       const effectiveImpl=implVal||byKind.implementation;
       const implDef=effectiveImpl?.metadata?.definition||effectiveImpl?.definition||null;
       const opArgDocs=extractOperatorArgDocs(effectiveImpl);
+      const apiDef=byKind.callsite?.metadata?.definition||byKind.callsite?.definition||null;
+      const apiArgDocs={};
+      if(Array.isArray(apiDef?.parameters))for(const p of apiDef.parameters){if(p?.name&&p?.description)apiArgDocs[p.name]=String(p.description).trim();}
+      if(typeof apiDef?.description==='string')Object.assign(apiArgDocs,parseDocstringArgDocs(apiDef.description));
       const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.name!=='fn'&&p.value?.type!=='Dataset');
       const provided=allArgs.filter(p=>p.origin!=='default');
       const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
@@ -1180,7 +1151,7 @@
           continue;
         }else{
           apiParamObjs.push(p);
-          apiParamRows.push([p.name,API_PARAM_DOCS[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]);
+          apiParamRows.push([p.name,apiArgDocs[p.name]||API_PARAM_DOCS[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]);
         }
       }
 
@@ -1204,6 +1175,7 @@
           }
           if(parts.length){
             sourceTitle.textContent=`${head}(${parts.join(', ')})`;
+            sourceTitle.title=sourceTitle.textContent;
             sourceTitle.classList.add('wb-source-title-api');
           }
         }
@@ -1240,6 +1212,7 @@
       const ticket=state.capture(),sequence=++sourceSequence;
       const previewApiExpr=presentation.compactApiExpr?.(node?.api_call,node?.label,node?.data_source)||'';
       sourceTitle.textContent=previewApiExpr||node?.label||node?.op_kind||'节点详情';
+      sourceTitle.title=sourceTitle.textContent;
       sourceTitle.classList.toggle('wb-source-title-api',!!previewApiExpr);
       const kinds=['prompt','implementation','callsite','configuration','schema'].filter(k=>node?.source_views?.[k]?.available);
       if(!kinds.length){sourceTabs.hidden=true;sourceBody.append($('p','本节点尚无绑定材料。','wb-caption'));return;}
@@ -1328,6 +1301,7 @@
         const byKind=Object.fromEntries(kinds.map((k,i)=>[k,values[i]]));
         const sealedApiExpr=presentation.compactApiExpr?.(reportNode?.api_call,reportNode?.operator?.name||reportNode?.label,reportNode?.data_source)||'';
         sourceTitle.textContent=sealedApiExpr||reportNode?.display_label||reportNode?.operator?.name||reportNode?.label||'算子详情';
+        sourceTitle.title=sourceTitle.textContent;
         sourceTitle.classList.toggle('wb-source-title-api',!!sealedApiExpr);
         if(reportNode?.description)sourceBody.append($('p',reportNode.description,'wb-node-semantic-desc'));
         const cfgVal=byKind.configuration,callVal=byKind.callsite;
@@ -1336,10 +1310,30 @@
             renderWiring({occurrence_id:selection?.occurrenceId,api_call:reportNode?.api_call,data_source:reportNode?.data_source,op_kind:reportNode?.kind,label:reportNode?.label},[callVal,cfgVal,{kind:'schema',metadata:cfgVal.schema_metadata}].filter(Boolean),wiringPane,byKind.implementation);
           }else{
             const info=cfgVal.wiring||{},rows=info.parameters||{};
-            const paramEntries=Object.entries(rows).filter(([k])=>k!=='fn'&&k!=='label');
+            // Historical runs without native metadata: keep the same 参数|说明|当前值 table and example card.
+            const histImpl=byKind.implementation,histDef=histImpl?.metadata?.definition||histImpl?.definition||null;
+            const histDocs=extractOperatorArgDocs(histImpl);
+            const histFlow=histDef?.field_flow;
+            if(Array.isArray(histFlow?.reads)&&histFlow.reads.length||Array.isArray(histFlow?.writes)&&histFlow.writes.length){
+              const sec=$('section',undefined,'wb-wiring-section');sec.append($('h4','数据流'));
+              const flowRows=[];
+              if(histFlow.reads?.length)flowRows.push(['输入',renderFieldChips(histFlow.reads,'读取字段：')]);
+              if(histFlow.writes?.length)flowRows.push(['输出',renderFieldChips(histFlow.writes,'产出字段：')]);
+              renderKvTable(sec,['方向','说明'],flowRows);wiringPane.append(sec);
+            }
+            if(histDef?.example?.input&&histDef?.example?.output){
+              const sec=$('section',undefined,'wb-wiring-section');sec.append($('h4','变换示例'),renderExampleCard(histDef.example));wiringPane.append(sec);
+            }
+            const paramEntries=[];
+            for(const[k,v]of Object.entries(rows)){
+              if(k==='fn'||k==='label')continue;
+              if(k==='fn_kwargs'&&v&&typeof v==='object'&&!Array.isArray(v)){for(const[fk,fv]of Object.entries(v))paramEntries.push([fk,fv]);}
+              else paramEntries.push([k,v]);
+            }
             if(paramEntries.length){
               const sec=$('section',undefined,'wb-wiring-section');sec.append($('h4','参数配置'));
-              materialTable(sec,['参数','值'],paramEntries.map(([k,v])=>[k,typeof v==='string'?v:json(v)]));wiringPane.append(sec);
+              renderParamTable(sec,paramEntries.map(([k,v])=>{const txt=typeof v==='string'?v:json(v);return [k,histDocs[k]||API_PARAM_DOCS[k]||'',renderParamValueCell(v,txt)];}));
+              wiringPane.append(sec);
             }
             const outFields=Object.entries(info.output_fields||{});
             if(outFields.length){
@@ -1503,7 +1497,7 @@
     function confirmControl(kind,target,perform){
       const ticket=state.capture();
       runUI.confirmation(runConfirmation,{title:kind==='stop'?'停止这次运行':'恢复原运行',
-        description:kind==='stop'?'停止请求需要执行端确认；保留已经提交的结果。':'沿用原计划、业务参数和代码，从可恢复的提交点继续。服务端会核对历史、容量和输出，不会覆盖原记录。',
+        description:kind==='stop'?'停止请求需要执行端确认；保留已经提交的结果。':'沿用原计划、参数和代码，从可恢复的提交点继续。服务端会核对历史、容量和输出，不会覆盖原记录。',
         rows:[['运行',target.run_id],['当前执行','第 '+target.attempt+' 次启动']],confirmLabel:kind==='stop'?'确认停止':'确认恢复',
         cancel:()=>{runConfirmation.hidden=true;},confirm:async()=>{if(!current(ticket))return;await perform();runConfirmation.hidden=true;}});
     }
@@ -1627,7 +1621,7 @@
     }
     function paintHistory(){
       paintFlowNavigation();
-      pipelineTitle.textContent=runFlowFilter?runUI.flowName(ctx,runFlowFilter):'管道';
+      pipelineTitle.textContent=runFlowFilter?runUI.flowName(ctx,runFlowFilter):'管线';
       pipelineTitle.title=runFlowFilter||'';
       const options=[...(records?.runs||[])];
       if(run&&run.entry===runFlowFilter&&!options.some(item=>item.run_id===run.run_id)){
@@ -1647,7 +1641,7 @@
       pickerLabel.hidden=!options.length;
       olderRuns.hidden=!records?.cursor&&!records?.offset;
       emptyTitle.textContent=data().run?'正在读取运行详情…':!records?'正在读取运行记录…':
-        !records.complete?'运行目录尚不完整':runFlowFilter?'这条管道还没有运行记录。':'这个项目还没有可查看的运行记录。';
+        !records.complete?'运行目录尚不完整':runFlowFilter?'这条管线还没有运行记录。':'这个项目还没有可查看的运行记录。';
       viewFlow.hidden=!records||!!data().run||!runFlowFilter;
     }
     function relativeOutputPath(uri){
@@ -2047,7 +2041,7 @@
     if(embedded?.hideFlowSidebar){
       flowNavigation.hidden=true;layout.classList.add('wb-embedded-no-sidebar');
     }else{
-      flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',narrowQuery:'(max-width:680px)',active:true});
+      flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管线目录',narrowQuery:'(max-width:680px)',active:true});
     }
     if(!embedded?.nodeDetailHost){
       nodePanelResize=ForgeNavigation.resizable({layout:body,sidebar:nodePanel,label:'算子详情',right:true,cssVar:'--wb-detail-width',minWidth:240,maxWidth:820,minMain:260,active:false});

@@ -387,8 +387,9 @@ class Service:
                         if session['turn']['cleanup'] == 'complete':
                             head = queue[0]
                             is_rework = head['submission'].startswith('forge-rework-')
+                            review_rework = head['submission'].startswith('forge-rework-r-')
                             self.start_project(workspace, root, sid, head['submission'], session['revision'], head['text'],
-                                               auto_review=is_rework, rework_depth=1 if is_rework else 0)
+                                               auto_review=review_rework, rework_depth=1 if is_rework else 0)
                     except (OSError, ValueError) as exc:
                         self.queue_readers.discard(sid)
                         self.store.hold_queue(sid, str(exc))
