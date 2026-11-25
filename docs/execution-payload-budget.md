@@ -55,3 +55,11 @@ These are payload/native-pool admission guarantees. Python/library internals and
 process-wide RSS still require the existing process guard and RSS headroom;
 Arrow logical bytes are not a process RSS measurement. P3 grouping, stage sinks,
 lookup and document adapters remain outside this change.
+
+## Output byte budgets
+
+`max_output_bytes` limits what an action publishes: Lance writes and merges, file
+and object sinks, key-value sinks, and queue results and raw objects. The result
+blocks of `materialize()` and `take_all()` stay in the run's own artifact store;
+their bytes count toward `max_scratch_bytes` (as `artifact_staging_bytes`) and their
+rows toward `max_output_rows`, not toward `max_output_bytes`.
