@@ -405,6 +405,80 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
     return sdk_issues, cross_issues
 
 
+def _thin_operator_wrapper_issues(path: Path) -> list[tuple[int, str, str]]:
+    """Detect zero-logic shim operators in operators/*.py that only forward or re-export another operator module."""
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    op_modules: set[str] = set()
+    op_symbols: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ''
+            is_op_mod = (
+                (node.level >= 1 and (not mod or not mod.startswith('_')))
+                or mod == 'operators'
+                or mod.startswith('operators.')
+            )
+            if not is_op_mod:
+                continue
+            for alias in node.names:
+                if alias.name == '*':
+                    continue
+                local = alias.asname or alias.name
+                if (node.level >= 1 and not mod) or mod == 'operators':
+                    op_modules.add(local)
+                else:
+                    op_symbols[local] = f'{mod}.{alias.name}'
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith('operators.') and alias.asname:
+                    op_modules.add(alias.asname)
+    if not op_modules and not op_symbols:
+        return []
+
+    def _forwarded_target(expr) -> str | None:
+        if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name) and expr.value.id in op_modules:
+            return f'{expr.value.id}.{expr.attr}'
+        if isinstance(expr, ast.Name) and expr.id in op_symbols:
+            return op_symbols[expr.id]
+        return None
+
+    issues: list[tuple[int, str, str]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
+            stmts = list(node.body)
+            if (stmts and isinstance(stmts[0], ast.Expr)
+                    and isinstance(stmts[0].value, ast.Constant)
+                    and isinstance(stmts[0].value.value, str)):
+                stmts = stmts[1:]
+            if len(stmts) == 1 and isinstance(stmts[0], ast.Return) and isinstance(stmts[0].value, ast.Call):
+                target = _forwarded_target(stmts[0].value.func)
+                if target:
+                    issues.append((node.lineno, node.name, target))
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            lhs, rhs = node.targets[0], node.value
+            if isinstance(lhs, ast.Name):
+                pairs = [(lhs, rhs)]
+            elif (isinstance(lhs, (ast.Tuple, ast.List))
+                  and isinstance(rhs, (ast.Tuple, ast.List))
+                  and len(lhs.elts) == len(rhs.elts)):
+                pairs = list(zip(lhs.elts, rhs.elts))
+            else:
+                pairs = []
+            for target_node, val_node in pairs:
+                if not isinstance(target_node, ast.Name):
+                    continue
+                name = target_node.id
+                if name.startswith('_') or name.isupper():
+                    continue
+                target = _forwarded_target(val_node)
+                if target:
+                    issues.append((node.lineno, name, target))
+    return issues
+
+
 def _points_to_runs(root: Path, value) -> bool:
     runs_root = (root / 'runs').resolve(strict=False)
     candidates = []
@@ -555,6 +629,16 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         if _imports_notebook_ui(root / rel):
             add('notebook_tool_in_operators', rel, 'operators/ 模块导入了 Notebook 交互库（IPython/ipywidgets），属于 Notebook 查看/分析/标注工具；按 DF-02 规范请迁入 data_tools/。')
             continue
+        shims = _thin_operator_wrapper_issues(root / rel)
+        if shims:
+            first_line, first_name, first_target = shims[0]
+            extra = f' 等 {len(shims)} 处' if len(shims) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('thin_operator_wrapper', []).append(
+                diagnostic('DF-02', rel,
+                           f'算子 {first_name} 仅为转调或重导出 {first_target} 的无逻辑垫片{extra}；按 DF-02 规范，请在 Flow 中直接引用目标算子并用 fn_kwargs 传参，或将逻辑内联为自包含算子，避免多层转包增加阅读负担。',
+                           line=first_line)
+            )
         if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
             add('orphan_operators', rel, 'operators/ 模块未被已登记 Flow 使用且未声明 __demiflow_operators__；若为 Notebook 查看/分析/标注工具请迁入 data_tools/，若为废弃代码请清理。')
 
