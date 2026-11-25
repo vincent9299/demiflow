@@ -25,12 +25,28 @@ scores.write_lance(scores_uri, mode="create")
 | 接口 | 合同 |
 |---|---|
 | `data.TrainingRecipe(...)` | 指定 `trainer`、`train_schema`、具名 `monitor_schemas`、有效参数及其 JSON Schema、基础模型与环境内容摘要、优化器更新预算、保存步数、数值拓扑、模型格式和默认 predictor。训练输入及监控输入在领取作业前固定到版本。只在明确声明的 `media_fields` 上验证外部文件内容，部署提供允许访问的根目录。 |
-| `trainer(request, context) -> FitResult` | `request.inputs` 含固定的数据版本及证明。训练文件写到 `context.model_dir`，框架工作文件写到 `work_dir`。用 `report_snapshot` 汇报已经提交的步数，用 `check_cancelled` 响应停止。需要进程组时通过 `run_group` 启动部署允许的模块。可选的 `trainer.reconcile(request, *, model_dir, work_dir)` 用于找回框架已落盘、尚未上报的原生快照。 |
+| `trainer(request, context)` | 无需导入任何引擎内部契约类。`request.inputs` 含固定数据版本与证明，训练权重写到 `context.model_dir`，临时工作文件写到 `context.work_dir`，用 `context.check_cancelled()` 响应停止，需要进程组时用 `context.run_group(...)`。交付 checkpoint 的公开方式：<br>1. **函数返回**：返回 `{step: {文件名: 路径}}`（单步也显式写整数 `step`；需同时提交续训状态时该步写 `{"files": {...}, "resume_files": {...}}`），或返回 `{"checkpoints": {step: ...}, "metrics": {...}}`。<br>2. **中途上报（可选）**：对声明在 `save_steps` 内的步数，可调用 `context.report_snapshot(step, files={...}, resume_files={...})` 原子落盘恢复凭据；仅当本次作业的最终步（`budget["optimizer_updates"]`）在 `save_steps` 内并已上报时，才可直接 `return None` 或 `return {"metrics": {...}}`，否则须在返回值中补交最终步。已上报的文件在作业结束前须保留原内容不变（建议按步独立命名），供引擎校验和导入。仅符合条件的 `interrupted` 作业会自动续训，主动取消仍走终止流程。<br>3. **原生快照对账（可选）**：`trainer.reconcile(request, *, model_dir, work_dir)` 可直接返回 `{"step": int, "files": {...}, "resume_files": {...}}` 或 `None`，所有路径须位于该次启动的 `model_dir` 内。 |
 | `data.PredictorSpec(...)` | 声明 actor 工厂、具名输入到列名的映射、`input_schema`、输出 schema、兼容模型格式、参数、batch 和资源。actor 构造函数接受 `model`、`inputs`、`parameters`。在 worker 内加载清单所指的模型并实现 `__call__(batch)`。 |
 | 预测批输出 | 每个输入按原顺序返回一行。设置 `batch_size > 1` 时，批输入还包含 `__demiflow_prediction_input_id`，actor 必须逐行原样带回，worker 校验后移除。多 seed 可每行返回结果列表，再用 Dataset.flat_map 展开。项目用明细行保留每个失败样本和原因。 |
-| 模型产物 | `FitResult.snapshots` 包含各步的 `TrainingSnapshotRef`。推理文件和续训状态各自带 URI、SHA-256 与字节数。模型归项目持久存储管理。评分表用 Lance 的实际发布回执固定所用模型版本。 |
+| 模型产物 | 引擎自动校验文件位于本次启动的 `model_dir` 内、流式计算 SHA-256 与字节数、封装并去重导入项目持久模型库。续训时父快照仅用于读取续训输入，已验证的历史步由引擎自动合并。评分表用 Lance 的实际发布回执固定所用模型版本。 |
 
-具体构造及可执行示例见[公开声明](../demiflow/data/training.py)、[作业合同](../demiflow/execution/contracts/training.py)与[通过公开 action 写表的测试](../tests/test_training_dataset_action.py)。
+最小零内部导入 `trainer` 示例：
+
+```python
+def train_model(request, context):
+    checkpoints = {}
+    for step in request.semantics["save_steps"]:
+        context.check_cancelled()
+        weights = context.model_dir / f"weights_step_{step}.bin"
+        weights.write_bytes(f"step-{step}".encode())
+        # 可选：长训练中途落盘即上报，防中断后白跑（文件须保留原内容至导入完成）
+        context.report_snapshot(step, files={"weights": weights})
+        checkpoints[step] = {"weights": weights}
+    return {"checkpoints": checkpoints, "metrics": {"final_step": step}}
+    # 若最终步在 save_steps 内且均已 report_snapshot，也可直接 return None 或 return {"metrics": {...}}
+```
+
+具体构造及可执行示例见[公开声明](../demiflow/data/training.py)与[通过公开 action 写表的测试](../tests/test_training_dataset_action.py)。
 
 ## 运行在哪里
 

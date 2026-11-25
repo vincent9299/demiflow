@@ -88,3 +88,105 @@ def native_checkpoint_crash(request, context):
 
 
 native_checkpoint_crash.reconcile = inspect_native_step
+
+
+class SealedWeightReaderPredictor:
+    """Reads actual sealed weight bytes from the managed model store during prediction."""
+
+    def __init__(self, *, model, inputs, parameters):
+        from pathlib import Path
+        self.step = model['step']
+        self.column = inputs['x']
+        weights_uri = model['snapshot']['files']['weights']['uri']
+        self.weights_uri = weights_uri
+        self.weight_text = Path(weights_uri).read_text(encoding='utf-8')
+
+    def __call__(self, batch):
+        values = batch[self.column].to_pylist()
+        return pa.table({
+            'x': values,
+            'step': [self.step] * len(values),
+            'weight': [self.weight_text] * len(values),
+        })
+
+
+def public_return_only_trainer(request, context):
+    """Zero internal imports: returns {step: {name: path}} directly without report_snapshot."""
+    checkpoints = {}
+    for step in request.semantics['save_steps']:
+        context.check_cancelled()
+        path = context.model_dir / f'weights_step_{step}.txt'
+        path.write_text(f'public-return-{step}', encoding='utf-8')
+        checkpoints[step] = {'weights': path}
+    return {'checkpoints': checkpoints, 'metrics': {'mode': 'public_return'}}
+
+
+def public_report_and_resume_trainer(request, context):
+    """Zero internal imports: reports step 1 then crashes; launch 2 delivers ONLY step 3."""
+    import os
+    from pathlib import Path
+    if request.restart_snapshot is None:
+        w1 = context.model_dir / 'weights_step_1.txt'
+        w1.write_text('resumed-weight-1', encoding='utf-8')
+        opt1 = context.model_dir / 'optimizer_step_1.txt'
+        opt1.write_text('opt-state-1', encoding='utf-8')
+        context.report_snapshot(1, files={'weights': w1}, resume_files={'optimizer': opt1})
+        os._exit(77)
+    assert request.restart_snapshot.step == 1
+    opt_text = Path(request.restart_snapshot.resume_files['optimizer'].uri).read_text(encoding='utf-8')
+    assert opt_text == 'opt-state-1'
+    w3 = context.model_dir / 'weights_step_3.txt'
+    w3.write_text('resumed-weight-3-from-' + opt_text, encoding='utf-8')
+    # Second launch delivers ONLY the new step 3; driver merges historical step 1.
+    return {3: {'weights': w3}}
+
+
+def _public_reconcile_dict(request, *, work_dir, model_dir):
+    """Zero internal imports: returns plain dict {step, files, resume_files}."""
+    import json
+    marker = model_dir / 'unreported_step.json'
+    if not marker.exists():
+        return None
+    info = json.loads(marker.read_text(encoding='utf-8'))
+    return {
+        'step': info['step'],
+        'files': {'weights': model_dir / info['weights']},
+        'resume_files': {'optimizer': model_dir / info['optimizer']},
+    }
+
+
+def public_reconcile_crash_trainer(request, context):
+    """Zero internal imports: crashes before report_snapshot; reconcile recovers step 1; launch 2 reports step 3 & returns None."""
+    import json
+    import os
+    from pathlib import Path
+    if request.restart_snapshot is None:
+        (context.model_dir / 'w1.txt').write_text('reconciled-weight-1', encoding='utf-8')
+        (context.model_dir / 'opt1.txt').write_text('reconciled-opt-1', encoding='utf-8')
+        (context.model_dir / 'unreported_step.json').write_text(
+            json.dumps({'step': 1, 'weights': 'w1.txt', 'optimizer': 'opt1.txt'}),
+            encoding='utf-8',
+        )
+        os._exit(77)
+    assert request.restart_snapshot.step == 1
+    opt_text = Path(request.restart_snapshot.resume_files['optimizer'].uri).read_text(encoding='utf-8')
+    assert opt_text == 'reconciled-opt-1'
+    w3 = context.model_dir / 'w3.txt'
+    w3.write_text('reconciled-weight-3', encoding='utf-8')
+    context.report_snapshot(3, files={'weights': w3})
+    return None
+
+
+public_reconcile_crash_trainer.reconcile = _public_reconcile_dict
+
+
+def public_final_step_outside_save_steps_trainer(request, context):
+    """save_steps=(1,), optimizer_updates=3: reports step 1; delivers step 3 only when parameters['deliver_final'] is True."""
+    w1 = context.model_dir / 'w1.txt'
+    w1.write_text('step-1-saved', encoding='utf-8')
+    context.report_snapshot(1, files={'weights': w1})
+    if not request.parameters.get('deliver_final'):
+        return None
+    w3 = context.model_dir / 'w3.txt'
+    w3.write_text('step-3-final', encoding='utf-8')
+    return {3: {'weights': w3}}

@@ -206,7 +206,17 @@ class TrainingRecipe:
     """Immutable declarative training contract passed to ``Dataset.fit(recipe=...)``.
 
     Fields:
-        trainer: Synchronous callable executed by the training worker.
+        trainer: Synchronous callable ``trainer(request, context)`` executed by the training worker.
+            Write checkpoint files inside ``context.model_dir`` (no internal DemiFlow imports needed)
+            and deliver them by returning ``{step: {name: path}}`` (or ``{step: {"files": ...,
+            "resume_files": ...}}`` when supplying optimizer resume state) or
+            ``{"checkpoints": {step: ...}, "metrics": {...}}``. Optionally call
+            ``context.report_snapshot(step, files=..., resume_files=...)`` during training for
+            declared ``save_steps`` (keep reported file contents unchanged until import); if all
+            required steps including ``budget["optimizer_updates"]`` were reported, ``trainer`` may
+            return ``None`` or ``{"metrics": {...}}``. Optional ``trainer.reconcile(request, *,
+            model_dir, work_dir)`` may return ``{"step": int, "files": ..., "resume_files": ...}``
+            or ``None``.
         train_schema: Mapping ``{column_name: arrow_type}`` required on the training Dataset.
         base_model_digest: 64-char lowercase hex SHA-256 digest identifying the base model.
         environment_digest: 64-char lowercase hex SHA-256 digest identifying the runtime environment.
