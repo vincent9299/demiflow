@@ -151,8 +151,14 @@ def main():
         try:
             os.close(read_error)
             os.chdir(spec['cwd'])
-            for kind, cap in ((resource.RLIMIT_NOFILE, 2048), (resource.RLIMIT_FSIZE, spec['file_bytes']),
-                              (resource.RLIMIT_CPU, max(1, int(spec['seconds']))), (resource.RLIMIT_CORE, 0)):
+            rlimits = [
+                (resource.RLIMIT_NOFILE, 2048),
+                (resource.RLIMIT_FSIZE, spec['file_bytes']),
+                (resource.RLIMIT_CORE, 0),
+            ]
+            if spec['seconds'] > 0:
+                rlimits.append((resource.RLIMIT_CPU, max(1, int(spec['seconds']))))
+            for kind, cap in rlimits:
                 _, hard = resource.getrlimit(kind)
                 cap = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
                 resource.setrlimit(kind, (cap, cap))
