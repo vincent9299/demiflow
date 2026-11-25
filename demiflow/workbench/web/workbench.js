@@ -864,6 +864,121 @@
     }
     const RUNTIME_ARGS=new Set(['config','model','options','concurrency','queue_depth','max_requests','request_concurrency','token_budget','when','catch','route','routes','isolate_route_failures','cache_when','schema_retries','service','request_gate','request_policy','batch_size','batch_readahead','fragment_readahead','max_batch','max_rows','max_row_bytes','wait_timeout_s','prepare_workers','reuse_workers','reuse_worker_max_tasks','index_cache_mb','max_entries','max_key_bytes']);
     const OUTPUT_SIDE_ARGS=new Set(['call_output','error_output','output_ref']);
+    const API_PARAM_DOCS={
+      uri:'数据表路径或目标地址',
+      path:'文件路径',
+      version:'固定读取的数据版本号',
+      columns:'仅读取指定列',
+      filter:'下推过滤条件（SQL 表达式）',
+      limit:'最大读取行数',
+      items:'内存输入的数据行列表',
+      other:'右侧待关联数据集',
+      on:'关联键列名',
+      right_on:'右表关联键列名',
+      how:'连接方式（left / inner / right / outer）',
+      suffix:'同名列冲突时的后缀',
+      schema:'输出表结构 Schema 约束',
+      key:'去重或阶段落盘主键列',
+      stage:'阶段落盘标识名称',
+      mode:'写入模式（create / append / overwrite / merge）',
+      output_ref:'写回主行的落盘引用字段名',
+      expected_version:'写入前校验的期望表版本',
+      update_columns:'合并更新时允许覆盖的列',
+      when_not_matched:'未匹配行处理策略',
+      return_receipt:'是否返回写入提交回执',
+      inputs:'从数据行读取的输入列映射',
+      output:'写回数据行的主输出列名',
+      outputs:'写回数据行的多列输出映射',
+      call_output:'记录模型调用元信息的列名',
+      error_output:'记录单行调用错误的列名',
+      when:'逐行触发条件函数',
+      concurrency:'最大并发度',
+      queue_depth:'在途任务队列深度上限',
+      max_requests:'本次运行最大模型请求次数',
+      token_budget:'单次请求或总量的输入预算上限',
+      batch_size:'单批读取或处理的行数',
+      batch_readahead:'预读批次数',
+      fragment_readahead:'预读数据分片数',
+      max_batch:'落盘单批最大行数',
+      flush_interval:'落盘刷新间隔（秒）',
+      max_rows:'允许写入的最大总行数',
+      max_row_bytes:'单行最大字节数上限',
+      max_key_bytes:'主键最大字节数上限',
+      max_index_bytes:'索引最大字节数上限',
+      chunk_bytes:'关联分块内存上限',
+      options:'模型调用运行选项（超时、后端配置等）',
+      temperature:'模型采样温度',
+      routes:'多路由模型配置列表',
+      route:'动态路由选择函数',
+      isolate_route_failures:'是否隔离单路由失败',
+      catch:'异常捕获与降级策略',
+      storage_options:'底层对象存储访问选项',
+      backend_options:'执行后端扩展选项',
+      service:'绑定的模型或外部服务名称',
+      request_policy:'请求重试与限流策略',
+      config:'Prompt 或 Agent 配置文件路径',
+      prompt:'具名 Prompt 模板标识',
+      model:'模型名称与传输配置',
+    };
+    function parseDocstringArgDocs(docText){
+      if(!docText||typeof docText!=='string')return {};
+      const out={};
+      const lines=docText.split(/\r?\n/);
+      for(const line of lines){
+        const sm=line.match(/^\s*:param(?:\s+[^:]+)?\s+([A-Za-z_]\w*)\s*:\s*(.+?)\s*$/);
+        if(sm)out[sm[1]]=sm[2].trim();
+      }
+      const argHeaders=new Set(['args','arguments','params','parameters','参数','入参']);
+      const endHeaders=new Set(['returns','return','yields','raises','examples','example','notes','note','attributes','返回','异常','示例','说明']);
+      let inArgs=false,baseIndent=0;
+      for(const line of lines){
+        const trimmed=line.trim();
+        if(!trimmed)continue;
+        const indent=line.length-line.trimStart().length;
+        const hm=trimmed.match(/^([A-Za-z\u4e00-\u9fff]+)\s*[:：]\s*$/);
+        if(hm){
+          const key=hm[1].toLowerCase();
+          if(argHeaders.has(key)){inArgs=true;baseIndent=indent;continue;}
+          if(endHeaders.has(key)){inArgs=false;continue;}
+        }
+        if(inArgs){
+          if(indent<=baseIndent&&!/^[-*•]/.test(trimmed)){inArgs=false;continue;}
+          const im=trimmed.match(/^(?:[-*•]\s+)?\*{0,2}([A-Za-z_]\w*)(?:\s*\([^)]*\))?\s*[:：]\s*(.+?)\s*$/);
+          if(im)out[im[1]]=im[2].trim();
+        }
+      }
+      return out;
+    }
+    function extractOperatorArgDocs(implVal){
+      if(!implVal)return {};
+      const out={};
+      const def=implVal.metadata?.definition;
+      if(Array.isArray(def?.parameters)){
+        for(const p of def.parameters){if(p?.name&&p?.description)out[p.name]=String(p.description).trim();}
+      }
+      if(typeof def?.description==='string')Object.assign(out,parseDocstringArgDocs(def.description));
+      const src=typeof def?.source==='string'?def.source:(typeof implVal.text==='string'?implVal.text:'');
+      if(src){
+        const dm=src.match(/(?:def|class)\s+[A-Za-z_]\w*[^:]*:\s*(?:#[^\n]*\n\s*)*(?:"""([\s\S]*?)"""|'''([\s\S]*?)''')/);
+        if(dm)Object.assign(out,parseDocstringArgDocs(dm[1]??dm[2]??''));
+      }
+      return out;
+    }
+    function renderParamTable(target,rows){
+      const table=$('table',undefined,'wb-table wb-param-table'),thead=$('thead'),tr=$('tr'),tbody=$('tbody');
+      for(const h of ['参数','说明','当前值'])tr.append($('th',h));
+      thead.append(tr);table.append(thead,tbody);
+      for(const [k,desc,v] of rows){
+        const r=$('tr');
+        r.append($('td',String(k)));
+        r.append($('td',desc||'—','wb-param-desc'));
+        const td=$('td');
+        if(v instanceof Node)td.append(v);else td.textContent=String(v??'');
+        r.append(td);
+        tbody.append(r);
+      }
+      target.append(table);
+    }
     function formatArgValue(p){
       if(p.value?.type==='Dataset')return 'Dataset · 上游数据流';
       if(p.value?.type==='function')return p.value.reference;
@@ -921,8 +1036,9 @@
       }
       return out;
     }
-    function renderWiring(node,values,target=wiringPane){
+    function renderWiring(node,values,target=wiringPane,implVal=null){
       const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),config=byKind.configuration,schema=byKind.schema;
+      const opArgDocs=extractOperatorArgDocs(implVal||byKind.implementation);
       const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.name!=='fn'&&p.value?.type!=='Dataset');
       const provided=allArgs.filter(p=>p.origin!=='default');
       const runtimeArgs=provided.filter(p=>RUNTIME_ARGS.has(p.name));
@@ -996,13 +1112,13 @@
           for(const[k,v]of Object.entries(p.value)){
             fnKwargKeys.push(k);
             const txt=typeof v==='string'?v:json(v);
-            paramRows.push([k,renderParamValueCell(v,txt)]);
+            paramRows.push([k,opArgDocs[k]||'',renderParamValueCell(v,txt)]);
           }
         }else if(p.name==='label'){
           continue;
         }else{
           otherParamNames.push(p.name);
-          paramRows.push([p.name,renderParamValueCell(p.value,formatArgValue(p))]);
+          paramRows.push([p.name,API_PARAM_DOCS[p.name]||opArgDocs[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]);
         }
       }
       if(apiExpr&&(fnKwargKeys.length||otherParamNames.length||Object.keys(bindings.inputs||{}).length||bindings.output)){
@@ -1033,7 +1149,7 @@
       if(paramRows.length){
         const paramSec=$('section',undefined,'wb-wiring-section');
         paramSec.append($('h4','调用参数'));
-        renderKvTable(paramSec,['参数','值'],paramRows);
+        renderParamTable(paramSec,paramRows);
         target.append(paramSec);
       }
 
@@ -1055,7 +1171,7 @@
           else if(p.name==='token_budget'&&p.value?.max_input!=null)summaryChips.append($('span','输入上限 '+p.value.max_input,'definition-chip'));
         }
         if(summaryChips.children.length)runtimeSection.append(summaryChips);
-        if(rtRows.length)renderKvTable(runtimeSection,['参数','值'],rtRows.map(p=>[p.name,renderParamValueCell(p.value,formatArgValue(p))]));
+        if(rtRows.length)renderParamTable(runtimeSection,rtRows.map(p=>[p.name,API_PARAM_DOCS[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]));
         target.append(runtimeSection);
       }
     }
@@ -1092,7 +1208,7 @@
         const byKind=Object.fromEntries(values.map(v=>[v.kind,v]));
         if(node.description)sourceBody.append($('p',node.description,'wb-node-semantic-desc'));
         const wiringVals=['callsite','configuration','schema'].map(k=>byKind[k]).filter(Boolean);
-        if(wiringVals.length)renderWiring(node,wiringVals,wiringPane);
+        if(wiringVals.length)renderWiring(node,wiringVals,wiringPane,byKind.implementation);
         else wiringPane.append($('p','暂无接线参数。','wb-caption'));
         let hasBehavior=false;
         const promptVal=byKind.prompt;
@@ -1159,7 +1275,7 @@
         const cfgVal=byKind.configuration,callVal=byKind.callsite;
         if(cfgVal&&cfgVal.availability!=='unavailable'){
           if(cfgVal.metadata){
-            renderWiring({occurrence_id:selection?.occurrenceId},[callVal,cfgVal,{kind:'schema',metadata:cfgVal.schema_metadata}].filter(Boolean),wiringPane);
+            renderWiring({occurrence_id:selection?.occurrenceId,api_call:reportNode?.api_call,data_source:reportNode?.data_source,op_kind:reportNode?.kind,label:reportNode?.label},[callVal,cfgVal,{kind:'schema',metadata:cfgVal.schema_metadata}].filter(Boolean),wiringPane,byKind.implementation);
           }else{
             const info=cfgVal.wiring||{},rows=info.parameters||{};
             const paramEntries=Object.entries(rows).filter(([k])=>k!=='fn'&&k!=='label');

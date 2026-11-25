@@ -367,7 +367,11 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
     (proj / 'operators' / 'base.py').write_text(
         'MAX_ITEMS = 100\n'
         'def pool_group(row, maximum=MAX_ITEMS):\n'
-        '    """按概念分组整理候选池。"""\n'
+        '    """按概念分组整理候选池。\n'
+        '\n'
+        '    Args:\n'
+        '        maximum: 单组最大候选图数量。\n'
+        '    """\n'
         '    return {"row": row, "maximum": maximum}\n'
         'def helper(row):\n'
         '    """保留原始行。"""\n'
@@ -521,3 +525,47 @@ def test_mece_operator_richness_anti_bypass_rules(tmp_path):
         parameter_digests={},
     )
     assert clean_diags == [], clean_diags
+
+    # OP-P1: Extra non-row parameters must be documented in Args:/参数:.
+    (proj / 'operators' / 'wrapped.py').write_text(
+        'from ._codec import pack\n'
+        'def pool_group(row, limit=12, tag="clean"):\n'
+        '    """打包并标记候选池条目。"""\n'
+        '    out = pack(row)\n'
+        '    out["limit"] = limit\n'
+        '    out["tag"] = tag\n'
+        '    return out\n',
+        encoding='utf-8',
+    )
+    _, p1_diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/_codec.py', 'operators/base.py', 'operators/wrapped.py'},
+        parameter_digests={},
+    )
+    assert any(
+        d['path'] == 'operators/wrapped.py' and 'OP-P1' in d['detail'] and 'limit' in d['detail']
+        for d in p1_diags
+    ), p1_diags
+
+    # Documenting both non-row parameters in 参数:/Args: clears OP-P1 cleanly.
+    (proj / 'operators' / 'wrapped.py').write_text(
+        'from ._codec import pack\n'
+        'def pool_group(row, limit=12, tag="clean"):\n'
+        '    """打包并标记候选池条目。\n'
+        '\n'
+        '    Args:\n'
+        '        limit: 每个概念最多保留的候选条数。\n'
+        '        tag: 写入结果行的业务标签。\n'
+        '    """\n'
+        '    out = pack(row)\n'
+        '    out["limit"] = limit\n'
+        '    out["tag"] = tag\n'
+        '    return out\n',
+        encoding='utf-8',
+    )
+    _, p1_clean = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/_codec.py', 'operators/base.py', 'operators/wrapped.py'},
+        parameter_digests={},
+    )
+    assert p1_clean == [], p1_clean

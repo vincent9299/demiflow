@@ -707,6 +707,103 @@ def _missing_operator_description_issues(path: Path) -> list[tuple[int, str]]:
     return issues
 
 
+_IMPLICIT_ROW_PARAMS = frozenset({'self', 'cls', 'row', 'rows', 'batch', 'item', 'items', 'record', 'records'})
+_ARG_SECTION_HEADERS = frozenset({'args', 'arguments', 'params', 'parameters', '参数', '入参'})
+_OTHER_SECTION_HEADERS = frozenset({'returns', 'return', 'yields', 'raises', 'examples', 'example', 'notes', 'note', 'attributes', '返回', '异常', '示例', '说明'})
+
+
+def _parse_docstring_arg_docs(doc: str | None) -> dict[str, str]:
+    """Extract {param_name: description} from Google-style (Args:/参数:) or Sphinx (:param name:) docstrings."""
+    if not doc or not doc.strip():
+        return {}
+    found: dict[str, str] = {}
+    lines = doc.splitlines()
+    # 1. Sphinx :param name: desc
+    for line in lines:
+        m = re.match(r'^\s*:param(?:\s+[^:]+)?\s+([A-Za-z_]\w*)\s*:\s*(.+?)\s*$', line)
+        if m:
+            found[m.group(1)] = m.group(2).strip()
+    # 2. Google-style Args: / Parameters: / 参数:
+    in_args = False
+    section_indent = 0
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        header_match = re.match(r'^([A-Za-z\u4e00-\u9fff]+)\s*[:：]\s*$', stripped)
+        if header_match:
+            key = header_match.group(1).lower()
+            if key in _ARG_SECTION_HEADERS:
+                in_args = True
+                section_indent = indent
+                continue
+            if key in _OTHER_SECTION_HEADERS:
+                in_args = False
+                continue
+        if in_args:
+            if indent <= section_indent and not stripped.startswith(('-', '*', '•')):
+                in_args = False
+                continue
+            item_match = re.match(r'^(?:[-*•]\s+)?\*{0,2}([A-Za-z_]\w*)(?:\s*\([^)]*\))?\s*[:：]\s*(.+?)\s*$', stripped)
+            if item_match:
+                found[item_match.group(1)] = item_match.group(2).strip()
+    return found
+
+
+def _missing_operator_param_docs(path: Path) -> list[tuple[int, str, list[str]]]:
+    """OP-P1: Detect public operators with extra non-row parameters lacking Args:/参数: semantic descriptions."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+
+    def extra_param_names(args: ast.arguments, *, is_method: bool) -> list[str]:
+        all_pos = [*args.posonlyargs, *args.args]
+        if is_method and all_pos and all_pos[0].arg in ('self', 'cls'):
+            all_pos = all_pos[1:]
+        # For a plain row function, skip the first positional data-row argument.
+        if not is_method and all_pos:
+            all_pos = all_pos[1:]
+        names = [a.arg for a in all_pos] + [a.arg for a in args.kwonlyargs]
+        return [n for n in names if not n.startswith('_') and n not in _IMPLICIT_ROW_PARAMS]
+
+    issues: list[tuple[int, str, list[str]]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
+            extra = extra_param_names(node.args, is_method=False)
+            if not extra:
+                continue
+            doc = ast.get_docstring(node)
+            if not doc or not doc.strip():
+                continue  # Already flagged by OP-S1 missing_operator_description
+            arg_docs = _parse_docstring_arg_docs(doc)
+            missing = [n for n in extra if not arg_docs.get(n)]
+            if missing:
+                issues.append((node.lineno, node.name, missing))
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith('_'):
+            init_fn = next(
+                (m for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == '__init__'),
+                None,
+            )
+            if init_fn is None:
+                continue
+            extra = extra_param_names(init_fn.args, is_method=True)
+            if not extra:
+                continue
+            cls_doc = ast.get_docstring(node) or ''
+            init_doc = ast.get_docstring(init_fn) or ''
+            if not cls_doc.strip() and not init_doc.strip():
+                continue  # Already flagged by OP-S1
+            arg_docs = {**_parse_docstring_arg_docs(cls_doc), **_parse_docstring_arg_docs(init_doc)}
+            missing = [n for n in extra if not arg_docs.get(n)]
+            if missing:
+                issues.append((node.lineno, node.name, missing))
+    return issues
+
+
 def _points_to_runs(root: Path, value) -> bool:
     runs_root = (root / 'runs').resolve(strict=False)
     candidates = []
@@ -936,6 +1033,18 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             by_category.setdefault('missing_operator_description', []).append(
                 diagnostic('DF-02', rel,
                            f'公开算子 {first_name} 缺少首行语义描述 docstring{extra}；按 DF-02/OP-S1 规范，每个公开代码算子（函数/Actor 类）须在首行 docstring 中写清业务语义，供工作台执行图节点直接展示。',
+                           line=first_line)
+            )
+        # OP-P1: Mandatory Args:/参数: semantic descriptions for non-row operator parameters.
+        missing_param_docs = _missing_operator_param_docs(root / rel)
+        if missing_param_docs:
+            first_line, first_name, first_params = missing_param_docs[0]
+            p_list = ', '.join(first_params[:3]) + ('…' if len(first_params) > 3 else '')
+            extra = f' 等 {len(missing_param_docs)} 个算子' if len(missing_param_docs) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('missing_operator_param_description', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开算子 {first_name} 的参数 {p_list} 缺少语义说明{extra}；按 DF-02/OP-P1 规范，非数据行参数须在 docstring 的 Args:/参数: 段逐个写清中文业务含义，供工作台接口面板直接展示。',
                            line=first_line)
             )
         if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):
