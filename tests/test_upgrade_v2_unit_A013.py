@@ -35,3 +35,14 @@ def test_schema_streaming_uses_one_real_action(monkeypatch):
     calls = _action_spy(monkeypatch)
     assert _stream().schema().names == ['id']
     assert calls == ['schema']
+
+
+def test_schema_without_fetch_starts_no_action_and_reads_no_source(tmp_path, monkeypatch):
+    opened = tmp_path / "source-opened"
+
+    def source():
+        opened.touch()
+        yield from ({"id": i} for i in range(6))
+    calls = _action_spy(monkeypatch)
+    assert data.from_iter(source).map(lambda r: r).schema(fetch_if_missing=False) is None
+    assert calls == [] and not opened.exists()

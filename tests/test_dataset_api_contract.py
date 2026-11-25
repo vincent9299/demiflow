@@ -1,5 +1,7 @@
 """Public export and Dataset action contracts."""
 
+import logging
+
 import pyarrow as pa
 import pytest
 
@@ -148,3 +150,22 @@ def test_iter_batches_explicit_pandas_format():
     assert all(isinstance(batch, pd.DataFrame) for batch in batches)
     assert [len(batch) for batch in batches] == [2, 1]
     assert batches[0].to_dict('records') == [{'x': 0}, {'x': 1}]
+
+
+def _take_all_events(caplog):
+    return [record.getMessage() for record in caplog.records
+            if record.getMessage() in ("demiflow.dataset.action_completed", "demiflow.dataset.action_failed")]
+
+
+@pytest.mark.parametrize("limit", [None, 3, 5])
+def test_take_all_logs_one_completion_and_no_failure(caplog, limit):
+    caplog.set_level(logging.INFO, logger="demiflow")
+    assert len(data.from_items([{"x": 1}, {"x": 2}, {"x": 3}]).take_all(limit=limit)) == 3
+    assert _take_all_events(caplog) == ["demiflow.dataset.action_completed"]
+
+
+def test_take_all_over_its_limit_logs_one_failure_and_no_completion(caplog):
+    caplog.set_level(logging.INFO, logger="demiflow")
+    with pytest.raises(ValueError, match="more than the take_all limit"):
+        data.from_items([{"x": 1}, {"x": 2}]).take_all(limit=1)
+    assert _take_all_events(caplog) == ["demiflow.dataset.action_failed"]
