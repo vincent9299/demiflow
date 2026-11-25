@@ -481,6 +481,58 @@ def test_unified_queue_carrier_preserves_bytes_intermediate(tmp_path):
     _assert_intermediate_type(tmp_path, 'bytes')
 
 
+def test_typed_intermediate_survives_worker_loss_after_acquisition(tmp_path):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    n = 3
+    cfg, root = _config(tmp_path, 'typed'), tmp_path / 'typed-run'
+    driver_pid = os.getpid()
+    crash_marker, ref_file = tmp_path / 'crashed-once', tmp_path / 'run-ref.json'
+
+    def prefix(row):
+        return {**row, 'temporary': (1, b'\x00')}
+
+    def suffix(row):
+        if row['_queue_delivery']['task_id'] == 't1' and not crash_marker.exists():
+            kill_owned_worker(crash_marker, driver_pid)
+        value = row['temporary']
+        out = {k: v for k, v in row.items() if k not in ('temporary', 'request')}
+        out['intermediate_type'] = [type(value).__name__, type(value[1]).__name__]
+        return out
+
+    def build(url):
+        return (data.read_queue(cfg, pool='p', max_tasks=n, max_inflight=1, idle_timeout_s=.5).map(prefix)
+                .fetch(store=LocalObjectStore(root / 'objects'), concurrency=1,
+                       policy=FetchPolicy(max_object_bytes=131072, http=HttpSource(allow_private=True)))
+                .map(suffix))
+
+    with origin_server() as (url, calls):
+        channel, p = _seed_tasks(cfg, tmp_path / 'typed-seed', url, n)
+        with pytest.raises(DataflowError, match='UNKNOWN_EFFECT'):
+            with RunContext.start(root, limits=LIMITS) as run:
+                ref_file.write_text(json.dumps(asdict(run.ref)))
+                with data.local_execution(workers=1, worker_mode='process', partitions=1):
+                    build(url).write_datasink(QueueResultSink(cfg, pool='p'))
+        assert crash_marker.exists() and calls['/file'] == 2
+        with channel.database.connection(write=True) as db:
+            db.execute('UPDATE queue_tasks SET lease_until=0 WHERE generation=?', (p.generation,))
+        with RunContext.resume(RunRef(**json.loads(ref_file.read_text()))):
+            with data.local_execution(workers=1, worker_mode='process', partitions=1):
+                build(url).write_datasink(QueueResultSink(cfg, pool='p'))
+        # The acquired task is not fetched again; its stored receipt keeps the row's types.
+        assert calls['/file'] == n
+    records = _records_by_task(cfg, channel)
+    assert sorted(records) == ['t0', 't1', 't2']
+    assert all(r['intermediate_type'] == ['tuple', 'bytes'] for r in records.values())
+    assert channel.state('p')['counts'] == {'done_ok': n}
+
+
+def test_rows_stored_as_json_by_an_earlier_attempt_remain_readable():
+    from demiflow.execution.contracts.record_codec import RECORD_MEDIA_TYPE, dumps_row, loads_stored_row
+    assert loads_stored_row(b'{"a":[1,2]}', 'application/json') == {'a': [1, 2]}
+    row = {'t': (1, b'\x00'), 'n': None}
+    assert loads_stored_row(dumps_row(row, max_bytes=4096), RECORD_MEDIA_TYPE) == row
+
+
 def test_unified_queue_carrier_business_error_raises_original_promptly(tmp_path, monkeypatch):
     # N2: a worker business exception must reach the driver as the ORIGINAL
     # ValueError immediately, not as a control TimeoutError after the production

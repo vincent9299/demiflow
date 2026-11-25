@@ -31,6 +31,7 @@ from demiflow.execution.native_queue.queue_execution import configure_explicit, 
 from demiflow.execution.native_queue.queue_sinks import QueueResultSink
 from demiflow.execution.native_queue.queue_source import QueueDatasource
 from demiflow.execution.native_queue.raw_fetch import RawFetch
+from demiflow.execution.contracts.record_codec import RECORD_MEDIA_TYPE, dumps_row, loads_stored_row
 from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.worker.row_scope import RowScope, set_row_scope
 from demiflow.execution.pipeline.run_context import RunAction, action_scope
@@ -383,7 +384,7 @@ class NativeAcquisitionService(NativeSearchOperations):
             descriptor = self._read_json(command.delivery_ref, max_bytes=self._services.bounds.max_control_bytes)
             if descriptor != {'occurrence': command.record_id}:
                 raise DataflowError('FENCED', 'Raw acquisition occurrence differs')
-            row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+            row = self._read_row(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
             self._admit_io()
             try:
                 receipt = self._run_io(self._acquire_io(row, None, command.record_id, fetch=fetch),
@@ -394,12 +395,12 @@ class NativeAcquisitionService(NativeSearchOperations):
             with self._lock:
                 self._raw_acquisition_count += 1
             return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
-                self._put_json(receipt, media_type=_ROW_MEDIA, max_bytes=self._services.bounds.max_row_bytes),
+                self._put_row(receipt, max_bytes=self._services.bounds.max_row_bytes),
                 self._put_json(fact, media_type=_FACT_MEDIA, max_bytes=self._services.bounds.max_control_bytes), 0)
         claim = self._claim_for(command.delivery_ref, lease)
         if claim.acquisition_fact is not None:
             return self._acquisition_reply(command, claim)
-        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        row = self._read_row(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         if type(row) is not dict:
             raise DataflowError('INVALID_CONTRACT', 'acquire requires exactly one request record')
         from demiflow.execution.native_queue.dataflow_queue_recovery import current_delivery_row
@@ -415,8 +416,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         # only native lease operations see a renewed attempt's reserved epoch.
         receipt = {**receipt, '_queue_delivery': row['_queue_delivery']}
         fact = acquisition_fact(receipt, output=self._fetch.output, channel=self._source.channel if self._source is not None else None, journal=self._action.context.journal)
-        row_ref = self._put_json(receipt, media_type=_ROW_MEDIA,
-                                 max_bytes=self._services.bounds.max_row_bytes)
+        row_ref = self._put_row(receipt, max_bytes=self._services.bounds.max_row_bytes)
         fact_ref = self._put_json(fact, media_type=_FACT_MEDIA,
                                   max_bytes=self._services.bounds.max_control_bytes)
         with self._lock:
@@ -449,7 +449,7 @@ class NativeAcquisitionService(NativeSearchOperations):
         claim = self._claim_for(command.delivery_ref, lease)
         if claim.acquisition_fact is None:
             raise DataflowError('INVALID_CONTRACT', 'finalize requires a confirmed acquisition')
-        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        row = self._read_row(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         self._validate_final_row(row, claim)
         if claim.finalized:
             prepared = claim.final_fact['prepared']['sinks']['result']
@@ -657,11 +657,11 @@ class NativeAcquisitionService(NativeSearchOperations):
     def _acquisition_reply(self, command: QueueCommand, claim: _Claim) -> QueueReply:
         # Replaying a pre-acquisition cut may repeat pure maps before fetch.
         # Preserve their current row while reusing only the original paid result.
-        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        row = self._read_row(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         from demiflow.execution.native_queue.dataflow_queue_recovery import current_delivery_row
         current_delivery_row(row, claim)
         receipt = {**row, self._fetch.output: claim.receipt_row[self._fetch.output]}
-        row_ref = self._put_json(receipt, media_type=_ROW_MEDIA, max_bytes=self._services.bounds.max_row_bytes)
+        row_ref = self._put_row(receipt, max_bytes=self._services.bounds.max_row_bytes)
         fact_ref = self._put_json(claim.acquisition_fact, media_type=_FACT_MEDIA,
                                   max_bytes=self._services.bounds.max_control_bytes)
         return QueueReply(command.operation_id, 'confirmed', command.delivery_ref,
@@ -761,6 +761,19 @@ class NativeAcquisitionService(NativeSearchOperations):
         if len(raw) > max_bytes:
             raise DataflowError('BUDGET_EXCEEDED', 'queue artifact exceeds its driver byte budget')
         return self._services.store.put(iter([raw]), max_bytes=max_bytes, media_type=media_type)
+
+    def _put_row(self, value, *, max_bytes: int) -> ArtifactRef:
+        """A business row keeps its data types (row codec); control documents use _put_json."""
+        return self._services.store.put(iter([dumps_row(value, max_bytes=max_bytes)]),
+                                        max_bytes=max_bytes, media_type=RECORD_MEDIA_TYPE)
+
+    def _read_row(self, ref: ArtifactRef, *, max_bytes: int):
+        if not isinstance(ref, ArtifactRef):
+            raise DataflowError('INVALID_CONTRACT', 'queue payload requires an artifact ref')
+        raw = b''.join(self._services.store.read(ref, max_bytes=max_bytes))
+        if len(raw) > max_bytes:
+            raise DataflowError('BUDGET_EXCEEDED', 'queue artifact exceeds its driver byte budget')
+        return loads_stored_row(raw, ref.media_type)
 
     def _read_json(self, ref: ArtifactRef, *, max_bytes: int):
         if not isinstance(ref, ArtifactRef):
@@ -905,7 +918,7 @@ class NativeProducerService(NativeAcquisitionService):
         descriptor = self._read_json(command.delivery_ref, max_bytes=self._services.bounds.max_control_bytes)
         if self._unit is None or descriptor != self._unit:
             raise DataflowError('FENCED', 'Publication does not belong to the active source unit')
-        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        row = self._read_row(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         async def publish():
             with action_scope(self._action):
                 set_row_scope(RowScope(command.record_id))

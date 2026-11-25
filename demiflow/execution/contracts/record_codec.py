@@ -1902,6 +1902,12 @@ def dumps_row(row: object, *, max_bytes: int) -> bytes:
 def loads_row(data: bytes) -> object:
     return _decode_payload(data, max_bytes=max(1, len(data)))
 
+def loads_stored_row(data: bytes, media_type: str) -> object:
+    """A row stored as an artifact: this row codec, or JSON written before rows used it."""
+    if media_type == RECORD_MEDIA_TYPE:
+        return loads_row(data)
+    return json.loads(data)
+
 def row_bytes(row: object, *, max_bytes: int) -> int:
     return len(dumps_row(row, max_bytes=max_bytes))
 

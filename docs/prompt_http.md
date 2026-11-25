@@ -2,11 +2,14 @@
 
 ## Async execution and recovery (2026-11-04)
 
-`map_prompt_async` no longer accepts `sqlite_journal` or `journal_dir`. Remove
-these options when migrating a caller. The actor performs inference and forwards
-results through bounded in-memory queues; it does not persist requests, replies,
-reservations or lease files. Legacy journals remain readable through the separate
-journal inspection API. The synchronous prompt API is outside this change.
+Prompt nodes (`map_prompt` and `map_prompt_async`) no longer accept `journal_dir`;
+remove it when migrating a caller. Request recovery belongs to the run: the actor
+performs inference and forwards results through bounded in-memory queues; it does
+not itself persist requests, replies, reservations or lease files. An optional
+private prompt cache is still declared with `sqlite_journal`, which accepts only
+`path` (required), `max_requests`, `read_only` and `timeout_s`, and cannot be
+combined with `journal_dir`, offline replay or CLI/Codex transports. Legacy
+journals remain readable through the separate journal inspection API.
 
 For a managed row-local stream ending at the existing `materialize()` boundary,
 the execution layer commits downstream output blocks and then confirms progress,
@@ -210,6 +213,10 @@ not the concurrency or payload bounds. Existing reservations and responses
 remain in the same journal and its cumulative count is never reset.
 
 ## Batched journal storage (opt-in)
+
+Prompt nodes reject `throughput`: their private cache accepts only the four keys
+listed at the top of this page. The layout below is a storage option of the
+journal library itself (`demiflow.operator_llm.sqlite_journal.SQLitePromptJournal`).
 
 `sqlite_journal.throughput=None` (the default) keeps the historic layout: one
 SQLite file, one `FULL`-synchronous commit per request, and one

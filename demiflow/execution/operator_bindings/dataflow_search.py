@@ -86,7 +86,7 @@ class NativeSearchOperations:
                 raise DataflowError('FENCED', 'Search does not belong to the active source unit')
         elif descriptor != {'occurrence': command.record_id}:
             raise DataflowError('FENCED', 'Native search invocation identity changed')
-        row = self._read_json(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
+        row = self._read_row(command.row_ref, max_bytes=self._services.bounds.max_row_bytes)
         self._admit_io()
         try:
             result, read_proofs = self._run_io(self._search_runtime.call(actor, command, row),
@@ -99,7 +99,7 @@ class NativeSearchOperations:
     def _confirmed(self, command, result, proofs):
         if not proofs or any(proof is None or proof['status'] != 'acked' for proof in proofs):
             raise DataflowError('UNKNOWN_EFFECT', 'Native effect has no confirmed receipt')
-        ref = self._put_json(result, media_type='application/json', max_bytes=self._services.bounds.max_row_bytes)
+        ref = self._put_row(result, max_bytes=self._services.bounds.max_row_bytes)
         proofs = [{key: proof[key] for key in ('commit_id', 'action_id', 'status', 'receipts')}
                   for proof in proofs]
         fact = self._put_json({'commits': proofs}, media_type='application/json',

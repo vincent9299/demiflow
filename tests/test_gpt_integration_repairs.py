@@ -169,7 +169,21 @@ if window != 'resume':
     def fault(name, commit_id):
         fact = RunJournal(root).execution_commit(commit_id)
         if name == window and fact['intent']['sinks'] == ['materialize'] and fact['sequence'] == 2:
-            os._exit(73)
+            # Model calls keep flowing while a cut commits, so lose the process only once
+            # all 8 requests are answered: recovery must then reuse every response.
+            import sqlite3, time
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                try:
+                    with sqlite3.connect(Path(root, 'run.sqlite')) as db:
+                        total, unanswered = db.execute(
+                            'SELECT count(*), coalesce(sum(response_json IS NULL), 0) FROM calls').fetchone()
+                except sqlite3.OperationalError:
+                    total, unanswered = 0, 0
+                if total == 8 and unanswered == 0:
+                    os._exit(73)
+                time.sleep(0.01)
+            os._exit(74)
     commit.fault_point = fault
 prior = RunJournal(root).recovery_identity() if Path(root, 'run.sqlite').exists() else None
 scope = RunContext.resume(RunRef(root, prior['run_id'])) if prior else RunContext.start(root,

@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 
 from demiflow.execution.contracts.dataflow import QueueBinding, QueueCommand, ArtifactRef
 from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.execution.contracts.record_codec import RECORD_MEDIA_TYPE, dumps_row, loads_stored_row
 from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.worker.row_scope import current_row_scope
 
@@ -65,7 +66,12 @@ class AcquisitionCall:
             if not isinstance(delivery, ArtifactRef):
                 raise DataflowError('FENCED', 'Queue row lost its driver-owned delivery ref')
         request = row
-        row_ref = put(request, services.bounds.max_row_bytes)
+        if self.operation == 'finalize':
+            # The settled row is written to the queue database as JSON by the queue sink.
+            row_ref = put(request, services.bounds.max_row_bytes)
+        else:
+            row_ref = services.store.put(iter([dumps_row(request, max_bytes=services.bounds.max_row_bytes)]),
+                                         max_bytes=services.bounds.max_row_bytes, media_type=RECORD_MEDIA_TYPE)
         command = QueueCommand(identity([self.binding.action_id, record_id, self.operation]),
             self.operation, self.binding, record_id, delivery, row_ref,
             node_id=getattr(self, 'search_occurrence', getattr(self, 'native_occurrence', None)))
@@ -75,8 +81,8 @@ class AcquisitionCall:
                 from demiflow.execution.contracts.queue_contract import QueueIncomplete
                 raise QueueIncomplete('Native task acquisition/settlement remains unconfirmed')
             raise DataflowError('UNKNOWN_EFFECT', 'Native acquisition/settlement was not confirmed')
-        result = json.loads(b''.join(services.store.read(reply.row_ref,
-            max_bytes=services.bounds.max_row_bytes)))
+        result = loads_stored_row(b''.join(services.store.read(reply.row_ref,
+            max_bytes=services.bounds.max_row_bytes)), reply.row_ref.media_type)
         if self.operation == 'finalize' and not self.keep_row:
             fact = json.loads(b''.join(services.store.read(reply.native_fact_ref,
                               max_bytes=services.bounds.max_control_bytes)))

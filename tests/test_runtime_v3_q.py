@@ -275,8 +275,9 @@ def _cmd(binding, operation, op_id, *, delivery_ref=None, row_ref=None, record_i
 
 
 def _read_json(store, ref):
-    import json
-    return json.loads(b''.join(store.read(ref, max_bytes=8 * 1024 * 1024)))
+    """A stored queue document: business rows use the row codec, control documents JSON."""
+    from demiflow.execution.contracts.record_codec import loads_stored_row
+    return loads_stored_row(b''.join(store.read(ref, max_bytes=8 * 1024 * 1024)), ref.media_type)
 
 
 # --- native queue fixtures ------------------------------------------------
