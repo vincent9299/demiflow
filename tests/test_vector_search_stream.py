@@ -11,6 +11,7 @@ from demiflow import data
 from demiflow.data.plan import VectorSearchOp
 from demiflow.errors import InvalidLanceRequest
 from demiflow.lance import search
+from _row_capture import run_stream_rows as collect
 
 
 @pytest.fixture
@@ -33,12 +34,6 @@ def plan(uri, rows, **kwargs):
     return data.from_items(rows).search_vectors(**settings)
 
 
-def collect(stream):
-    rows = []
-    stats = stream.map(lambda row: rows.append(row) or row).run_stream()
-    return rows, stats
-
-
 def test_lazy_native_node_preserves_queries_and_duplicates(table, monkeypatch):
     uri, _ = table
     opened = []
@@ -47,6 +42,12 @@ def test_lazy_native_node_preserves_queries_and_duplicates(table, monkeypatch):
         opened.append((args, kwargs))
         return native_open(*args, **kwargs)
     monkeypatch.setattr(search, 'open_lance_dataset', tracked)
+    closed = []
+    native_close = search.VectorSearch.aclose
+    async def tracked_close(self):
+        await native_close(self)
+        closed.append(True)
+    monkeypatch.setattr(search.VectorSearch, 'aclose', tracked_close)
     inputs = [dict(qid='one', vector=[1., 0.]), dict(qid='two', vector=[0., 1.]),
               dict(qid='duplicate', vector=[1., 0.])]
     stream = plan(uri, inputs)
@@ -58,13 +59,12 @@ def test_lazy_native_node_preserves_queries_and_duplicates(table, monkeypatch):
         'one': 'a', 'two': 'b', 'duplicate': 'a'}
     assert all(set(r['hits'][0]) == {'id', '_distance'} for r in rows)
     assert all(r['hits'][0]['_distance'] == 0 for r in rows)
-    assert len(opened) == 1
+    assert len(opened) == len(closed) == 1  # The action released its handle.
     assert opened[0][1]['index_cache_size_bytes'] == 256 * 2**20
+    collect(stream)
+    assert len(opened) == len(closed) == 2  # Action-owned handle can be reopened safely.
     assert stats.metrics['resources']['VectorSearch:0']['version'] == 1
     assert stats.metrics['resources']['VectorSearch:0']['queries'] == 3
-    assert stream._stages[-1]._dataset is None
-    collect(stream)
-    assert len(opened) == 2  # Action-owned handle can be reopened safely.
 
 
 def test_static_and_per_row_filters_empty_hits_and_materialization(table):
@@ -77,24 +77,26 @@ def test_static_and_per_row_filters_empty_hits_and_materialization(table):
     assert by_filter["id = 'b'"] == []
 
 
-def test_head_pinned_for_action_and_explicit_version(table):
-    uri, schema = table
-    appended = False
+def test_head_pinned_for_action_and_explicit_version(table, tmp_path):
+    uri, _ = table
+    appended = tmp_path / 'appended'
     def after_search(row):
-        nonlocal appended
-        if not appended:
+        # Read the schema here: a captured pyarrow object would make this callback
+        # a separate opaque stage that the default four workers cannot also place.
+        if not appended.exists():
             lance.write_dataset(pa.Table.from_pylist([
-                dict(id='new', group='z', embedding=[.5, .5], text='D')], schema=schema), uri, mode='append')
-            appended = True
+                dict(id='new', group='z', embedding=[.5, .5], text='D')], schema=lance.dataset(uri).schema),
+                uri, mode='append')
+            appended.touch()
         return row
     inputs = [dict(vector=[.5, .5])] * 6
     rows, stats = collect(plan(uri, inputs, concurrency=1).map(after_search))
     assert all(r['hits'][0]['id'] != 'new' for r in rows)
+    pinned, _ = collect(plan(uri, inputs[:1], version=1))
+    assert pinned[0]['hits'][0]['id'] != 'new'
+    head, _ = collect(plan(uri, inputs[:1]))
+    assert head[0]['hits'][0]['id'] == 'new'
     assert stats.metrics['resources']['VectorSearch:0']['version'] == 1
-    rows, _ = collect(plan(uri, inputs[:1], version=1))
-    assert rows[0]['hits'][0]['id'] != 'new'
-    rows, _ = collect(plan(uri, inputs[:1]))
-    assert rows[0]['hits'][0]['id'] == 'new'
 
 
 def test_empty_input_does_not_open_table(monkeypatch):
@@ -116,7 +118,6 @@ def test_invalid_queries_fail_instead_of_dropping_rows(table, vector):
     with pytest.raises(RecoveryContractError if nonfinite else InvalidLanceRequest,
                        match='Nonfinite' if nonfinite else None):
         stream.run_stream()
-    assert stream._stages[-1]._dataset is None
 
 
 @pytest.mark.parametrize('kwargs', [dict(columns=[]), dict(output='vector'),
@@ -135,9 +136,13 @@ def test_invalid_configuration_rejected_at_declaration(kwargs):
 def test_query_and_result_byte_admission(table, monkeypatch):
     uri, schema = table
     stream = plan(uri, [dict(vector=[1., 0.])], options={'max_query_dimensions': 1})
-    with pytest.raises(InvalidLanceRequest, match='max_query_dimensions'):
-        stream.run_stream()
-    assert stream._stages[-1]._version is None  # Refused before table I/O.
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('a refused query opened the table')
+    with monkeypatch.context() as patch:  # Refused before table I/O.
+        patch.setattr(search, 'open_lance_dataset', forbidden)
+        with pytest.raises(InvalidLanceRequest, match='max_query_dimensions'):
+            stream.run_stream()
     lance.write_dataset(pa.Table.from_pylist([
         dict(id='wide', group='z', embedding=[1., 0.], text='x' * 20000)], schema=schema), uri, mode='overwrite')
     for options, message in [({'max_result_bytes': 1000}, 'max_result_bytes'),
@@ -145,7 +150,6 @@ def test_query_and_result_byte_admission(table, monkeypatch):
         stream = plan(uri, [dict(vector=[1., 0.])], columns=['id', 'text'], options=options)
         with pytest.raises(MemoryError, match=message):
             stream.run_stream()
-        assert stream._stages[-1]._dataset is None
     with pytest.raises(MemoryError, match='top_k'):
         plan(uri, [], top_k=10000, options={'max_python_result_bytes': 1000})
 
@@ -203,10 +207,14 @@ def test_failure_drains_other_search_before_closing_handle(table, monkeypatch):
     assert closed == [True]
 
 
-def test_concurrency_and_slow_consumer_backpressure(table, monkeypatch):
-    active = peak = finished = consumed = max_ahead = 0
+def test_concurrency_and_slow_consumer_backpressure(table, monkeypatch, tmp_path):
+    active = peak = finished = max_ahead = 0
     lock = threading.Lock()
     real_call = search.VectorSearch.__call__
+    consumed_log = tmp_path / 'consumed'
+
+    def consumed():
+        return len(consumed_log.read_text().splitlines()) if consumed_log.exists() else 0
     def run(self, row):
         nonlocal active, peak, finished, max_ahead
         with lock:
@@ -219,17 +227,17 @@ def test_concurrency_and_slow_consumer_backpressure(table, monkeypatch):
             with lock:
                 active -= 1
                 finished += 1
-                max_ahead = max(max_ahead, finished - consumed)
+                max_ahead = max(max_ahead, finished - consumed())
     async def consume(row):
-        nonlocal consumed
         await asyncio.sleep(.01)
-        consumed += 1
+        with consumed_log.open('a') as out:
+            out.write('1\n')
         return row
     monkeypatch.setattr(search.VectorSearch, '__call__', run)
     stream = plan(table[0], [dict(vector=[1., 0.])] * 20)
     stats = stream.map_async(consume, concurrency=1, queue_depth=1).run_stream()
     assert 1 < peak <= 2 and active == 0
-    assert finished == consumed == stats.emitted == 20
+    assert finished == consumed() == stats.emitted == 20
     assert max_ahead <= 4  # Two search workers, downstream queue and consumer.
 
 
@@ -299,7 +307,6 @@ def test_hnsw_refinement_stream_chain_matches_exact(hnsw_table, monkeypatch, ef)
     assert all(kwargs['nearest'].get('ef') == ef for kwargs,_ in scanned)
     assert all(kwargs['nearest']['refine_factor'] == 16 for kwargs,_ in scanned)
     assert all(kwargs['columns'] == ['id', '_distance'] for kwargs,_ in scanned)
-    assert stream._stages[-1]._dataset is None
 
 
 def test_hnsw_prefilter_empty_and_fewer_than_top_k(hnsw_table):
