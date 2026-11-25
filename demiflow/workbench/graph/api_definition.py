@@ -42,3 +42,41 @@ def current(api):
         return None
     root = Path(__file__).resolve().parents[2]
     return from_source(api, read_bounded(root / address[0], 2 * 1024**2))
+
+
+_CATALOG_CACHE = None
+
+
+def catalog():
+    """Return public DemiFlow DataAPI and Dataset standard API contracts from engine source."""
+    global _CATALOG_CACHE
+    if _CATALOG_CACHE is not None:
+        return _CATALOG_CACHE
+    root = Path(__file__).resolve().parents[2]
+    items = []
+    for rel, owner, group in (
+        ('data/api.py', 'DataAPI', '数据入口 · data'),
+        ('data/dataset.py', 'Dataset', '数据变换与输出 · Dataset'),
+    ):
+        raw = read_bounded(root / rel, 2 * 1024**2)
+        tree = ast.parse(raw)
+        digest = hashlib.sha256(raw).hexdigest()
+        for cls in tree.body:
+            if not isinstance(cls, ast.ClassDef) or cls.name != owner:
+                continue
+            for fn in cls.body:
+                if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) or fn.name.startswith('_'):
+                    continue
+                value = code_definition(fn, '', kind='api', name=f'{owner}.{fn.name}')
+                value.update(
+                    id=f'api:{owner}.{fn.name}',
+                    owner=owner,
+                    method=fn.name,
+                    group=group,
+                    display_name=f'data.{fn.name}' if owner == 'DataAPI' else f'Dataset.{fn.name}',
+                    path=rel,
+                    file_sha256=digest,
+                )
+                items.append(value)
+    _CATALOG_CACHE = items
+    return items

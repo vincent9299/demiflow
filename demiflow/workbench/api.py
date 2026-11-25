@@ -819,9 +819,13 @@ class Handler(BaseHTTPRequestHandler):
                              else definitions.read(root, data_tools=True, include_platform=True, **query))
                 elif url.path in {'/api/project-operators', '/api/operator-definition', '/api/operator-history'}:
                     from demiflow.workbench.projects import definitions
-                    value = (definitions.catalog(root) if url.path == '/api/project-operators' else
-                             definitions.read(root, **query) if url.path == '/api/operator-definition' else
-                             definitions.history(root, **query))
+                    if url.path == '/api/project-operators':
+                        from demiflow.workbench.graph import api_definition
+                        value = {**definitions.catalog(root), 'standard_apis': api_definition.catalog()}
+                    elif url.path == '/api/operator-definition':
+                        value = definitions.read(root, **query)
+                    else:
+                        value = definitions.history(root, **query)
                 elif url.path == '/api/flow-arguments':
                     from demiflow.workbench.projects.flow_arguments import read
                     value = read(root, **query)
