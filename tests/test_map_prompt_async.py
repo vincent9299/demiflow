@@ -194,3 +194,58 @@ def test_config_is_a_real_yaml_path_and_is_bound_at_declaration(server, tmp_path
 def test_invalid_node_budget_is_rejected_at_declaration(limit):
     with pytest.raises(ValueError, match='max_requests'):
         prompt(DataAPI().from_items([]), max_requests=limit)
+
+
+def test_numbered_images_reach_the_request_in_order(server):
+    pack=PACK.replace('{{ payload | json }}','{{ payload | json }}\n      {{ pictures | numbered_image }}')
+    parsed=parse_prompt_pack(pack)
+    assert parsed.prompt_definitions['enrich'].input_modalities==('text','image')
+    pictures=['data:image/png;base64,AAAA','data:image/png;base64,BBBB']
+    rows=(DataAPI().from_items([{'item':{'task':'compare'},'pixels':pictures}])
+          .map_prompt_async('enrich',config=parsed,inputs={'payload':'item','pictures':'pixels'},output='answer')
+          .take_all())
+    assert rows[0]['answer']=='ok' and len(server['requests'])==1
+    content=server['requests'][0]['body']['messages'][1]['content']
+    positions=[]
+    for index,url in enumerate(pictures,1):
+        pos=next(i for i,part in enumerate(content) if part.get('image_url',{}).get('url')==url)
+        assert content[pos-1]=={'type':'text','text':f'\nImage {index}:\n'}
+        positions.append(pos)
+    assert positions==sorted(positions)
+
+
+def test_images_and_multiple_outputs_map_onto_the_original_row(server):
+    pack=(PACK.replace('required: [result]','required: [result, n]')
+          .replace('        result: {type: string}','        result: {type: string}\n        n: {type: integer}')
+          .replace('{{ payload | json }}','{{ payload | json }}\n      {{ picture | image }}'))
+    server['respond']=lambda b,i:{'result':'ok','n':2}
+    rows=(DataAPI().from_items([{'item':1,'image':'https://example.org/a.png','keep':True}])
+          .map_prompt_async('enrich',config=parse_prompt_pack(pack),inputs={'payload':'item','picture':'image'},
+                            outputs={'result':'answer','n':'count'})
+          .take_all())
+    assert rows==[{'item':1,'image':'https://example.org/a.png','keep':True,'answer':'ok','count':2}]
+    parts=server['requests'][0]['body']['messages'][1]['content']
+    assert any(p.get('image_url',{}).get('url')=='https://example.org/a.png' for p in parts)
+
+
+def test_skipped_and_failed_rows_keep_their_original_data(server):
+    server['status']=503
+    items=[{'item':1,'skip':True},{'item':2,'skip':False}]
+    rows=prompt(DataAPI().from_items(items),when=lambda r:not r['skip'],error_output='error').take_all()
+    assert rows[0]==items[0]
+    assert {k:rows[1][k] for k in items[1]}==items[1] and 'answer' not in rows[1]
+    assert rows[1]['error']['type']
+    assert len(server['requests'])==1
+
+
+def test_response_failing_the_schema_publishes_nothing(server,tmp_path):
+    import pyarrow as pa
+    server['respond']=lambda b,i:{'result':99}
+    target=tmp_path/'answers.lance'
+    ctx=DataAPI()
+    with pytest.raises(PromptResponseContractError):
+        prompt(ctx.from_items([{'item':1}])).write_lance(
+            str(target),mode='create',schema=pa.schema([('item',pa.int64()),('answer',pa.string())]))
+    assert not target.exists()
+    assert ctx.prompt_usage()['provider_requests_failed']==1
+    assert len(server['requests'])==1
