@@ -946,3 +946,108 @@ def test_linux_landlock_inherit_os_reads_external_and_urandom_while_blocking_wri
     out2, err2 = proc2.communicate(timeout=15)
     assert proc2.returncode == 0, f'out={out2!r} err={err2!r}'
     assert out2.strip() == b'SCOPED_OK'
+
+
+def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_path):
+    from demiflow.workbench.conversations.worker import (
+        _build_rework_prompt,
+        _capture_protected_files,
+        _enforce_protected_files,
+    )
+
+    proj = tmp_path / 'empty_proj'
+    (proj / '.forge').mkdir(parents=True)
+    (proj / '.forge' / 'state.json').write_text('{"id":"w1"}\n', encoding='utf-8')
+    (proj / '.env').write_text('CONCEPT_EVAL_API_KEY=real-secret\n', encoding='utf-8')
+    (proj / '.env').chmod(0o600)
+    (proj / 'AGENTS.md').write_text('# Rules\n', encoding='utf-8')
+    (proj / 'workspace.json').write_text('{"name":"empty_proj"}\n', encoding='utf-8')
+    ext_dir = tmp_path / 'external_legacy'
+    ext_dir.mkdir()
+    (ext_dir / 'old.py').write_text('# legacy\n', encoding='utf-8')
+    home = tmp_path / 'home'
+    home.mkdir(mode=0o700)
+
+    spec = SandboxSpec(
+        read_paths=(str(proj),),
+        write_paths=(str(proj),),
+        runtime_paths=('/usr', '/lib', '/lib64'),
+        protected_paths=(str(proj / '.env'), str(proj / '.forge'), str(proj / 'AGENTS.md')),
+        denied_paths=(str(tmp_path / 'control.db'),),
+        private_home=str(home),
+        role='developer',
+        seconds=15,
+        read_policy='inherit_os',
+        write_policy='project_root',
+    )
+    validated = validate_spec_portable(spec, ['/bin/sh'], {'PATH': '/usr/bin'}, str(proj))
+    assert validated['write_policy'] == 'project_root'
+
+    # Non-developer role must never use project_root write policy.
+    bad_ro = SandboxSpec(
+        read_paths=(str(proj),), write_paths=(), runtime_paths=('/usr',),
+        protected_paths=(), denied_paths=(), private_home=str(home),
+        role='readonly', write_policy='project_root',
+    )
+    with pytest.raises(ValueError, match='project_root'):
+        validate_spec_portable(bad_ro, ['/bin/sh'], {}, str(proj))
+
+    # macOS Seatbelt allows project root writes while still denying protected paths.
+    sb = build_seatbelt_profile(spec)
+    assert f'(allow file-write* (subpath "{proj}")' in sb
+    assert f'(deny file-write* (subpath "{proj / ".env"}")' in sb
+
+    # Windows WSL2 forwards write_policy='project_root'.
+    wsl = build_wsl_spec_payload(
+        SandboxSpec(
+            read_paths=(r'C:\work\proj',), write_paths=(r'C:\work\proj',),
+            runtime_paths=('/usr',), protected_paths=(r'C:\work\proj\.env',),
+            denied_paths=(), private_home=r'C:\work\home',
+            role='developer', read_policy='inherit_os', write_policy='project_root',
+        ),
+        ['python3', '-V'], {'LANG': 'C.UTF-8'}, r'C:\work\proj',
+    )
+    assert wsl['write_policy'] == 'project_root'
+
+    # Real Linux Landlock test: empty project can create flows/ & files natively while external writes stay blocked.
+    if backend_readiness()['available']:
+        script = (
+            'import pathlib, sys\n'
+            'proj, ext = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n'
+            '(proj / "flows").mkdir()\n'
+            '(proj / "flows" / "train.py").write_text("def run(): return 1\\n")\n'
+            '(proj / ".env.example").write_text("CONCEPT_EVAL_API_KEY=\\n")\n'
+            'assert (ext / "old.py").read_text() == "# legacy\\n"\n'
+            'try:\n'
+            '    (ext / "escape.txt").write_text("no")\n'
+            '    raise RuntimeError("External write was allowed!")\n'
+            'except OSError:\n'
+            '    pass\n'
+            'print("PROJ_ROOT_OK")\n'
+        )
+        proc = launch_sandbox(
+            ['/usr/bin/python3', '-I', '-B', '-c', script, str(proj), str(ext_dir)],
+            spec=spec, env={'PATH': '/usr/bin:/bin'}, cwd=str(proj),
+        )
+        out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 0, f'out={out!r} err={err!r}'
+        assert out.strip() == b'PROJ_ROOT_OK'
+        assert (proj / 'flows' / 'train.py').is_file()
+        assert (proj / '.env.example').is_file()
+        assert not (ext_dir / 'escape.txt').exists()
+
+    # Forge post-turn protected-file hook detects & restores mutated/deleted protected files across all OSes.
+    snap = _capture_protected_files(proj)
+    assert {'.env', '.forge/state.json', 'AGENTS.md'} <= set(snap)
+    (proj / '.env').write_text('WIPED\n', encoding='utf-8')
+    (proj / 'AGENTS.md').unlink()
+    (proj / '.forge' / 'state.json').write_text('{"id":"tampered"}\n', encoding='utf-8')
+    (proj / '.env.example').write_text('CONCEPT_EVAL_API_KEY=\n', encoding='utf-8')
+    violations = _enforce_protected_files(proj, snap)
+    assert violations == ['.env', '.forge/state.json', 'AGENTS.md']
+    assert (proj / '.env').read_text(encoding='utf-8') == 'CONCEPT_EVAL_API_KEY=real-secret\n'
+    assert (proj / '.forge' / 'state.json').read_text(encoding='utf-8') == '{"id":"w1"}\n'
+    assert (proj / 'AGENTS.md').read_text(encoding='utf-8') == '# Rules\n'
+    assert (proj / '.env.example').is_file()
+    rework = _build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
+    assert rework is not None and '.env' in rework and '受保护文件钩子' in rework

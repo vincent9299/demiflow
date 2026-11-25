@@ -97,9 +97,85 @@ def _project_has_business_python(project_root) -> bool | None:
     return isinstance(py, str) and bool(py.strip())
 
 
-def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None):
+_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'AGENTS.md', 'PIPELINE_SPEC.md')
+_PROTECTED_GUARD_MAX_BYTES = 512 * 1024
+
+
+def _protected_guard_paths(root: Path) -> list[str]:
+    """Return relative paths of project-internal secret/governance files guarded by Forge hooks."""
+    paths = list(_PROTECTED_GUARD_STATIC)
+    try:
+        with os.scandir(root) as entries:
+            for entry in entries:
+                if (entry.name.startswith('.env.')
+                        and entry.name not in {'.env.example', '.env.sample'}
+                        and entry.name not in paths):
+                    paths.append(entry.name)
+    except OSError:
+        pass
+    return paths
+
+
+def _capture_protected_files(project_root) -> dict[str, tuple[bytes, int]]:
+    """Snapshot pre-existing protected files before a developer turn (OS-independent Forge hook)."""
+    root = Path(project_root)
+    snap: dict[str, tuple[bytes, int]] = {}
+    for rel in _protected_guard_paths(root):
+        path = root / rel
+        try:
+            info = path.lstat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _PROTECTED_GUARD_MAX_BYTES:
+            continue
+        try:
+            snap[rel] = (path.read_bytes(), info.st_mode & 0o777)
+        except OSError:
+            continue
+    return snap
+
+
+def _enforce_protected_files(project_root, before_snapshot: dict[str, tuple[bytes, int]]) -> list[str]:
+    """Detect and restore any unauthorized mutation/deletion of protected files after a developer turn."""
+    if not before_snapshot:
+        return []
+    root = Path(project_root)
+    violations: list[str] = []
+    for rel, (orig_bytes, orig_mode) in sorted(before_snapshot.items()):
+        path = root / rel
+        mutated = False
+        try:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                mutated = True
+            elif path.read_bytes() != orig_bytes:
+                mutated = True
+        except OSError:
+            mutated = True
+        if not mutated:
+            continue
+        violations.append(rel)
+        try:
+            if path.is_symlink():
+                path.unlink()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f'.{path.name}.forge-restore-{os.getpid()}')
+            tmp.write_bytes(orig_bytes)
+            try:
+                os.chmod(tmp, orig_mode)
+            except OSError:
+                pass
+            os.replace(tmp, path)
+        except OSError:
+            pass
+    return violations
+
+
+def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, protected_violations=()):
     """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
     issues = []
+    for rel in (protected_violations or ()):
+        issues.append(f"- [受保护文件钩子] `{rel}` 属于项目受保护文件不允许修改，Forge 钩子已自动恢复原内容；请勿改动 `.env` / `.forge/state.json` / `AGENTS.md` / `PIPELINE_SPEC.md`。")
     if isinstance(pipeline_checks, dict):
         for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
             item = pipeline_checks.get(key)
@@ -212,7 +288,16 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
-    writes = [] if readonly else [root / name for name in project['writes'] if Path(name).parts[:1] != ('data_tools',) and (root / name).exists()]
+    project_root_write = (
+        not readonly
+        and project.get('kind') == 'pipeline'
+        and project.get('phase') == 'implementation'
+    )
+    writes = (
+        [] if readonly else
+        [root] if project_root_write else
+        [root / name for name in project['writes'] if Path(name).parts[:1] != ('data_tools',) and (root / name).exists()]
+    )
     protected = [] if notebook_op else [root / name for name in ('.git', '.forge', '.venv', '.env', '.env.local', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md', 'data_tools')]
     if not notebook_op and root.is_dir():
         try:
@@ -259,7 +344,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
         private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
         direct_network=direct_network,
-        read_policy='scoped' if readonly else 'inherit_os')
+        read_policy='scoped' if readonly else 'inherit_os',
+        write_policy='project_root' if project_root_write else 'scoped')
 
 
 def automatic_approval(project, request, *, assurance):
@@ -329,6 +415,7 @@ def _sandbox_compatible(standby_spec, actual_spec):
         and standby_spec.role == actual_spec.role
         and standby_spec.direct_network == actual_spec.direct_network
         and standby_spec.read_policy == actual_spec.read_policy
+        and standby_spec.write_policy == actual_spec.write_policy
     )
 
 
@@ -810,6 +897,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 if kind != 'usage.observed' or len(pending_events) >= 16 or time.monotonic() - last_flush >= 0.016:
                     flush_events()
 
+            protected_snapshot = {}
             try:
                 tick()
                 if requested: raise InterruptedError(reason)
@@ -829,6 +917,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if sdk_identity(coding['catalog']) != coding['sdk_revision']:
                         reject('Native SDK changed before context delivery', 'conflict')
                 baseline = capture(project['root'], watched, exclude=excluded)
+                protected_snapshot = _capture_protected_files(project['root']) if (not compact and not notebook) else {}
                 store.update(tid, baseline=wire(baseline).decode())
                 if compact:
                     prompt = ''
@@ -916,7 +1005,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if cell_cli and control_bridge is not None:
                         control_bridge.set_turn(turn, deadline)
                     elif control_bridge is not None and input_access is not None:
-                        layout_root = Path(project['root']) if (not compact and not notebook and project.get('writes')) else None
+                        layout_root = Path(project['root']) if (
+                            not compact and not notebook
+                            and (project.get('writes') or (project.get('kind') == 'pipeline' and project.get('phase') == 'implementation'))
+                        ) else None
                         control_bridge.set_turn(input_access, delivery_review=delivery_review, project_root=layout_root)
                     transport.frame_count = 0
                     transport.output_bytes = 0
@@ -953,7 +1045,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         from demiflow.workbench.notebooks.cell_commands import CellCommands
                         control_bridge = CellCommands(store, turn, deadline)
                     elif acp and guided:
-                        layout_root = Path(project['root']) if (not compact and not notebook and project.get('writes')) else None
+                        layout_root = Path(project['root']) if (
+                            not compact and not notebook
+                            and (project.get('writes') or (project.get('kind') == 'pipeline' and project.get('phase') == 'implementation'))
+                        ) else None
                         control_bridge = BridgeServer(input_access, delivery_review=delivery_review, project_root=layout_root)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
@@ -1186,12 +1281,22 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 if cleanup_err and not reason:
                     reason = cleanup_err
                 process = transport = provider = model_broker = control_bridge = shims = None
+            protected_violations = []
+            try:
+                protected_violations = _enforce_protected_files(project['root'], protected_snapshot)
+                if protected_violations:
+                    store.event(tid, 'protected.violation', dict(paths=protected_violations, restored=True))
+            except BaseException:
+                pass
             try:
                 changes = []; revision = None
                 saved = store.turn(tid)
                 if saved['baseline'] and watched:
                     before = json.loads(saved['baseline']); after = capture(project['root'], watched, exclude=excluded)
-                    authorized_writes = list(dict.fromkeys([*project['writes'], *host_layout_paths]))
+                    if project.get('kind') == 'pipeline' and project.get('phase') == 'implementation' and not compact and not notebook:
+                        authorized_writes = list(dict.fromkeys([*project['writes'], *watched, *host_layout_paths]))
+                    else:
+                        authorized_writes = list(dict.fromkeys([*project['writes'], *host_layout_paths]))
                     changes = list(differences(before, after, authorized_writes, root=project['root']))
                     if changes:
                         source_hash = lambda values: digest({name: (fact or {}).get('sha256') for name, fact in values.items()})
@@ -1214,6 +1319,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             try:
                 result = dict(reason=reason, peaks=peaks, changed_files=len(changes), evidence='stale' if changes else 'missing',
                               cleanup='complete' if drained else 'unknown', provider_completed=completed)
+                if protected_violations:
+                    result['protected_violations'] = protected_violations
                 result['execution_assurance'] = assurance
                 checked_entries = []
                 if (coding is not None and changes and drained and completed and final == 'completed'
@@ -1298,7 +1405,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 if (auto_review and rework_depth == 0 and final == 'completed' and drained
                         and not saved['stop_at'] and not requested and turn.get('operation') == 'message'):
                     rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report,
-                                                         project_root=project['root'])
+                                                         project_root=project['root'],
+                                                         protected_violations=protected_violations)
                     if rework_prompt:
                         try:
                             existing_queue = store.show(session['workspace'], session['id']).get('queued_messages') or []

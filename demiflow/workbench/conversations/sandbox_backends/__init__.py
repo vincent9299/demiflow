@@ -59,6 +59,10 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
         raise ValueError('Sandbox read_policy must be scoped or inherit_os')
     if spec.read_policy == 'inherit_os' and spec.role != 'developer':
         raise ValueError('Only developer role may inherit host read permissions')
+    if spec.write_policy not in {'scoped', 'project_root'}:
+        raise ValueError('Sandbox write_policy must be scoped or project_root')
+    if spec.write_policy == 'project_root' and spec.role != 'developer':
+        raise ValueError('Only developer role may use project_root write policy')
     if spec.direct_network and spec.role == 'verifier':
         raise ValueError('Verifier sandbox cannot enable direct network access')
     for value, maximum in ((spec.seconds, 3600), (spec.rss_bytes, 16 * 1024**3),
@@ -102,8 +106,9 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
     for allowed in write_paths:
         if any(_contains(allowed, dep) or _contains(dep, allowed) for dep in runtime_paths):
             raise ValueError('Sandbox write scope overlaps a trusted runtime path')
-        if any(_contains(allowed, prot) or _contains(prot, allowed) for prot in protected_paths):
-            raise ValueError('Sandbox write scope overlaps a protected read-only path')
+        if spec.write_policy != 'project_root':
+            if any(_contains(allowed, prot) or _contains(prot, allowed) for prot in protected_paths):
+                raise ValueError('Sandbox write scope overlaps a protected read-only path')
         if any(_contains(allowed, den) or _contains(den, allowed) for den in denied_paths):
             raise ValueError('Sandbox write scope overlaps a denied path')
 
@@ -124,6 +129,7 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
         cwd=str(cwd),
         direct_network=bool(spec.direct_network),
         read_policy=spec.read_policy,
+        write_policy=spec.write_policy,
     )
 
 

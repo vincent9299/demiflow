@@ -341,7 +341,7 @@ def render_context(result):
         rows.append('\n## 项目运行与沙箱配置')
         if env_cfg.get('execution_mode'):
             net_label = '已开启项目联网' if env_cfg.get('dev_network') else '默认断网（可在项目设置中开启联网）'
-            rows.append('执行模式：' + (f'受限开发沙箱（写入限于本项目授权目录及 $TMPDIR，读权限继承当前用户操作系统权限，{net_label}）'
+            rows.append('执行模式：' + (f'受限开发沙箱（写入限于本项目目录及 $TMPDIR，受保护文件由 Forge 钩子守护；读权限继承当前用户操作系统权限，{net_label}）'
                                      if env_cfg['execution_mode'] == 'restricted' else env_cfg['execution_mode']))
         if env_cfg.get('python'):
             rows.append('业务 Python 环境（只读）：' + env_cfg['python'] + '（已加入 PATH，可直接运行 python / pytest，已自动接通只读 demiflow SDK 与 pytest 沙箱参数）')
