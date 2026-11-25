@@ -1407,11 +1407,12 @@
     const opCodeType = item => ({class: '可调用类', async_function: '异步函数', function: '函数'})[item.definition_type] || 'Python 定义';
     const opVisible = item => item.kind === 'prompt' || item.export_status === 'declared' || (item.export_status === 'legacy' && item.flow_references?.length) || item.id === opSelected;
 
-    const OUTLINE_KEYS = ['flows', 'configs', 'code', 'prompt'];
+    const OUTLINE_KEYS = ['flows', 'configs', 'code', 'prompt', 'apis'];
     let outlineExplorer = null;
     const outlineSections = {}; // key -> {section, toggle, count, list, open}
     const outlineHandles = [];
-    let outlineWeights = [0.22, 0.20, 0.32, 0.26];
+    let outlineWeights = [0.20, 0.18, 0.28, 0.20, 0.14];
+    let opStandardApis = [], opSelectedApi = null;
     try {
       const saved = JSON.parse(localStorage.getItem('forge-dev-outline-splits') || 'null');
       if (Array.isArray(saved) && saved.length === OUTLINE_KEYS.length && saved.every(n => Number.isFinite(n) && n >= 0.08)) outlineWeights = saved;
@@ -1483,17 +1484,18 @@
     if (operatorsHost) {
       outlineExplorer = node('div', 'dev-outline-explorer');
       const specs = [
-        ['flows', '管道', '调整管道与配置高度'],
-        ['configs', '配置', '调整配置与代码算子高度'],
-        ['code', '代码算子', '调整代码算子与 Prompt 算子高度'],
-        ['prompt', 'Prompt 算子', null],
+        ['flows', '管道', '调整管道与配置高度', true],
+        ['configs', '配置', '调整配置与代码算子高度', true],
+        ['code', '代码算子', '调整代码算子与 Prompt 算子高度', true],
+        ['prompt', 'Prompt 算子', '调整 Prompt 算子与标准 API 高度', true],
+        ['apis', '标准 API', null, false],
       ];
-      specs.forEach(([key, label, handleLabel], idx) => {
+      specs.forEach(([key, label, handleLabel, defaultOpen], idx) => {
         const section = node('div', 'dev-outline-section');
         const header = node('div', 'dev-section-header');
         const toggleBtn = node('button', 'dev-section-toggle');
         toggleBtn.type = 'button';
-        toggleBtn.setAttribute('aria-expanded', 'true');
+        toggleBtn.setAttribute('aria-expanded', String(defaultOpen));
         const count = node('span', 'dev-section-count', '0');
         toggleBtn.append(chevronIcon(), node('span', 'dev-section-title', label), count);
         header.append(toggleBtn);
@@ -1505,7 +1507,7 @@
         const list = node('div', 'op-tree-items dev-outline-list');
         section.append(header, list);
         outlineExplorer.append(section);
-        outlineSections[key] = {section, toggle: toggleBtn, count, list, open: true};
+        outlineSections[key] = {section, toggle: toggleBtn, count, list, open: defaultOpen};
         toggleBtn.onclick = () => {
           outlineSections[key].open = !outlineSections[key].open;
           applyOutlineSplits();
@@ -1626,12 +1628,126 @@
       }
     }
 
+    function paintStandardApiDetail(apiItem) {
+      if (!apiItem) return;
+      if (typeof disposeReaders === 'function') disposeReaders(operatorPane);
+      operatorPane.replaceChildren();
+      paneMode = 'operator';
+      filePane.hidden = true;
+      operatorPane.hidden = false;
+      openPane();
+      const head = node('div', 'dev-op-header');
+      const headTop = node('div', 'dev-op-header-top');
+      const badges = node('div', 'dev-op-badges');
+      badges.append(node('span', 'dev-op-badge is-code', '标准 API · ' + apiItem.owner));
+      const headBtns = node('div', 'dev-op-actions');
+      const refBtn = node('button', 'dev-action-btn dev-action-primary', '引用到对话');
+      refBtn.type = 'button';
+      refBtn.onclick = () => {
+        if (typeof onReference === 'function') onReference(apiItem.display_name + '()');
+      };
+      headBtns.append(refBtn);
+      headTop.append(badges, headBtns);
+      head.append(headTop, node('h2', 'dev-op-title', apiItem.display_name));
+      if (apiItem.description) {
+        const firstLine = apiItem.description.split('\n').map(s => s.trim()).find(Boolean) || '';
+        if (firstLine) head.append(node('p', 'dev-op-desc', firstLine));
+      }
+      operatorPane.append(head);
+
+      const body = node('div', 'dev-op-body');
+      if (apiItem.signature) {
+        paintOperatorCard(body, '函数签名', card => {
+          card.append(node('pre', 'dev-op-sig', apiItem.signature));
+        });
+      }
+      if (apiItem.description) {
+        paintOperatorCard(body, '接口说明', card => {
+          card.append(node('p', 'definition-doc', apiItem.description));
+        });
+      }
+      paintOperatorCard(body, '参数列表', card => {
+        const params = apiItem.parameters || [];
+        if (params.length) {
+          const wrap = node('div', 'definition-table');
+          const t = node('table', 'op-contract');
+          const hr = document.createElement('tr');
+          ['参数', '类型', '要求 / 默认值'].forEach(h => hr.append(node('th', '', h)));
+          t.append(hr);
+          for (const p of params) {
+            const tr = document.createElement('tr');
+            tr.append(
+              node('td', '', p.name),
+              node('td', '', p.annotation || '未声明'),
+              node('td', '', p.required ? '必填' : (p.default_expression ?? '可选')),
+            );
+            t.append(tr);
+          }
+          wrap.append(t);
+          card.append(wrap);
+        } else {
+          card.append(node('p', 'definition-note', '无参数。'));
+        }
+      });
+      paintOperatorCard(body, '返回类型', card => {
+        card.append(node('p', 'definition-return', apiItem.returns || '未声明'));
+      });
+      operatorPane.append(body);
+    }
+
+    function paintStandardApisOutline() {
+      const sec = outlineSections.apis;
+      if (!sec) return;
+      sec.list.replaceChildren();
+      const term = filterQuery.trim().toLowerCase();
+      const matches = opStandardApis.filter(item =>
+        !term || (item.display_name + ' ' + (item.description || '') + ' ' + (item.group || '')).toLowerCase().includes(term));
+      sec.count.textContent = String(matches.length);
+      const groups = new Map();
+      for (const item of matches) {
+        const g = item.group || item.owner;
+        if (!groups.has(g)) groups.set(g, []);
+        groups.get(g).push(item);
+      }
+      for (const [groupName, items] of groups) {
+        const details = document.createElement('details');
+        details.className = 'op-tree-file';
+        details.open = true;
+        const summary = document.createElement('summary');
+        summary.append(node('span', '', groupName));
+        details.append(summary);
+        for (const item of items) {
+          const b = node('button', 'op-tree-leaf');
+          b.type = 'button';
+          b.dataset.standardApi = item.id;
+          const firstDoc = (item.description || '').split('\n').map(s => s.trim()).find(Boolean) || '';
+          b.title = item.display_name + (firstDoc ? ' — ' + firstDoc : '');
+          b.setAttribute('aria-pressed', String(paneMode === 'operator' && opSelectedApi === item.id));
+          b.append(node('span', 'op-glyph', 'A'), node('span', '', item.display_name));
+          b.onclick = () => {
+            opSelectedApi = item.id;
+            opSelected = null;
+            opSelectedFlow = null;
+            opSelectedConfig = null;
+            paintStandardApiDetail(item);
+            paintOperatorTree();
+          };
+          details.append(b);
+        }
+        sec.list.append(details);
+      }
+      if (!matches.length) {
+        sec.list.append(node('p', 'op-muted dev-op-pad', term ? '无匹配标准 API' : '暂无标准 API'));
+      }
+    }
+
     function paintOperatorTree() {
       if (!outlineExplorer) return;
       paintFlowsOutline();
       paintConfigsOutline();
       paintOperatorGroup(outlineSections.code?.list, outlineSections.code?.count, 'code');
       paintOperatorGroup(outlineSections.prompt?.list, outlineSections.prompt?.count, 'prompt');
+      paintStandardApisOutline();
     }
 
     function paintOperatorCard(parent, title, contentFn) {
@@ -1855,6 +1971,7 @@
           ]);
           if (disposed) return;
           opIndex = data;
+          opStandardApis = Array.isArray(data?.standard_apis) ? data.standard_apis : [];
           const seen = new Map();
           for (const e of ctx?.project?.entries || []) seen.set(e.entry, {entry: e.entry, title: e.entry, params: e.params || []});
           for (const f of ctx?.flows || []) {
