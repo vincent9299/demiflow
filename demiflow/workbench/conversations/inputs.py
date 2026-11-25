@@ -30,7 +30,7 @@ _PRIVATE = {'.ssh', '.codex', '.codex-home', '.config', '.aws', '.azure', '.kube
 _SYSTEM = tuple(Path(p) for p in ('/proc', '/sys', '/dev', '/run', '/etc/shadow',
     '/etc/gshadow', '/etc/ssh', '/etc/ssl/private', '/etc/sudoers', '/etc/sudoers.d'))
 _RESULT_BYTES = 48000
-_READ_BYTES = 16384
+_READ_BYTES = 32768
 _SCAN_ENTRIES = 2048
 _MAX_FIELDS = 64
 _INSPECTION_SECONDS = 7
@@ -153,6 +153,8 @@ class InputAccess:
                 result.update(action=action, source=source, readonly=True)
                 wire(result, _RESULT_BYTES)
                 return result
+        except FileNotFoundError as exc:
+            raise ForgeError('Input path does not exist', code='not_found') from exc
         except UnicodeError as exc:
             raise ForgeError('Text input is not valid UTF-8 at this byte offset; '
                              'use inspect for Lance/Parquet tables', code='operation_rejected') from exc
@@ -228,21 +230,27 @@ class InputAccess:
             reject('Text reading requires a regular file', 'invalid_request')
         offset = integer(arguments.get('offset', 0), 0, 2**63 - 1)
         maximum = integer(arguments.get('bytes', 8192), 1, _READ_BYTES)
-        raw = os.pread(fd, maximum + 1, offset)
-        visible = raw[:maximum]
+        raw = os.pread(fd, maximum + 4, offset)
+        skip = 0
+        if offset > 0:
+            while skip < min(3, len(raw)) and (raw[skip] & 0xC0) == 0x80:
+                skip += 1
+        actual_offset = offset + skip
+        window = raw[skip:]
+        visible = window[:maximum]
         # Omitted trailing UTF-8 continuation bytes belong to the next page.
         import codecs
         decoder = codecs.getincrementaldecoder('utf-8')('strict')
-        content = decoder.decode(visible, final=len(raw) <= maximum)
+        content = decoder.decode(visible, final=len(window) <= maximum)
         pending, _ = decoder.getstate()
         consumed = len(visible) - len(pending)
         if visible and not consumed:
             reject('Text byte budget is too small for one UTF-8 character', 'invalid_request')
         if '\x00' in content:
             reject('Binary input requires table inspection or another supported reader', 'operation_rejected')
-        return dict(text=content, offset=offset, bytes=consumed,
-            truncated=offset + consumed < info.st_size,
-            next_offset=offset + consumed if offset + consumed < info.st_size else None)
+        return dict(text=content, offset=actual_offset, bytes=consumed,
+            truncated=actual_offset + consumed < info.st_size,
+            next_offset=actual_offset + consumed if actual_offset + consumed < info.st_size else None)
 
     def _inspect(self, path, info, arguments):
         limit = integer(arguments.get('limit', 5), 0, 10)

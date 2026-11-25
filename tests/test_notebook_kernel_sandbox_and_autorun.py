@@ -121,6 +121,16 @@ def test_developer_sandbox_includes_declared_readonly_external_locations_only(tm
     assert str(tmp_path.resolve()) not in dev_spec.read_paths
     assert str(state.resolve()) not in dev_spec.read_paths
     assert str(ext_ro.resolve()) not in nb_spec.read_paths
+    assert dev_spec.read_policy == 'inherit_os'
+    assert dev_spec.direct_network is False
+    assert nb_spec.read_policy == 'scoped'
+    assert nb_spec.direct_network is False
+
+    net_project = {**project, 'dev_network': True}
+    net_dev_spec = sandbox_spec(deployment, net_project, session, {'operation': 'message', 'created': 10**12}, {'sources': []}, config, priv_home)
+    net_nb_spec = sandbox_spec(deployment, net_project, session, {'operation': 'notebook_cell_cli', 'created': 10**12}, {'sources': []}, config, priv_home)
+    assert net_dev_spec.direct_network is True
+    assert net_nb_spec.direct_network is False
 
 
 def test_registry_notebook_sandbox_validation_and_persistence(tmp_path):

@@ -63,18 +63,25 @@ def build_seatbelt_profile(spec, *, validated: dict | None = None) -> str:
         '(allow ipc-posix-shm-read-data)',
         '(allow file-read-metadata)',
     ]
-    # System runtime read grants required for macOS dyld and shell execution.
-    for sys_path in _MACOS_SYSTEM_READ:
-        lines.append(_rule_for_path('file-read*', sys_path, allow=True))
+    # System runtime / host read policy.
+    if data['read_policy'] == 'inherit_os':
+        # Inherit the invoking OS user's native read permissions; writes remain
+        # strictly confined to write_paths + private_home + /dev/null.
+        lines.append('(allow file-read*)')
+    else:
+        for sys_path in _MACOS_SYSTEM_READ:
+            lines.append(_rule_for_path('file-read*', sys_path, allow=True))
     lines.append('(allow file-write* (literal "/dev/null"))')
 
     # Read & runtime paths (read-only).
-    for path in (*data['read_paths'], *data['runtime_paths']):
-        lines.append(_rule_for_path('file-read*', path, allow=True))
+    if data['read_policy'] != 'inherit_os':
+        for path in (*data['read_paths'], *data['runtime_paths']):
+            lines.append(_rule_for_path('file-read*', path, allow=True))
 
     # Writable project paths & private HOME (full native permissions inside scope).
     for path in (*data['write_paths'], data['private_home']):
-        lines.append(_rule_for_path('file-read*', path, allow=True))
+        if data['read_policy'] != 'inherit_os':
+            lines.append(_rule_for_path('file-read*', path, allow=True))
         lines.append(_rule_for_path('file-write*', path, allow=True))
 
     # Explicit overrides: protected paths stay read-only; denied paths are unreadable & unwritable.

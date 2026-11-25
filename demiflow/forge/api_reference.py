@@ -7,7 +7,7 @@ from .platform_environment import read_bounded
 from .schema import ForgeError
 
 
-MODULES = ('demiflow.data', 'demiflow.operator_llm', 'demiflow.objects', 'demiflow.agent')
+MODULES = ('demiflow.data', 'demiflow.execution', 'demiflow.operator_llm', 'demiflow.objects', 'demiflow.agent')
 REFERENCE_BYTES = 2 * 1024**2
 SDK_ROOT = Path(__file__).resolve().parents[1]
 DATASET = 'demiflow.data:Dataset.'
@@ -101,6 +101,33 @@ def api_markdown(apis):
                 facts += '（节选）'
         rows.append(facts)
     return '\n\n'.join(rows)
+
+
+def module_symbol_index(reference):
+    """Build a compact, live-discovered public symbol directory grouped by module."""
+    catalog = reference['catalog']
+    if not catalog.get('inspection_complete'):
+        return {}
+    essential = set(ESSENTIAL)
+    grouped = {mod: [] for mod in MODULES if mod in catalog.get('modules', ())}
+    for item in catalog['objects']:
+        if item.get('origin', {}).get('kind') != 'platform':
+            continue
+        if item.get('signature', {}).get('status') != 'available':
+            continue
+        mod, _, sym = item['id'].partition(':')
+        if mod not in grouped or not sym or item['id'] in essential:
+            continue
+        if '.' in sym:
+            owner, _, member = sym.partition('.')
+            if owner not in {'Dataset', 'FitRef', 'RunContext', 'LocalObjectStore', 'ObjectRef'}:
+                continue
+            if member.startswith('_'):
+                continue
+        elif sym.endswith('Error') or sym.endswith('Warning'):
+            continue
+        grouped[mod].append(sym)
+    return {mod: sorted(set(syms)) for mod, syms in grouped.items() if syms}
 
 
 def render_reference(reference, *, maximum=20 * 1024):

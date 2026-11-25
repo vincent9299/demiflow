@@ -85,6 +85,10 @@ def notebook_sandbox(item):
     return {'mode': 'off', 'write_paths': []}
 
 
+def dev_network(item):
+    return bool(item.get('dev_network', False)) if isinstance(item, dict) else False
+
+
 def load_registry(path):
     path = ws.no_symlinks(Path(path).absolute())
     value = ws.read_control(path, 256*1024)
@@ -96,7 +100,7 @@ def load_registry(path):
     for key, item in value['projects'].items():
         identity(key)
         fields = {'root','name','allow_runs'} if value['format']==FORMAT else {'root','name','permissions'}
-        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox'} != fields:
+        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox', 'dev_network'} != fields:
             raise ForgeError('Invalid console project')
         if 'python' in item:
             py = item['python']
@@ -104,6 +108,8 @@ def load_registry(path):
                 raise ForgeError('Invalid project python configuration')
         if 'notebook_sandbox' in item:
             validate_notebook_sandbox(item['notebook_sandbox'])
+        if 'dev_network' in item and type(item['dev_network']) is not bool:
+            raise ForgeError('Invalid project dev_network configuration')
         if value['format']==FORMAT:
             if type(item['allow_runs']) is not bool:
                 raise ForgeError('Invalid run permission')
@@ -216,6 +222,7 @@ def projects(value):
         row['capabilities']=capabilities(item)
         row['python'] = item.get('python')
         row['notebook_sandbox'] = notebook_sandbox(item)
+        row['dev_network'] = dev_network(item)
         try:
             resolve_workspace(value, key)
             row['status'] = 'available'
@@ -349,6 +356,25 @@ def set_notebook_sandbox(path, workspace_id, *, expected, mode, write_paths=()):
             value['projects'][workspace_id]['notebook_sandbox'] = cleaned
         ws.write_control(path, value, expected=expected)
     return dict(status='updated', workspace_id=workspace_id, notebook_sandbox=cleaned, digest=content_digest(value))
+
+
+def set_dev_network(path, workspace_id, *, expected, enabled):
+    """Configure optional per-project outbound network access for the dev assistant sandbox."""
+    identity(workspace_id)
+    if type(enabled) is not bool:
+        raise ForgeError('dev_network enabled must be boolean', code='invalid_request')
+    with _locked(path) as path:
+        value = load_registry(path)
+        if content_digest(value) != expected:
+            raise ForgeError('Registry changed before dev_network update', code='conflict')
+        if workspace_id not in value['projects']:
+            raise ForgeError('Workspace is not registered', code='not_found')
+        if enabled:
+            value['projects'][workspace_id]['dev_network'] = True
+        else:
+            value['projects'][workspace_id].pop('dev_network', None)
+        ws.write_control(path, value, expected=expected)
+    return dict(status='updated', workspace_id=workspace_id, dev_network=enabled, digest=content_digest(value))
 
 
 def register(forge):

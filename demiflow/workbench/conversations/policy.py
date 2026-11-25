@@ -59,8 +59,8 @@ class Limits:
         if type(value) is not dict or value.keys() - defaults.keys():
             reject('Unknown development resource limit')
         # Keep the default prompt small; deployments may explicitly reserve a
-        # larger bounded prompt for real projects with long inherited guidance.
-        ceilings = {**defaults, 'context_bytes': 512 * 1024}
+        # larger bounded prompt or RSS ceiling for real projects (e.g. ML/PyTorch tests).
+        ceilings = {**defaults, 'context_bytes': 512 * 1024, 'rss_bytes': 8 * 1024**3}
         for key, number in value.items():
             integer(number, 1, ceilings[key])
         result = cls(**value)
@@ -95,9 +95,11 @@ class Deployment:
             reject('Configure 1..128 explicitly permitted projects')
         for key, project in self.projects.items():
             required = {'root', 'kind', 'phase', 'writes', 'watch', 'sources', 'non_goals', 'authorization'}
-            optional = {'protected', 'python'}
+            optional = {'protected', 'python', 'dev_network'}
             if type(project) is not dict or not required <= project.keys() or project.keys() - required - optional:
                 reject('Invalid project development grant')
+            if 'dev_network' in project and type(project['dev_network']) is not bool:
+                reject('Configured project dev_network must be a boolean')
             if 'python' in project:
                 py_val = project['python']
                 if py_val != '':

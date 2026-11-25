@@ -789,3 +789,160 @@ def test_resolve_local_uri_tolerates_unreadable_parent_and_loop_continue_break(t
     report = check_project(proj, entry='flows/loop_demo.py:run', params='configs/loop_demo.json')
     assert report['status'] == 'passed', report
     assert report['entries'][0]['status'] == 'checked', report
+
+
+def test_read_policy_inherit_os_cross_platform_validation_and_backends(tmp_path):
+    spec = _sample_spec(tmp_path, direct_network=False)
+    inherit_spec = SandboxSpec(
+        read_paths=spec.read_paths,
+        write_paths=spec.write_paths,
+        runtime_paths=spec.runtime_paths,
+        protected_paths=spec.protected_paths,
+        denied_paths=spec.denied_paths,
+        private_home=spec.private_home,
+        role='developer',
+        seconds=30,
+        direct_network=False,
+        read_policy='inherit_os',
+    )
+    data = validate_spec_portable(inherit_spec, ['/bin/sh', '-c', 'true'], {'PATH': '/usr/bin'}, str(tmp_path))
+    assert data['read_policy'] == 'inherit_os'
+
+    # Non-developer roles must never inherit host read permissions.
+    for bad_role in ('readonly', 'verifier'):
+        bad = SandboxSpec(
+            read_paths=spec.read_paths,
+            write_paths=(),
+            runtime_paths=spec.runtime_paths,
+            protected_paths=spec.protected_paths,
+            denied_paths=spec.denied_paths,
+            private_home=spec.private_home,
+            role=bad_role,
+            read_policy='inherit_os',
+        )
+        with pytest.raises(ValueError, match='Only developer role'):
+            validate_spec_portable(bad, ['/bin/sh'], {}, str(tmp_path))
+
+    # macOS Seatbelt emits (allow file-read*) while keeping strict write & denied overrides.
+    profile = build_seatbelt_profile(inherit_spec)
+    assert '(allow file-read*)' in profile
+    assert '(deny default)' in profile
+    assert '(deny network*)' in profile
+    read_idx = profile.index('(allow file-read*)')
+    write_idx = profile.index(f'(allow file-write* (subpath "{tmp_path / "proj" / "flows"}")')
+    prot_idx = profile.index(f'(deny file-write* (subpath "{tmp_path / "proj" / "workspace.json"}")')
+    deny_idx = profile.index(f'(deny file-read* (subpath "{tmp_path / "secret.json"}")')
+    assert read_idx < write_idx < prot_idx < deny_idx
+
+    # Windows WSL2 propagates read_policy verbatim alongside POSIX-translated paths.
+    win_spec = SandboxSpec(
+        read_paths=(r'C:\work\proj',),
+        write_paths=(r'C:\work\proj\flows',),
+        runtime_paths=('/usr',),
+        protected_paths=(r'C:\work\proj\workspace.json',),
+        denied_paths=(r'C:\work\secret.json',),
+        private_home=r'C:\work\home',
+        role='developer',
+        read_policy='inherit_os',
+    )
+    wsl_payload = build_wsl_spec_payload(win_spec, ['python3', '-V'], {'LANG': 'C.UTF-8'}, r'C:\work\proj')
+    assert wsl_payload['read_policy'] == 'inherit_os'
+    assert wsl_payload['write_paths'] == ['/mnt/c/work/proj/flows']
+
+
+def test_linux_landlock_inherit_os_reads_external_and_urandom_while_blocking_writes(tmp_path):
+    if not backend_readiness()['available']:
+        pytest.skip('Linux Landlock sandbox unavailable')
+
+    proj = tmp_path / 'proj'
+    (proj / 'flows').mkdir(parents=True)
+    ws = proj / 'workspace.json'
+    ws.write_text('{"name":"demo"}\n', encoding='utf-8')
+    external = tmp_path / 'external_ref'
+    external.mkdir()
+    ext_file = external / 'legacy.py'
+    ext_file.write_text('# legacy reference\n', encoding='utf-8')
+    home = tmp_path / 'home'
+    home.mkdir(mode=0o700)
+
+    # 1. inherit_os developer sandbox: external dir NOT in read_paths is readable,
+    # /dev/urandom is readable, writes inside flows/ work, writes to external & workspace.json fail.
+    inherit_spec = SandboxSpec(
+        read_paths=(str(proj),),
+        write_paths=(str(proj / 'flows'),),
+        runtime_paths=('/usr', '/lib', '/lib64'),
+        protected_paths=(str(ws),),
+        denied_paths=(),
+        private_home=str(home),
+        role='developer',
+        seconds=15,
+        read_policy='inherit_os',
+    )
+    script = (
+        'import os, pathlib, sys\n'
+        'flows, ws, ext_dir, ext_file = [pathlib.Path(p) for p in sys.argv[1:]]\n'
+        'assert ext_file.read_text() == "# legacy reference\\n"\n'
+        'with open("/dev/urandom", "rb") as f:\n'
+        '    assert len(f.read(16)) == 16\n'
+        'with open("/dev/zero", "rb") as f:\n'
+        '    assert f.read(8) == b"\\x00" * 8\n'
+        '(flows / "ok.py").write_text("ok")\n'
+        'for bad in (\n'
+        '    lambda: (ext_dir / "escape.txt").write_text("no"),\n'
+        '    lambda: ext_file.write_text("mutated"),\n'
+        '    lambda: os.unlink(ext_file),\n'
+        '    lambda: ws.write_text("mutated"),\n'
+        '):\n'
+        '    try:\n'
+        '        bad()\n'
+        '    except OSError:\n'
+        '        continue\n'
+        '    raise RuntimeError("Forbidden write was allowed under inherit_os")\n'
+        'print("INHERIT_OK")\n'
+    )
+    proc = launch_sandbox(
+        ['/usr/bin/python3', '-I', '-B', '-c', script, str(proj / 'flows'), str(ws), str(external), str(ext_file)],
+        spec=inherit_spec,
+        env={'PATH': '/usr/bin:/bin'},
+        cwd=str(proj),
+    )
+    out, err = proc.communicate(timeout=15)
+    assert proc.returncode == 0, f'out={out!r} err={err!r}'
+    assert out.strip() == b'INHERIT_OK'
+    assert (proj / 'flows' / 'ok.py').read_text() == 'ok'
+    assert ext_file.read_text() == '# legacy reference\n'
+    assert ws.read_text() == '{"name":"demo"}\n'
+
+    # 2. scoped readonly sandbox still allows /dev/urandom & /dev/zero while denying external reads.
+    scoped_spec = SandboxSpec(
+        read_paths=(str(proj),),
+        write_paths=(),
+        runtime_paths=('/usr', '/lib', '/lib64'),
+        protected_paths=(str(ws),),
+        denied_paths=(),
+        private_home=str(home),
+        role='readonly',
+        seconds=15,
+        read_policy='scoped',
+    )
+    scoped_script = (
+        'import pathlib, sys\n'
+        'ext_file = pathlib.Path(sys.argv[1])\n'
+        'with open("/dev/urandom", "rb") as f:\n'
+        '    assert len(f.read(16)) == 16\n'
+        'try:\n'
+        '    ext_file.read_text()\n'
+        '    raise RuntimeError("Scoped sandbox read external file")\n'
+        'except OSError:\n'
+        '    pass\n'
+        'print("SCOPED_OK")\n'
+    )
+    proc2 = launch_sandbox(
+        ['/usr/bin/python3', '-I', '-B', '-c', scoped_script, str(ext_file)],
+        spec=scoped_spec,
+        env={'PATH': '/usr/bin:/bin'},
+        cwd=str(proj),
+    )
+    out2, err2 = proc2.communicate(timeout=15)
+    assert proc2.returncode == 0, f'out={out2!r} err={err2!r}'
+    assert out2.strip() == b'SCOPED_OK'

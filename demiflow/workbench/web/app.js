@@ -287,7 +287,7 @@
     const write=!!body&&!['plan-preview','plan-node-detail','plan-pipeline-source','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
     const cleanup=false;
     const epoch = viewEpoch;
-    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities','project-python','project-notebook-sandbox'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
+    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities','project-python','project-notebook-sandbox','project-dev-network'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
     if (url.length > 8192) throw new Error('查询链接超出长度限制，请缩小字段投影');
     const payload=body?V.boundedJSON(body,65536):null;
     const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([readController.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
@@ -980,6 +980,12 @@
         nbChecked,
         !nbAllowed&&!nbChecked,
       );
+      const devNetBox=makeToggle(
+        '开发助手联网',
+        '默认关闭（防数据外泄与误调收费模型）；需要安装第三方包或联网调试时可开启',
+        !!project.dev_network,
+        false,
+      );
       const permMsg=$('p','','small project-python-msg');permMsg.hidden=true;
       const savePerms=button('保存权限',async()=>{
         savePerms.disabled=true;permMsg.hidden=true;
@@ -1004,7 +1010,12 @@
             case_annotate:!!curCaps.case_annotate,
           };
           if(json(nextCaps)!==json(curCaps)){
-            await api('project-capabilities',{},{workspace_id:project.workspace_id,expected,capabilities:nextCaps});
+            const r=await api('project-capabilities',{},{workspace_id:project.workspace_id,expected,capabilities:nextCaps});
+            expected=r.digest;
+          }
+          const nextDevNet=!!devNetBox.checked;
+          if(nextDevNet!==!!latest.dev_network){
+            await api('project-dev-network',{},{workspace_id:project.workspace_id,expected,enabled:nextDevNet});
           }
           await refreshProjects();
           if(workspaceId===project.workspace_id&&context){

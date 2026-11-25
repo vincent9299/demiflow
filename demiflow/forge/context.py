@@ -7,7 +7,7 @@ import os
 from hashlib import sha256
 from pathlib import Path
 
-from .api_reference import api_markdown, build_reference, select_apis, sdk_identity
+from .api_reference import api_markdown, build_reference, module_symbol_index, select_apis, sdk_identity
 from .io import no_symlinks
 from .platform import content_digest
 from .platform_environment import read_bounded
@@ -236,8 +236,11 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
         elif (content_digest(reference['catalog']) != reference['catalog_id']
               or sdk_identity(reference['catalog']) != reference['sdk_revision']):
             raise ForgeError('Cached SDK identity differs from loaded sources', code='conflict')
-        result['sdk'] = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'],
-                             apis=select_apis(reference, api=api))
+        sdk_payload = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'],
+                           apis=select_apis(reference, api=api))
+        if topic == 'sdk':
+            sdk_payload['symbol_index'] = module_symbol_index(reference)
+        result['sdk'] = sdk_payload
     except ForgeError as exc:
         if exc.code == 'invalid_request':
             raise
@@ -337,7 +340,8 @@ def render_context(result):
             return
         rows.append('\n## 项目运行与沙箱配置')
         if env_cfg.get('execution_mode'):
-            rows.append('执行模式：' + ('受限开发沙箱（读写限于本项目目录及 $TMPDIR）'
+            net_label = '已开启项目联网' if env_cfg.get('dev_network') else '默认断网（可在项目设置中开启联网）'
+            rows.append('执行模式：' + (f'受限开发沙箱（写入限于本项目授权目录及 $TMPDIR，读权限继承当前用户操作系统权限，{net_label}）'
                                      if env_cfg['execution_mode'] == 'restricted' else env_cfg['execution_mode']))
         if env_cfg.get('python'):
             rows.append('业务 Python 环境（只读）：' + env_cfg['python'] + '（已加入 PATH，可直接运行 python / pytest，已自动接通只读 demiflow SDK 与 pytest 沙箱参数）')
@@ -373,9 +377,14 @@ def render_context(result):
     def append_sdk(full=False):
         if full:
             rows.append('\n' + api_markdown(sdk['apis']))
+            sym_index = sdk.get('symbol_index') or {}
+            if sym_index:
+                rows.append('\n### 其余已实时发现的公开 SDK 符号（按需执行 `demiflow forge context --root . --api <模块>:<符号>` 查完整签名与文档）')
+                for mod, syms in sym_index.items():
+                    rows.append(f"- `{mod}`：" + '、'.join(syms))
         else:
             names = [item['id'] for item in sdk.get('apis') or ()]
-            rows.append('\n## SDK 索引（完整签名请用 `--topic sdk` 或 `--api <SYMBOL>`）')
+            rows.append('\n## SDK 索引（完整签名与全部公开符号目录请用 `--topic sdk` 或 `--api <模块>:<符号>`）')
             if names:
                 rows.append('、'.join(names))
         rows.append(f"SDK 版本依据 {sdk['sdk_revision']} · API 目录 {sdk['catalog_id']}")

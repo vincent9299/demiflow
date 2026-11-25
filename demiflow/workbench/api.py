@@ -156,6 +156,7 @@ POST_FIELDS = {
     'project-permissions': ({'workspace_id', 'expected', 'run_submit', 'run_control', 'attach'}, set()),
     'project-python': ({'workspace_id', 'expected', 'python'}, set()),
     'project-notebook-sandbox': ({'workspace_id', 'expected', 'mode'}, {'write_paths'}),
+    'project-dev-network': ({'workspace_id', 'expected', 'enabled'}, set()),
     'flow-register': ({'entry'}, {'params'}),
     'project-check': (set(), set()),
     'audit-check': ({'kind', 'expected_policy'}, {'digest'}),
@@ -680,7 +681,7 @@ class Handler(BaseHTTPRequestHandler):
             elif key=='replace':
                 if type(value) is not list or not 1<=len(value)<=32:
                     raise ForgeError('Expected 1..32 parameter replacements',code='invalid_request')
-            elif key in {'new_outputs','telemetry','compact','run_submit','run_control','attach','create'}:
+            elif key in {'new_outputs','telemetry','compact','run_submit','run_control','attach','create','enabled'}:
                 if type(value) is not bool:
                     raise ForgeError(key+' must be boolean', code='invalid_request')
             elif type(value) is not str or not value or len(value.encode()) > 4096:
@@ -768,6 +769,7 @@ class Handler(BaseHTTPRequestHandler):
                     proj_item = self.server.inventory()['projects'].get(key, {})
                     py_cfg = proj_item.get('python')
                     value['project_python'] = py_cfg.strip() if isinstance(py_cfg, str) and py_cfg.strip() else None
+                    value['dev_network'] = bool(proj_item.get('dev_network', False))
                     value['analysis_connected'] = self.server.analysis is not None
                     value['native_notebook'] = self.server.notebooks is not None
                     value['analysis_execution_profile']=self.server.analysis_execution_profile()
@@ -968,7 +970,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ForgeError('当前服务尚未安装可配置的本地开发代理。', code='operation_rejected')
                 with self._work(): value = self.server.development_settings.save(request)
                 self._send(value); return
-            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python','/api/project-notebook-sandbox'}:
+            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python','/api/project-notebook-sandbox','/api/project-dev-network'}:
                 if self.server.registry is None:
                     raise ForgeError('Project management requires a console registry', code='operation_rejected')
                 request = self._body(self.path.removeprefix('/api/'))
@@ -1037,10 +1039,11 @@ class Handler(BaseHTTPRequestHandler):
                                   '/api/project-permissions': console.set_permissions,
                                   '/api/project-capabilities':console.set_capabilities,
                                   '/api/project-python': console.set_python,
-                                  '/api/project-notebook-sandbox': console.set_notebook_sandbox}[self.path]
+                                  '/api/project-notebook-sandbox': console.set_notebook_sandbox,
+                                  '/api/project-dev-network': console.set_dev_network}[self.path]
                         value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
                             if self.path=='/api/project-capabilities' else {}))
-                    if self.path == '/api/project-python' and self.server.development_settings is not None:
+                    if self.path in {'/api/project-python', '/api/project-dev-network'} and self.server.development_settings is not None:
                         with self.server.development_settings.service.lock:
                             self.server.development_settings.bindings.clear()
                     if self.path in {'/api/project-python', '/api/project-notebook-sandbox'} and self.server.notebooks is not None:

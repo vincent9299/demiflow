@@ -59,6 +59,7 @@ class SandboxSpec:
     file_bytes: int = 64 * 1024**2
     private_bytes: int = 256 * 1024**2
     direct_network: bool = False
+    read_policy: str = 'scoped'
 
 
 SPEC_BYTES = 2 * 1024 * 1024
@@ -92,6 +93,10 @@ def specification(spec, command, env, cwd):
         raise ValueError('The qualified development sandbox requires Linux x86-64')
     if type(spec) is not SandboxSpec or spec.role not in {'developer', 'readonly', 'verifier'}:
         raise ValueError('A trusted development sandbox specification is required')
+    if spec.read_policy not in {'scoped', 'inherit_os'}:
+        raise ValueError('Sandbox read_policy must be scoped or inherit_os')
+    if spec.read_policy == 'inherit_os' and spec.role != 'developer':
+        raise ValueError('Only developer role may inherit host read permissions')
     if spec.direct_network and spec.role == 'verifier':
         raise ValueError('Verifier sandbox cannot enable direct network access')
     for value, maximum in ((spec.seconds, 3600), (spec.rss_bytes, 16 * 1024**3),
@@ -118,9 +123,11 @@ def specification(spec, command, env, cwd):
         raise ValueError('Read-only/reviewer and verifier roles cannot write source paths')
     write.append(home)
     denied.extend(['/proc', '/sys', '/run'])
+    checked_against_denied = (write + runtime) if spec.read_policy == 'inherit_os' else (read + write + runtime)
     for allowed in read + write + runtime:
         if _contains('/dev', allowed) or _contains(allowed, '/dev'):
             raise ValueError('Device paths cannot be supplied as sandbox scopes')
+    for allowed in checked_against_denied:
         if any(_contains(allowed, forbidden) or _contains(forbidden, allowed) for forbidden in denied):
             raise ValueError('Sandbox allowlist overlaps a protected path')
     for allowed in write:
@@ -173,20 +180,27 @@ def specification(spec, command, env, cwd):
     if any(_contains(path, home) or _contains(home, path) for path in source_roots):
         raise ValueError('Source write scope must be separate from private HOME')
     baseline_bytes, baseline_files = tree_usage(source_roots, 4096)
-    # One fixed harmless device is needed by shells and native CLI subprocesses.
+    # Fixed harmless devices needed by shells, TLS, Python/PyTorch, and native CLIs.
     # Never grant the device directory or caller-selected character devices.
     null = os.stat('/dev/null')
     if not stat.S_ISCHR(null.st_mode) or null.st_rdev != os.makedev(1, 3):
         raise ValueError('The fixed null device identity is unsupported')
     read.append('/dev/null')
     write.append('/dev/null')
+    for dev_path, major, minor in (('/dev/zero', 1, 5), ('/dev/urandom', 1, 9)):
+        try:
+            dev_info = os.stat(dev_path)
+        except OSError:
+            continue
+        if stat.S_ISCHR(dev_info.st_mode) and dev_info.st_rdev == os.makedev(major, minor):
+            read.append(dev_path)
     identities = {path: [os.stat(path).st_dev, os.stat(path).st_ino] for path in read + write + runtime}
     return dict(read_paths=read, write_paths=write, runtime_paths=runtime, identities=identities,
                 command=list(command), env=environment, cwd=str(Path(cwd).resolve(strict=True)),
                 seconds=spec.seconds, rss_bytes=spec.rss_bytes, processes=spec.processes, file_bytes=spec.file_bytes,
                 private_home=home, private_bytes=spec.private_bytes, source_roots=source_roots,
                 source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files,
-                direct_network=bool(spec.direct_network))
+                direct_network=bool(spec.direct_network), read_policy=spec.read_policy)
 
 
 def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None):

@@ -20,7 +20,7 @@ from .schema import ForgeError
 
 
 PUBLIC_MODULES = (
-    "demiflow", "demiflow.data", "demiflow.operator_llm", "demiflow.agent",
+    "demiflow", "demiflow.data", "demiflow.execution", "demiflow.operator_llm", "demiflow.agent",
     "demiflow.inference", "demiflow.services", "demiflow.objects", "demiflow.embeddings",
     "demiflow.collect.raw_contract", "demiflow.secrets", "demiflow.queue",
 )
@@ -259,7 +259,9 @@ def _public_export(module, label, root, *, depth=0):
     if label in namespace:
         return namespace[label]
     expected = {"demiflow": root / "__init__.py",
-                "demiflow.data": root / "data/__init__.py"}
+                "demiflow.data": root / "data/__init__.py",
+                "demiflow.execution": root / "execution/__init__.py",
+                "demiflow.execution.contracts": root / "execution/contracts/__init__.py"}
     name = namespace.get("__name__")
     path = Path(namespace.get("__file__", ""))
     if (depth >= 3 or type(module) is not types.ModuleType or type(name) is not str or name not in expected

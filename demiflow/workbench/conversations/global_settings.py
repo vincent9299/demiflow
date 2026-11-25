@@ -208,12 +208,14 @@ class GlobalSettings:
             configured_python = row.get('python')
             if configured_python and not (Path(configured_python).is_file() and os.access(configured_python, os.X_OK)):
                 configured_python = ''
-            if (self.value is None and configured_python is None and workspace in self.service.deployment.projects
+            configured_dev_network = bool(row.get('dev_network', False))
+            if (self.value is None and configured_python is None and not configured_dev_network
+                    and workspace in self.service.deployment.projects
                     and explicit is self.service.deployment.projects[workspace]
                     and explicit['identity'] == identity):
                 return self.service.deployment,self.service.policy_hash,self.service.config_path
             effective=self.value or dict(provider=next(iter(self.templates)),config=next(iter(self.templates.values())))
-            cache_key=(workspace,digest(identity),digest(self.value),configured_python)
+            cache_key=(workspace,digest(identity),digest(self.value),configured_python,configured_dev_network)
             if cache_key not in self.bindings:
                 if len(self.bindings)>=128: reject('自动项目绑定超过预算。','resource_limit')
                 if explicit and explicit['identity']==identity:
@@ -223,6 +225,10 @@ class GlobalSettings:
                     project['python'] = configured_python
                 else:
                     project.pop('python', None)
+                if configured_dev_network:
+                    project['dev_network'] = True
+                else:
+                    project.pop('dev_network', None)
                 value=copy.deepcopy(self.service.deployment.value)
                 value['projects']={workspace:project};value['providers']={effective['provider']:effective['config']}
                 deployment=Deployment(value)
