@@ -86,6 +86,14 @@ def _node_document(document):
     return raw.decode()
 
 
+def _pending_rollback(exc):
+    """Whether a read-only open failed because a hot rollback journal awaits playback."""
+    name = getattr(exc, 'sqlite_errorname', None)  # Python 3.11+
+    if name is not None:
+        return name == 'SQLITE_READONLY_ROLLBACK'
+    return 'readonly database' in str(exc)
+
+
 class RunJournal:
     def __init__(self, directory, *, attempt=None, _maintenance_deadline=None):
         if attempt is not None and (type(attempt) is not int or not 1 <= attempt <= 32):
@@ -158,15 +166,7 @@ class RunJournal:
             scoped = self._connections is not None
             db = self._connections.get(write) if scoped else None
             if db is None:
-                db = (self._connect() if write else sqlite3.connect(
-                    self.path.resolve().as_uri() + '?mode=ro', uri=True,
-                    timeout=5, check_same_thread=False, cached_statements=64))
-                if not write:
-                    try:
-                        db.execute('PRAGMA cache_size=-2048')
-                    except BaseException:
-                        db.close()
-                        raise
+                db = self._connect() if write else self._open_reader()
                 if scoped:
                     self._connections[write] = db
             if db.in_transaction:
@@ -197,6 +197,41 @@ class RunJournal:
             return '', ()
         state = json.loads(db.execute('SELECT document FROM execution_state').fetchone()[0])
         return ' WHERE attempt=?', (self.attempt or state['attempt'],)
+
+    def _open_reader(self):
+        """Open the journal read-only, after a dead writer's rollback if one is pending.
+
+        A writer killed inside a transaction leaves a hot rollback journal. SQLite
+        plays it back on the next open, which needs write access, so a read-only
+        open is refused until some writable connection has done it.
+        """
+        uri = self.path.resolve().as_uri() + '?mode=ro'
+        for rolled_back in (False, True):
+            db = sqlite3.connect(uri, uri=True, timeout=5, check_same_thread=False, cached_statements=64)
+            try:
+                db.execute('PRAGMA cache_size=-2048')
+                return db
+            except sqlite3.OperationalError as exc:
+                db.close()
+                if rolled_back or not _pending_rollback(exc):
+                    raise
+                try:
+                    self._roll_back_dead_writer()
+                except sqlite3.Error:
+                    raise exc from None
+            except BaseException:
+                db.close()
+                raise
+
+    def _roll_back_dead_writer(self):
+        # Reading through a writable connection makes SQLite play the journal back.
+        # No table or row is written, and a live writer's transaction is not touched:
+        # its lock keeps the journal from being treated as abandoned.
+        db = sqlite3.connect(self.path, timeout=5)
+        try:
+            db.execute('SELECT 1 FROM sqlite_master').fetchone()
+        finally:
+            db.close()
 
     def _connect(self):
         self.directory.mkdir(parents=True, exist_ok=True)
