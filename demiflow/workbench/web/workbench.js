@@ -205,7 +205,7 @@
       wiringPane.hidden=tab!=='wiring';behaviorPane.hidden=tab!=='behavior';
       for(const[k,b]of detailTabButtons){b.classList.toggle('active',k===tab);b.setAttribute('aria-pressed',String(k===tab));}
     }
-    for(const[k,label]of [['wiring','接线'],['behavior','行为']])detailTabButtons.set(k,button(label,()=>selectDetailTab(k),sourceTabs));
+    for(const[k,label]of [['wiring','接口'],['behavior','实现']])detailTabButtons.set(k,button(label,()=>selectDetailTab(k),sourceTabs));
     sourceHeader.append(sourceTitle);
     if(isEmbeddedDetail){
       const inlineActions=$('div',undefined,'wb-source-actions');
@@ -875,6 +875,52 @@
       materialTable(target,['配置项','来源','当前值'],items.map(p=>[p.name,
         p.expression||(p.origin==='default'?'API 默认值':'传入值'),formatArgValue(p)]));
     }
+    function summarizeComplexValue(val){
+      if(Array.isArray(val))return `[${val.length} 项]`;
+      if(val&&typeof val==='object'){
+        const keys=Object.keys(val);
+        const head=keys.slice(0,4).join(', ')+(keys.length>4?'…':'');
+        return `{${keys.length} 项${head?': '+head:''}}`;
+      }
+      return String(val);
+    }
+    function renderParamValueCell(rawVal,formattedText){
+      const text=typeof formattedText==='string'?formattedText:String(formattedText??'');
+      const isComplex=rawVal&&typeof rawVal==='object'&&!rawVal.unavailable&&!['Dataset','function','Schema'].includes(rawVal.type);
+      if(isComplex&&text.length>90){
+        const fold=$('details',undefined,'wb-param-fold');
+        fold.append($('summary',summarizeComplexValue(rawVal)),$('pre',text,'wb-code'));
+        return fold;
+      }
+      return text;
+    }
+    function renderKvTable(target,headers,rows){
+      const table=$('table',undefined,'wb-table'),thead=$('thead'),tr=$('tr'),tbody=$('tbody');
+      for(const h of headers)tr.append($('th',h));
+      thead.append(tr);table.append(thead,tbody);
+      for(const [k,v] of rows){
+        const r=$('tr');
+        r.append($('td',String(k)));
+        const td=$('td');
+        if(v instanceof Node)td.append(v);else td.textContent=String(v??'');
+        r.append(td);
+        tbody.append(r);
+      }
+      target.append(table);
+    }
+    function upstreamLabelsFor(node){
+      const dag=planPreview?.logical_dag;
+      if(!dag||!node?.occurrence_id)return [];
+      const byOcc=new Map((dag.nodes||[]).map(n=>[n.occurrence_id,n]));
+      const out=[];
+      for(const edge of dag.edges||[]){
+        if(edge.to?.occurrence_id!==node.occurrence_id)continue;
+        const src=byOcc.get(edge.from?.occurrence_id);
+        const name=src?.description?.trim()?.replace(/[。.]\s*$/,'')||src?.label||src?.op_kind||'上游节点';
+        out.push({port:edge.to?.port||'main',name:name.length>26?name.slice(0,25)+'…':name});
+      }
+      return out;
+    }
     function renderWiring(node,values,target=wiringPane){
       const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),config=byKind.configuration,schema=byKind.schema;
       const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.name!=='fn'&&p.value?.type!=='Dataset');
@@ -883,44 +929,80 @@
       const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
       const dataArgs=provided.filter(p=>!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
       const bindings=schema?.metadata?.bindings||{};
+      const apiExpr=presentation.compactApiExpr?.(node?.api_call,node?.label,node?.data_source)||'';
+      const opKind=String(node?.op_kind||'').toLowerCase();
 
-      const inputRows=[];
-      if(bindings.inputs&&typeof bindings.inputs==='object')for(const[k,v]of Object.entries(bindings.inputs))inputRows.push([k,String(v)]);
-      if(inputRows.length){
-        const inSec=$('section',undefined,'wb-wiring-section');
-        inSec.append($('h4','输入'));
-        materialTable(inSec,['输入字段','绑定列'],inputRows);
-        target.append(inSec);
+      // 1. 数据流（每个节点必有输入与输出）
+      const upstreams=upstreamLabelsFor(node);
+      const flowRows=[];
+      if(bindings.inputs&&typeof bindings.inputs==='object'&&Object.keys(bindings.inputs).length){
+        const cols=Object.entries(bindings.inputs).map(([k,v])=>k===String(v)?k:`${k} ← ${v}`).join('，');
+        const fromHint=upstreams.length?`（来自 ${upstreams.map(u=>u.name).join('、')}）`:'';
+        flowRows.push(['输入',`取列：${cols}${fromHint}`]);
+      }else if(upstreams.length>1){
+        const portNames={left:'左表',right:'右表'};
+        flowRows.push(['输入',upstreams.map(u=>`${portNames[u.port]||u.port}：${u.name}`).join(' ＋ ')]);
+      }else if(upstreams.length===1){
+        flowRows.push(['输入',`${upstreams[0].name}（整行数据）`]);
+      }else if(node?.data_source?.uri){
+        const base=String(node.data_source.uri).split('/').filter(Boolean).pop()||node.data_source.uri;
+        const ver=Number.isInteger(node.data_source.version)?` · v${node.data_source.version}`:'';
+        flowRows.push(['输入',`外部表 ${base}${ver}`]);
+      }else{
+        flowRows.push(['输入','内存数据清单']);
       }
 
-      const outputRows=[];
-      if(bindings.output)outputRows.push(['主输出',String(bindings.output)]);
-      if(bindings.outputs&&typeof bindings.outputs==='object')for(const[k,v]of Object.entries(bindings.outputs))outputRows.push([k,String(v)]);
-      for(const p of sideOutputs)outputRows.push(['伴随输出 · '+p.name,formatArgValue(p)]);
-      if(outputRows.length){
-        const outSec=$('section',undefined,'wb-wiring-section');
-        outSec.append($('h4','输出'));
-        materialTable(outSec,['输出角色','绑定列'],outputRows);
-        target.append(outSec);
+      const outCols=[];
+      if(bindings.output)outCols.push(String(bindings.output));
+      if(bindings.outputs&&typeof bindings.outputs==='object')for(const v of Object.values(bindings.outputs))outCols.push(String(v));
+      for(const p of sideOutputs){const v=formatArgValue(p);if(v)outCols.push(v);}
+      let outputDesc='新数据行（1→1）';
+      if(outCols.length){
+        outputDesc=`写回列：${[...new Set(outCols)].join('，')}`;
+      }else if(apiExpr.startsWith('.flat_map')||opKind.includes('flat')){
+        outputDesc='展开为多行（1→N）';
+      }else if(apiExpr.startsWith('.filter')||opKind.includes('filter')){
+        outputDesc='筛选保留的数据行';
+      }else if(apiExpr.startsWith('.join')||opKind.includes('join')){
+        const onArg=dataArgs.find(p=>p.name==='on');
+        outputDesc=onArg?`按 ${formatArgValue(onArg)} 关联后的行`:'关联后的行';
+      }else if(apiExpr.startsWith('.save_lance')||opKind.includes('checkpoint')||opKind.includes('save')){
+        const stageArg=dataArgs.find(p=>p.name==='stage');
+        outputDesc=stageArg?`阶段落盘（stage=${formatArgValue(stageArg)}）并继续向下传递`:'阶段落盘并继续向下传递';
+      }else if(apiExpr.startsWith('.write_lance')||opKind.includes('write')){
+        outputDesc='写出最终 Lance 表并返回回执';
+      }else if(apiExpr.startsWith('data.read_')||apiExpr.startsWith('data.from_')||opKind.includes('read')||opKind==='materialized'){
+        outputDesc='数据行流';
       }
+      flowRows.push(['输出',outputDesc]);
 
+      const flowSec=$('section',undefined,'wb-wiring-section');
+      flowSec.append($('h4','数据流'));
+      renderKvTable(flowSec,['方向','说明'],flowRows);
+      target.append(flowSec);
+
+      // 2. 业务入参（固定侧输入，大对象默认折叠）
       const paramRows=[];
       for(const p of dataArgs){
         if(p.name==='fn_kwargs'&&p.value&&typeof p.value==='object'&&!Array.isArray(p.value)&&!p.value.unavailable){
-          for(const[k,v]of Object.entries(p.value))paramRows.push([k,typeof v==='string'?v:json(v)]);
+          for(const[k,v]of Object.entries(p.value)){
+            const txt=typeof v==='string'?v:json(v);
+            paramRows.push([k,renderParamValueCell(v,txt)]);
+          }
         }else if(p.name==='label'){
           continue;
         }else{
-          paramRows.push([p.name,formatArgValue(p)]);
+          paramRows.push([p.name,renderParamValueCell(p.value,formatArgValue(p))]);
         }
       }
       if(paramRows.length){
         const paramSec=$('section',undefined,'wb-wiring-section');
-        paramSec.append($('h4','参数配置'));
-        materialTable(paramSec,['参数','值'],paramRows);
+        paramSec.append($('h4','业务入参'));
+        renderKvTable(paramSec,['入参','值'],paramRows);
         target.append(paramSec);
       }
 
+      // 3. 运行参数（纯引擎调度与资源控制）
       const engineCfg=config?.metadata?.engine_configuration;
       const modelObj=engineCfg?.model&&typeof engineCfg.model==='object'?engineCfg.model:null;
       const modelName=modelObj?.name||modelObj?.model||(typeof engineCfg?.model==='string'?engineCfg.model:null);
@@ -929,7 +1011,7 @@
       const rtRows=runtimeArgs.filter(p=>!['concurrency','queue_depth','max_requests','token_budget','when','config'].includes(p.name));
       if(runtimeArgs.length||modelLabel){
         const runtimeSection=$('section',undefined,'wb-wiring-section');
-        runtimeSection.append($('h4','运行配置'));
+        runtimeSection.append($('h4','运行参数'));
         const summaryChips=$('div',undefined,'wb-runtime-chips');
         if(modelLabel)summaryChips.append($('span','模型 '+modelLabel,'definition-model'));
         const chipLabels={concurrency:'并发',queue_depth:'队列',max_requests:'请求上限'};
@@ -938,10 +1020,9 @@
           else if(p.name==='token_budget'&&p.value?.max_input!=null)summaryChips.append($('span','输入上限 '+p.value.max_input,'definition-chip'));
         }
         if(summaryChips.children.length)runtimeSection.append(summaryChips);
-        if(rtRows.length)materialTable(runtimeSection,['配置项','值'],rtRows.map(p=>[p.name,formatArgValue(p)]));
+        if(rtRows.length)renderKvTable(runtimeSection,['参数','值'],rtRows.map(p=>[p.name,renderParamValueCell(p.value,formatArgValue(p))]));
         target.append(runtimeSection);
       }
-      if(!target.children.length)target.append($('p','当前节点无额外参数配置。','wb-caption'));
     }
     async function loadPreviewSource(){
       savePreviewLocator();
