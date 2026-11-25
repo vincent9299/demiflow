@@ -56,6 +56,7 @@ def build_wsl_spec_payload(spec, command, env, cwd, *, validated: dict | None = 
         private_bytes=spec.private_bytes,
         direct_network=data['direct_network'],
         read_policy=data['read_policy'],
+        write_policy=data['write_policy'],
         command=data['command'],
         env=data['env'],
         cwd=windows_to_wsl_path(data['cwd']),
@@ -89,7 +90,7 @@ class WindowsWslBackend:
             'denied_paths=tuple(d["denied_paths"]), private_home=d["private_home"], role=d["role"], '
             'seconds=d["seconds"], rss_bytes=d["rss_bytes"], processes=d["processes"], '
             'file_bytes=d["file_bytes"], private_bytes=d["private_bytes"], direct_network=d["direct_network"], '
-            'read_policy=d.get("read_policy", "scoped")); '
+            'read_policy=d.get("read_policy", "scoped"), write_policy=d.get("write_policy", "scoped")); '
             'p = launch_sandbox(d["command"], spec=s, env=d["env"], cwd=d["cwd"]); '
             'raise SystemExit(p.wait())'
         )

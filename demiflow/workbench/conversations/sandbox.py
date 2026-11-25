@@ -60,6 +60,7 @@ class SandboxSpec:
     private_bytes: int = 256 * 1024**2
     direct_network: bool = False
     read_policy: str = 'scoped'
+    write_policy: str = 'scoped'
 
 
 SPEC_BYTES = 2 * 1024 * 1024
@@ -97,6 +98,10 @@ def specification(spec, command, env, cwd):
         raise ValueError('Sandbox read_policy must be scoped or inherit_os')
     if spec.read_policy == 'inherit_os' and spec.role != 'developer':
         raise ValueError('Only developer role may inherit host read permissions')
+    if spec.write_policy not in {'scoped', 'project_root'}:
+        raise ValueError('Sandbox write_policy must be scoped or project_root')
+    if spec.write_policy == 'project_root' and spec.role != 'developer':
+        raise ValueError('Only developer role may use project_root write policy')
     if spec.direct_network and spec.role == 'verifier':
         raise ValueError('Verifier sandbox cannot enable direct network access')
     for value, maximum in ((spec.seconds, 3600), (spec.rss_bytes, 16 * 1024**3),
@@ -111,8 +116,8 @@ def specification(spec, command, env, cwd):
     # The control plane must never execute modules writable by this domain on
     # a later launch/gate. Platform development therefore needs a separate,
     # read-only installed control plane, not the checkout being edited.
-    protected.extend(_paths([str(Path(__file__).resolve().parents[2]), sys.executable,
-                             sys.prefix, sys.base_prefix, '/usr', '/lib', '/lib64']))
+    system_protected = _paths([str(Path(__file__).resolve().parents[2]), sys.executable,
+                               sys.prefix, sys.base_prefix, '/usr', '/lib', '/lib64'])
     # These are fixed launcher dependencies, not additional child read grants.
     # In particular /usr owns unshare and /lib* own its loader/native libraries.
     denied = _paths(spec.denied_paths, existing=False)
@@ -130,31 +135,33 @@ def specification(spec, command, env, cwd):
     for allowed in checked_against_denied:
         if any(_contains(allowed, forbidden) or _contains(forbidden, allowed) for forbidden in denied):
             raise ValueError('Sandbox allowlist overlaps a protected path')
+    checked_protected = system_protected if spec.write_policy == 'project_root' else (protected + system_protected)
     for allowed in write:
         if any(_contains(allowed, dependency) or _contains(dependency, allowed) for dependency in runtime):
             raise ValueError('Sandbox write scope overlaps a trusted runtime path')
-        if any(_contains(allowed, forbidden) or _contains(forbidden, allowed) for forbidden in protected):
+        if any(_contains(allowed, forbidden) or _contains(forbidden, allowed) for forbidden in checked_protected):
             raise ValueError('Sandbox write scope overlaps a protected read-only path')
-    for value in write:
-        path = Path(value)
-        if path.is_file() and path.stat().st_nlink != 1:
-            raise ValueError('Hard-linked writable files are outside the sandbox scope')
-        if path.is_dir():
-            count = 0
-            pending = [path]
-            while pending:
-                with os.scandir(pending.pop()) as entries:
-                    for entry in entries:
-                        count += 1
-                        if count > 4096:
-                            raise ValueError('Writable tree scope inventory exceeds budget')
-                        if value != home and entry.name in {'.git', '.forge', '.codex', '.dsh', 'AGENTS.md'}:
-                            raise ValueError('Writable tree contains protected development metadata')
-                        info = entry.stat(follow_symlinks=False)
-                        if stat.S_ISLNK(info.st_mode) or stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
-                            raise ValueError('Writable tree contains a link alias')
-                        if stat.S_ISDIR(info.st_mode):
-                            pending.append(entry.path)
+    if spec.write_policy != 'project_root':
+        for value in write:
+            path = Path(value)
+            if path.is_file() and path.stat().st_nlink != 1:
+                raise ValueError('Hard-linked writable files are outside the sandbox scope')
+            if path.is_dir():
+                count = 0
+                pending = [path]
+                while pending:
+                    with os.scandir(pending.pop()) as entries:
+                        for entry in entries:
+                            count += 1
+                            if count > 4096:
+                                raise ValueError('Writable tree scope inventory exceeds budget')
+                            if value != home and entry.name in {'.git', '.forge', '.codex', '.dsh', 'AGENTS.md'}:
+                                raise ValueError('Writable tree contains protected development metadata')
+                            info = entry.stat(follow_symlinks=False)
+                            if stat.S_ISLNK(info.st_mode) or stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
+                                raise ValueError('Writable tree contains a link alias')
+                            if stat.S_ISDIR(info.st_mode):
+                                pending.append(entry.path)
     if type(command) not in (list, tuple) or not 1 <= len(command) <= 256:
         raise ValueError('Sandbox command exceeds argument budget')
     if any(type(arg) is not str or '\0' in arg for arg in command) or not Path(command[0]).is_absolute():
@@ -175,11 +182,11 @@ def specification(spec, command, env, cwd):
         for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'NO_PROXY', 'no_proxy'):
             environment.pop(name, None)
     from .sandbox_native import tree_usage
-    source_roots = [path for path in write if path != home]
+    source_roots = [] if spec.write_policy == 'project_root' else [path for path in write if path != home]
     source_roots = [path for path in source_roots if not any(other != path and _contains(other, path) for other in source_roots)]
-    if any(_contains(path, home) or _contains(home, path) for path in source_roots):
+    if any(_contains(path, home) or _contains(home, path) for path in (write if spec.write_policy == 'project_root' else source_roots) if path != home):
         raise ValueError('Source write scope must be separate from private HOME')
-    baseline_bytes, baseline_files = tree_usage(source_roots, 4096)
+    baseline_bytes, baseline_files = tree_usage(source_roots, 4096) if source_roots else (0, 0)
     # Fixed harmless devices needed by shells, TLS, Python/PyTorch, and native CLIs.
     # Never grant the device directory or caller-selected character devices.
     null = os.stat('/dev/null')
@@ -200,7 +207,8 @@ def specification(spec, command, env, cwd):
                 seconds=spec.seconds, rss_bytes=spec.rss_bytes, processes=spec.processes, file_bytes=spec.file_bytes,
                 private_home=home, private_bytes=spec.private_bytes, source_roots=source_roots,
                 source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files,
-                direct_network=bool(spec.direct_network), read_policy=spec.read_policy)
+                direct_network=bool(spec.direct_network), read_policy=spec.read_policy,
+                write_policy=spec.write_policy)
 
 
 def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None):
