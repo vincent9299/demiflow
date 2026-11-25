@@ -141,6 +141,7 @@ GET_FIELDS = {
 POST_FIELDS = {
     'development-settings': ({'expected','provider','model','effort','authentication','base_url','api_key'}, set()),
     'notebook-open': (set(), {'create'}),
+    'data-tool-write': ({'path', 'source'}, set()),
     'flow-arguments-save': ({'entry', 'revision', 'source_sha256', 'arguments'}, set()),
     'project-file-save': ({'path', 'text'}, {'expected_sha256'}),
     'project-file-create': ({'path'}, {'text'}),
@@ -641,6 +642,14 @@ class Handler(BaseHTTPRequestHandler):
             if sha_val is not None and (type(sha_val) is not str or (sha_val and not re.fullmatch(r'[0-9a-f]{64}', sha_val))):
                 raise ForgeError('Invalid expected_sha256 field', code='invalid_request')
             return request
+        if name == 'data-tool-write':
+            path_val = request.get('path')
+            source_val = request.get('source')
+            if type(path_val) is not str or not path_val.strip() or len(path_val.encode()) > 128:
+                raise ForgeError('Invalid path field', code='invalid_request')
+            if type(source_val) is not str or not source_val.strip() or len(source_val.encode()) > 65536:
+                raise ForgeError('Invalid source field', code='invalid_request')
+            return request
         if name == 'project-file-create':
             path_val = request.get('path')
             text_val = request.get('text')
@@ -1002,6 +1011,15 @@ class Handler(BaseHTTPRequestHandler):
                 from demiflow.workbench.notebooks.proxy import open_notebook
                 key = self.path.split('/')[3] if self.path.startswith('/api/workspaces/') else next(iter(self.server.single['projects']))
                 open_notebook(self, key, create=create)
+                return
+            if name == 'data-tool-write':
+                if not permissions.get('analysis_write'):
+                    raise PermissionError('此项目未开启 Notebook / 数据写入权限，无法写入 data_tools。')
+                request = self._body(name)
+                from demiflow.workbench.projects import definitions
+                with self._work():
+                    value = definitions.write_data_tool(root, path=request['path'], source=request['source'])
+                self._send(value)
                 return
             if name in {'project-create', 'project-register', 'project-remove', 'project-permissions','project-capabilities'}:
                 raise ForgeError('Project management requires a console endpoint', code='invalid_request')

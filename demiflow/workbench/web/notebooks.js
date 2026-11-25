@@ -280,16 +280,21 @@
       }
     }
     let toolPromise=null;
-    async function ensureToolIndex(){
-      if(toolIndex)return toolIndex;
+    async function ensureToolIndex(force=false){
+      if(toolIndex&&!force)return toolIndex;
       if(!toolPromise){
         toolPromise=api('project-data-tools').then(index=>{
           toolIndex=index;
-          if(alive())filterLists();
+          if(alive()){delete panes.tools.dataset.revision;filterLists();}
           return index;
         }).finally(()=>{toolPromise=null;});
       }
       return toolPromise;
+    }
+    async function writeDataTool(args){
+      const result=await api('data-tool-write',{},{path:args.path,source:args.source});
+      if(alive())await ensureToolIndex(true).catch(()=>{});
+      return result;
     }
     async function loadTools(){
       if(!toolIndex&&activeTab==='tools')panes[activeTab].textContent='正在读取'+labels[activeTab]+'…';
@@ -683,7 +688,7 @@
           session.storage=storage;
           cards=mountCards({desk,controls,panel,storage,app:session.frame.contentWindow.jupyterapp,api,project,alive,
             permissions:()=>context.capabilities||{},hasProjectPython:()=>!!context.project_python,
-            loadTools:ensureToolIndex,openTool,
+            loadTools:ensureToolIndex,openTool,writeDataTool,
             tables:()=>[...tables.values()].map(({item,fieldNames})=>({
               table:item.label,version:item.version,fields:fieldNames,
               reader:'demiflow.workbench.notebooks.data.sample'})),

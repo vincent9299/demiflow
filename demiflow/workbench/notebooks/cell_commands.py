@@ -81,7 +81,8 @@ class CellCommands(BridgeServer):
                 reject('Notebook did not return a result before this command expired', 'conflict')
             return {'done': False}
         fields = {'context.show': set(), 'catalog.list': {'group', 'offset'}, 'catalog.show': {'group', 'id', 'offset'},
-                  'cell.show': set(), 'cell.edit': {'source'}, 'cell.run': set()}
+                  'cell.show': set(), 'cell.edit': {'source'}, 'cell.run': set(),
+                  'tool.write': {'path', 'source'}}
         if method == 'context.show' and type(params) is dict and 'topic' in params:
             if params['topic'] not in ('cell', 'before', 'output', 'env', 'catalog'):
                 reject('Unknown context topic')
@@ -100,8 +101,10 @@ class CellCommands(BridgeServer):
             integer(params['offset'], 0, 4096)
         if 'id' in params:
             text(params['id'], 4096)
+        if 'path' in params:
+            text(params['path'], 128)
         if 'source' in params:
-            text(params['source'], 12000)
+            text(params['source'], 65536 if method == 'tool.write' else 12000)
         key = self.store.request(self.tid, dict(rpc_id=secrets.token_hex(12), method=METHOD,
                                                command=method, arguments=params))
         return {'id': key}

@@ -219,6 +219,75 @@ def _module_name(path):
     return None
 
 
+def write_data_tool(root, *, path, source):
+    """Safely write a project data_tools/*.py module with mandatory semantic declarations."""
+    from demiflow.forge.io import no_symlinks
+
+    if type(path) is not str or not path.strip() or len(path) > 128:
+        raise ForgeError('工具文件名格式不正确。', code='invalid_request')
+    if type(source) is not str or not source.strip():
+        raise ForgeError('工具源码不能为空。', code='invalid_request')
+    raw_bytes = source.encode('utf-8')
+    if len(raw_bytes) > 65536:
+        raise ForgeError('工具源码超过 64 KB 上限。', code='invalid_request')
+
+    cleaned = path.strip().replace('\\', '/')
+    if cleaned.startswith('data_tools/'):
+        cleaned = cleaned[len('data_tools/'):]
+    if '/' in cleaned or '..' in cleaned:
+        raise ForgeError('仅允许写入项目 data_tools/ 根目录下的 .py 文件，不允许子目录或越界路径：' + path, code='invalid_request')
+    stem = cleaned[:-3] if cleaned.endswith('.py') else cleaned
+    if not stem.isidentifier() or keyword.iskeyword(stem) or stem.startswith('_'):
+        raise ForgeError('工具模块名必须是合法的公开 Python 标识符（例如 pool_review.py）：' + path, code='invalid_request')
+
+    try:
+        tree = _safe_tree(source)
+        public = exports(tree, DATA_TOOL_EXPORT)
+        semantics = data_tool_semantics(tree)
+    except (SyntaxError, ValueError) as exc:
+        raise ForgeError(f'工具源码校验失败：{exc}', code='invalid_request') from exc
+
+    if not public:
+        raise ForgeError(
+            '数据工具必须在模块顶层声明非空的 __demiflow_data_tools__，且每个导出项都必须包含语义字段（kind、title、summary、when_to_use）。',
+            code='invalid_request',
+        )
+    exported = []
+    for name in sorted(public):
+        meta = semantics.get(name) or {}
+        missing = [k for k in ('title', 'summary', 'when_to_use') if not meta.get(k)]
+        if missing:
+            raise ForgeError(
+                f'数据工具 {name} 缺少必填语义字段：{", ".join(missing)}。'
+                '请在 __demiflow_data_tools__ 中使用字典声明 {"kind": ..., "title": "中文名", "summary": "一句话用途", "when_to_use": "适用场景"}。',
+                code='invalid_request',
+            )
+        exported.append({'symbol': name, 'kind': meta['kind'], 'title': meta['title'],
+                         'summary': meta['summary'], 'when_to_use': meta['when_to_use']})
+
+    root = Path(root)
+    tools_dir = root / 'data_tools'
+    no_symlinks(tools_dir)
+    tools_dir.mkdir(mode=0o755, exist_ok=True)
+    if not tools_dir.is_dir():
+        raise ForgeError('项目 data_tools 路径不是目录。', code='conflict')
+    target = tools_dir / f'{stem}.py'
+    no_symlinks(target)
+    tmp = tools_dir / f'.{stem}.{os.getpid()}.tmp'
+    try:
+        tmp.write_bytes(raw_bytes)
+        os.replace(tmp, target)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+    return {
+        'status': 'written',
+        'path': f'data_tools/{stem}.py',
+        'module': f'data_tools.{stem}',
+        'tools': exported,
+    }
+
+
 def _notebook_entry(root, item, definition, module):
     path = Path(item['path'])
     node = _safe_tree(definition['source']).body[0]
