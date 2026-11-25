@@ -131,7 +131,16 @@ main.native-data-active{padding:0!important;max-width:none!important;overflow:hi
 .df-nb-action:hover{background:#e4e4e7;color:#09090b}
 .df-nb-action.df-nb-del:hover{color:#a83d3c}
 .df-nb-action svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.df-composer-footer{display:flex;align-items:center;gap:10px;margin-top:4px;flex-wrap:wrap}
+.df-composer-footer{display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap}
+.df-composer-meta{display:inline-flex;align-items:center;gap:6px;margin-left:auto;min-width:0}
+.df-card-access{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:#52525b;white-space:nowrap}
+.df-card-access[hidden]{display:none}
+.df-card-model{font-size:11.5px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:14em}
+.df-card-model[hidden]{display:none}
+.df-composer-footer .df-card-provider{width:auto;max-width:13em;margin:0;padding:1px 4px;border:1px solid #e4e4e7;border-radius:6px;background:#fafafa;color:#52525b;font:inherit;font-size:11.5px}
+.df-composer-footer .df-card-provider[hidden]{display:none}
+.df-card-stats-dock{margin:-6px 14px 10px;padding:0 2px;font-size:11px;gap:6px 10px;justify-content:flex-start}
+.df-card-stats-dock[hidden]{display:none}
 .df-tool-picker-btn{border:1px solid #e4e4e7;background:#fafafa;color:#3f3f46;font-size:11.5px;line-height:1.4;padding:2px 8px;border-radius:6px;box-shadow:none}
 .df-tool-picker-btn:is(:hover,:focus-visible){background:#f4f4f5;color:#09090b;border-color:#d4d4d8}
 .df-tool-popover{position:absolute;left:0;right:0;bottom:calc(100% + 6px);z-index:20;background:#fff;border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 8px 24px rgba(9,9,11,.12);padding:8px;display:flex;flex-direction:column;gap:6px;max-height:280px}

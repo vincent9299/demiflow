@@ -43,6 +43,39 @@
   const chevron=()=>svg('m3.5 5.5 3.5 3.5 3.5-3.5');
   const modelLabel=provider=>provider?.display_name||provider?.model_name||String(provider?.model||'Select model').replace(/^deepseek-/i,'DeepSeek-').replace(/(^|-)(v\d+(?:\.\d+)?|flash|pro)(?=-|$)/gi,(_,dash,part)=>dash+part[0].toUpperCase()+part.slice(1));
   const effortLabel=provider=>provider?.effort_display_name||({low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Max'}[provider?.effort]||provider?.effort||'');
+  function formatProvider(provider){
+    if(!provider)return {label:'',effort:'',text:''};
+    const label=modelLabel(provider),effort=effortLabel(provider);
+    return {label,effort,text:effort?label+' '+effort:label};
+  }
+  function renderStatsInto(dock,stats,sessionId){
+    const active=(!stats||(stats.session_id&&sessionId&&stats.session_id!==sessionId))?null:stats;
+    dock.replaceChildren();
+    if(!active){dock.hidden=true;dock.title='';return;}
+    if(stats.coverage?.state==='partial'){
+      dock.hidden=false;dock.append(el('span','dc-stat-pending','正在读取会话统计…'));dock.title='统计尚未覆盖全部记录，不将未知值当作 0。';return;
+    }
+    const counters=[];
+    const partial=stats.coverage?.metrics_state==='partial'?'历史统计仅包含有统计记录的轮次。':'';
+    if(finite(stats.turns))counters.push(compact(stats.turns)+' turns');
+    else if(finite(stats.conversation_turns))counters.push(compact(stats.conversation_turns)+' messages');
+    if(finite(stats.steps))counters.push(compact(stats.steps)+' steps');
+    const speed=finite(stats.decode_tokens_per_second)?scaled(stats.decode_tokens_per_second)+' tok/s':'';
+    if(counters.length||speed){const group=el('span','dc-stat');group.title=(stats.turns_basis==='conversation_requests'?'工作台会话轮数：已保存的用户请求。':'已记录的会话活动；未提供的指标不显示。')+partial;group.append(svg('M2.4 11.6a6 6 0 1 1 9.2 0M7 7l3-3M7 7v.01'),el('span',null,counters.join(' ')+(counters.length&&speed?' · ':'')+speed));dock.append(group);}
+    const usage=[];
+    if(finite(stats.tokens?.total))usage.push(compact(stats.tokens.total)+' tok');
+    if(finite(stats.cache_hit_ratio)&&stats.cache_hit_ratio<=1)usage.push('Cache hit '+scaled(stats.cache_hit_ratio*100)+'%');
+    if(usage.length){const group=el('span','dc-stat');group.title='代理报告的 token 用量与缓存命中率。'+partial;group.append(svg('M2 3c0-2.3 10-2.3 10 0s-10 2.3-10 0v8c0 2.3 10 2.3 10 0V3M2 7c0 2.3 10 2.3 10 0'),el('span',null,usage.join(' · ')));dock.append(group);}
+    const context=stats.context;
+    if(finite(context?.used)&&finite(context?.size)&&context.size>0){
+      const percent=Math.min(100,Math.round(context.used/context.size*100)),meter=el('span','dc-context');
+      meter.title='最新代理报告：上下文已用 '+context.used.toLocaleString()+' / '+context.size.toLocaleString()+' tokens。'+partial;meter.setAttribute('aria-label','上下文已用 '+percent+'%');
+      const ring=document.createElementNS('http://www.w3.org/2000/svg','svg');ring.setAttribute('viewBox','0 0 14 14');ring.setAttribute('width','14');ring.setAttribute('height','14');ring.setAttribute('aria-hidden','true');
+      for(const kind of ['track','fill']){const circle=document.createElementNS(ring.namespaceURI,'circle');for(const [key,value] of Object.entries({cx:7,cy:7,r:5.5,fill:'none','stroke-width':2,class:'dc-ring-'+kind}))circle.setAttribute(key,value);if(kind==='fill'){circle.setAttribute('stroke-dasharray',`${Math.PI*11*percent/100} ${Math.PI*11}`);circle.setAttribute('transform','rotate(-90 7 7)');}ring.append(circle);}
+      meter.append(ring,el('span',null,percent+'%'));dock.append(meter);
+    }
+    dock.hidden=!dock.childElementCount;dock.title=partial+(stats.unavailable?.length?'部分指标尚无记录。':'');
+  }
 
   function create(options={}) {
     const id='forge-composer-'+(++serial), state={capabilities:{},session:null,readonly:false,historyOnly:false,sending:false,creation:false,stats:null,disposed:false,attaching:false};
@@ -234,31 +267,7 @@
       const stats=state.stats,active=(!stats||(stats.session_id&&stats.session_id!==state.session?.id))?null:stats;
       const fingerprint=active?JSON.stringify(active):'';
       if(fingerprint===statsFingerprint)return;statsFingerprint=fingerprint;
-      dock.replaceChildren();
-      if(!active){dock.hidden=true;return;}
-      if(stats.coverage?.state==='partial'){
-        dock.hidden=false;dock.append(el('span','dc-stat-pending','正在读取会话统计…'));dock.title='统计尚未覆盖全部记录，不将未知值当作 0。';return;
-      }
-      const counters=[];
-      const partial=stats.coverage?.metrics_state==='partial'?'历史统计仅包含有统计记录的轮次。':'';
-      if(finite(stats.turns))counters.push(compact(stats.turns)+' turns');
-      else if(finite(stats.conversation_turns))counters.push(compact(stats.conversation_turns)+' messages');
-      if(finite(stats.steps))counters.push(compact(stats.steps)+' steps');
-      const speed=finite(stats.decode_tokens_per_second)?scaled(stats.decode_tokens_per_second)+' tok/s':'';
-      if(counters.length||speed){const group=el('span','dc-stat');group.title=(stats.turns_basis==='conversation_requests'?'工作台会话轮数：已保存的用户请求。':'已记录的会话活动；未提供的指标不显示。')+partial;group.append(svg('M2.4 11.6a6 6 0 1 1 9.2 0M7 7l3-3M7 7v.01'),el('span',null,counters.join(' ')+(counters.length&&speed?' · ':'')+speed));dock.append(group);}
-      const usage=[];
-      if(finite(stats.tokens?.total))usage.push(compact(stats.tokens.total)+' tok');
-      if(finite(stats.cache_hit_ratio)&&stats.cache_hit_ratio<=1)usage.push('Cache hit '+scaled(stats.cache_hit_ratio*100)+'%');
-      if(usage.length){const group=el('span','dc-stat');group.title='代理报告的 token 用量与缓存命中率。'+partial;group.append(svg('M2 3c0-2.3 10-2.3 10 0s-10 2.3-10 0v8c0 2.3 10 2.3 10 0V3M2 7c0 2.3 10 2.3 10 0'),el('span',null,usage.join(' · ')));dock.append(group);}
-      const context=stats.context;
-      if(finite(context?.used)&&finite(context?.size)&&context.size>0){
-        const percent=Math.min(100,Math.round(context.used/context.size*100)),meter=el('span','dc-context');
-        meter.title='最新代理报告：上下文已用 '+context.used.toLocaleString()+' / '+context.size.toLocaleString()+' tokens。'+partial;meter.setAttribute('aria-label','上下文已用 '+percent+'%');
-        const ring=document.createElementNS('http://www.w3.org/2000/svg','svg');ring.setAttribute('viewBox','0 0 14 14');ring.setAttribute('width','14');ring.setAttribute('height','14');ring.setAttribute('aria-hidden','true');
-        for(const kind of ['track','fill']){const circle=document.createElementNS(ring.namespaceURI,'circle');for(const [key,value] of Object.entries({cx:7,cy:7,r:5.5,fill:'none','stroke-width':2,class:'dc-ring-'+kind}))circle.setAttribute(key,value);if(kind==='fill'){circle.setAttribute('stroke-dasharray',`${Math.PI*11*percent/100} ${Math.PI*11}`);circle.setAttribute('transform','rotate(-90 7 7)');}ring.append(circle);}
-        meter.append(ring,el('span',null,percent+'%'));dock.append(meter);
-      }
-      dock.hidden=!dock.childElementCount;dock.title=partial+(stats.unavailable?.length?'部分指标尚无记录。':'');
+      renderStatsInto(dock,active,state.session?.id);
     }
     function update(values={}){
       if(state.disposed)return;Object.assign(state,values);renderProviders();renderAvailability();renderQueue();
@@ -272,5 +281,5 @@
     }
     update();return {form,input,send,stop,providers,update,dispose,resize,get autoReview(){return autoReviewEnabled;}};
   }
-  window.ForgeDevelopmentComposer=Object.freeze({create,connectionStatus});
+  window.ForgeDevelopmentComposer=Object.freeze({create,connectionStatus,formatProvider,renderStatsInto});
 })();
