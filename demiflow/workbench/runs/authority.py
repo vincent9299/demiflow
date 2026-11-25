@@ -59,7 +59,8 @@ class WebAuthority:
         if workspace.workspace_id(root, project) != self.workspace_id:
             raise PermissionError('Project identity changed')
         if action != 'read' and not (allowed and self.ceiling):
-            raise PermissionError('Required run permission is disabled: ' + action)
+            label = {'run_submit': '管线运行', 'run_control': '管线停止与控制', 'attach': '保留结果为输入'}.get(action, action)
+            raise PermissionError(f'当前项目未开启「{label}」权限，请在右上角「项目设置」中开启。')
 
     @contextmanager
     def guard(self, root, action):
