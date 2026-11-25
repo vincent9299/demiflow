@@ -13,19 +13,20 @@ def test_object_read_survives_optional_manifest_disappearing_after_stat(tmp_path
     manifest = tmp_path / '_demiflow/artifact_locations.json'
     manifest.parent.mkdir()
     manifest.write_text(json.dumps({'version': 1, 'files': {}}))
-    original = Path.read_text
+    original = Path.open
     attempts = []
-    def read(path, *args, **kwargs):
+    def opening(path, *args, **kwargs):
+        # The manifest disappears after its stat, just before it is opened.
         if path == manifest:
             attempts.append(path)
             path.unlink()
         return original(path, *args, **kwargs)
-    monkeypatch.setattr(Path, 'read_text', read)
+    monkeypatch.setattr(Path, 'open', opening)
     assert ref.read(max_bytes=16) == b'body'
     assert attempts == [manifest]
 
 
-def test_location_mapping_still_precedes_existing_path_and_errors_are_not_hidden(tmp_path, monkeypatch):
+def test_location_mapping_precedes_existing_path_and_only_unreadable_manifests_count_as_absent(tmp_path, monkeypatch):
     old, moved = tmp_path / 'old', tmp_path / 'new'
     old.write_bytes(b'old')
     moved.write_bytes(b'new')
@@ -33,15 +34,21 @@ def test_location_mapping_still_precedes_existing_path_and_errors_are_not_hidden
     manifest.parent.mkdir()
     manifest.write_text(json.dumps({'version': 1, 'files': {'old': 'new'}}))
     assert resolve_local_artifact(old) == moved
-    # A manifest permission failure is not equivalent to its absence.
+    # A malformed manifest is an error, not an absent mapping.
+    broken = tmp_path / 'broken'
+    (broken / '_demiflow').mkdir(parents=True)
+    (broken / '_demiflow/artifact_locations.json').write_text(json.dumps({'version': 2, 'files': {}}))
+    with pytest.raises(ValueError, match='Invalid artifact location manifest'):
+        resolve_local_artifact(broken / 'file')
+    # An unreadable ancestor manifest counts as absent: a sandbox (Landlock) may allow
+    # stat but deny open outside its read scope (7c4b06dd).
     original = Path.stat
     def stat(path, *args, **kwargs):
         if path == manifest:
             raise PermissionError('denied')
         return original(path, *args, **kwargs)
     monkeypatch.setattr(Path, 'stat', stat)
-    with pytest.raises(PermissionError, match='denied'):
-        resolve_local_artifact(old)
+    assert resolve_local_artifact(old) == old.resolve()
 
 
 def test_saved_offline_input_restores_after_exact_relocation(tmp_path):

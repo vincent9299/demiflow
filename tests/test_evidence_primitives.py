@@ -6,7 +6,6 @@ import httpx
 import lance
 import pyarrow as pa
 import pytest
-from demiflow import data
 from demiflow.collect.documents import store_document,read_document,DocumentError
 from demiflow.collect.web import WebClient
 from demiflow.services.request_limits import RequestGate, ServiceStopped
@@ -41,8 +40,12 @@ def test_document_structure_and_immutable_integrity(tmp_path):
 def test_stream_writer_flush_replay_and_duplicate_keys(tmp_path):
     schema=pa.schema([('id',pa.string()),('value',pa.int64())])
     writer=StreamLanceWriter(tmp_path/'rows.lance',schema,key='id');writer.initialize()
-    data.from_items([{'id':str(i),'value':i} for i in range(5)]).batch_map(
-        writer.__call__,max_batch=2,flush_interval=.01,concurrency=1,queue_depth=2).run_stream()
+    # Drive the primitive directly. A stateful writer method handed to batch_map runs
+    # from a sealed copy, so this writer object would never see its batches; dataset
+    # pipelines publish through save_lance instead.
+    rows=[{'id':str(i),'value':i} for i in range(5)]
+    for start in range(0,len(rows),2):
+        asyncio.run(writer(rows[start:start+2]))
     old=writer.reference();assert lance.dataset(**old).count_rows()==5
     assert writer.version==4  # empty snapshot + 2 + 2 + tail 1
     replay=StreamLanceWriter(tmp_path/'rows.lance',schema,key='id');replay.initialize()
