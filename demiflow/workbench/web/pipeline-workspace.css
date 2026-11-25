@@ -16,7 +16,7 @@ main.pipeline-workspace-active{padding:0!important;max-width:none!important;over
 .pw-sidebar-pane[hidden]{display:none}
 .pw-sidebar-pane .dev-sidebar-pane{display:flex;flex-direction:column;flex:1;min-height:0}
 .pw-sidebar .dev-inline-outline-wrap{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
-.pw-sidebar .dev-inline-outline-wrap[hidden]{display:none!important}
+.pw-sidebar .dev-inline-outline-wrap[hidden],.pw-sidebar .dev-tree-body[hidden]{display:none!important}
 .pw-sidebar .dev-outline-view-toggle.is-active{background:#e4e4e7;color:#09090b}
 .pw-flows-pane .wb-navigation-items{display:flex;flex-direction:column;gap:2px;padding:2px 0}
 .pw-flows-pane .wb-flow-record{display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:2px;width:100%;padding:7px 9px;border:0;border-radius:7px;background:transparent;box-shadow:none;color:#27272a}

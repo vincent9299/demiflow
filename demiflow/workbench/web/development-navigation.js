@@ -315,9 +315,10 @@
       treeToggle.setAttribute('aria-expanded', String(treeOpen));
       changedList.hidden = !changedOpen;
       historyWrap.hidden = !changedOpen || approvedHistory.length === 0;
-      treeCreateWrap.hidden = !treeOpen || !treeCreateOpen;
-      treeSearchBar.hidden = !treeOpen || !treeSearchOpen;
-      treeBody.hidden = !treeOpen;
+      treeCreateWrap.hidden = !treeOpen || !treeCreateOpen || inlineOutlineMode;
+      treeSearchBar.hidden = !treeOpen || !treeSearchOpen || inlineOutlineMode;
+      treeBody.hidden = !treeOpen || inlineOutlineMode;
+      if (inlineOutlineWrap) inlineOutlineWrap.hidden = !treeOpen || !inlineOutlineMode;
       changedSection.classList.toggle('is-collapsed', !changedOpen);
       treeSection.classList.toggle('is-collapsed', !treeOpen);
       const canResize = hasChanges && changedOpen && treeOpen;
