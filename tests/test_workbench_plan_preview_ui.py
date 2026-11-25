@@ -55,7 +55,7 @@ def test_sidebar_and_graph_text_copy_preserves_navigation(original, tmp_path, br
     declare_existing_flow(original, 'other.py:run_pipeline', params='settings/other.json')
     with service(None, registry=registry_path) as app, opened(browser, app) as (page, _):
         page.context.grant_permissions(['clipboard-read', 'clipboard-write'], origin=app.origin)
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(3)
         row = page.get_by_role('button', name='other.py:run_pipeline', exact=True)
         expect(row).to_have_attribute('aria-pressed', 'false')
@@ -95,7 +95,7 @@ def test_unbound_project_explains_missing_entry_before_compile(original, tmp_pat
     registry_path = tmp_path / 'registry.json'
     registry.add(registry_path, original)
     with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.get_by_text('未识别到受支持的入口声明', exact=False).first).to_be_visible()
         expect(page.get_by_role('button', name='解析执行计划', exact=True)).to_be_disabled()
         assert not any(method == 'POST' and url.endswith('/plan-preview') for method, url in requests)
@@ -106,7 +106,7 @@ def test_original_configuration_selector_compiles_through_real_http(original, tm
     register_preview_project(original, registry_path, writable=True)
     before = business_bytes(original)
     with service(None, registry=registry_path, enable_config_write=True) as app, opened(browser, app) as (page, requests):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         compile_button = page.get_by_role('button', name='解析执行计划', exact=True)
         expect(compile_button).to_be_enabled()
         initial_requests = len([url for method, url in requests if method == 'POST' and url.endswith('/plan-preview')])
@@ -219,7 +219,7 @@ def test_preview_ui_is_explicit_and_clears_on_configuration_change(original, tmp
                 value['basis']['params'] = 'settings/other.json'
             route.fulfill(status=200, content_type='application/json', body=json.dumps(value))
         page.route('**/plan-preview', compiled)
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(len(preview['dag']['nodes']))
         expect(page.locator('.wb-basis')).to_have_text('编译计划 · 尚未运行 · 仅首个执行动作')
@@ -267,15 +267,15 @@ def test_unmounted_preview_response_cannot_repopulate_a_new_view(original, tmp_p
             else:
                 held.append(route)
         page.route('**/plan-preview', compiled)
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(len(preview['dag']['nodes']))
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.get_by_role('button', name='正在解析…', exact=True)).to_be_disabled()
-        page.locator('.function-nav').get_by_role('button', name='Readme', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='文档', exact=True).click()
         expect(page.locator('.workbench')).to_have_count(0)
         assert len(held) == 1
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.get_by_role('button', name='正在解析…', exact=True)).to_be_disabled(timeout=65000)
         assert len(held) == 2
         # A new mount has its own in-flight compile. The old response must not

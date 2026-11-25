@@ -259,7 +259,7 @@ def test_native_interrupt_restart_drafts_project_switch_and_rename(browser,nativ
             editor=frame.locator('.jp-CodeCell .cm-content').first
             editor.fill('unsaved_note = "keep this draft"')
             kernel_id=page.locator(selector).evaluate('f=>f.contentWindow.jupyterapp.shell.currentWidget.sessionContext.session.kernel.id')
-            page.get_by_role('button',name='Readme',exact=True).click()
+            page.get_by_role('button',name='文档',exact=True).click()
             expect(page.get_by_role('heading',name='Native Notebook fixture',exact=True)).to_be_visible()
             assert page.locator('iframe.native-notebook-frame').count()==1
             assert not page.locator(selector).count()
@@ -395,7 +395,7 @@ def test_dictionary_resolved_request_stays_fixed_across_rebind_and_navigation(br
             rebind_sample(root)
             expect(page.locator('.dictionary-table[open] .dictionary-fields')).to_contain_text('变化',timeout=30000)
             assert page.evaluate('ForgeView.decodeView(location.hash).binding_digest')==original
-            page.get_by_role('button',name='Readme',exact=True).click()
+            page.get_by_role('button',name='文档',exact=True).click()
             page.get_by_role('button',name='数据',exact=True).click()
             expect(page.locator('.dictionary-table[open] .dictionary-fields')).to_contain_text('变化',timeout=30000)
             assert page.evaluate('ForgeView.decodeView(location.hash).binding_digest')==original

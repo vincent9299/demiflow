@@ -26,7 +26,7 @@ def test_configuration_error_repair_and_submit_reaches_real_result(isolated, bro
                 if request.method == "POST" and request.url.endswith("/run-prepare") else None)
         try:
             page.goto(app.origin + "/#token=" + app.token)
-            page.locator(".function-nav").get_by_role("button", name="管道", exact=True).click()
+            page.locator(".function-nav").get_by_role("button", name="管线", exact=True).click()
             page.locator(".wb-node").first.wait_for()
             page.locator(".wb-more > summary").click()
             page.get_by_role("button", name="整图配置", exact=True).click()

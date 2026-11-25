@@ -29,7 +29,7 @@ def test_submit_history_snapshot_and_result(root, browser):
     assert Path(demiflow.__file__).resolve().parents[1] == Path(__file__).resolve().parents[1]
     single_flow(root)
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         start = page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)
         expect(start).to_be_enabled()
         start.click()
@@ -82,7 +82,7 @@ def test_history_recovers_when_its_first_read_is_not_dispatched(root, browser):
                 route.continue_()
 
         page.route('**/runs?*', read_history)
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.locator('.wb-actions').get_by_role('button', name='运行记录', exact=True).click()
         record = page.get_by_role('combobox',name='运行记录')
         expect(record).to_have_value(value['run_id'])
@@ -112,7 +112,7 @@ def run(*, source, target, other):
     run_id = value['run_id']
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
         try:
-            page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+            page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
             page.locator('.wb-actions').get_by_role('button', name='运行记录', exact=True).click()
             expect(page.get_by_label('运行记录', exact=True)).to_have_value(run_id)
             page.get_by_role('button', name='开始这次运行', exact=True).click()
@@ -180,7 +180,7 @@ def test_late_parameter_response_does_not_replace_selected_run(root, browser):
     b = execute(root, prepared(root))
     assert a['status'] == b['status'] == 'succeeded'
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.locator('.wb-actions').get_by_role('button', name='运行记录', exact=True).click()
         page.get_by_label('运行记录',exact=True).select_option(a['run_id'])
         held = []
@@ -217,7 +217,7 @@ def run(*, directory):
         'arguments': {'directory': str(root/'never-created')}}))
     declare_existing_flow(root, 'flows/native.py:run', params='flows/native.json')
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.locator('.wb-flow-record[data-entry="flows/native.py:run"]').click()
         button = page.locator('.wb-actions').get_by_role('button', name='运行', exact=True)
         expect(button).to_be_enabled()

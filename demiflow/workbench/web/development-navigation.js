@@ -134,7 +134,7 @@
     return svg;
   }
 
-  function filePanel({layout, filesHost, operatorsHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange}) {
+  function filePanel({layout, filesHost, operatorsHost, paneHost, toggle, api, iconButton, mountText, disposeReaders, project, onReference, onRework, onRequestReview, onShowFilesTab, onBadgeChange, onOpenChange, onSelectFlow}) {
     let disposed = false;
     let levels = Object.create(null), expanded = [], treeLoaded = false, projectRootPath = '';
     let gitChanges = [], gitBranch = '', gitIsRepo = false;
@@ -432,8 +432,8 @@
     const operatorPane = node('div', 'dev-operator-pane');
     operatorPane.hidden = true;
     pane.append(tabBar, forgeStrip, forgeDetail, toolbar, viewport, operatorPane);
-    layout.append(pane);
-    toggle.setAttribute('aria-expanded', 'false');
+    (paneHost || layout).append(pane);
+    toggle?.setAttribute('aria-expanded', 'false');
 
     function setPaneMode(mode) {
       paneMode = mode === 'operator' ? 'operator' : 'file';
@@ -1588,7 +1588,12 @@
         b.append(node('span', 'op-glyph is-flow', 'F'), textWrap);
         b.onclick = () => {
           opSelectedFlow = f.entry;
-          openFile(filePath, 'source');
+          if (typeof onSelectFlow === 'function') {
+            setOpen(false, {skipFocus: true});
+            onSelectFlow(f.entry);
+          } else {
+            openFile(filePath, 'source');
+          }
           paintOperatorTree();
         };
         sec.list.append(b);
@@ -2052,8 +2057,9 @@
     function setOpen(value, {skipFocus = false} = {}) {
       pane.hidden = !value;
       layout.classList.toggle('development-files-open', value);
-      toggle.setAttribute('aria-expanded', String(value));
-      resize?.setActive(value && !matchMedia('(max-width:900px)').matches);
+      toggle?.setAttribute('aria-expanded', String(value));
+      resize?.setActive(value && !paneHost && !matchMedia('(max-width:900px)').matches);
+      onOpenChange?.(value);
       if (value) {
         if (paneMode === 'operator') {
           if (!opDetail && opSelected) openOperator(opSelected);
@@ -2064,7 +2070,7 @@
         if (!skipFocus) (paneMode === 'operator' ? operatorPane.querySelector('button') : closePanelBtn)?.focus();
       } else {
         destroyViewer();
-        if (!skipFocus) toggle.focus();
+        if (!skipFocus) toggle?.focus();
       }
     }
 

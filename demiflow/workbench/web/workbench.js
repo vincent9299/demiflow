@@ -15,7 +15,7 @@
   const restrictionText={INCOMPATIBLE_HISTORY:'历史封存与当前运行时不兼容，不能恢复；请新建运行。',UNKNOWN_EFFECT:'存在未知效果的执行，恢复准入待服务端核对。',CAPACITY_PENDING:'容量待满足，尚未执行完成；不会自动新建或重复提交。'};
   async function mount(options) {
     const {main,api,icon,workspaceId:project,view={},mountText,disposeReaders,onContext=()=>{},rememberView:saveView=()=>{},onPageChange=()=>{},
-      openResult=async()=>{},navigate=async()=>{},openOperator=null,projectSettings={}}=options;
+      openResult=async()=>{},navigate=async()=>{},openOperator=null,projectSettings={},embedded=null}=options;
     const presentation=globalThis.ForgeWorkbenchPresentation;
     if(!presentation||typeof presentation.chooseGraphView!=='function'||typeof presentation.buildGraphModel!=='function'||typeof presentation.buildNodeDetails!=='function')
       throw new Error('图呈现模块未加载或不完整：ForgeWorkbenchPresentation');
@@ -34,7 +34,7 @@
     const runUI=globalThis.ForgeRunPresentation;
     let flowCollapse,nodePanelResize;
     let planPreview=null,previewSelection=null,previewSequence=0,previewBusy=false;
-    let activePage=view.panel==='monitor'||(['run','run_compare','runs'].includes(view.kind)&&view.panel!=='flows')?'monitor':'flows',detailOpen=false,locationFields=null,userNavigation=0;
+    let activePage=view.panel==='monitor'||(['run','run_compare','runs'].includes(view.kind)&&view.panel!=='flows')?'monitor':'flows',detailOpen=false,lastEmbeddedDetail=false,locationFields=null,userNavigation=0;
     let lastPipelinePage=activePage;
     function rememberView(fields){locationFields=fields;saveView({...fields,panel:activePage});}
     function rememberPanel(){if(locationFields)saveView({...locationFields,panel:activePage});onPageChange(activePage);}
@@ -153,14 +153,19 @@
       const target=definitionSource;
       if(typeof openOperator==='function')await openOperator(target);
     },nodePanelTools);
+    if(embedded?.onAskAssistant){
+      button('让助手改',()=>embedded.onAskAssistant(definitionSource),nodePanelTools,{cls:'wb-ask-assistant'});
+    }
     const nodeOutputs=button('查看本次输出',()=>changeMode('results'),nodePanelTools);nodeOutputs.hidden=true;
-    const closeDetail=button('关闭详情',()=>{detailOpen=false;updateActions();},nodePanelTools);
+    const closeDetail=button('关闭详情',()=>{detailOpen=false;updateActions();embedded?.onDetailClose?.();},nodePanelTools);
+    if(embedded?.nodeDetailHost)closeDetail.hidden=true;
     nodePanel.append(nodePanelTools,inspector);
     const checks=$('section',undefined,'wb-checks'),checkScopes=$('div',undefined,'wb-check-scopes'),checkGrid=$('div',undefined,'wb-check-grid'),checkIssues=$('div',undefined,'wb-check-issues'),checkCoverage=$('aside',undefined,'wb-check-coverage');checks.hidden=true;checkGrid.append(checkIssues,checkCoverage);checks.append(checkScopes,checkGrid);root.append(checks);
     const tools=$('div',undefined,'wb-canvas-tools');
     const closeChecks=button('收起检查',()=>changeMode('config'),checks);checks.prepend(closeChecks);
     const previewButton=button('解析执行计划',()=>compilePlanPreview(),actions);previewButton.title='只解析当前入口与已保存入参，不启动数据处理';
     actions.append(runsContextButton,currentContextButton,previewButton,runButton,refreshRunButton,more);
+    if(embedded?.assistantButton)actions.append(embedded.assistantButton);
     const graph=ForgeWorkbenchGraph.mount(graphHost,{controls:tools,onSelect:selection=>{selectGraphNode(selection).catch(error=>{if(error.name!=='AbortError')message(error.message,'error-box');});}});
     const nodeJump=select('定位算子',[],null);nodeJump.className='wb-node-jump';tools.append(nodeJump);
     nodeJump.onchange=()=>{const card=graphModel?.nodes.find(n=>n.key===nodeJump.value);if(card)selectGraphNode(card.selection).catch(e=>message(e.message,'error-box'));};
@@ -175,7 +180,10 @@
     const actionBar=$('div',undefined,'wb-action-bar');actionBar.hidden=true;
 
     const locator=details('定位节点 / 查看局部',graphSection),locatorBody=$('div',undefined,'wb-inline-actions');locator.append(locatorBody);locator.hidden=true;
-    graphSection.prepend(actionBar,graphHost);body.append(graphSection,nodePanel);root.append(body);
+    graphSection.prepend(actionBar,graphHost);
+    if(embedded?.nodeDetailHost){body.append(graphSection);embedded.nodeDetailHost.append(nodePanel);}
+    else body.append(graphSection,nodePanel);
+    root.append(body);
     const runDetail=$('section',undefined,'wb-run-detail'),detailHeader=$('div',undefined,'wb-source-header'),detailTabs=$('div',undefined,'wb-source-tabs'),runDetailBody=$('div',undefined,'wb-run-detail-body');runDetail.hidden=true;
     const detailButtons=new Map();
     detailHeader.append($('strong','执行情况'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
@@ -303,13 +311,21 @@
       layout.classList.toggle('wb-project-layout',true);
       graphHost.hidden=false;
       nodeJump.hidden=false;expandGraph.hidden=!document.fullscreenEnabled;
-      nodePanel.hidden=!detailOpen&&!monitoring;body.classList.toggle('wb-detail-open',detailOpen||monitoring);
+      const detailVisible=detailOpen||monitoring;
+      if(embedded?.nodeDetailHost){
+        nodePanel.hidden=false;
+        body.classList.remove('wb-detail-open');
+        if(detailVisible&&!lastEmbeddedDetail)embedded.onDetailOpen?.();
+        lastEmbeddedDetail=detailVisible;
+      }else{
+        nodePanel.hidden=!detailVisible;body.classList.toggle('wb-detail-open',detailVisible);
+      }
       const narrowDetail=matchMedia(monitoring?'(max-width:1200px)':'(max-width:950px)').matches;
-      nodePanelResize?.setActive(!nodePanel.hidden&&!body.hidden&&!narrowDetail);
+      nodePanelResize?.setActive(!embedded?.nodeDetailHost&&!nodePanel.hidden&&!body.hidden&&!narrowDetail);
       nodeOutputs.hidden=!run||!run.outputs?.length;
       bottom.hidden=monitoring?runInspector!=='definition':inspectorWhole;
       inspector.hidden=monitoring||!inspectorWhole;
-      nodePanelTools.hidden=monitoring&&runInspector!=='definition';closeDetail.hidden=monitoring;
+      nodePanelTools.hidden=monitoring&&runInspector!=='definition';closeDetail.hidden=monitoring||!!embedded?.nodeDetailHost;
       root.dataset.page=activePage;onPageChange(activePage);
       runBar.hidden=!run||!!comparison||activePage!=='monitor';
       if(!checksActive)documents.open=false;
@@ -1760,8 +1776,14 @@
     const layout=$('div',undefined,'wb-workspace-layout'),runMain=$('div',undefined,'wb-workspace-main');
     root.prepend(layout);layout.append(flowNavigation,runMain);
     for(const element of [...root.children])if(element!==layout)runMain.append(element);
-    flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',narrowQuery:'(max-width:680px)',active:true});
-    nodePanelResize=ForgeNavigation.resizable({layout:body,sidebar:nodePanel,label:'算子详情',right:true,cssVar:'--wb-detail-width',minWidth:240,maxWidth:820,minMain:260,active:false});
+    if(embedded?.hideFlowSidebar){
+      flowNavigation.hidden=true;layout.classList.add('wb-embedded-no-sidebar');
+    }else{
+      flowCollapse=ForgeNavigation.collapsible({layout,sidebar:flowNavigation,header:flowHeader,label:'管道目录',narrowQuery:'(max-width:680px)',active:true});
+    }
+    if(!embedded?.nodeDetailHost){
+      nodePanelResize=ForgeNavigation.resizable({layout:body,sidebar:nodePanel,label:'算子详情',right:true,cssVar:'--wb-detail-width',minWidth:240,maxWidth:820,minMain:260,active:false});
+    }
     let metricSequence=0,lastObservationRevision=null;
     async function refreshTrend(force=false){
       if(!run||trend.hidden||(!force&&Date.now()-lastMetricAt<5000))return;
@@ -1800,6 +1822,14 @@
     });
     const handle=Object.freeze({
       showPage,
+      selectFlow:async entry=>{
+        if(!entry||disposed)return;
+        if(activePage==='monitor')await showPage('flows');
+        if(working?.entry===entry&&!run)return;
+        entryChoice.value=entry;
+        await entryChoice.onchange();
+      },
+      closeDetail:()=>{detailOpen=false;lastEmbeddedDetail=false;updateActions();},
       sync:async(fresh,{graphChanged=false,catalogChanged=false,runsChanged=false,force=false}={})=>{
         const permissionsChanged=json(ctx.run_permissions)!==json(fresh.run_permissions)||json(ctx.capabilities)!==json(fresh.capabilities);
         ctx=fresh;paintSelectors();if(historyOpen&&graphChanged)paintHistory();updateActions();

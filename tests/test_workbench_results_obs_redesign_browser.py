@@ -46,7 +46,7 @@ def make_long_json(text: str | None) -> str:
     )
     run_id = value['run_id']
     with service(root, enable_runs=True) as app, page_for(browser, app) as (page, errors):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.locator('.wb-actions').get_by_role('button', name='运行记录', exact=True).click()
         expect(page.get_by_label('运行记录', exact=True)).to_have_value(run_id)
         page.get_by_role('button', name='开始这次运行', exact=True).click()

@@ -82,7 +82,7 @@ def test_author_without_workbench_then_open_compile_and_run(tmp_path, browser, m
     console = tmp_path / 'projects.json'
     registry.add(console, root)
     with service(None, registry=console) as app, opened(browser, app) as (page, _):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         with page.expect_response(lambda res: res.url.endswith('/plan-preview') and
                                   res.request.post_data_json.get('entry') == 'flows/evens.py:run',
                                   timeout=65000) as pending:

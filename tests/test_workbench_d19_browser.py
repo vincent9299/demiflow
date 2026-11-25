@@ -37,7 +37,7 @@ V3_SCHEMA = 'demiflow.dataflow_graph.v3'
 
 def _select_flow(page):
     """Current configuration stays separate from a sealed execution graph."""
-    page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+    page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
     page.get_by_label('流程', exact=True).select_option('flows/questions.py:select')
     expect(page.get_by_label('配置', exact=True)).to_have_value('flows/select_a.json')
     expect(page.locator('.wb-graph-empty')).to_have_text('尚无运行执行图')
@@ -110,7 +110,7 @@ def test_ui_d19_shell_and_responsive(owned_fixture, browser):
 
         # counterexample: keyboard focus is visible and reachable
         page.set_viewport_size({'width': 1440, 'height': 1050})
-        first = nav.get_by_role('button', name='管道', exact=True)
+        first = nav.get_by_role('button', name='管线', exact=True)
         first.focus()
         expect(first).to_be_focused()
         # Projects are selected from the header; opening it does not reserve
@@ -204,7 +204,7 @@ def test_ui_d19_sealed_graph_attempts(owned_fixture, browser):
     root = fx.root
     assert fx.sealed_actions, 'a real run must seal at least one action'
     with fx.open_page(browser) as (page, log):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.get_by_role('button', name='运行记录', exact=True).click()
         page.locator('.wb-run-record[data-run="' + fx.run_facts['run_id'] + '"]').click()
         expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
@@ -347,7 +347,7 @@ def test_ui_d19_late_response_and_cleanup(owned_fixture, browser):
         for _ in range(20):
             page.locator('.function-nav').get_by_role('button', name='数据', exact=True).click()
             expect(page.get_by_label('当前数据表', exact=True)).to_be_visible()
-            page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+            page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
             expect(page.locator('.wb-basis')).to_contain_text('封存运行图')
         page.wait_for_function('() => __d19Life.active === 0 && __d19Life.held.length === 0')
         after = page.evaluate('() => ({urls:__d19Life.urls.size, intervals:__d19Life.intervals.size})')
@@ -395,7 +395,7 @@ def test_ui_d19_asset_and_single_authority(owned_fixture, browser):
         page.route('**/workbench-presentation.js', lambda route: route.fulfill(
             content_type='text/javascript', body=instrumented))
         page.reload()
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).wait_for()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).wait_for()
         _select_flow(page)
         _run(page)
         normalize_calls = page.evaluate('() => window.__d19NormalizeCalls || 0')

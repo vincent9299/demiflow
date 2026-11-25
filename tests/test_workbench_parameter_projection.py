@@ -73,7 +73,7 @@ def test_registered_plain_configuration_cold_open_switch_and_reload(browser, tmp
     parameter_file.write_text(json.dumps({'arguments': {'extra': False}}))
     declare_existing_flow(root, entry, params=parameter_file.name)
     with service(root) as app, opened(browser, app) as (page, _):
-        flows = page.get_by_role('navigation', name='项目功能').get_by_role('button', name='管道', exact=True)
+        flows = page.get_by_role('navigation', name='项目功能').get_by_role('button', name='管线', exact=True)
         flows.click()
         expect(page.locator('.wb-node')).to_have_count(3, timeout=65000)
         for extra, expected in [(True, 4), (False, 3)]:

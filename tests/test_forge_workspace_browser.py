@@ -49,7 +49,7 @@ def test_workspace_browser_dictionary_graph_source_and_export(demo, tmp_path):
             page.get_by_role("button", name="数据", exact=True).click()
             page.get_by_role('complementary',name='数据字典').wait_for()
             assert not page.get_by_role('button',name='Case 分析',exact=True).count()
-            page.get_by_role("button",name="管道",exact=True).click()
+            page.get_by_role("button",name="管线",exact=True).click()
             page.get_by_role("button",name="检查",exact=True).click()
             page.locator('.wb-basis').filter(has_text='检查报告图 · checked').wait_for()
             assert page.evaluate('ForgeView.decodeView(location.hash).report_digest')==reports['a']

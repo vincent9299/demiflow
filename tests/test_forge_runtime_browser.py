@@ -47,7 +47,7 @@ def browser_page(root,tmp_path,monkeypatch):
         page.on("pageerror", lambda e: errors.append(str(e)))
         try:
             page.goto(server.origin + "/#token=" + server.token)
-            page.get_by_role("button", name="管道", exact=True).wait_for()
+            page.get_by_role("button", name="管线", exact=True).wait_for()
             yield page, server, errors
         finally:
             browser.close()
@@ -114,7 +114,7 @@ def test_rm03_browser_lost_prepare_response_reuses_persistent_identity(
     root, browser_page
 ):
     page, server, errors = browser_page
-    page.get_by_role("button", name="管道", exact=True).click()
+    page.get_by_role("button", name="管线", exact=True).click()
     bodies = []
 
     def drop_first(route):

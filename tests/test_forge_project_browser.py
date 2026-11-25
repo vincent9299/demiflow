@@ -47,7 +47,7 @@ def test_create_register_and_check_in_browser(tmp_path):
         dialog.get_by_role('button',name='注册已有项目',exact=True).click()
         page.locator('#workspace-name').filter(has_text='original-pipeline').wait_for()
         page.locator('#sync-status').filter(has_text='自动同步已开启').wait_for()
-        page.get_by_role('button',name='管道',exact=True).click()
+        page.get_by_role('button',name='管线',exact=True).click()
         project_info(page)
         page.get_by_text('尚未识别入口。具体原因见下面的问题列表。', exact=True).wait_for()
         page.screenshot(path=str(artifact/'registered-project.png'))
@@ -207,7 +207,7 @@ def test_empty_console_observes_registration_from_cli(tmp_path):
         assert result.exit_code==0,result.output
         # No reload or browser-side registration: the same console observes it.
         page.locator('#workspace-name').filter(has_text='cli-pipeline').wait_for()
-        page.get_by_role('button',name='管道',exact=True).click()
+        page.get_by_role('button',name='管线',exact=True).click()
         project_info(page)
         page.get_by_text('尚未识别入口。具体原因见下面的问题列表。', exact=True).wait_for()
         # Platform/environment diagnostics need not have a business filename.

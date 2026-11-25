@@ -65,7 +65,7 @@ def test_real_legacy_graph_and_sealed_time(owned_fixture, browser):
         evidence='Native legacy run and real HTTP graph; not Runtime v3'))
 
     with fx.open_page(browser) as (page, log):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.get_by_role('button', name='运行记录', exact=True).click()
         page.locator('.wb-run-record[data-run="' + run['run_id'] + '"]').click()
         expect(page.locator('.wb-node')).to_have_count(7)

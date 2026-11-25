@@ -35,7 +35,7 @@ def test_real_nodes_open_matching_function_and_prompt_with_unreferenced_tabs_hid
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):
         errors = []
         page.on('pageerror', lambda e: errors.append(str(e)))
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         with page.expect_response(lambda r: r.url.endswith('/plan-preview')) as pending:
             page.get_by_role('button', name='解析执行计划', exact=True).click()
         assert pending.value.status == 200, pending.value.text()
@@ -97,7 +97,7 @@ def test_late_material_does_not_replace_new_selection_and_expiry_clears_old_text
     path = tmp_path / 'registry.json'
     registry.add(path, original)
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         page.get_by_role('button', name='解析执行计划', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4)
         pending = []
@@ -140,7 +140,7 @@ def test_referenced_but_over_budget_prompt_keeps_an_honest_tab(original, tmp_pat
     path = tmp_path / 'registry.json'
     registry.add(path, original)
     with service(None, registry=path) as app, opened(browser, app) as (page, requests):
-        page.locator('.function-nav').get_by_role('button', name='管道', exact=True).click()
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.wb-node')).to_have_count(4, timeout=45000)
         page.locator('.wb-node').filter(has_text='联合出题').click()
         tab = page.locator('.wb-source-tabs').get_by_role('button', name='Prompt 算子', exact=True)

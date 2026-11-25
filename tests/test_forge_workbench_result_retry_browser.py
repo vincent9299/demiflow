@@ -87,7 +87,7 @@ def test_fixed_result_request_survives_failure_refresh_reload_history_and_confli
             elif action=='retry':page.get_by_role('button',name='重试打开数据表',exact=True).click()
             elif action=='reload':page.reload()
             else:
-                page.locator('.function-nav').get_by_role('button',name='Readme',exact=True).click()
+                page.locator('.function-nav').get_by_role('button',name='文档',exact=True).click()
                 page.locator('#project-readme').wait_for();page.go_back()
             page.locator('.case-record-selector button').first.wait_for()
             actual=page.evaluate('ForgeView.decodeView(location.hash)')

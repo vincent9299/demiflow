@@ -208,11 +208,11 @@ SOFTWARE.
   const labels={preparing:'准备开发依据',starting:'正在连接',running:'正在开发',waiting_input:'等待回答',waiting_approval:'等待许可',stopping:'已请求停止，正在清理',completed:'本轮已完成',failed:'本轮失败',interrupted:'连接中断',cancelled:'已停止'};
   const uid=()=>crypto.randomUUID();
   const iconButton=(label,path,viewBox='0 0 24 24',filled=false)=>{const b=el('button',undefined,'development-icon');b.type='button';b.title=label;b.setAttribute('aria-label',label);const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox',viewBox);svg.setAttribute('aria-hidden','true');if(filled)svg.classList.add('development-filled-icon');const p=document.createElementNS(svg.namespaceURI,typeof path==='string'?'path':'rect');for(const [key,value]of Object.entries(typeof path==='string'?{d:path}:path))p.setAttribute(key,value);svg.append(p);b.append(svg);return b;};
-  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register}) {
+  async function mount({main,api,workspaceId,view,mountText,disposeReaders,openOperators=false,operatorTarget=null,openSession,openNew,error,register,drawerMode=false,externalFilesHost=null,externalOperatorsHost=null,externalCodeHost=null,onCodeOpenChange=null,onSelectFlow=null,onShowFilesTab=null,onBadgeChange=null,onTurnCompleted=null}) {
     const state={disposed:false,navigationEpoch:0,initializing:true,timer:null,session:null,sequence:0,items:new Map(),pending:new Set(),submission:null,dialogs:new Set(),stats:null,statsAt:0,newDraft:view?.kind==='development_new',listOffset:0,listAt:0,writerBusy:false,activeSession:null};
-    const layout=el('section',undefined,'development-layout'),body=el('div',undefined,'development-conversation');
-    layout.append(body);main.append(layout);main.classList.add('development-main');active.add(state);
-    const handle={workspaceId,get sessionId(){return state.session?.id;},navigate:async nextView=>{if(state.disposed)return;await switchView(nextView);},dispose(){if(state.disposed)return;flushDrafts();state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
+    const layout=el('section',undefined,'development-layout'+(drawerMode?' is-drawer-mode':'')),body=el('div',undefined,'development-conversation');
+    layout.append(body);main.append(layout);if(!drawerMode)main.classList.add('development-main');active.add(state);
+    const handle={workspaceId,get sessionId(){return state.session?.id;},get files(){return state.files;},insertReference:path=>insertReference(path),navigate:async nextView=>{if(state.disposed)return;await switchView(nextView);},dispose(){if(state.disposed)return;flushDrafts();state.disposed=true;clearTimeout(state.timer);state.observer?.disconnect();state.releaseViewport?.();state.navigationResize?.dispose();state.rail?.dispose();state.files?.dispose();state.composer?.dispose();state.chat?.dispose();active.delete(state);if(!drawerMode)main.classList.remove('development-main');disposeReaders(layout);for(const dialog of state.dialogs)dialog.remove();state.dialogs.clear();}};register(handle);
     const sidebar=el('aside',undefined,'development-session-sidebar'),sideHeading=el('div',undefined,'development-session-heading');
     const createNew=el('button',undefined,'development-new-conversation');createNew.type='button';createNew.append(el('span','＋'),el('span','新会话'));createNew.disabled=true;
     let sidebarTab='sessions';
@@ -252,10 +252,26 @@ SOFTWARE.
     sideToggle.onclick=()=>{sidebarOpen(layout.dataset.sidebar!=='open');sideToggle.focus();};
     const closeSidebar=()=>{sidebarOpen(false);sideToggle.focus();};backdrop.onclick=closeSidebar;
     sidebar.onkeydown=event=>{if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();closeSidebar();}};
-    let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!narrowViewport);
+    let narrowViewport=matchMedia('(max-width:900px)').matches;sidebarOpen(!drawerMode&&!narrowViewport);
     createNew.onclick=()=>{if(!createNew.disabled&&typeof openNew==='function')openNew();};
     const filesToggle=iconButton('打开代码面板','M3 4h18v16H3zM15 4v16');
-    head.append(filesToggle);body.append(head);
+    let drawerSessionSelect=null,drawerNewBtn=null;
+    if(drawerMode){
+      sideToggle.hidden=true;filesToggle.hidden=true;sidebar.hidden=true;backdrop.hidden=true;
+      drawerSessionSelect=el('select',undefined,'dev-drawer-session-select');
+      drawerSessionSelect.setAttribute('aria-label','切换开发会话');
+      drawerSessionSelect.onchange=()=>{
+        const val=drawerSessionSelect.value;
+        if(val==='__new__'){if(typeof openNew==='function')openNew();}
+        else if(val&&val!==state.session?.id)openSession(val);
+      };
+      drawerNewBtn=el('button','＋ 新会话','dev-drawer-new-session');drawerNewBtn.type='button';
+      drawerNewBtn.onclick=()=>{if(!drawerNewBtn.disabled&&typeof openNew==='function')openNew();};
+      head.append(drawerSessionSelect,drawerNewBtn);
+    }else{
+      head.append(filesToggle);
+    }
+    body.append(head);
     const insertReference=path=>{
       if(!path||!state.composer)return;
       const box=state.composer.input;
@@ -277,12 +293,13 @@ SOFTWARE.
         box.focus();
       }
     };
-    state.files=DevelopmentNavigation.filePanel({layout,filesHost:filesPane,operatorsHost:operatorsPane,toggle:filesToggle,api,iconButton,mountText,disposeReaders,project:workspaceId,
+    state.files=DevelopmentNavigation.filePanel({layout,filesHost:externalFilesHost||filesPane,operatorsHost:externalOperatorsHost||operatorsPane,paneHost:externalCodeHost||null,toggle:filesToggle,api,iconButton,mountText,disposeReaders,project:workspaceId,
       onReference:insertReference,
       onRework:prompt=>sendGuidedMessage(prompt),
       onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),
-      onShowFilesTab:()=>{sidebarOpen(true);setSidebarTab('files');},
-      onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;}});
+      onShowFilesTab:()=>{if(onShowFilesTab)onShowFilesTab();else{sidebarOpen(true);setSidebarTab('files');}},
+      onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;onBadgeChange?.(count);},
+      onOpenChange:onCodeOpenChange,onSelectFlow});
     if(openOperators){
       sidebarOpen(true);setSidebarTab('operators');
       state.files.selectOperatorTarget(operatorTarget).catch(()=>{});
@@ -317,6 +334,21 @@ SOFTWARE.
       if(state.nextListOffset!==null&&state.nextListOffset!==undefined)pageButton('更早的会话',state.nextListOffset);
       sessionNote.textContent=!capabilities.enabled?ForgeDevelopmentComposer.connectionStatus(capabilities).label:capabilities.multiple_conversations!==true?'当前服务仅支持一个项目会话':!(state.sessionRows||[]).length?'还没有会话，从新会话开始。':'';
       if(term&&!sessionList.querySelector('button:not([hidden])'))sessionNote.textContent='当前页没有匹配的会话';
+      if(drawerSessionSelect){
+        drawerSessionSelect.replaceChildren();
+        if(state.newDraft&&!state.session){
+          const opt=el('option','新会话');opt.value='__new__';drawerSessionSelect.append(opt);
+        }
+        for(const saved of state.sessionRows||[]){
+          const row=state.session?.id===saved.id?{...saved,...state.session}:saved;
+          const opt=el('option',row.title||'未命名会话');opt.value=row.id;drawerSessionSelect.append(opt);
+        }
+        if(!drawerSessionSelect.options.length){
+          const opt=el('option','暂无会话');opt.value='';drawerSessionSelect.append(opt);
+        }
+        drawerSessionSelect.value=state.session?.id||(state.newDraft?'__new__':drawerSessionSelect.options[0]?.value||'');
+        if(drawerNewBtn){drawerNewBtn.disabled=createNew.disabled;drawerNewBtn.title=createNew.title;}
+      }
     }
     async function loadConversations(force=false){
       if(state.disposed||!capabilities.enabled)return;
@@ -459,7 +491,7 @@ SOFTWARE.
             state.files?.recordChecks({native_flow:result.pipeline_checks?.native_flow,project_layout:result.pipeline_checks?.project_layout,review:result.pipeline_review});
           }
         }catch{}
-        if(!replaying&&event.data?.cleanup==='complete')state.files?.refreshChanges();
+        if(!replaying&&event.data?.cleanup==='complete'){state.files?.refreshChanges();onTurnCompleted?.();}
       }else if(event.type==='review.requested'||event.type==='review.started'){
         state.files?.recordChecks({review:'running',reviewReset:event.type==='review.requested'});
       }else if(event.type==='review.detail'){
