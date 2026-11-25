@@ -4,6 +4,7 @@ The host /proc mount is never exposed to the untrusted child. PID 1 can use it
 for bounded observation; killing PID 1 kills every descendant in this namespace.
 """
 import json
+import math
 import os
 from pathlib import Path
 import resource
@@ -178,7 +179,7 @@ def main():
             args=(channel, listener, spec['seconds'], relay_failed), daemon=True).start()
     os.write(status_fd, b'ready\n')
     os.close(status_fd)
-    deadline = time.monotonic() + spec['seconds']
+    deadline = math.inf if spec['seconds'] == 0 else time.monotonic() + spec['seconds']
     last_disk = 0
     while time.monotonic() < deadline:
         pid, state = os.waitpid(child, os.WNOHANG)

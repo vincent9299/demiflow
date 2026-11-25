@@ -689,7 +689,9 @@ def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
     import pyarrow as pa
     from demiflow.forge.pipeline_check import check_project
     from demiflow.forge.project import initialize_project
-    from demiflow.workbench.conversations.context import _run_project_layout
+    from demiflow.forge.project_bindings import bind_table
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.conversations.context import PROJECT_LAYOUT_TOOL, _run_project_layout
 
     ext = tmp_path / 'external_inputs'
     ext.mkdir()
@@ -700,10 +702,12 @@ def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
     initialize_project(proj)
     for d in ('flows', 'configs'):
         (proj / d).mkdir(exist_ok=True)
-    bound = _run_project_layout(proj, {'action': 'bind_table', 'alias': 'items_in', 'path': str(tbl), 'version': 1})
-    assert bound['status'] == 'bound'
-    assert bound['param_ref'] == {'kind': 'table', 'alias': 'items_in'}
-    assert (proj / 'tables' / 'items_in.json').is_file()
+
+    # bind_table is retired from manage_project_layout so dev assistants cannot recreate tables/.
+    assert 'bind_table' not in PROJECT_LAYOUT_TOOL['inputSchema']['properties']['action']['enum']
+    with pytest.raises(ForgeError, match='Unsupported manage_project_layout action'):
+        _run_project_layout(proj, {'action': 'bind_table', 'alias': 'items_in', 'path': str(tbl), 'version': 1})
+    assert not (proj / 'tables').exists()
 
     (proj / 'flows' / 'read_demo.py').write_text(
         'import hashlib\n'
@@ -715,12 +719,29 @@ def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
         '        raise ValueError("bad")\n'
         '    return data.read_lance(uri=source["uri"], version=source["version"]).count()\n'
     )
+    # Simplified flat URI input works without tables/ or locations.
     (proj / 'configs' / 'read_demo.json').write_text(
-        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"source": {"kind": "table", "alias": "items_in"}}}\n'
+        json.dumps({'source': {'uri': str(tbl), 'version': 1}}) + '\n'
     )
     report = check_project(proj, entry='flows/read_demo.py:run', params='configs/read_demo.json')
     assert report['status'] == 'passed', report
     assert report['entries'][0]['status'] == 'checked', report
+
+    # Legacy table bindings remain readable for backward compatibility.
+    legacy_proj = tmp_path / 'legacy_tbl_proj'
+    initialize_project(legacy_proj)
+    for d in ('flows', 'configs'):
+        (legacy_proj / d).mkdir(exist_ok=True)
+    bound = bind_table(legacy_proj, 'items_in', str(tbl), version=1)
+    assert bound['status'] == 'bound'
+    assert (legacy_proj / 'tables' / 'items_in.json').is_file()
+    (legacy_proj / 'flows' / 'read_demo.py').write_text((proj / 'flows' / 'read_demo.py').read_text())
+    (legacy_proj / 'configs' / 'read_demo.json').write_text(
+        '{"format": "demiflow_forge_flow_parameters_v2", "arguments": {"source": {"kind": "table", "alias": "items_in"}}}\n'
+    )
+    legacy_report = check_project(legacy_proj, entry='flows/read_demo.py:run', params='configs/read_demo.json')
+    assert legacy_report['status'] == 'passed', legacy_report
+    assert legacy_report['entries'][0]['status'] == 'checked', legacy_report
 
 
 def test_deepseek_tool_call_clips_oversized_write_payload():
@@ -1051,3 +1072,63 @@ def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_p
     assert (proj / '.env.example').is_file()
     rework = _build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
     assert rework is not None and '.env' in rework and '受保护文件钩子' in rework
+
+
+def test_unlimited_dev_turn_seconds_and_sandbox_seconds_zero(tmp_path):
+    import math
+    from demiflow.workbench.conversations.policy import Limits, turn_deadline
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
+    from demiflow.workbench.conversations.sandbox_backends import validate_spec_portable
+
+    # Default turn_seconds is 0 (no 15-min wall-clock cutoff); explicit positive values still work.
+    default_limits = Limits.parse({})
+    assert default_limits.turn_seconds == 0
+    assert math.isinf(turn_deadline({'created': 1000.0}, default_limits))
+
+    finite_limits = Limits.parse({'turn_seconds': 45})
+    assert finite_limits.turn_seconds == 45
+    assert turn_deadline({'created': 1000.0}, finite_limits) == 1045.0
+
+    proj = tmp_path / 'proj'
+    home = tmp_path / 'home'
+    proj.mkdir()
+    home.mkdir(mode=0o700)
+
+    dev_spec = SandboxSpec(
+        read_paths=(str(proj),),
+        write_paths=(str(proj),),
+        runtime_paths=(),
+        protected_paths=(),
+        denied_paths=(),
+        private_home=str(home),
+        role='developer',
+        seconds=0,
+        read_policy='inherit_os',
+        write_policy='project_root',
+    )
+    validated = validate_spec_portable(dev_spec, ['/usr/bin/python3', '-c', 'pass'], {'PATH': '/usr/bin:/bin'}, str(proj))
+    assert validated['write_policy'] == 'project_root'
+
+    # Readonly / verifier sandboxes still require a positive finite wall-clock bound.
+    for role in ('readonly', 'verifier'):
+        bad = SandboxSpec(
+            read_paths=(str(proj),),
+            write_paths=(),
+            runtime_paths=(),
+            protected_paths=(),
+            denied_paths=(),
+            private_home=str(home),
+            role=role,
+            seconds=0,
+        )
+        with pytest.raises(ValueError, match='Sandbox resource limit is invalid'):
+            validate_spec_portable(bad, ['/usr/bin/python3', '-c', 'pass'], {'PATH': '/usr/bin:/bin'}, str(proj))
+
+    if backend_readiness()['available']:
+        proc = launch_sandbox(
+            ['/usr/bin/python3', '-I', '-B', '-c', 'print("UNLIMITED_OK")'],
+            spec=dev_spec, env={'PATH': '/usr/bin:/bin'}, cwd=str(proj),
+        )
+        out, err = proc.communicate(timeout=15)
+        assert proc.returncode == 0, f'out={out!r} err={err!r}'
+        assert out.strip() == b'UNLIMITED_OK'

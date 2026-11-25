@@ -373,18 +373,34 @@ def resolve_flow_resources(root, tree, references, bindings, *, control=None):
                 raise ForgeError('Invalid object location reference')
             reference=dict(reference)
             from demiflow.objects import local_object_directory
+            from .io import no_symlinks
             reference['root'] = str(local_object_directory(reference['root'], base=root))
-            workspace = control if control is not None else load_project(root)[1]
-            matches = [key for key, location in workspace['locations'].items()
-                       if str(location_root(root, location)) == reference['root']]
-            if len(matches) != 1:
-                raise ForgeError('Object root must match one registered workspace location')
             if reference.get('access') not in {None,'write'}:
                 raise ForgeError('Unknown object resource access')
-            if reference.get('access')=='write' and not workspace['locations'][matches[0]].get('writable',False):
-                raise ForgeError('Image object destination is not writable')
+            workspace = control if control is not None else load_project(root)[1]
+            declared_locations = workspace.get('locations') or {}
             binding = {k: reference[k] for k in ('kind', 'root', 'relocations', 'layout')}
-            binding['location_id'] = matches[0]
+            if declared_locations:
+                matches = [key for key, location in declared_locations.items()
+                           if str(location_root(root, location)) == reference['root']]
+                if len(matches) != 1:
+                    raise ForgeError('Object root must match one registered workspace location')
+                if reference.get('access')=='write' and not declared_locations[matches[0]].get('writable',False):
+                    raise ForgeError('Image object destination is not writable')
+                binding['location_id'] = matches[0]
+            else:
+                obj_path = Path(reference['root']).absolute()
+                no_symlinks(obj_path)
+                proj_root = Path(root).absolute()
+                if (any(p.startswith('.') for p in obj_path.parts[1:])
+                        or any(obj_path == fb or fb in obj_path.parents for fb in _FORBIDDEN_ABS_ROOTS)
+                        or obj_path == proj_root
+                        or obj_path in proj_root.parents):
+                    raise ForgeError('Object root points to a forbidden, hidden, or workspace-encompassing path', code='operation_rejected')
+                if reference.get('access') == 'write':
+                    data_root = proj_root / 'data'
+                    if obj_path != data_root and not obj_path.is_relative_to(data_root):
+                        raise ForgeError('Image object destination must stay inside project data/ directory', code='invalid_request')
             if 'access' in reference:binding['access']=reference['access']
             key = 'objects:' + content_digest(binding)
             if key not in bindings and len(bindings) >= 256:

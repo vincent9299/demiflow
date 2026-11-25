@@ -37,6 +37,7 @@
   `max_state_bytes` 约束计算状态及其恢复镜像。输出发布由 sink 确认，恢复点由 checkpoint 协调，队列领取和确认按原生协议登记。
 - 取消由 RunContext 接收，driver 停止新准入并排空在途发布，worker 关闭本地资源，调度器等待后端确认退出。存储按所有者与可达引用裁定回收。
 - 观测在事件发生处产生。历史读取按指定 run、attempt 查询已持久化事实。对外检查、控制通过已有 P4 端口，控制操作沿各自授权入口执行。
+- **公开算子与 SDK 契约文档自描述**：所有暴露于公开 SDK（`demiflow.data`、`demiflow.execution`、`demiflow.operator_llm`、`demiflow.objects`、`demiflow.agent`）的算子、方法与契约类须在源码 docstring 中写明用途、关键参数/字段约束及返回值（禁止空文档或 `@dataclass` 自动签名复读机），由 `tests/merge_gate.py` 中的 `tests/test_public_sdk_docstrings.py` 棘轮门禁强制把关。
 
 ## 二　模块调用时序
 

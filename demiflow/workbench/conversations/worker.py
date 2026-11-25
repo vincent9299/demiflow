@@ -31,7 +31,7 @@ from demiflow.workbench.conversations.common import read_file
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import snapshot
 from demiflow.workbench.conversations.common import wire
-from demiflow.workbench.conversations.policy import Deployment
+from demiflow.workbench.conversations.policy import Deployment, turn_deadline
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.transport import Transport
 from demiflow.workbench.conversations.provider import adapter_for
@@ -333,14 +333,20 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     if not notebook_op:
         read.extend(_declared_readonly_locations(root, denied, Path(private_home)))
     unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
-    duration = seconds if seconds is not None else max(.1, turn['created'] + deployment.limits.turn_seconds - time.time())
+    if seconds is not None:
+        duration = seconds
+    elif deployment.limits.turn_seconds == 0 and not readonly:
+        duration = 0
+    else:
+        duration = max(.1, turn['created'] + (deployment.limits.turn_seconds or 3600) - time.time())
+    spec_seconds = 0 if (not readonly and duration == 0) else min(86400, max(.1, duration))
     rt = tuple(sorted({*runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),
                        *(str(Path(p).absolute()) for p in extra_runtime_paths)}))
     return SandboxSpec(read_paths=unique(read), write_paths=unique(writes),
         runtime_paths=rt,
         protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
         role='readonly' if readonly else 'developer',
-        seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
+        seconds=spec_seconds, rss_bytes=deployment.limits.rss_bytes,
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
         private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
         direct_network=direct_network,
@@ -597,7 +603,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 from demiflow.workbench.conversations.sandbox_shims import SandboxShims
                 shims = SandboxShims(st_project, execution_mode=deployment.mode,
                                      project_python=st_py, input_access=True)
-            warm_sandbox_secs = min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
+            warm_sandbox_secs = (0 if limits.turn_seconds == 0
+                                 else min(86400, max(limits.turn_seconds, WARM_SANDBOX_SECONDS)))
             standby_spec = (sandbox_spec(deployment, st_project, st_session,
                                          {'operation': st_operation, 'created': time.time()},
                                          st_manifest, st_config, st_provider_home, seconds=warm_sandbox_secs,
@@ -609,7 +616,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             try:
                 st_cwd = str(st_provider_home) if st_notebook else st_project['root']
                 if standby_spec is not None:
-                    sandbox_deadline = time.time() + standby_spec.seconds
+                    sandbox_deadline = (time.time() + standby_spec.seconds) if standby_spec.seconds > 0 else 0.0
                     if st_cell_cli:
                         from dataclasses import replace
                         standby_spec = replace(standby_spec, runtime_paths=(*standby_spec.runtime_paths, str(control_bridge.bin)))
@@ -790,7 +797,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                            if deployment.mode == 'restricted' else None)
             final, reason, completed = 'failed', None, False
             requested = False
-            deadline = turn['created'] + limits.turn_seconds
+            deadline = turn_deadline(turn, limits)
             stop_started = None
             last_sample, peaks = 0, {'rss_bytes': 0, 'private_bytes': 0, 'processes': 0}
             last_turn_check, cached_turn = 0.0, turn
@@ -982,7 +989,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         provider_home.mkdir(mode=0o700, exist_ok=True)
                         actual_spec = sandbox_spec(deployment, project, session, turn, manifest,
                             deployment.providers[session['provider']], provider_home,
-                            seconds=max(.1, sandbox_deadline - time.time()),
+                            seconds=(None if sandbox_deadline == 0.0 else max(.1, sandbox_deadline - time.time())),
                             extra_read_paths=shims.read_paths if shims is not None else (),
                             extra_runtime_paths=shims.runtime_paths if shims is not None else ())
                         if cell_cli and control_bridge is not None:
@@ -1059,7 +1066,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         from demiflow.workbench.conversations.sandbox_shims import SandboxShims
                         shims = SandboxShims(project, execution_mode=deployment.mode,
                                              project_python=proj_py, input_access=input_access is not None)
-                    warm_sandbox_secs = (min(3600, max(limits.turn_seconds, WARM_SANDBOX_SECONDS))
+                    warm_sandbox_secs = ((0 if limits.turn_seconds == 0
+                                          else min(86400, max(limits.turn_seconds, WARM_SANDBOX_SECONDS)))
                                          if (parent_sock is not None and not compact) else None)
                     confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home,
                                              seconds=warm_sandbox_secs,
@@ -1069,7 +1077,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     warm_operation = turn_op
                     provider_cwd = str(provider_home) if notebook else project['root']
                     if confined is not None:
-                        sandbox_deadline = time.time() + confined.seconds
+                        sandbox_deadline = (time.time() + confined.seconds) if confined.seconds > 0 else 0.0
                         if cell_cli:
                             from dataclasses import replace
                             confined = replace(confined, runtime_paths=(*confined.runtime_paths, str(control_bridge.bin)))
@@ -1272,7 +1280,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 and final == 'completed' and completed and not requested
                 and process is not None and process.poll() is None
                 and transport is not None and not transport.closed
-                and (deployment.mode != 'restricted' or sandbox_deadline - time.time() > limits.turn_seconds + 60)
+                and (deployment.mode != 'restricted' or sandbox_deadline == 0.0 or sandbox_deadline - time.time() > limits.turn_seconds + 60)
             )
             drained = True
             author_process = process

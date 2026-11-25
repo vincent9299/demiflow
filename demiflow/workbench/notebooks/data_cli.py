@@ -32,7 +32,7 @@ def main():
     cell.add_parser('edit', help='Replace the bound cell with Python source from stdin')
     cell.add_parser('run', help='Run the bound cell in its attached Jupyter kernel')
     tool = groups.add_parser('tool', help='Author or update reusable semantic modules under data_tools/').add_subparsers(dest='action', required=True)
-    tool_write = tool.add_parser('write', help='Write a data_tools/<name>.py module from stdin (requires semantic __demiflow_data_tools__)')
+    tool_write = tool.add_parser('write', help='Write a data_tools/<name>.py module from stdin (requires non-empty docstring per public tool; __demiflow_data_tools__ is optional)')
     tool_write.add_argument('path', metavar='MODULE_PY', help='Module filename under data_tools/, e.g. pool_review.py')
     args = parser.parse_args(args)
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))

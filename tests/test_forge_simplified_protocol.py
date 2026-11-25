@@ -741,3 +741,119 @@ def test_op_e1_example_and_ast_field_flow_extraction(tmp_path):
     drift_msgs = [d['detail'] for d in drift_diags if d['path'] == 'operators/transforms.py']
     assert any('OP-P1' in m and 'old_limit' in m for m in drift_msgs), drift_diags
     assert any('OP-E1' in m and 'old_score' in m for m in drift_msgs), drift_diags
+
+
+def test_slim_workspace_read_object_without_locations_and_static_raise_handling(tmp_path):
+    """Slim workspaces without locations support read_object & clear static raise diagnostics."""
+    import hashlib
+    import lance
+    import pyarrow as pa
+    from demiflow.forge.pipeline_check import check_project
+    from demiflow.forge.project import initialize_project
+    from demiflow.forge.project_bindings import resolve_flow_resources
+    from demiflow.forge.schema import ForgeError
+
+    proj = tmp_path / 'slim_obj_proj'
+    initialize_project(proj, name='Slim Object Project')
+    for d in ('flows', 'configs', 'tests/fixtures', 'data'):
+        (proj / d).mkdir(parents=True, exist_ok=True)
+
+    # Verify workspace.json has NO locations key.
+    raw_ws = json.loads((proj / 'workspace.json').read_text(encoding='utf-8'))
+    assert 'locations' not in raw_ws
+
+    img = proj / 'tests' / 'fixtures' / 'sample.bin'
+    raw = b'fake-png-bytes'
+    img.write_bytes(raw)
+    digest = hashlib.sha256(raw).hexdigest()
+    tbl = proj / 'tests' / 'fixtures' / 'answers.lance'
+    img_type = pa.struct([
+        pa.field('uri', pa.string(), nullable=False),
+        pa.field('sha256', pa.string(), nullable=False),
+    ])
+    lance.write_dataset(
+        pa.table({'image': pa.array([{'uri': img.as_uri(), 'sha256': digest}], type=img_type)}),
+        str(tbl),
+    )
+
+    ext_imgs = tmp_path / 'external_images'
+    ext_imgs.mkdir()
+    ext_img = ext_imgs / 'ext.bin'
+    ext_img.write_bytes(raw)
+
+    (proj / 'flows' / 'score.py').write_text(
+        'from demiflow import data\n'
+        'def run(answers: dict, image_root: str, expected_cases: int = 1, execution_approved: bool = False):\n'
+        '    """读取本地对象并按静态配置校验。"""\n'
+        '    if type(expected_cases) is not int or expected_cases < 1:\n'
+        '        raise ValueError("expected_cases 必须是正整数")\n'
+        '    data.require(execution_approved, "execution_approved=false：拒绝运行")\n'
+        '    return data.read_lance(answers["uri"], version=answers["version"]).read_object(\n'
+        '        reference="image", output="image_bytes", root=image_root, max_bytes=65536\n'
+        '    ).materialize()\n',
+        encoding='utf-8',
+    )
+    # 1. Valid config with project tests/fixtures root passes WITHOUT locations in workspace.json.
+    (proj / 'configs' / 'score.json').write_text(json.dumps({
+        'answers': {'uri': 'tests/fixtures/answers.lance', 'version': 1},
+        'image_root': str(proj / 'tests' / 'fixtures'),
+        'expected_cases': 1,
+        'execution_approved': False,
+    }), encoding='utf-8')
+    res = check_project(proj, entry='flows/score.py:run', params='configs/score.json')
+    assert res['status'] == 'passed', res
+    assert res['entries'][0]['status'] == 'checked', res
+
+    # 2. Valid config with external read-only image directory also passes without locations.
+    (proj / 'configs' / 'score_ext.json').write_text(json.dumps({
+        'answers': {'uri': 'tests/fixtures/answers.lance', 'version': 1},
+        'image_root': str(ext_imgs),
+        'expected_cases': 1,
+        'execution_approved': False,
+    }), encoding='utf-8')
+    res_ext = check_project(proj, entry='flows/score.py:run', params='configs/score_ext.json')
+    assert res_ext['status'] == 'passed', res_ext
+
+    # 3. Static if ...: raise triggered by invalid param reports clear FL-06 (not FL-07 Unsupported Raise).
+    (proj / 'configs' / 'score_bad.json').write_text(json.dumps({
+        'answers': {'uri': 'tests/fixtures/answers.lance', 'version': 1},
+        'image_root': str(proj / 'tests' / 'fixtures'),
+        'expected_cases': 0,
+        'execution_approved': False,
+    }), encoding='utf-8')
+    res_bad = check_project(proj, entry='flows/score.py:run', params='configs/score_bad.json')
+    assert res_bad['status'] == 'failed', res_bad
+    entry_diags = res_bad['diagnostics']
+    assert any(
+        d['rule'] == 'FL-06'
+        and 'ValueError' in d['detail']
+        and 'expected_cases 必须是正整数' in d['detail']
+        and 'demiflow.data.require' in d['detail']
+        for d in entry_diags
+    ), entry_diags
+    assert not any('Unsupported wiring statement: Raise' in d['detail'] for d in entry_diags), entry_diags
+
+    # 4. Security boundaries on direct object roots in slim workspaces.
+    for bad_root in (str(proj), str(tmp_path), '/etc', str(proj / '.forge')):
+        with pytest.raises(ForgeError):
+            resolve_flow_resources(
+                proj, None,
+                [{'kind': 'objects', 'parameter': 'objects', 'root': bad_root, 'relocations': [], 'layout': 'path'}],
+                {},
+            )
+    # Write object roots in slim workspaces must stay inside data/.
+    with pytest.raises(ForgeError, match='data/'):
+        resolve_flow_resources(
+            proj, None,
+            [{'kind': 'objects', 'parameter': 'objects', 'root': str(proj / 'tests' / 'fixtures'),
+              'relocations': [], 'layout': 'path', 'access': 'write'}],
+            {},
+        )
+    ok_write = resolve_flow_resources(
+        proj, None,
+        [{'kind': 'objects', 'parameter': 'objects', 'root': str(proj / 'data' / 'imgs'),
+          'relocations': [], 'layout': 'path', 'access': 'write'}],
+        {},
+    )
+    assert ok_write['objects']['access'] == 'write'
+    assert ok_write['objects']['root'] == str((proj / 'data' / 'imgs').absolute())

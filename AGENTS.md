@@ -4,6 +4,8 @@
 
 Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/dataset-engine-architecture.md)逐项核对受影响的模块职责、调用时序和依赖方向。
 
+**公开 SDK 与引擎算子 docstring 强制规范（2026-11-25 真人确认）**：引擎侧所有对外暴露的公开算子、方法与契约类（覆盖 `demiflow.data`、`demiflow.execution`、`demiflow.operator_llm`、`demiflow.objects`、`demiflow.agent` 公开导出）**必须编写清晰的 docstring**（说明用途、关键参数/字段契约与返回值，严禁空 docstring 或 `@dataclass` 自动生成的签名复读机）。该规范由合入闸 [test_public_sdk_docstrings.py](tests/test_public_sdk_docstrings.py)（`tests/merge_gate.py`）作为前置门禁强制校验，历史遗留项只减不增。
+
 ## Forge / 工作台的工作位置与修改范围
 
 **2026-11-19 真人更新**：新任务从 `main` 建隔离分支；固定集成线 `integration` 由管理者合入并验证，再快进 `main`。原 `fix/prompt-replay-delivery-20261118` 是工作分支，不再充当集成权威。主仓现有 checkout、dirty/staging 和运行预览分别核验，不能因移动引用而改写或重启它们。以下候选路径要求作为历史保留，最新工作流见 `docs/repository-rules.md`。

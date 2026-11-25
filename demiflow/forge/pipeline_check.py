@@ -360,7 +360,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             break
         path = candidate.partition(':')[0]
         try:
-            parameters = {'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {}}
+            parameters = {}
             if param is not None:
                 raw = read_bounded(validate_parameter_path(root, param), 65536)
                 _record(parameter_digests, param, sha256(raw).hexdigest())

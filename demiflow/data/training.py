@@ -164,7 +164,23 @@ def analyze_prediction(arguments, *, inputs, callables, resources):
 @flow_api("predictor_spec", role="value")
 @dataclass(frozen=True, kw_only=True)
 class PredictorSpec:
-    """A batch actor factory. The worker supplies its sealed model binding."""
+    """Declarative batch actor specification used by ``ModelSelection.predict``.
+
+    The worker instantiates ``factory(model=..., inputs=..., parameters=...)`` with its
+    sealed model binding and runs batched inference over the target Dataset.
+
+    Fields:
+        factory: Batch actor class whose constructor accepts ``(model, inputs, parameters)``.
+        inputs: Mapping ``{predictor_port: dataset_column}`` naming required input columns.
+        input_schema: Mapping ``{predictor_port: arrow_type}`` whose keys must equal ``inputs``.
+        output_schema: Mapping ``{output_column: arrow_type}`` (e.g. ``"string"``, ``"binary"``).
+        model_formats: Optional tuple of compatible model format identifiers.
+        parameter_schema: Optional JSON Schema (object) validating ``parameters``.
+        parameters: Default finite JSON prediction parameters.
+        batch_size: Positive integer inference batch size (default ``1``).
+        batch_format: Batch payload format passed to the actor (default ``"default"``).
+        native_options: Optional stream ``batch_transform`` execution options.
+    """
     factory: type
     inputs: Mapping[str, str]
     input_schema: Mapping[str, str]
@@ -187,6 +203,23 @@ class PredictorSpec:
 @flow_api("training_recipe", role="value")
 @dataclass(frozen=True, kw_only=True)
 class TrainingRecipe:
+    """Immutable declarative training contract passed to ``Dataset.fit(recipe=...)``.
+
+    Fields:
+        trainer: Synchronous callable executed by the training worker.
+        train_schema: Mapping ``{column_name: arrow_type}`` required on the training Dataset.
+        base_model_digest: 64-char lowercase hex SHA-256 digest identifying the base model.
+        environment_digest: 64-char lowercase hex SHA-256 digest identifying the runtime environment.
+        budget: Finite JSON mapping containing ``optimizer_updates`` (int ``>= max(save_steps)``).
+        save_steps: Strictly increasing sequence of 1..1024 unique positive optimizer step ints.
+        model_format: Nonempty artifact format name compatible with ``predictor.model_formats``.
+        predictor: ``PredictorSpec`` used for downstream inference on checkpoints of this run.
+        topology: Finite JSON mapping declaring training worker/device topology.
+        media_fields: Optional mapping ``{role: (column_name, ...)}`` for media columns in train/monitors.
+        monitor_schemas: Optional mapping of up to 63 named monitor Dataset schemas (excluding ``train``/``parent``).
+        parameter_schema: Optional JSON Schema (object) validating ``parameters``.
+        parameters: Finite JSON training hyperparameters validated against ``parameter_schema``.
+    """
     trainer: Callable
     train_schema: Mapping[str, str]
     base_model_digest: str
@@ -212,24 +245,47 @@ class TrainingRecipe:
 
 @dataclass(frozen=True)
 class FitRef:
+    """Handle returned by ``Dataset.fit`` referencing a declared managed training job.
+
+    Use ``fit_ref.select(steps=...)`` (or ``fit_ref.checkpoints.select(steps=...)``)
+    to bind one or more saved optimizer steps into a ``ModelSelection``.
+    """
     declaration: FitDeclaration
 
     @property
     def checkpoints(self):
+        """Return this FitRef as a checkpoint collection for step selection."""
         return self
 
     @flow_api("select_model", role="value")
     def select(self, *, steps):
+        """Select 1..1024 unique positive saved optimizer steps and return a ``ModelSelection``."""
         return ModelSelection(self.declaration, training_steps(steps))
 
 
 @dataclass(frozen=True)
 class ModelSelection:
+    """One or more selected checkpoint steps from a ``FitRef`` ready for inference or resume.
+
+    Call ``.predict(on=dataset, inputs=..., parameters=...)`` to apply the recipe's
+    ``PredictorSpec`` over a Dataset, or pass a single-step selection to ``Dataset.fit(resume_from=...)``.
+    """
     declaration: FitDeclaration
     steps: tuple[int, ...]
 
     @flow_api("predict", datasets=("on",), analyze=analyze_prediction)
     def predict(self, *, on, inputs=None, parameters=None):
+        """Apply the recipe's ``PredictorSpec`` to ``on`` Dataset using the selected checkpoint steps.
+
+        Args:
+            on: Target ``Dataset`` sharing the training execution port.
+            inputs: Optional mapping overriding predictor input port column bindings.
+            parameters: Optional finite JSON overrides merged over ``PredictorSpec.parameters``
+                and validated against ``PredictorSpec.parameter_schema``.
+
+        Returns:
+            A new ``Dataset`` with the columns declared in ``PredictorSpec.output_schema``.
+        """
         from .dataset import Dataset
         if not isinstance(on, Dataset) or not _same_scope(on._executor, self.declaration.executor):
             raise ValueError("predict requires a Dataset on the training execution port")

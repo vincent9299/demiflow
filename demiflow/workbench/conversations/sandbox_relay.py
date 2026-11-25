@@ -5,6 +5,7 @@ loopback TCP stream and owns a preconnected anonymous channel. Model credentials
 provider/model selection and request authorization remain in the fixed server.
 """
 import fcntl
+import math
 import select
 import socket
 import struct
@@ -12,13 +13,13 @@ import threading
 import time
 
 CHUNK = 32768
-MAX_BYTES = 64 * 1024**2
-MAX_PACKETS = 16384
+MAX_BYTES = 256 * 1024**2
+MAX_PACKETS = 131072
 
 
 class Budget:
     def __init__(self, seconds):
-        self.deadline = time.monotonic() + seconds
+        self.deadline = math.inf if seconds == 0 else time.monotonic() + seconds
         self.used = self.packets = 0
 
     def consume(self, count):

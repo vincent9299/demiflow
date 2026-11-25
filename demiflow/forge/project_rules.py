@@ -1330,10 +1330,8 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             elif suffix in _ARCHIVE_SUFFIXES:
                 add('root_archive', name, '根目录存在压缩归档包；废弃代码或旧配置请直接清理，不要在项目内保留源码/配置打包归档。')
         elif item.is_dir():
-            if name == 'tables':
-                add('legacy_tables', 'tables', 'tables/ 为历史兼容目录，输入表路径请直接写在 configs/*.json 中（如 {"uri": "data/in.lance", "version": 1}），迁移后请清理 tables/ 目录。')
-            elif name != 'parameters' and name not in ALLOWED_ROOT_DIRS:
-                add('root_dir', name, f'根目录存在非规范顶层目录 {name}/；按 DF-02 规范请按职责迁入标准目录（flows/、operators/、prompts/、configs/、data_tools/、notebooks/、data/、logs/、docs/、tests/）或清理废弃目录。')
+            if name != 'parameters' and name not in ALLOWED_ROOT_DIRS:
+                add('root_dir', name, f'根目录存在非规范顶层目录 {name}/；按 DF-02 规范根目录仅允许标准目录（flows/、operators/、prompts/、configs/、data_tools/、notebooks/、data/、logs/、docs/、tests/、runs/），请按职责归位或清理。')
 
     # 2. Deprecated parameters/ directory: unbound legacy files or empty leftover directory.
     param_dir = root / 'parameters'
@@ -1341,9 +1339,9 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
         param_files = _iter_tree_files(root, 'parameters', exclude=exclude)
         unbound_params = [p for p in param_files if p not in bound_params]
         for rel in unbound_params:
-            add('legacy_parameters', rel, 'parameters/ 为历史兼容目录，不应残留未登记的旧参数文件；请将有效配置放在 configs/ 并清理废弃文件。')
+            add('legacy_parameters', rel, '参数文件应统一放在 configs/ 目录；请清理未登记的 parameters/ 文件。')
         if not param_files and not any(p.startswith('parameters/') for p in bound_params):
-            add('legacy_parameters', 'parameters', 'parameters/ 为已废弃的空兼容目录，请清理。')
+            add('legacy_parameters', 'parameters', '根目录存在空目录 parameters/；参数文件应统一放在 configs/，请清理该目录。')
 
     # 3. Orphan unregistered files & private-operator import guard in flows/.
     for rel in _iter_tree_files(root, 'flows', exclude=exclude):
@@ -1595,7 +1593,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                         pass
     for target in sorted(docs_bad_targets):
         add('code_in_docs', target,
-            'docs/ 仅用于项目文档与验收证据，不应存放废弃代码、压缩归档包（.tar.gz/.zip）或迁入的旧 configs/parameters/prompts/flows/operators 目录；废弃的非数据文件请直接清理（使用 manage_project_layout remove_path），切勿打包或转存到 docs/。')
+            'docs/ 仅用于项目文档与验收证据，不应存放源码目录、配置目录或压缩归档包（.tar.gz/.zip）；废弃非数据文件请直接清理（使用 manage_project_layout remove_path），切勿打包或转存到 docs/。')
 
     # 9. Active configs/*.json output paths & simplified flat URI protocol.
     from .project_bindings import extract_arguments
@@ -1629,13 +1627,13 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             continue
         if param_fmt != 'flat' or _has_legacy_param_indirection(args):
             add('legacy_param_format', param_rel,
-                '参数文件仍使用历史包装格式（format/arguments）或表别名/location_id 拆分；按 DF-02 规范请改为扁平 JSON，输入表直接写 {"uri": "...", "version": 1}（version 可选），输出表直接写 {"kind": "output", "uri": "data/out.lance"}。')
+                '参数文件应直接采用扁平 JSON 键值：输入 Lance 表写 {"uri": "...", "version": 1}（version 可选），输出 Lance 表写 {"kind": "output", "uri": "data/out.lance"}。')
         if not isinstance(args, dict):
             continue
         for key, value in args.items():
             if key in _OUTPUT_ARG_KEYS and _points_to_runs(root, value):
                 add('legacy_output_dir', param_rel,
-                    f'活跃参数 {key} 仍指向历史 runs/ 目录；按 DF-02 规范默认产物应输出到 data/ 目录（历史 runs/ 仅作只读保留）。')
+                    f'活跃参数 {key} 指向 runs/ 目录；按 DF-02 规范运行产物应输出到 data/ 目录。')
                 break
 
     # 9b. Legacy bloated workspace.json (internal Forge state should live in .forge/state.json).
@@ -1648,7 +1646,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             extra_locs = set((raw_ws.get('locations') or {}).keys()) - used_locs if isinstance(raw_ws, dict) else set()
             if not is_slim_manifest(raw_ws) or extra_locs:
                 add('legacy_manifest', 'workspace.json',
-                    'workspace.json 仍包含平台内部状态（format/id/platform/audit）或冗余 locations；按 DF-02 规范请先完成参数直连 uri 迁移并清理 tables/，再调用 manage_project_layout(action="slim_manifest") 将内部态收进 .forge/state.json 并瘦身 workspace.json。')
+                    'workspace.json 仅保留可读项目清单（name、entries 及可选 budgets），平台内部状态应保存在 .forge/state.json；请调用 manage_project_layout(action="slim_manifest") 规范化。')
         except Exception:
             pass
 

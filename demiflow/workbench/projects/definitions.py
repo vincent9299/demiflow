@@ -247,23 +247,37 @@ def write_data_tool(root, *, path, source):
     except (SyntaxError, ValueError) as exc:
         raise ForgeError(f'工具源码校验失败：{exc}', code='invalid_request') from exc
 
-    if not public:
+    top_defs = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not node.name.startswith('_')
+    }
+    target_names = sorted(public) if public is not None else sorted(top_defs)
+    if not target_names:
         raise ForgeError(
-            '数据工具必须在模块顶层声明非空的 __demiflow_data_tools__，且每个导出项都必须包含语义字段（kind、title、summary、when_to_use）。',
+            '数据工具模块必须至少定义一个公开函数或类（非 _ 开头），并为每个导出项写清首行 docstring 语义描述。',
             code='invalid_request',
         )
     exported = []
-    for name in sorted(public):
+    for name in target_names:
         meta = semantics.get(name) or {}
-        missing = [k for k in ('title', 'summary', 'when_to_use') if not meta.get(k)]
-        if missing:
+        node = top_defs.get(name)
+        doc_first = ((ast.get_docstring(node) or '').strip().splitlines()[0].strip()[:200]
+                     if node is not None and (ast.get_docstring(node) or '').strip() else '')
+        summary = (meta.get('summary') or doc_first).strip()
+        if not summary:
             raise ForgeError(
-                f'数据工具 {name} 缺少必填语义字段：{", ".join(missing)}。'
-                '请在 __demiflow_data_tools__ 中使用字典声明 {"kind": ..., "title": "中文名", "summary": "一句话用途", "when_to_use": "适用场景"}。',
+                f'数据工具 {name} 缺少语义描述：请为 {name} 编写非空 docstring（首行用一句话说明用途，与 Forge 算子规范一致），或在可选 __demiflow_data_tools__ 中提供 summary。',
                 code='invalid_request',
             )
-        exported.append({'symbol': name, 'kind': meta['kind'], 'title': meta['title'],
-                         'summary': meta['summary'], 'when_to_use': meta['when_to_use']})
+        tool_kind = meta.get('kind') or (public[name] if public is not None and name in public else 'tool')
+        exported.append({
+            'symbol': name,
+            'kind': tool_kind,
+            'title': meta.get('title') or name,
+            'summary': summary,
+            'when_to_use': meta.get('when_to_use') or '',
+        })
 
     root = Path(root)
     tools_dir = root / 'data_tools'

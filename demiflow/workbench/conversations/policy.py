@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from dataclasses import dataclass
 import copy
+import math
 from pathlib import Path
 import os
 
@@ -44,7 +45,7 @@ class Limits:
     control_reserve: int = 16 * 1024**2
     provider_bytes: int = 256 * 1024**2
     private_total_bytes: int = 512 * 1024**2
-    turn_seconds: int = 900
+    turn_seconds: int = 0
     input_seconds: int = 600
     rss_bytes: int = 2 * 1024**3
     processes: int = 32
@@ -60,9 +61,11 @@ class Limits:
             reject('Unknown development resource limit')
         # Keep the default prompt small; deployments may explicitly reserve a
         # larger bounded prompt or RSS ceiling for real projects (e.g. ML/PyTorch tests).
-        ceilings = {**defaults, 'context_bytes': 512 * 1024, 'rss_bytes': 8 * 1024**3}
+        # turn_seconds=0 disables the wall-clock turn cutoff (per-LLM-call timeouts,
+        # memory/disk/process limits, idle recycling, and manual stop remain enforced).
+        ceilings = {**defaults, 'context_bytes': 512 * 1024, 'rss_bytes': 8 * 1024**3, 'turn_seconds': 86400}
         for key, number in value.items():
-            integer(number, 1, ceilings[key])
+            integer(number, 0 if key == 'turn_seconds' else 1, ceilings[key])
         result = cls(**value)
         if result.context_bytes > result.context_total:
             reject('Initial development context exceeds total context budget')
@@ -71,6 +74,11 @@ class Limits:
         if not result.output_bytes <= result.session_bytes <= result.project_bytes <= result.global_bytes:
             reject('Development byte budgets are inconsistent')
         return result
+
+
+def turn_deadline(turn, limits):
+    """Return Unix wall-clock deadline for a turn, or math.inf when turn_seconds == 0."""
+    return (turn['created'] + limits.turn_seconds) if limits.turn_seconds > 0 else math.inf
 
 
 class Deployment:

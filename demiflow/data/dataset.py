@@ -111,7 +111,24 @@ class Dataset:
 
     @_flow_api("fit", datasets=("self",), role="value", analyze=_analyze_fit)
     def fit(self, *, recipe, monitors=None, retrain_id=None, resume_from=None):
-        """Declare training. A downstream Dataset action submits the captured job."""
+        """Declare a managed training job on this Dataset and return a FitRef.
+
+        A downstream Dataset action (for example ``fit_ref.select(steps=...).predict(on=...).write_lance(...)``)
+        submits the captured training job and binds its sealed model checkpoints.
+
+        Args:
+            recipe: ``TrainingRecipe`` defining the synchronous trainer callable,
+                ``train_schema``, ``base_model_digest`` / ``environment_digest`` (64-hex SHA-256),
+                ``budget`` (with ``optimizer_updates >= max(save_steps)``), strictly increasing
+                ``save_steps``, ``model_format``, ``predictor`` (``PredictorSpec``), and ``topology``.
+            monitors: Optional mapping of ``{monitor_name: Dataset}`` whose keys must exactly
+                match ``recipe.monitor_schemas`` and share the same execution port.
+            retrain_id: Optional stable operation identifier matching ``[A-Za-z0-9_.-]{1,128}``.
+            resume_from: Optional single-step ``ModelSelection`` on the same execution port.
+
+        Returns:
+            A ``FitRef`` handle whose ``.select(steps=...)`` returns a ``ModelSelection``.
+        """
         from .training import declare_fit
         return declare_fit(self, recipe, monitors, retrain_id, resume_from)
 

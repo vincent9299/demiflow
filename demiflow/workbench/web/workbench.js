@@ -722,9 +722,11 @@
       if(field.affected_nodes.includes(node.id))return true;
       if(!field.affected_nodes_truncated)return false;
       return Object.values(node.parameter_origins||{}).some(origin=>{
-        if(origin.argument!==field.parts[1]||!Array.isArray(origin.path))return false;
-        const path=field.parts.slice(2),prefix=(a,b)=>a.length<=b.length&&a.every((part,index)=>part===b[index]);
-        return ['table_alias','output_path'].includes(field.kind)||prefix(origin.path,path)||prefix(path,origin.path);
+        const wrapped=field.parts[0]==='arguments';
+        const argName=wrapped?field.parts[1]:field.parts[0];
+        if(origin.argument!==argName||!Array.isArray(origin.path))return false;
+        const path=field.parts.slice(wrapped?2:1),prefix=(a,b)=>a.length<=b.length&&a.every((part,index)=>part===b[index]);
+        return ['table_alias','table_uri','output_path','output_uri'].includes(field.kind)||prefix(origin.path,path)||prefix(path,origin.path);
       });
     }
     function parse(field,raw){

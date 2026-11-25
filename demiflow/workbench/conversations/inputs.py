@@ -22,6 +22,7 @@ if __package__ in {None, ''}:
 
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.common import integer, reject, wire
+from demiflow.workbench.conversations.policy import turn_deadline
 
 
 _PRIVATE = {'.ssh', '.codex', '.codex-home', '.config', '.aws', '.azure', '.kube',
@@ -97,7 +98,7 @@ class InputAccess:
         self.runtime = tuple(str(p) for p in runtime_paths)
         turn = store.turn(tid)
         self.epoch = turn['epoch']
-        self.deadline = deadline if deadline is not None else turn['created'] + store.limits.turn_seconds
+        self.deadline = deadline if deadline is not None else turn_deadline(turn, store.limits)
 
     def require_active(self):
         turn = self.store.turn(self.tid)

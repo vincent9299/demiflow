@@ -10,6 +10,7 @@ import hmac
 import http.server
 import fcntl
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -26,6 +27,7 @@ from dataclasses import replace as _replace_dataclass
 import urllib.parse
 
 from .common import identifier, reject, wire
+from .policy import turn_deadline
 from .transport import Transport, decode
 
 FRAME = 4 * 1024 * 1024
@@ -191,7 +193,7 @@ class ModelBroker:
         self.name = session['provider']; self.config = deployment.providers[self.name]
         if not capabilities(self.name, self.config)['available']:
             reject('Configured provider has no qualified fixed model channel')
-        self.deadline = (turn['created'] + deployment.limits.turn_seconds) if turn is not None else (time.time() + 3600)
+        self.deadline = turn_deadline(turn, deployment.limits) if turn is not None else math.inf
         self.token = secrets.token_hex(32)
         self.closed = threading.Event(); self.requests = self.connections = 0
         self.input_bytes = self.output_bytes = 0; self.failure = None
@@ -278,7 +280,7 @@ class ModelBroker:
             if self.quota is not None:
                 self.quota.close()
                 self.quota = None
-            self.deadline = turn['created'] + limits.turn_seconds
+            self.deadline = turn_deadline(turn, limits)
             self.requests = self.connections = 0
             self.input_bytes = self.output_bytes = self.output_reserved = 0
             self.failure = None

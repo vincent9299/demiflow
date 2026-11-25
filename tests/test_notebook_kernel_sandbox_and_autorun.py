@@ -348,21 +348,45 @@ def test_write_data_tool_enforces_path_boundary_and_mandatory_semantics(tmp_path
         with pytest.raises(ForgeError):
             definitions.write_data_tool(proj, path=bad_path, source=valid_source)
 
-    # 2. Mandatory semantics: rejects missing __demiflow_data_tools__ or missing title/summary/when_to_use
-    with pytest.raises(ForgeError, match='__demiflow_data_tools__'):
-        definitions.write_data_tool(proj, path='no_export.py', source='def f():\n    return 1\n')
-    with pytest.raises(ForgeError, match='缺少必填语义字段'):
+    # 2. Forge-aligned docstring semantics: rejects missing docstring / no public defs,
+    #    accepts plain public function with docstring (no __demiflow_data_tools__ needed),
+    #    and supports optional __demiflow_data_tools__ for finer kind/title/when_to_use.
+    with pytest.raises(ForgeError, match='docstring'):
+        definitions.write_data_tool(proj, path='no_doc.py', source='def f():\n    return 1\n')
+    with pytest.raises(ForgeError, match='至少定义一个公开函数或类'):
+        definitions.write_data_tool(proj, path='private_only.py', source='def _helper():\n    """internal"""\n    return 1\n')
+    with pytest.raises(ForgeError, match='docstring'):
         definitions.write_data_tool(
             proj, path='no_sem.py',
             source='__demiflow_data_tools__ = {"f": "analysis"}\ndef f():\n    return 1\n',
         )
-    with pytest.raises(ForgeError, match='when_to_use'):
-        definitions.write_data_tool(
-            proj, path='partial_sem.py',
-            source='__demiflow_data_tools__ = {"f": {"kind": "analysis", "title": "统计", "summary": "算均值"}}\ndef f():\n    return 1\n',
-        )
 
-    # 3. Valid semantic module succeeds and is immediately discoverable in catalog
+    plain_doc_source = (
+        'def quick_preview(df):\n'
+        '    """快速抽样查看数据表前 20 行与列分布。"""\n'
+        '    return df.head(20)\n'
+    )
+    plain_res = definitions.write_data_tool(proj, path='quick_preview.py', source=plain_doc_source)
+    assert plain_res['status'] == 'written'
+    assert plain_res['tools'] == [{
+        'symbol': 'quick_preview',
+        'kind': 'tool',
+        'title': 'quick_preview',
+        'summary': '快速抽样查看数据表前 20 行与列分布。',
+        'when_to_use': '',
+    }]
+
+    tagged_doc_source = (
+        '__demiflow_data_tools__ = {"score_hist": "analysis"}\n'
+        'def score_hist(df):\n'
+        '    """统计评测得分直方图。"""\n'
+        '    return df\n'
+    )
+    tagged_res = definitions.write_data_tool(proj, path='score_hist.py', source=tagged_doc_source)
+    assert tagged_res['tools'][0]['kind'] == 'analysis'
+    assert tagged_res['tools'][0]['summary'] == '统计评测得分直方图。'
+
+    # 3. Full optional semantic dict continues to work and is immediately discoverable in catalog
     result = definitions.write_data_tool(proj, path='batch_viewer.py', source=valid_source)
     assert result['status'] == 'written'
     assert result['path'] == 'data_tools/batch_viewer.py'
@@ -370,6 +394,7 @@ def test_write_data_tool_enforces_path_boundary_and_mandatory_semantics(tmp_path
     assert (proj / 'data_tools' / 'batch_viewer.py').is_file()
     cat = definitions.catalog(proj, data_tools=True, include_platform=False)
     by_symbol = {item['symbol']: item for item in cat['definitions']}
+    assert by_symbol['quick_preview']['summary'] == '快速抽样查看数据表前 20 行与列分布。'
     assert by_symbol['inspect_batch']['title'] == '批次看图'
     assert by_symbol['inspect_batch']['when_to_use'] == '查看某次管线产出的合成图质量时使用'
 

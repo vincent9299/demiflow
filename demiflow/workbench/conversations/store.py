@@ -20,6 +20,7 @@ from demiflow.workbench.conversations.common import integer
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import text
 from demiflow.workbench.conversations.common import wire
+from demiflow.workbench.conversations.policy import turn_deadline
 from demiflow.forge.schema import ForgeError
 
 TERMINAL = {'completed', 'failed', 'cancelled', 'interrupted'}
@@ -936,7 +937,7 @@ class Store:
             if db.execute('SELECT count(*) FROM pending WHERE turn=?', (tid,)).fetchone()[0] >= 32:
                 reject('Turn request count exceeded budget', 'resource_limit')
             key = 'q' + secrets.token_hex(16)
-            expires = min(time.time() + self.limits.input_seconds, turn['created'] + self.limits.turn_seconds)
+            expires = min(time.time() + self.limits.input_seconds, turn_deadline(turn, self.limits))
             db.execute('INSERT INTO pending VALUES(?,?,?,?,?,?,?,?)', (key, tid, turn['epoch'], hashed, raw, expires, None, 'waiting'))
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(raw.encode()), turn['session']))
             self._event(db, turn['session'], tid, turn['epoch'], 'input.requested', dict(id=key, digest=hashed, request=request, expires=expires))
@@ -946,7 +947,7 @@ class Store:
         """Serialize a bounded transport send against stop and epoch changes."""
         with self.connect(write=True) as db:
             turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
-            deadline = turn['created'] + self.limits.turn_seconds
+            deadline = turn_deadline(turn, self.limits)
             if turn['epoch'] != epoch or turn['stop_at'] or turn['cleanup'] == 'complete' or time.time() >= deadline:
                 return False
             send()
