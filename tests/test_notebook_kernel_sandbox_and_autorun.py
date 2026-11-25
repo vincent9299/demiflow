@@ -360,3 +360,39 @@ def test_write_data_tool_enforces_path_boundary_and_mandatory_semantics(tmp_path
     by_symbol = {item['symbol']: item for item in cat['definitions']}
     assert by_symbol['inspect_batch']['title'] == '批次看图'
     assert by_symbol['inspect_batch']['when_to_use'] == '查看某次管线产出的合成图质量时使用'
+
+
+def test_dev_sandbox_and_grant_keep_data_tools_readonly(tmp_path):
+    from demiflow.workbench.conversations.global_settings import automatic_project
+    from demiflow.workbench.conversations.worker import sandbox_spec
+
+    proj = tmp_path / 'proj'
+    (proj / 'flows').mkdir(parents=True)
+    (proj / 'data_tools').mkdir(parents=True)
+    (proj / 'workspace.json').write_text(json.dumps({'name': 'demo'}), encoding='utf-8')
+    state = tmp_path / 'state'
+    state.mkdir(mode=0o700)
+    priv_home = state / 's1' / 'provider'
+    priv_home.mkdir(parents=True, mode=0o700)
+    fake_exec = tmp_path / 'fake-cli'
+    fake_exec.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
+    fake_exec.chmod(0o755)
+
+    grant = automatic_project(proj)
+    assert 'flows' in grant['writes']
+    assert 'data_tools' not in grant['writes']
+
+    deployment = type('Dep', (), {
+        'mode': 'restricted', 'direct_network': False, 'state': state, 'value': {},
+        'providers': {'deepseek': {'executable': str(fake_exec)}},
+        'limits': type('Lim', (), {
+            'sessions': 8, 'turns': 8, 'turn_seconds': 60, 'rss_bytes': 2 * 1024**3,
+            'processes': 32, 'provider_bytes': 64 * 1024**2, 'private_total_bytes': 128 * 1024**2,
+        })(),
+    })()
+    project = {'root': str(proj), 'kind': 'pipeline', 'writes': ['flows', 'data_tools'], 'protected': []}
+    spec = sandbox_spec(deployment, project, {'id': 's1', 'provider': 'deepseek'},
+                        {'operation': 'message', 'created': 10**12}, {'sources': []}, {'executable': str(fake_exec)}, priv_home)
+    assert str((proj / 'flows').resolve()) in spec.write_paths
+    assert str((proj / 'data_tools').resolve()) not in spec.write_paths
+    assert str((proj / 'data_tools').resolve()) in spec.protected_paths
