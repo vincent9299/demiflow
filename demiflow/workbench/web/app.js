@@ -791,12 +791,35 @@
     const root=$('input'),name=$('input');root.required=true;root.placeholder='服务器上的绝对目录';root.setAttribute('aria-label','项目目录');root.maxLength=4096;
     name.placeholder=create?'项目名称':'名称（可留空）';name.setAttribute('aria-label','项目名称');name.required=create;name.maxLength=128;
     form.append(root,name);
+    let grantBox=null;
+    const canGrantAny=!!(serviceRunPermissions.run_submit||serviceRunPermissions.run_control||serviceWorkbenchPermissions.config_write||serviceWorkbenchPermissions.analysis_execute||serviceWorkbenchPermissions.analysis_write);
+    if(create){
+      form.append($('p','新建项目将默认开启当前服务允许的文件写入、管线运行与 Notebook 权限，后续可在右上角「项目设置」中调整。','muted small'));
+    }else if(canGrantAny){
+      const grantWrap=$('label',undefined,'project-register-grant');
+      grantBox=$('input');grantBox.type='checkbox';grantBox.checked=false;grantBox.setAttribute('aria-label','同时开启编辑、运行与 Notebook 权限');
+      grantWrap.append(grantBox,$('span','同时开启编辑、运行与 Notebook 权限（不勾选则默认只读浏览，后续可在右上角「项目设置」中开启）'));
+      form.append(grantWrap);
+    }
     const save=$('button',title);save.type='submit';form.append(save);
     const close=button('取消',()=>dialog.close(),form);close.type='button';
     let failure;
     form.onsubmit=async event=>{event.preventDefault();save.disabled=true;failure?.remove();try{
       const body={root:root.value.trim()};if(name.value.trim())body.name=name.value.trim();
       const result=await api(create?'project-create':'project-register',{},body);
+      if(!create&&grantBox?.checked&&result?.workspace_id){
+        await refreshProjects();
+        let expected=projectDigest;
+        if(serviceRunPermissions.run_submit||serviceRunPermissions.run_control){
+          const updated=await api('project-permissions',{},{workspace_id:result.workspace_id,expected,run_submit:!!serviceRunPermissions.run_submit,run_control:!!serviceRunPermissions.run_control,attach:false});
+          expected=updated.digest;
+        }
+        const caps={config_write:!!serviceWorkbenchPermissions.config_write,analysis_execute:!!serviceWorkbenchPermissions.analysis_execute,analysis_write:!!serviceWorkbenchPermissions.analysis_write,case_annotate:false};
+        if(Object.values(caps).some(Boolean)){
+          try{await api('project-capabilities',{},{workspace_id:result.workspace_id,expected,capabilities:caps});}
+          catch{/* Capability ceiling or helper readiness may be narrower; keep registration */}
+        }
+      }
       dialog.close();await refreshProjects();await switchProject(result.workspace_id,null,'replace');
     }catch(err){failure=error(form,err);}finally{save.disabled=false;}};
     dialog.append(form);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();root.focus();
@@ -871,6 +894,7 @@
         if(viewState==='ready'){view=reference;selection=reference;selectionEpoch++;putHistory(reference,'replace');projectHeading();}},
       projectSettings:{get:()=>({manage:projectManageEnabled,project:projectList.find(p=>p.workspace_id===id),digest:projectDigest,
         service:serviceRunPermissions,workbench:serviceWorkbenchPermissions}),refresh:refreshProjects},
+      openProjectSettings:()=>settingsDialog(),
       renderProjectInfo:async parent=>{await projectChecks(parent,{project:id,isCurrent,
         onBegin:()=>{checkVersion++;checksPending++;},
         onEnd:()=>{checkVersion++;checksPending--;if(isCurrent())mountedHandle?.projectCheckSettled?.();}});
@@ -920,6 +944,81 @@
     const path=$('p',project.root,'muted small');path.style.overflowWrap='anywhere';
     dialog.append($('h2','项目设置'),$('p',project.name),path);
     if(projectManageEnabled){
+      const permSection=$('section',undefined,'project-permissions-settings');
+      permSection.append($('strong','项目权限'));
+      const permList=$('div',undefined,'project-permission-list');
+      const configuredPerms=project.configured_permissions||project.permissions||{};
+      const configuredCaps={config_write:false,analysis_execute:false,analysis_write:false,case_annotate:false,...(project.configured_capabilities||project.capabilities||{})};
+      const makeToggle=(title,desc,checked,disabled)=>{
+        const row=$('label',undefined,'project-permission-row'+(disabled?' is-disabled':''));
+        const box=$('input');box.type='checkbox';box.checked=!!checked;box.disabled=!!disabled;box.setAttribute('aria-label',title);
+        const copy=$('span',undefined,'project-permission-copy');
+        copy.append($('span',title,'project-permission-title'),$('span',disabled?desc+'（当前服务未开启上限）':desc,'muted small'));
+        row.append(box,copy);
+        permList.append(row);
+        return box;
+      };
+      const configWriteBox=makeToggle(
+        '文件与配置写入',
+        '允许新建/编辑项目文件、修改参数与登记流程',
+        configuredCaps.config_write,
+        !serviceWorkbenchPermissions.config_write&&!configuredCaps.config_write,
+      );
+      const runAllowed=!!(serviceRunPermissions.run_submit||serviceRunPermissions.run_control);
+      const runChecked=serviceRunPermissions.run_submit?!!configuredPerms.run_submit:!!configuredPerms.run_control;
+      const runBox=makeToggle(
+        '管线运行与停止',
+        serviceRunPermissions.run_submit?'允许在工作台启动、恢复与停止管线运行':'允许在工作台停止与核对管线运行',
+        runChecked,
+        !runAllowed&&!runChecked,
+      );
+      const nbAllowed=!!(serviceWorkbenchPermissions.analysis_execute||serviceWorkbenchPermissions.analysis_write);
+      const nbChecked=!!(configuredCaps.analysis_execute||configuredCaps.analysis_write);
+      const nbBox=makeToggle(
+        '数据与 Notebook',
+        '允许在「数据」页运行和保存 Notebook 及数据工具',
+        nbChecked,
+        !nbAllowed&&!nbChecked,
+      );
+      const permMsg=$('p','','small project-python-msg');permMsg.hidden=true;
+      const savePerms=button('保存权限',async()=>{
+        savePerms.disabled=true;permMsg.hidden=true;
+        try{
+          await refreshProjects();
+          const latest=projectList.find(p=>p.workspace_id===project.workspace_id);
+          if(!latest)throw new Error('项目登记已变化，请刷新后重试。');
+          const curPerms=latest.configured_permissions||latest.permissions||{};
+          const curCaps={config_write:false,analysis_execute:false,analysis_write:false,case_annotate:false,...(latest.configured_capabilities||latest.capabilities||{})};
+          let expected=projectDigest;
+          const nextRunSubmit=runBox.checked&&!!serviceRunPermissions.run_submit;
+          const nextRunControl=runBox.checked&&!!serviceRunPermissions.run_control;
+          const nextAttach=!!curPerms.attach&&!!serviceRunPermissions.attach;
+          if(runAllowed&&(nextRunSubmit!==!!curPerms.run_submit||nextRunControl!==!!curPerms.run_control)){
+            const r=await api('project-permissions',{},{workspace_id:project.workspace_id,expected,run_submit:nextRunSubmit,run_control:nextRunControl,attach:nextAttach});
+            expected=r.digest;
+          }
+          const nextCaps={
+            config_write:configWriteBox.checked?(!!serviceWorkbenchPermissions.config_write||!!curCaps.config_write):false,
+            analysis_execute:nbBox.checked?(!!serviceWorkbenchPermissions.analysis_execute||!!curCaps.analysis_execute):false,
+            analysis_write:nbBox.checked?(!!serviceWorkbenchPermissions.analysis_write||!!curCaps.analysis_write):false,
+            case_annotate:!!curCaps.case_annotate,
+          };
+          if(json(nextCaps)!==json(curCaps)){
+            await api('project-capabilities',{},{workspace_id:project.workspace_id,expected,capabilities:nextCaps});
+          }
+          await refreshProjects();
+          if(workspaceId===project.workspace_id&&context){
+            const fresh=await api('context');
+            if(workspaceId===project.workspace_id){context=fresh;updates.context?.(fresh);projectHeading();}
+          }
+          permMsg.textContent='项目权限已保存并立即生效。';permMsg.dataset.tone='ok';permMsg.hidden=false;
+        }catch(err){
+          permMsg.textContent=err?.message||'保存权限失败';permMsg.dataset.tone='error';permMsg.hidden=false;
+        }finally{savePerms.disabled=false;}
+      },permSection);
+      permSection.insertBefore(permList,savePerms);permSection.append(permMsg);
+      dialog.append(permSection);
+
       const pySection=$('section',undefined,'project-python-settings');
       pySection.append($('strong','项目业务 Python 环境（开发测试与 Notebook 内核共用）'));
       const modeSelect=$('select',undefined,'project-python-select');modeSelect.setAttribute('aria-label','Python 环境模式');

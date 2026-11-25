@@ -29,7 +29,7 @@
     const historicalEntries=new Set();
     let observationCursor=null,observationPages=[],graphSequence=0,scopeNode=null,nodeOffset=0,inspectorWhole=false;
     let lastRunGraphAt=0,graphStatus=null,graphModel=null,actionExplicit=false;
-    let settingsBasis=null,issueScope='flow',scopedCheckButton=null;
+    let issueScope='flow',scopedCheckButton=null;
     let runInspector='observations',runDefinition=null,definitionSequence=0,runFlowFilter='';
     const runUI=globalThis.ForgeRunPresentation;
     let flowCollapse,nodePanelResize;
@@ -89,12 +89,12 @@
     root.addEventListener('click',event=>{if(!more.contains(event.target))more.open=false;});
     root.addEventListener('keydown',event=>{if(event.key==='Escape'&&more.open){more.open=false;more.querySelector('summary').focus();}});
     const runButton=button('运行',()=>confirmSubmit(),actions,{cls:'primary'});
-    button('接入与权限',()=>{more.open=false;settings.hidden=!settings.hidden;paintSettings();},moreBody,{cls:'quiet'});
     const advancedDialog=$('dialog',undefined,'wb-advanced-dialog');advancedDialog.setAttribute('aria-label','高级诊断');
     const advancedDialogHead=$('div',undefined,'wb-dialog-head');advancedDialogHead.append($('h3','高级诊断'));
     button('关闭',()=>advancedDialog.close(),advancedDialogHead,{cls:'quiet'});
     const advancedContent=$('div',undefined,'wb-advanced-content');advancedDialog.append(advancedDialogHead,advancedContent);root.append(advancedDialog);
     const advancedButton=button('高级诊断',()=>{more.open=false;if(!advancedDialog.open)advancedDialog.showModal();},moreBody,{cls:'quiet'});advancedButton.hidden=true;
+    more.hidden=true;
     const pipelineHeader=$('header',undefined,'wb-pipeline-header'),headerTitleGroup=$('div',undefined,'wb-header-title');
     const headerTitleRow=$('div',undefined,'wb-header-title-row');
     const pipelineTitle=$('h2',undefined,'wb-pipeline-title');
@@ -125,7 +125,7 @@
     root.append(pipelineHeader,toolbar);
     const notice=$('div',undefined,'wb-notice');notice.hidden=true;notice.setAttribute('role','status');root.append(notice);
     const accessState=$('p',undefined,'wb-access wb-caption');accessState.hidden=true;root.append(accessState);
-    const settings=$('div',undefined,'wb-settings');settings.hidden=true;root.append(settings);
+    const pendingBox=$('section',undefined,'wb-pending');root.append(pendingBox);
     const flowNavigation=$('nav',undefined,'wb-flow-navigation wb-section-navigation');flowNavigation.id='wb-flow-navigation';flowNavigation.setAttribute('aria-label','项目管道');flowNavigation.hidden=true;root.append(flowNavigation);
     const flowHeader=ForgeNavigation.header({title:'管线',searchLabel:'搜索管线',onSearch:filterFlows});
     const flowList=$('div',undefined,'wb-navigation-items');
@@ -366,10 +366,9 @@
       previewButton.textContent=previewBusy?'正在解析…':'解析执行计划';
       previewButton.title=dirty?'先保存业务参数，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
-      accessState.hidden=monitoring||!!run||(!invalidEntry&&registered()&&can('run_submit'));
-      accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!working?.entry?'请在“更多 → 接入与权限”登记入口和业务参数。':!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数；可解析已保存配置的执行计划，接入不会自动授予运行权限。':'原生流程已登记；当前可阅读与检查，项目或服务尚未开放提交权限。';
+      accessState.hidden=monitoring||!!run||!working?.entry||(!invalidEntry&&registered()&&can('run_submit'));
+      accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数。':'当前项目尚未开启管线运行权限，可在右上角「项目设置」中开启。';
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
-      guardSettings();
     }
     function uniqueParams(entry){const paths=ctx.flows.find(f=>f.entry===entry)?.parameters||[];return paths.length===1?paths[0]:null;}
     entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry)await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
@@ -411,6 +410,7 @@
     }
     function paintAdvancedDiagnostics(graphValue,choice,model){
       advancedButton.hidden=!graphValue;
+      more.hidden=!graphValue;
       advancedContent.replaceChildren();
       if(!graphValue)return;
       const box=$('div',undefined,'wb-advanced');
@@ -456,7 +456,7 @@
       graphLegend.textContent='点击算子查看实现与 Prompt；箭头表示引擎编译的数据流。';
       paintNodeJump(model);
       actionBar.hidden=locator.hidden=true;
-      advancedButton.hidden=false;advancedContent.replaceChildren();
+      advancedButton.hidden=false;more.hidden=false;advancedContent.replaceChildren();
       raw('编译依据',{basis:planPreview.basis,scope:planPreview.scope,entry_completed:planPreview.entry_completed,kind:planPreview.kind,provider:planPreview.provider,dag_id:planPreview.dag.dag_id},advancedContent);
       return model;
     }
@@ -649,7 +649,27 @@
       run=null;comparison=null;working={entry,params};const ticket=transition({entry,params,report,run:null,attempt:null,mode});
       runBar.hidden=runFacts.hidden=results.hidden=true;results.replaceChildren();paintSelectors();
       try{if(entry){await fetchGraph(ticket);if(current(ticket))rememberView(report?{kind:'inspection',report_digest:report}:{kind:'flows',entry,...(params?{params}:{})});}
-        else{basisLabel.textContent='尚无已声明入口';graphHost.replaceChildren($('p',entryIssue()+' 请在“接入与权限”登记入口和业务参数。'));inspector.replaceChildren($('p','可查看项目说明、数据和检查结果。'));sourceBody.replaceChildren($('p','发现或登记入口后，可在这里阅读选中节点的源码。','wb-caption'));settings.hidden=false;paintSettings();}}
+        else{
+          basisLabel.textContent='尚无已声明入口';
+          more.hidden=true;advancedButton.hidden=true;
+          const emptyCard=$('div',undefined,'wb-empty-onboarding');
+          emptyCard.append(
+            $('h3','尚未登记管线'),
+            $('p','当前项目还没有已登记的管线入口。可以直接在「会话」中让开发助手创建或迁移管线，或在右上角「项目设置」中配置业务 Python 环境与项目权限。','wb-caption'),
+          );
+          const emptyActions=$('div',undefined,'wb-inline-actions');
+          if(typeof embedded?.onOpenAssistant==='function'){
+            button('打开开发助手',()=>embedded.onOpenAssistant(),emptyActions,{cls:'primary'});
+          }
+          if(typeof options.openProjectSettings==='function'){
+            button('项目设置',()=>options.openProjectSettings(),emptyActions);
+          }
+          if(emptyActions.childElementCount)emptyCard.append(emptyActions);
+          graphHost.replaceChildren(emptyCard);
+          inspector.replaceChildren($('p','可查看项目说明、数据和检查结果。'));
+          sourceBody.replaceChildren($('p','发现或登记入口后，可在这里阅读选中节点的源码。','wb-caption'));
+        }
+      }
       catch(error){if(current(ticket)&&error.name!=='AbortError')message(error.message,'error-box',ticket);}
       finally{if(current(ticket))graphLoading(false);}
       paintPending();
@@ -1889,64 +1909,6 @@
         throw error;
       }
     }
-    function settingsIdentity(){return json([projectSettings.get?.()?.digest||null,ctx.flows.length,ctx.run_permissions,ctx.capabilities]);}
-    function guardSettings(){
-      if(settings.hidden||settingsBasis===null)return;
-      const stale=settingsBasis!==settingsIdentity();
-      const note=settings.querySelector('.wb-settings-stale');if(note)note.hidden=!stale;
-      const register=settings.querySelector('[data-access=register]');
-      if(register)register.disabled=!configWrite()||previewBusy||graphHost.getAttribute('aria-busy')==='true'||register.dataset.pending==='true';
-      // Keep the captured registry CAS base and the user's fields. A sync must
-      // not silently rebase an unfinished permission edit onto another grant.
-      if(stale)for(const b of settings.querySelectorAll('[data-access=permissions]'))b.disabled=true;
-    }
-    function paintSettings(){
-      settingsBasis=settingsIdentity();
-      settings.replaceChildren($('h3','接入与权限'));
-      const stale=$('p','接入或权限信息已变化，当前填写已保留；收起后再展开可读取最新信息并重置填写。','wb-settings-stale wb-caption');stale.hidden=true;settings.append(stale);
-      settings.append($('p','已登记 '+ctx.flows.length+' 个原生流程；提交、停止和配置写入分别授权。','wb-caption'));
-      const form=$('div',undefined,'wb-inline-form'),entry=$('input'),params=$('input');entry.maxLength=params.maxLength=1024;
-      entry.value=working?.entry||'';params.value=working?.params||'';entry.placeholder='flows/process.py:process';params.placeholder='flows/configs/default.json';
-      entry.setAttribute('aria-label','登记流程入口');params.setAttribute('aria-label','登记参数文件');field('入口',entry,form);field('参数',params,form);
-      const register=button('登记原生流程',async()=>{const ticket=state.capture(),body={entry:entry.value.trim()};
-        if(params.value.trim())body.params=params.value.trim();
-        let binding;
-        try{binding=await request('flow-register',{},body);}
-        catch(error){if(error.code==='busy'&&current(ticket)){message('服务正在读取或检查，登记尚未开始；填写已保留，请稍后重试。','error-box',ticket);return;}throw error;}
-        if(!current(ticket))return;
-        settings.hidden=true;message('已登记 '+body.entry+'；正在读取入口与配置。');
-        try{const fresh=await request('context');if(!current(ticket))return;ctx=fresh;onContext(fresh);await useWorking(binding.entry,binding.params);}
-        catch(error){if(current(ticket)&&error.name!=='AbortError')message('入口已登记，读取视图暂未完成；请刷新后选择 '+body.entry+'。 '+error.message,'error-box',ticket);}
-      },form);register.dataset.access='register';settings.append(form);guardSettings();
-      const meta=projectSettings.get?.();
-      if(!meta?.manage||!meta.project){settings.append($('p','当前项目权限由服务部署者配置。','wb-caption'));return;}
-      const permissions=$('div',undefined,'wb-inline-form'),inputs=new Map(),configured=meta.project.configured_permissions||meta.project.permissions;
-      for(const[key,label]of [['run_submit','接入与提交'],['run_control','停止与核对'],['attach','保留结果为输入']]){
-        const input=$('input');input.type='checkbox';input.checked=!!configured[key];input.disabled=!meta.service[key];input.setAttribute('aria-label',label);field(label,input,permissions);inputs.set(key,input);
-      }
-      const savePermissions=button('保存运行权限',async()=>{const ticket=state.capture(),body={workspace_id:project,expected:meta.digest,...Object.fromEntries([...inputs].map(([key,input])=>[key,input.checked]))};
-        await request('project-permissions',{},body);if(!current(ticket))return;
-        await projectSettings.refresh?.();if(!current(ticket))return;
-        const fresh=await request('context');if(current(ticket)){ctx=fresh;onContext(fresh);paintSettings();paintSelectors();message('运行权限已更新，未启动作业。');}
-      },permissions,{disabled:!meta.service.run_submit||!meta.service.run_control||!meta.service.attach});savePermissions.dataset.access='permissions';settings.append(permissions);
-      const config=$('input');config.type='checkbox';config.checked=!!(meta.project.configured_capabilities||meta.project.capabilities)?.config_write;config.disabled=!meta.workbench?.config_write;config.setAttribute('aria-label','保存图上配置');
-      const capabilities=$('div',undefined,'wb-inline-form');field('保存图上配置',config,capabilities);
-      const configuredCapabilities={config_write:false,analysis_execute:false,analysis_write:false,case_annotate:false,...(meta.project.configured_capabilities||meta.project.capabilities||{})};
-      const saveCapabilities=button('保存配置写入权限',async()=>{const ticket=state.capture();await request('project-capabilities',{}, {workspace_id:project,expected:meta.digest,capabilities:{...configuredCapabilities,config_write:config.checked}});
-        if(!current(ticket))return;await projectSettings.refresh?.();if(!current(ticket))return;
-        const fresh=await request('context');if(current(ticket)){ctx=fresh;onContext(fresh);paintSettings();paintConfiguration(data().graph?.nodes.find(n=>n.id===data().node)||null);message('配置写入权限已更新。');}
-      },capabilities,{disabled:!meta.workbench?.config_write});saveCapabilities.dataset.access='permissions';settings.append(capabilities);
-      const analysisPermissions=$('div',undefined,'wb-inline-form'),analysisInputs=new Map();
-      for(const[key,label]of [['analysis_execute','运行 Notebook'],['analysis_write','保存 Notebook 与视图'],['case_annotate','保存 Case 标注']]){
-        const input=$('input');input.type='checkbox';input.checked=!!configuredCapabilities[key];input.disabled=!meta.workbench?.[key]&&!input.checked;input.setAttribute('aria-label',label);field(label,input,analysisPermissions);analysisInputs.set(key,input);
-      }
-      const saveAnalysis=button('保存数据分析权限',async()=>{const ticket=state.capture();await request('project-capabilities',{}, {workspace_id:project,expected:meta.digest,capabilities:{...configuredCapabilities,...Object.fromEntries([...analysisInputs].map(([key,input])=>[key,input.checked]))}});
-        if(!current(ticket))return;await projectSettings.refresh?.();if(!current(ticket))return;
-        const fresh=await request('context');if(current(ticket)){ctx=fresh;onContext(fresh);paintSettings();message('数据分析权限已更新，未执行 Notebook。');}
-      },analysisPermissions,{disabled:![...analysisInputs.keys()].some(key=>meta.workbench?.[key]||configuredCapabilities[key])});saveAnalysis.dataset.access='permissions';settings.append(analysisPermissions);
-      settings.append($('p','配置写入、分析执行、保存和标注分别受项目授权与服务上限约束；旧登记格式需由部署者显式迁移。','wb-caption'));
-    }
-    const pendingBox=$('section',undefined,'wb-pending');root.insertBefore(pendingBox,settings);
     const inspectedPending=new Set();
     function settlePendingForRun(value){
       if(!value?.run_id||value.status==='prepared')return;

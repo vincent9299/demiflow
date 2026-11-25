@@ -26,7 +26,7 @@
   async function mount(options) {
     const {
       main, api, icon, context, workspaceId, view = {}, mountText, disposeReaders,
-      openResult, navigate, onContext, rememberView, onPageChange, projectSettings,
+      openResult, navigate, onContext, rememberView, onPageChange, projectSettings, openProjectSettings,
       renderProjectInfo, projectCheckState, continueInput, continueWithResult,
       error, openNew, openSession, initialDrawer = null, operatorTarget = null, register,
     } = options;
@@ -312,6 +312,7 @@
       onPageChange,
       rememberView,
       projectSettings,
+      openProjectSettings,
       renderProjectInfo,
       embedded: {
         hideFlowSidebar: true,
@@ -319,6 +320,7 @@
         nodeDetailHost: detailPane,
         sourceButton: headerSourceBtn,
         onFlowSelect: () => setStageMode('canvas'),
+        onOpenAssistant: () => { setSidebarTab('sessions'); setStageMode('assistant'); },
         onDetailOpen: () => {
           devHandle?.files?.setOpen?.(false, {skipFocus: true});
           setRightMode('detail');

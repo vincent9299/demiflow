@@ -993,14 +993,53 @@ class Handler(BaseHTTPRequestHandler):
                     if any(grants[key] and not configured[key] and not ceiling[key] for key in console.CAPABILITIES):
                         raise PermissionError('Requested capability exceeds the service deployment ceiling')
                 with self._work():
-                    action = {'/api/project-create': console.create, '/api/project-register': console.add,
-                              '/api/project-remove': console.remove,
-                              '/api/project-permissions': console.set_permissions,
-                              '/api/project-capabilities':console.set_capabilities,
-                              '/api/project-python': console.set_python,
-                              '/api/project-notebook-sandbox': console.set_notebook_sandbox}[self.path]
-                    value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
-                        if self.path=='/api/project-capabilities' else {}))
+                    if self.path == '/api/project-create':
+                        value = console.create(self.server.registry, **request)
+                        # Newly created empty projects are ready for editing, runs and
+                        # Notebook work up to this server's deployment ceiling.
+                        wid = value['workspace_id']
+                        ceiling = self.server.permission_ceiling()
+                        inv = self.server.inventory()
+                        if inv.get('format') in {console.FORMAT_V2, console.FORMAT_V3}:
+                            digest = console.content_digest(inv)
+                            if ceiling['run_submit'] or ceiling['run_control']:
+                                updated = console.set_permissions(
+                                    self.server.registry, wid, expected=digest,
+                                    run_submit=bool(ceiling['run_submit']),
+                                    run_control=bool(ceiling['run_control']),
+                                    attach=False,
+                                )
+                                digest = updated['digest']
+                            if inv.get('format') == console.FORMAT_V3:
+                                analysis_svc = self.server.analysis or self.server.notebooks
+                                can_analysis = False
+                                if analysis_svc is not None:
+                                    try:
+                                        analysis_svc.assert_ready()
+                                        can_analysis = True
+                                    except Exception:
+                                        can_analysis = False
+                                caps = {
+                                    'config_write': bool(ceiling['config_write']),
+                                    'analysis_execute': bool(ceiling['analysis_execute']) and can_analysis,
+                                    'analysis_write': bool(ceiling['analysis_write']) and can_analysis,
+                                    'case_annotate': False,
+                                }
+                                if any(caps.values()):
+                                    console.set_capabilities(
+                                        self.server.registry, wid, expected=digest,
+                                        capabilities=caps,
+                                        analysis_service=analysis_svc if (caps['analysis_execute'] or caps['analysis_write']) else None,
+                                    )
+                    else:
+                        action = {'/api/project-register': console.add,
+                                  '/api/project-remove': console.remove,
+                                  '/api/project-permissions': console.set_permissions,
+                                  '/api/project-capabilities':console.set_capabilities,
+                                  '/api/project-python': console.set_python,
+                                  '/api/project-notebook-sandbox': console.set_notebook_sandbox}[self.path]
+                        value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
+                            if self.path=='/api/project-capabilities' else {}))
                     if self.path == '/api/project-python' and self.server.development_settings is not None:
                         with self.server.development_settings.service.lock:
                             self.server.development_settings.bindings.clear()
@@ -1042,7 +1081,10 @@ class Handler(BaseHTTPRequestHandler):
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
             if name not in {'inspect','plan-preview','plan-node-detail','plan-pipeline-source','audit-check','project-check','run-admission'} and not permissions[permission]:
-                raise PermissionError('Required run permission is disabled: '+permission)
+                label = {'config_write': '文件与配置写入', 'run_submit': '管线运行', 'run_control': '管线停止与控制',
+                         'attach': '保留结果为输入', 'analysis_execute': '运行 Notebook',
+                         'analysis_write': '保存 Notebook 与数据工具', 'case_annotate': 'Case 标注'}.get(permission, permission)
+                raise PermissionError(f'当前项目未开启「{label}」权限，请在右上角「项目设置」中开启。')
             request = self._body(name)
             if name == 'plan-pipeline-source':
                 self._send(self.server.plan_snapshots.read_pipeline(root, **request))

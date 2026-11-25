@@ -106,3 +106,55 @@ def test_unified_three_tab_nav_and_three_column_pipeline_workspace(project,brows
         sidebar.get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.pw-workbench-host')).to_be_visible()
         assert not errors, errors
+
+
+def test_project_create_defaults_and_settings_dialog_permissions(browser, monkeypatch, tmp_path):
+    import json
+    from demiflow.workbench.projects import registry as console
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'domain'))
+    registry_path = tmp_path / 'console.json'
+    registry_path.write_text(json.dumps(dict(format=console.FORMAT_V3, projects={})))
+    new_root = tmp_path / 'brand-new-project'
+    with service(None, registry=registry_path, enable_runs=True, enable_config_write=True) as app:
+        context = browser.new_context(viewport=dict(width=1440, height=1000))
+        page = context.new_page()
+        page.set_default_timeout(30000)
+        errors = []
+        page.on('pageerror', lambda err: errors.append(str(err)))
+        try:
+            page.goto(app.origin + '/#token=' + app.token)
+            page.get_by_role('button', name='新建项目', exact=True).click()
+            dialog = page.get_by_role('dialog')
+            dialog.get_by_label('项目目录', exact=True).fill(str(new_root))
+            dialog.get_by_label('项目名称', exact=True).fill('brand-new')
+            dialog.get_by_role('button', name='新建项目', exact=True).click()
+            expect(page.locator('#workspace-name')).to_have_text('brand-new', timeout=20000)
+            # Empty canvas should show clean onboarding and never auto-render the retired .wb-settings form.
+            page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
+            expect(page.locator('.wb-settings')).to_have_count(0)
+            # Creating .env from the file tree works immediately without manual permission setup.
+            page.locator('.pw-sidebar').get_by_role('button', name='文件', exact=True).click()
+            page.get_by_role('button', name='新建文件', exact=True).click()
+            page.get_by_label('新建文件路径', exact=True).fill('.env')
+            page.get_by_role('button', name='创建', exact=True).click()
+            expect(page.locator('.dev-tree-body')).to_contain_text('.env', timeout=15000)
+            # Open top-right 项目设置 dialog and verify unified permission switches work end-to-end.
+            page.locator('#project-settings').click()
+            settings = page.get_by_role('dialog', name='项目设置')
+            expect(settings).to_be_visible()
+            cfg_box = settings.get_by_label('文件与配置写入', exact=True)
+            run_box = settings.get_by_label('管线运行与停止', exact=True)
+            expect(cfg_box).to_be_checked()
+            expect(run_box).to_be_checked()
+            cfg_box.uncheck()
+            settings.get_by_role('button', name='保存权限', exact=True).click()
+            expect(settings).to_contain_text('项目权限已保存并立即生效', timeout=15000)
+            settings.get_by_role('button', name='关闭', exact=True).click()
+            # Creating a file now shows a friendly Chinese permission hint.
+            page.get_by_role('button', name='新建文件', exact=True).click()
+            page.get_by_label('新建文件路径', exact=True).fill('blocked.txt')
+            page.get_by_role('button', name='创建', exact=True).click()
+            expect(page.locator('.dev-tree-create-error')).to_contain_text('项目设置', timeout=15000)
+            assert not errors, errors
+        finally:
+            context.close()
