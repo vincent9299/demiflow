@@ -49,7 +49,47 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   const input=element(document,'textarea');input.rows=2;input.placeholder='描述你想做的分析或标注…';input.setAttribute('aria-label','卡片要求');
   const providerSelect=element(document,'select','df-card-provider');
   providerSelect.hidden=true;providerSelect.setAttribute('aria-label','卡片助手模型');providerSelect.title='卡片助手模型';
-  let providers=[],canPrewarm=false,prewarmKey='';
+  const modelBadge=element(document,'span','df-card-model');modelBadge.hidden=true;
+  const accessBadge=element(document,'span','df-card-access');accessBadge.hidden=true;
+  const accessIcon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  for(const [k,v] of Object.entries({viewBox:'0 0 14 14',width:'13',height:'13','aria-hidden':'true',fill:'none',stroke:'currentColor','stroke-width':'1.4','stroke-linecap':'round','stroke-linejoin':'round'}))accessIcon.setAttribute(k,v);
+  const shieldPath=document.createElementNS(accessIcon.namespaceURI,'path');
+  shieldPath.setAttribute('d','M7 1.4 12 3.3v3.5c0 2.7-1.8 4.5-5 5.8-3.2-1.3-5-3.1-5-5.8V3.3L7 1.4ZM7 4v3.5M7 9.7h.01');
+  accessIcon.append(shieldPath);
+  const accessLabel=element(document,'span');
+  accessBadge.append(accessIcon,accessLabel);
+  const statsDock=element(document,'div','dc-dock df-card-stats-dock');statsDock.hidden=true;
+  let capabilities={},providers=[],canPrewarm=false,prewarmKey='';
+  const statsCache=new Map();
+  let statsFingerprint='';
+  function formatProviderLabel(p){
+    if(!p)return '';
+    const formatted=globalThis.ForgeDevelopmentComposer?.formatProvider?.(p);
+    return formatted?.text||p.label||p.model||p.id||'';
+  }
+  function paintStats(sid){
+    const entry=sid?statsCache.get(sid):null;
+    const stats=entry?.stats||null;
+    const fp=sid&&stats?sid+':'+JSON.stringify(stats):'';
+    if(fp===statsFingerprint)return;
+    statsFingerprint=fp;
+    if(globalThis.ForgeDevelopmentComposer?.renderStatsInto){
+      globalThis.ForgeDevelopmentComposer.renderStatsInto(statsDock,stats,sid);
+    }else{statsDock.hidden=true;}
+  }
+  async function refreshStats(sid,force=false){
+    if(!valid()||!assistantOpen||!sid||capabilities.conversation_stats===false)return;
+    const entry=statsCache.get(sid);
+    if(!force&&entry&&Date.now()-entry.at<3000)return;
+    statsCache.set(sid,{stats:entry?.stats||null,at:Date.now()});
+    try{
+      const stats=await api('dev-stats',{session_id:sid});
+      if(!valid())return;
+      statsCache.set(sid,{stats,at:Date.now()});
+      const currentSid=selectedId?assistantFor(selectedId)?.sessionId:null;
+      if(currentSid===sid)paintStats(sid);
+    }catch{}
+  }
   function requestNotebookPrewarm(conversation,providerId){
     if(!valid()||!assistantOpen||!canPrewarm||!providerId)return;
     const sid=conversation?.sessionId||null;
@@ -63,15 +103,17 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       const conv=assistantFor(selectedId);
       conv.chooseProvider(providerSelect.value);
       requestNotebookPrewarm(conv,providerSelect.value);
+      renderThread();
     }
   };
   async function loadProviders(){
     try{
       const caps=await api('dev-capabilities');
       if(!valid()||!assistantOpen)return;
+      capabilities=caps||{};
       canPrewarm=caps.prewarm_api===true&&caps.notebook_cells===true&&caps.enabled===true&&caps.start===true;
       providers=(caps.providers||[]).filter(p=>p.available);
-      providerSelect.replaceChildren(...providers.map(p=>new Option(p.label||p.id,p.id)));
+      providerSelect.replaceChildren(...providers.map(p=>new Option(formatProviderLabel(p),p.id)));
       renderThread();
     }catch{} // Sending checks capabilities again and displays the service error.
   }
@@ -150,7 +192,9 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   toolPopover.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();closeToolPopover();input.focus();}};
   const onDocClick=e=>{if(!toolPopover.hidden&&!toolPopover.contains(e.target)&&e.target!==toolPickerBtn)closeToolPopover();};
   document.addEventListener('click',onDocClick,true);
-  composerFooter.append(executionLabel,toolPickerBtn);
+  const composerMeta=element(document,'div','df-composer-meta');
+  composerMeta.append(providerSelect,modelBadge);
+  composerFooter.append(executionLabel,toolPickerBtn,accessBadge,composerMeta);
   const send=icon(document,'up','发送要求');send.type='submit';
   const messages=new Map(),drafts=new Map(),refs=new Map(),decorated=new Map();
   const conversations=new Map(),inFlight=new Set();
@@ -171,8 +215,8 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       const boundPath=path;
       conversations.set(id,notebookConversation({api,project,path:boundPath,cell:id,
         active:()=>valid()&&panel.context.path===boundPath,
-        onSession:sid=>{if(assistantOpen&&selectedId===id)transcript.select(sid);},
-        onEvents:(sid,events)=>transcript.receive(sid,events),
+        onSession:sid=>{if(assistantOpen&&selectedId===id){transcript.select(sid);refreshStats(sid,true);}},
+        onEvents:(sid,events)=>{transcript.receive(sid,events);if(assistantOpen&&selectedId===id&&events?.length)refreshStats(sid,false);},
         command:(name,args,pending)=>command(id,name,args,pending)}));
     }
     return conversations.get(id);
@@ -210,7 +254,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   }
   const add=icon(document,'cell','新建卡片',()=>{const cell=newCell();cell?.editor?.focus();});
   add.disabled=!writable();controls.append(add);
-  head.append(heading,targetName,providerSelect,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(toolPopover,reference,input,composerFooter,send);aside.append(head,thread,form);desk.append(aside);
+  head.append(heading,targetName,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(toolPopover,reference,input,composerFooter,send);aside.append(head,thread,form,statsDock);desk.append(aside);
   const divider=ForgeNavigation.resizable({layout:desk,sidebar:aside,label:'卡片助手',right:true,active:false});
   function ask(item){
     let cell=selected();if(!cell)cell=newCell();
@@ -237,13 +281,30 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       chip.append(icon(document,'close','取消引用 '+item.symbol,()=>{refs.set(id,items.filter(i=>i.id!==item.id));renderThread();}));reference.append(chip);
     }
     const conversation=id?assistantFor(id):null;
-    transcript.select(conversation?.sessionId||null);
+    const activeSid=conversation?.sessionId||null;
+    transcript.select(activeSid);
+    paintStats(activeSid);
+    if(assistantOpen&&activeSid)refreshStats(activeSid,false);
     const pending=conversation?.pending;
     const busy=inFlight.has(id);
-    providerSelect.hidden=providers.length<2||!id;
-    providerSelect.disabled=!!(busy||pending||conversation?.sessionId);
-    providerSelect.value=conversation?.provider||providers.find(p=>p.id==='deepseek')?.id||providers[0]?.id||'';
-    if(assistantOpen&&id&&!busy&&!pending)requestNotebookPrewarm(conversation,providerSelect.value);
+    const activeProviderId=conversation?.provider||providers.find(p=>p.id==='deepseek')?.id||providers[0]?.id||'';
+    const activeProvider=providers.find(p=>p.id===activeProviderId)||(capabilities.providers||[]).find(p=>p.id===activeProviderId)||providers[0]||null;
+    const providerLocked=!!(busy||pending||activeSid);
+    const canPickProvider=providers.length>=2&&!providerLocked&&!!id;
+    providerSelect.hidden=!canPickProvider;
+    providerSelect.disabled=providerLocked;
+    providerSelect.value=activeProviderId;
+    const modelText=formatProviderLabel(activeProvider);
+    modelBadge.hidden=canPickProvider||!modelText;
+    modelBadge.textContent=modelText;
+    modelBadge.title=activeProvider?(modelText+' · '+activeProvider.id):'';
+    const readonly=capabilities.read_only===true||!writable();
+    if(capabilities.enabled!==undefined){
+      accessBadge.hidden=false;
+      accessLabel.textContent=readonly?'Read only':capabilities.mode==='restricted'?'Managed access':capabilities.mode==='trusted_local'?'Trusted local':'Project access';
+      accessBadge.title=readonly?'当前仅可查看历史记录。':capabilities.mode==='restricted'?'项目开发受 Forge 管理；输入可在对话中发现和引用，写入仍限项目授权范围。':capabilities.mode==='trusted_local'?'可信本地执行；当前未声明 OS 防篡改边界。':'按当前项目的已授权开发范围执行。';
+    }else{accessBadge.hidden=true;}
+    if(assistantOpen&&id&&!busy&&!pending&&activeProviderId)requestNotebookPrewarm(conversation,activeProviderId);
     executionLabel.hidden=!permissions().analysis_execute;execution.disabled=busy;
     input.disabled=busy||!writable()||!id;send.disabled=input.disabled;
     if(!id){actions.append(element(document,'p','df-chat-status','选中一张代码卡片即可调整。'));return;}
@@ -399,7 +460,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       const target=cellById(id);
       if(row.code&&target&&sourceOf(target)===row.source)applyCode(row,target);
     }catch(error){if(valid())saveMessage(id,{request,text:error.message,error:true,turn:error.turn,retryable:error.retryable});}
-    finally{inFlight.delete(id);if(valid()){schedulePaint();renderThread();}}
+    finally{inFlight.delete(id);if(valid()){const sid=assistantFor(id)?.sessionId;if(sid)refreshStats(sid,true);schedulePaint();renderThread();}}
   }
   form.onsubmit=e=>{e.preventDefault();submit(input.value);};
   input.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();form.requestSubmit();}};
