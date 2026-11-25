@@ -172,12 +172,12 @@
 - **依据。** 2026-11-25 `tests/test_operator_foundation_runs.py::test_managed_model_results_evidence_and_read_only_access`，打印了引用和清单；至迟 11-22 起失败。同文件的取消测试原先打开 `evidence/calls.sqlite`，已改为读 `run.sqlite`。
 - **建议。** 工作台把运行自己的调用记录作为有界证据读取（按引用核对属于本次运行），或由运行在清单中声明它；修好后该测试应通过。
 
-### T-033 封存改动后，同一进程导入过另一个测试模块时，续跑误判"代码已改"
+### T-033 封存改动后，路由图与恢复测试大面积报"加载的程序代码与封存时不一致"
 
-- **现象。** 自 `31c779c6`（`agy/seal/bundle-relative-imports-20261125`，main-20261125-20）起，`tests/test_native_prompt_barrier.py::test_nondeterministic_text_expansion_preserves_known_image_identity` 在同一 pytest 进程里也收集了 `tests/test_prompt_without_journal.py` 时，续跑一步报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`。两个文件都导入 `image_http_fixture`。
-- **依据。** 2026-11-25 对照：单独运行，在 `40c0034a`（其前一提交）和 `31c779c6` 上各 5 次全过；两个测试同会话，在 `40c0034a` 上通过，在 `31c779c6` 上失败，两种执行顺序都失败（pytest 先导入全部测试模块再执行）。该测试此前因 `map` / `flat_map` 写错走不到续跑，第 4 批修正后才暴露。
-- **影响。** 推测：notebook 或长期运行的进程里导入过引用同一辅助模块的其他代码后，续跑可能被误拒；未逐行证实。
-- **建议。** 封存改动负责人用上述两个测试同会话复现；修好后两者同会话应通过。
+- **现象。** 自 `31c779c6`（main-20261125-20，合入 `eafb549a` "seal(business_sources): capture AST static relative and constant-only imports for worker bundling"）起，worker 加载程序时报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`，代码并没有改。
+- **依据。** 2026-11-25 对照，同一批测试文件分别在 `40c0034a`（其前一提交）和 `31c779c6` 上运行：`tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，之前 23 过 2 败，之后 23 败 2 过，失败都是这条报错，单独运行文件也如此。另：`tests/test_native_prompt_barrier.py` 的崩溃续跑测试单独运行通过（前后各 5 次），与 `tests/test_prompt_without_journal.py` 同会话时在 `31c779c6` 上失败、在 `40c0034a` 上通过。其他文件的影响未逐一核对。
+- **影响。** 路由图、恢复等路径上真实存在的程序被拒绝加载；业务代码若有类似的导入写法，可能同样受影响（未证实）。
+- **建议。** 封存改动负责人用上述文件对照复现，修复或回退该提交，并在标准线上复跑；修好后上述测试应恢复到 `40c0034a` 的结果。
 
 ### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
 
