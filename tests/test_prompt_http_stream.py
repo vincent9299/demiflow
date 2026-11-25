@@ -210,31 +210,30 @@ def test_cancel_during_response_commit_preserves_cache(monkeypatch,tmp_path):
     assert journal_totals(tmp_path/'commit.sqlite')['transport_errors']==0
 
 
-@pytest.mark.parametrize('request_timeout,expected_responses', [(2, 1), (.1, 0)])
+@pytest.mark.parametrize('request_timeout,body_seconds,expected_responses', [(5, .4, 1), (1, 2, 0)])
 @pytest.mark.parametrize('failure_kind', ['service', 'sqlite'])
 def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
-        monkeypatch, tmp_path, request_timeout, expected_responses, failure_kind):
+        sse_server, tmp_path, request_timeout, body_seconds, expected_responses, failure_kind):
+    """An upstream row fails while a paid streaming call is in flight.
+
+    Real HTTP and default workers. The call is drained up to its own deadline: a
+    response that fits is saved, one that does not is recorded as a transport
+    error; either way nothing is published. The deadlines are far enough from
+    the upstream failure that the upstream error is always the first one.
+    """
     error = (ServiceStopped('search engine unavailable') if failure_kind == 'service'
              else sqlite3.OperationalError('database is locked'))
-    monkeypatch.setenv('TEST_PROMPT_URL','http://fixture/v1')
-    monkeypatch.setenv('TEST_PROMPT_KEY','fixture')
-    original=httpx.AsyncClient;state={'requests':0,'closed':False}
-    # Row callables are rebuilt from their sealed programs, so closure objects are
-    # copies: the upstream waits on a file the response body creates.
-    received=tmp_path/'first-chunk-received'
-    class Body(httpx.AsyncByteStream):
-        async def __aiter__(self):
-            yield event(chunk('{"result":'))
-            received.touch()
-            await asyncio.sleep(.4)  # survives watchdog cancellation and old drain deadline
-            yield event(chunk('"saved"}','stop'))+event('[DONE]')
-        async def aclose(self):state['closed']=True
-    def handler(request):
-        state['requests']+=1
-        return httpx.Response(200,stream=Body(),headers={'content-type':'text/event-stream'})
-    monkeypatch.setattr(httpx,'AsyncClient',lambda **kw:original(**{**kw,'transport':httpx.MockTransport(handler)}))
+    received = tmp_path/'request-received'
+    body = wire('saved')
+    # The server sends the body in 47-byte pieces, body_seconds in total.
+    sse_server['delay'] = body_seconds / (len(body) // 47 + 1)
+    def respond(request, index):
+        received.touch()
+        return body
+    sse_server['respond'] = respond
     async def upstream(row):
-        if row['item']=='stop':
+        # Row callables run from sealed copies in the workers: wait on a file.
+        if row['item'] == 'stop':
             for _ in range(500):
                 if received.exists():
                     break
@@ -243,21 +242,20 @@ def test_service_stop_drains_paid_response_but_does_not_publish_partial_success(
                    else sqlite3.OperationalError('database is locked'))
         return row
     with pytest.raises(type(error), match=str(error)):
-        # Thread workers send through the transport patched in this process; one-row
-        # batches let the paid row reach the prompt while the other row is still upstream.
-        # Nothing follows the prompt: a later operator lets a finite action run the prompt
-        # only after its whole input is complete, and no call would be in flight.
-        with RunContext.start(tmp_path/'run'), data.local_execution(worker_mode='thread', batch_rows=1, block_size=1):
+        # One-row batches let the paid row reach the prompt while the other row is still
+        # upstream. Nothing follows the prompt: a later operator lets a finite action run
+        # the prompt only after its whole input is complete, and no call would be in flight.
+        with RunContext.start(tmp_path/'run'), data.local_execution(batch_rows=1, block_size=1):
             prompt(data.from_items([{'item':'paid'},{'item':'stop'}]).map_async(upstream,concurrency=2),
-                   options={'stream':True,'timeout_s':request_timeout}).materialize().take_all()
-    totals=journal_totals(tmp_path/'run'/'run.sqlite')
-    assert received.exists() and state['requests']==1 and state['closed']
+                   options={'stream':True,'trust_env':False,'timeout_s':request_timeout}).materialize().take_all()
+    assert received.exists() and len(sse_server['requests']) == 1
     # No partial success is published: no action result and no final sink manifest.
-    journal=RunJournal(tmp_path/'run')
+    journal = RunJournal(tmp_path/'run')
     assert journal.execution_action('action-1')['result'] is None
     assert not any((sink or {}).get('manifest', {}).get('final')
                    for commit in journal.execution_commits('action-1')
                    for sink in ((commit.get('prepared') or {}).get('sinks') or {}).values())
+    totals = journal_totals(tmp_path/'run'/'run.sqlite')
     assert totals['responses'] == expected_responses
     assert totals['transport_errors'] == 1 - expected_responses
 

@@ -14,7 +14,7 @@ from demiflow.execution.contracts.errors import ExecutionBudgetExceeded
 _BUILTINS = {name: getattr(builtins, name) for name in (
     'ValueError', 'TypeError', 'KeyError', 'IndexError', 'LookupError', 'TimeoutError',
     'RuntimeError', 'AssertionError', 'OSError', 'FileNotFoundError', 'PermissionError',
-    'NotImplementedError', 'ZeroDivisionError')}
+    'NotImplementedError', 'ZeroDivisionError', 'MemoryError')}
 _KNOWN = {cls.__module__ + '.' + cls.__qualname__: cls for cls in _BUILTINS.values()}
 _OS_ERRORS = frozenset(cls for cls in _BUILTINS.values() if issubclass(cls, OSError))
 _KNOWN['sqlite3.OperationalError'] = sqlite3.OperationalError
@@ -58,6 +58,11 @@ _KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
                for cls in (UncertainPromptCall, EmbeddingProtocolError)})
 from demiflow.services.request_limits import ServiceStopped
 _KNOWN[ServiceStopped.__module__ + '.' + ServiceStopped.__qualname__] = ServiceStopped
+from demiflow.errors import InvalidLanceRequest
+# A Lance node rejects an invalid request (for example a malformed query vector)
+# with this type, and an exceeded result budget with MemoryError; the caller of
+# the action sees the type the node raised.
+_KNOWN[InvalidLanceRequest.__module__ + '.' + InvalidLanceRequest.__qualname__] = InvalidLanceRequest
 _HTTP_TYPE = 'httpx.HTTPStatusError'
 
 

@@ -122,7 +122,7 @@
 - **崩溃与恢复。** 已处理（2026-11-25，分支 `claude/tests/effectiveness-20261124`）。主因是测试按旧的落盘环节名 `output` 找杀进程的位置，现在叫 `materialize` / `take_all`，子进程因此一直没被杀。改对之后恢复行为正常。同时按"测的是否是用户可依赖的保证、保证坏了是否会失败、是否重复"复查了整个文件，不只是失败的用例：删掉了永远走不到的分支、在主进程里替换但代码在子进程跑的替身、读不存在目录因而恒为空的资源检查、和专门文件重复的用例。剩下要裁定的引擎行为见 T-019 到 T-023。
 - **prompt。** 已核对（2026-11-25）18 个。测试写法过时、已改 12 个：在驱动进程里替换 HTTP 客户端或 actor 而 prompt 跑在 worker 进程里（改用线程 worker）；读驱动端请求闸门副本的计数（改读服务端）；用旧的落盘环节名 `output` 找故障点；`map` 写成了一行变多行的 `flat_map`；列目录时没算每次运行的 `-driver-resources`；总超时短到请求可能送不到服务端；替换服务对象后改由更早的类型检查拒绝；取消测试按旧位置打开调用记录。删 1 个：`test_exact_source_threshold_uses_one_final_cut` 检查的“恰好 1 次提交”是 v3 之前设计的实现细节，v3 多出的最终提交引用同一数据块。其余 6 个是引擎问题，测试保持失败：T-025 1 个、T-027 1 个、T-028 3 个、T-029 1 个。提交 `9d5563d2`。
 - **其余引擎测试（第 6 批）。** 已核对（2026-11-25）。普查 35 个文件：66 失败、13 错误。已改 15 个：去掉已退役的 `.checkpoint()`（`test_prompt_messages` 4）；替身跟上真实函数签名、引用改名后的常量（`test_dataset_native` 2）；查询失败可先确认一个不发布输出的中间 cut，改为检查"没有发布输出"（`test_dataset_native` 1）；算子调用记录在模块属性里，改用线程 worker（`test_operator_api` 3）；自定义服务对象不再能跨 worker，改为声明被动的 `ManagedHTTPService`（`test_readonly_prompt_replay` 1）；清单改由 `Path.open` 读取、读不了的上级清单按不存在处理（`7c4b06dd`，`test_artifact_relocation` 2）；有状态写入器的方法交给 `batch_map` 后驱动端看不到其批次，改为直接驱动（`test_evidence_primitives` 1）；重复写入目标的报错类型（`test_native_web_dataset` 1）。约 21 个来自 T-033；`test_stream` 1 个、`test_prompt_routes` 2 个来自 T-025；`test_operator_api` 3 个见 T-034；大负载 5 个见 T-035；需要 Ray 的 3 个属于 Ray 线；工作区格式相关的 forge、托管图片（7 个）与 `runtime_v3_w`（6 个，含 2 个 JS 场景）留给界面批次。提交 `153d35af`、`60a5d1ed`、`5fbc33cc`。
-- **向量检索。** 已核对（2026-11-25）19 个。结果为空的 9 个是测试在行回调里往闭包列表追加结果：回调从封存的程序重建，线程 worker 下也是副本，调用方的列表永远为空；改为经文件取回行（共用的 `tests/_row_capture.py`），背压测试的消费计数同样改用文件。同样的写法还在 `tests/test_document_library.py`（`capture()`，2 个测试）和 `tests/test_google_backends.py`（1 个测试）里，一并改了；这 3 个在 `9f3d4e53` 之前就因结果为空失败，之后又被 T-025 拒绝，调大默认额度验证新写法 3 个全过。另 1 个回调捕获了 pyarrow `Schema`，见 T-032，测试改为在回调里读表的 schema。几处检查驱动端 actor 对象 `_dataset`/`_version` 的断言永远成立，改为替换 `open_lance_dataset` 和 `VectorSearch.aclose` 记录真实的打开与关闭。仍失败 10 个：T-030 8 个、T-031 2 个（这两个测试的其他断言都已通过，资源统计放在最后检查）。提交 `979363a1`。
+- **向量检索。** 已核对（2026-11-25）19 个。结果为空的 9 个是测试在行回调里往闭包列表追加结果：回调从封存的程序重建，线程 worker 下也是副本，调用方的列表永远为空；改为经文件取回行（共用的 `tests/_row_capture.py`），背压测试的消费计数同样改用文件。同样的写法还在 `tests/test_document_library.py`（`capture()`，2 个测试）和 `tests/test_google_backends.py`（1 个测试）里，一并改了；这 3 个在 `9f3d4e53` 之前就因结果为空失败，之后又被 T-025 拒绝，调大默认额度验证新写法 3 个全过。另 1 个回调捕获了 pyarrow `Schema`，见 T-032，测试改为在回调里读表的 schema。几处检查驱动端 actor 对象 `_dataset`/`_version` 的断言永远成立，改为替换 `open_lance_dataset` 和 `VectorSearch.aclose` 记录真实的打开与关闭。当时仍失败 10 个：T-030 8 个（已修）、T-031 2 个（这两个测试的其他断言都已通过，资源统计放在最后检查）。提交 `979363a1`。
 - **测试的替身落后一步，合同还在。** `tests/test_dataset_native.py` 2 个（`_group_order_fixtures` 的替身少一个 `window` 参数）。改测试即可。
 - **其余**见 `_demiflow/shared-review/CLAUDE-test-audit-20261124/engine-lines.txt`，每个测试一行。
 
@@ -165,7 +165,7 @@
 ### T-028 上游出错时，prompt 在途的付费请求没有按期限收完
 
 - **现象。** prompt 请求已发出、响应正在流式返回时，上游另一行报错使 action 失败。此时在途请求不会被收完：即使请求期限远未到、响应很快就能收完，连接也被直接关闭，响应丢失，账本只记一条错误。文档写明取消时在原生 actor 的期限内收完在途调用再关闭客户端（`docs/prompt_http.md` "Cancellation drains active calls…"，`docs/native-barrier-checkpoints.md` "drains native calls/writers under their deadlines"）。
-- **依据。** 2026-11-25 用真实的本地 HTTP 流式服务、默认进程 worker、不替换任何代码的独立脚本复现：请求期限 5 秒、响应 0.4 秒即可收完，另一行在上游报错后，在途请求被切断（服务端看到客户端提前断开），运行账本里该调用没有响应，只记了一条错误。`tests/test_prompt_http_stream.py::test_service_stop_drains_paid_response_but_does_not_publish_partial_success` 中期限 2 秒的两个参数因此固定失败；期限 0.1 秒的两个参数在测试的线程 worker 加模拟传输下随时序其一失败（偶尔连错误也没记），真实 HTTP 下每次都记下了错误。原测试在驱动进程里替换 HTTP 客户端、靠闭包对象和 `asyncio.Event` 跨阶段传信号，在 v3 里一直测不到这个场景；已改为线程 worker、文件信号，并按运行记录核对"没有发布部分结果"。另：prompt 后面若接其他算子，有限输入的 action 会等上游全部完成后才开始 prompt，因此测试里 prompt 后面不接算子。
+- **依据。** 2026-11-25 用真实的本地 HTTP 流式服务、默认进程 worker、不替换任何代码的独立脚本复现：请求期限 5 秒、响应 0.4 秒即可收完，另一行在上游报错后，在途请求被切断（服务端看到客户端提前断开），运行账本里该调用没有响应，只记了一条错误。`tests/test_prompt_http_stream.py::test_service_stop_drains_paid_response_but_does_not_publish_partial_success` 已改为同样的写法（真实 HTTP、默认 worker、文件信号、按运行记录核对"没有发布部分结果"）：期限 5 秒、响应 0.4 秒的两个参数固定失败（账本里 `responses` 为 0），期限 1 秒、响应 2 秒的两个参数固定通过；连跑 8 轮结果一致。原测试在驱动进程里替换 HTTP 客户端、靠闭包对象和 `asyncio.Event` 跨阶段传信号，在 v3 里一直测不到这个场景；期间一版用 0.1 秒期限的写法时过时不过，原因是请求自己的超时与上游报错几乎同时发生、谁先成为 action 的失败原因不确定，已把两者在时间上拉开。另：prompt 后面若接其他算子，有限输入的 action 会等上游全部完成后才开始 prompt，因此测试里 prompt 后面不接算子。
 - **建议。** 对齐实现与文档：action 失败或取消时，在途的 prompt 调用在其期限内收完并记录响应，超过期限的记为传输错误。
 
 ### T-029 工作台读不到托管运行的模型调用证据
@@ -179,15 +179,9 @@
 - **现象。** 自 `31c779c6`（main-20261125-20，合入 `eafb549a`）起，封存业务依赖时会读取源码里的绝对 `import`，并且只在该模块已被本进程加载（`sys.modules`）时才计入依赖（`execution/seal/business_sources.py::_ast_import_dependencies`）。驱动进程与 worker 进程加载过的模块不同，两边算出的依赖集合就不同，worker 加载程序时报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`，代码并没有改。
 - **依据（不经过 pytest 的用户写法，2026-11-25）。** 业务函数体内 `import biz_extra`，驱动进程此前已导入过 `biz_extra`：进程 worker 下，`40c0034a`（改动前）正常，最新 main `c00afcb3` 失败；驱动进程没有提前导入时，前后都正常。
 - **同一改动修好了更大的真实问题，不要回退。** 使用相对导入的业务包（顶层 `from ._consts import X`、函数体内 `from . import _lazy`）在 `40c0034a` 上用进程 worker 运行 map、map+reduce、运行内 materialize 全部以 `CORRUPT_ARTIFACT` 加载失败，改动后全部通过。
-- **对测试的影响。** `tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，改动前 23 过 2 败，改动后 23 败 2 过；`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个由通过变为失败；多个文件同会话运行时还有更多测试出现同一报错。都是同一机制：场景模块在函数体内导入了其他测试模块，pytest 进程早已加载它们，worker 没有。
+- **对测试的影响。** `tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，改动前 23 过 2 败，改动后 23 败 2 过；`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个由通过变为失败；`tests/test_runtime_v3_thread_host.py` 整文件运行时有 4 个同样报错（只挑这 4 个用例单独运行则通过）；多个文件同会话运行时还有更多测试出现同一报错。都是同一机制：场景模块在函数体内导入了其他测试模块，pytest 进程早已加载它们，worker 没有。
 - **建议。** 绝对导入的依赖不要按"本进程是否已加载"来确定：改为与相对导入一样按文件系统解析，或只在封存时确定依赖并写入清单，worker 按清单核对而不重新发现。修好后上述测试和用户写法的复现都应通过。
 - **更正。** 本条 11-25 首次发布（main-20261125-37）时写的是"修复或回退"，并把影响描述为路由图与恢复程序被拒绝加载；当时只有测试证据。经独立脚本核实后改为以上内容。
-
-### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
-
-- **现象。** `search_vectors` 的查询向量不合法（空、维度不对、非有限、非数值）或超过 `max_query_dimensions` 时，worker 里抛出 `InvalidLanceRequest`；结果超过 `max_result_bytes` / `max_python_result_bytes` 时抛出 `MemoryError`。调用方拿到的都是 `DataflowError: INTERNAL_PROTOCOL`，无法按类型捕获，也被归为内部错误。
-- **依据。** worker 失败按 `execution/contracts/dataflow_failures.py` 的 `_KNOWN` 名单恢复类型，不在名单里的一律成为 `INTERNAL_PROTOCOL`。11-24 的 `e908557c` 为 prompt 错误做过同样的修复（"They were not in the fixed failure vocabulary, so the caller … could not catch the prompt error"）。`tests/test_vector_search_stream.py` 中 `test_invalid_queries_fail_instead_of_dropping_rows` 7 个与 `test_query_and_result_byte_admission` 因此失败。`docs/vector_search.md` 写的是"超限明确报错"。
-- **建议。** 把 `demiflow.errors.InvalidLanceRequest` 和 `MemoryError` 加入失败类型名单（后者带原消息）；修好后这 8 个测试应通过。
 
 ### T-031 向量检索的资源统计缺失
 
@@ -214,6 +208,10 @@
 - **建议。** 引擎负责人指出新路径里对应的有界性观察点（或确认这些界限已由别的测试覆盖），据此改写探测；后三个需逐一判断是行为变化还是性能退步。在此之前这 5 个测试保持失败。
 
 ## 已完成
+
+### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
+
+已修（2026-11-25，用户同意改平台）。`execution/contracts/dataflow_failures.py` 的失败类型名单加入 `demiflow.errors.InvalidLanceRequest` 和内置的 `MemoryError`，与 11-24 `e908557c` 对 prompt 错误的做法相同；调用方拿到的是节点抛出的类型。`tests/test_vector_search_stream.py` 中原先因此失败的 8 个测试通过，新增 `tests/test_runtime_v3_lance_failure_types.py` 做类型往返检查。驱动端已有的两处 `MemoryError` 处理是本进程内的解码与序列化，不受影响。提交 `49f4d760`。
 
 ### T-015 已删除的过时测试里，仍然有效但现在没有测试的保证
 
