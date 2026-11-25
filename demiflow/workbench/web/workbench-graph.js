@@ -57,7 +57,7 @@
   }
 
   /* C05: bounded DAG layering + fork layout, stable in model order, O(V+E). */
-  function layoutGraph(model, {width = 0, nodeWidth = 200, nodeHeight = 100, gapX = 36, gapY = 20, direction = 'horizontal'} = {}) {
+  function layoutGraph(model, {width = 0, nodeWidth = 228, nodeHeight = 108, gapX = 36, gapY = 20, direction = 'horizontal'} = {}) {
     const nodes = model.nodes, edges = model.edges;
     if (nodes.length > MAX_NODES || edges.length > MAX_EDGES) throw new Error('图超过显示预算');
     // Reserve readable space for declared branch/merge labels in horizontal mode.
@@ -301,10 +301,10 @@
       for (const card of model.nodes) {
         const p = pos.get(card.key); if (!p) continue;
         const group = svg('g', {class: 'wb-node', transform: `translate(${p.x} ${p.y})`, tabindex: 0, role: 'button', 'aria-pressed': 'false'});
-        const kindText = svg('text', {x: 14, y: 22, class: 'wb-node-kind'});
-        const titleLines = [svg('text', {x: 14, y: 42, class: 'wb-node-title'}), svg('text', {x: 14, y: 60, class: 'wb-node-title'})];
-        const summaryLines = [78,94].map(y=>svg('text', {x:14,y,class:'wb-node-summary'}));
-        const stateText = svg('text', {x: 14, y: 94, class: 'wb-node-state'});
+        const kindText = svg('text', {x: 14, y: 20, class: 'wb-node-kind'});
+        const titleLines = [svg('text', {x: 14, y: 39, class: 'wb-node-title'}), svg('text', {x: 14, y: 57, class: 'wb-node-title'})];
+        const summaryLines = [79, 95].map(y => svg('text', {x: 14, y, class: 'wb-node-summary'}));
+        const stateText = svg('text', {x: 14, y: 97, class: 'wb-node-state'});
         const tip = svg('title', {});
         group.append(svg('rect', {width: p.width, height: p.height, rx: 10}), kindText, ...titleLines, ...summaryLines, stateText, tip);
         const activate = () => {if (!disposed) onSelect(card.selection);};
@@ -318,17 +318,25 @@
       const el = elements.get(card.key); if (!el) return;
       el.card = card;
       const memberCount = card.occurrences.length;
-      el.kindText.textContent = fitWidth(card.kindLabel + (memberCount > 1 ? ' · ×' + memberCount : ''), el.width - 28, 12);
-      const titleLines = wrapText(card.title, el.width - 28, 14, 2);
+      el.kindText.textContent = fitWidth(card.kindLabel + (memberCount > 1 ? ' · ×' + memberCount : ''), el.width - 28, 11);
+      const titleLines = wrapText(card.title, el.width - 28, 13.5, 2);
       el.titleLines.forEach((node, i) => {node.textContent = titleLines[i] || '';});
-      const summary=visibleSummary(card),preview=currentModel?.choice.kind==='preview';
-      const lines=preview?wrapText(summaryText(summary[0]),el.width-28,12,2):[fitWidth(summaryText(summary[0]),el.width-28,12)];
-      el.summaryLines.forEach((node,i)=>{node.textContent=lines[i]||'';});
-      el.stateText.textContent = preview?'':fitWidth((TONE_GLYPH[card.state.tone] || '') + card.state.label, el.width - 28, 12);
+      const summary = visibleSummary(card), preview = currentModel?.choice.kind === 'preview';
+      const apiExpr = typeof card.apiExpr === 'string' && card.apiExpr.trim() ? card.apiExpr.trim() : '';
+      if (apiExpr) {
+        el.summaryLines[0].setAttribute('class', 'wb-node-api');
+        el.summaryLines[0].textContent = fitWidth(apiExpr, el.width - 28, 11.5);
+        el.summaryLines[1].textContent = '';
+      } else {
+        el.summaryLines[0].setAttribute('class', 'wb-node-summary');
+        const lines = preview ? wrapText(summaryText(summary[0]), el.width - 28, 12, 2) : [fitWidth(summaryText(summary[0]), el.width - 28, 12)];
+        el.summaryLines.forEach((node, i) => {node.textContent = lines[i] || '';});
+      }
+      el.stateText.textContent = preview ? '' : fitWidth((TONE_GLYPH[card.state.tone] || '') + card.state.label, el.width - 28, 11.5);
       el.group.dataset.state = card.state.tone;
-      const facts = summary.map(summaryText).filter(Boolean);
+      const facts = [...(apiExpr ? [apiExpr] : []), ...summary.map(summaryText)].filter(Boolean);
       el.group.setAttribute('aria-label', card.title + ' · ' + card.kindLabel + (facts.length ? ' · ' + facts.join(' · ') : '') + ' · ' + card.state.label);
-      el.tip.textContent = card.title + '\n' + card.kindLabel + (memberCount>1 ? '\n共 ' + memberCount + ' 次出现' : '') + (facts.length ? '\n' + facts.join('\n') : '') + '\n' + card.state.label + '\n点击查看 API 接口、输入、输出和自定义实现';
+      el.tip.textContent = card.title + (apiExpr ? '\n' + apiExpr : '') + '\n' + card.kindLabel + (memberCount > 1 ? '\n共 ' + memberCount + ' 次出现' : '') + (facts.length ? '\n' + facts.join('\n') : '') + '\n' + card.state.label + '\n点击查看接线与行为实现';
     }
     function renderNotices(model) {
       notices.replaceChildren();

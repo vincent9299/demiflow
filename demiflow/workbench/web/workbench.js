@@ -940,7 +940,9 @@
       const preview=planPreview,selected=previewSelection;
       const node=preview.dag.nodes.find(n=>n.occurrence_id===selected.occurrenceId&&n.logical_node_id===selected.logicalNodeId);
       const ticket=state.capture(),sequence=++sourceSequence;
-      sourceTitle.textContent=node?.label||node?.op_kind||'节点详情';
+      const previewApiExpr=presentation.compactApiExpr?.(node?.api_call,node?.label,node?.data_source)||'';
+      sourceTitle.textContent=previewApiExpr||node?.label||node?.op_kind||'节点详情';
+      sourceTitle.classList.toggle('wb-source-title-api',!!previewApiExpr);
       const kinds=['prompt','implementation','callsite','configuration','schema'].filter(k=>node?.source_views?.[k]?.available);
       if(!kinds.length){sourceTabs.hidden=true;sourceBody.append($('p','本节点尚无绑定材料。','wb-caption'));return;}
       const basis={kind:'preview',entry:preview.basis.entry,params:preview.basis.params,digest:preview.basis.digest,dag_id:preview.basis.dag_id};
@@ -1026,7 +1028,9 @@
         disposeReaders(sourceBody);sourceBody.replaceChildren();
         wiringPane.replaceChildren();behaviorPane.replaceChildren();
         const byKind=Object.fromEntries(kinds.map((k,i)=>[k,values[i]]));
-        sourceTitle.textContent=reportNode?.display_label||reportNode?.operator?.name||reportNode?.label||'算子详情';
+        const sealedApiExpr=presentation.compactApiExpr?.(reportNode?.api_call,reportNode?.operator?.name||reportNode?.label,reportNode?.data_source)||'';
+        sourceTitle.textContent=sealedApiExpr||reportNode?.display_label||reportNode?.operator?.name||reportNode?.label||'算子详情';
+        sourceTitle.classList.toggle('wb-source-title-api',!!sealedApiExpr);
         if(reportNode?.description)sourceBody.append($('p',reportNode.description,'wb-node-semantic-desc'));
         const cfgVal=byKind.configuration,callVal=byKind.callsite;
         if(cfgVal&&cfgVal.availability!=='unavailable'){
