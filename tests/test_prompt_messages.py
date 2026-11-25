@@ -38,7 +38,7 @@ def test_http_exact_history_replay_and_changed_assistant(server, tmp_path):
     before = copy.deepcopy(messages)
     options = {'sqlite_journal': {'path': str(tmp_path / 'calls.sqlite'), 'max_requests': 2}}
     for i in range(2):
-        rows = node(messages, options=options).checkpoint(tmp_path / f'out{i}.jsonl', version='v1').take_all()
+        rows = node(messages, options=options).take_all()
         assert rows[0]['answer'] == '{"result": "ok"}'
     assert len(server['requests']) == 1
     assert messages == before
@@ -56,14 +56,14 @@ def test_offline_preserves_history_and_plain_text(tmp_path):
     request = next((tmp_path / 'offline/requests').glob('*.json'))
     assert json.loads(request.read_text())['messages'] == history()
     submit_response(request, tmp_path / 'offline/responses' / request.name, 'a sheep\nan oil painting', model='mock-model')
-    rows = node(history(), options=options).checkpoint(tmp_path / 'out.jsonl', version='v1').take_all()
+    rows = node(history(), options=options).take_all()
     assert rows[0]['answer'] == 'a sheep\nan oil painting'
 
 
-def test_sse_plain_text_and_sync_parity(sse_server, tmp_path):
+def test_sse_plain_text_and_sync_parity(sse_server):
     sse_server['respond'] = lambda body, index: event(chunk('caption\n', 'stop')) + event('[DONE]')
     options = {'stream': True, 'verify_model': False}
-    rows = node(history(), options=options).checkpoint(tmp_path / 'out.jsonl', version='v1').take_all()
+    rows = node(history(), options=options).take_all()
     assert rows[0]['answer'] == 'caption\n'
     rows = DataAPI().from_items([{'m': history()}]).map_prompt('enrich', config=pack(),
         inputs={'messages': 'm'}, output='answer', options=options).take_all()
@@ -108,8 +108,8 @@ def test_image_limit_and_unsupported_inputs():
             validate_messages(value)
 
 
-def test_bad_row_never_calls_provider_and_counter_covers_history(server, tmp_path):
-    rows = node([{'role': 'tool', 'content': 'bad'}]).checkpoint(tmp_path / 'out.jsonl', version='v1').take_all()
+def test_bad_row_never_calls_provider_and_counter_covers_history(server):
+    rows = node([{'role': 'tool', 'content': 'bad'}]).take_all()
     assert rows[0]['error'] and not server['requests']
     assert CharacterCounter().prompt(pack().prompt_definitions['enrich'], {'messages': history()}) == CharacterCounter().messages(history())
 

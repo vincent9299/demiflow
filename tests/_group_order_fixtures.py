@@ -10,16 +10,18 @@ def install_group_order_probe(tmp_path, monkeypatch):
     script = '''import os
 if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
     from demiflow.execution.kernels import relational, ordering
+    from demiflow.operators.ordering import SORT_FRAME_OVERHEAD
     from _worker_event_fixtures import emit
     original_build, original_write = relational.build_sort_runs, ordering._write_run
     active = []
     def observed_write(frames, services):
         if active:
             proof = active[-1]
-            resident = sum(len(frame[2]) + ordering._FRAME_OVERHEAD for frame in frames)
+            resident = sum(len(frame[2]) + SORT_FRAME_OVERHEAD for frame in frames)
             assert resident <= services.bounds.max_resident_bytes
             proof['max_run_resident_bytes'] = max(proof['max_run_resident_bytes'], resident)
-            for key, provenance, raw in frames:
+            for frame in frames:
+                key = frame[0]
                 # Only the configured group key enters comparisons. Wide
                 # payload remains an opaque serialized frame, never a key.
                 assert len(key) == len(proof['keys'])
@@ -28,7 +30,7 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
                 proof['max_key_bytes'] = max(proof['max_key_bytes'], sum(len(token[1]) for token in key))
             proof['rows'] += len(frames)
         return original_write(frames, services)
-    def observed_build(records, *, spec, services):
+    def observed_build(records, *, spec, services, **options):
         proof = dict(keys=list(spec.configuration['keys']), rows=0,
             max_key_bytes=0, max_run_resident_bytes=0, runs=0,
             max_resident_bytes=services.bounds.max_resident_bytes,
@@ -37,7 +39,7 @@ if 'DEMIFLOW_WORKER_CONTROL_FD' in os.environ:
         assert len(active) < 8
         active.append(proof)
         try:
-            refs = original_build(records, spec=spec, services=services)
+            refs = original_build(records, spec=spec, services=services, **options)
             proof['runs'] = len(refs)
             proof['spill_bytes'] = sum(ref.size_bytes for ref in refs)
             emit(LOG_PATH, 'group_sort', **proof)

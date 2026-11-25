@@ -6,6 +6,7 @@ import httpx
 import pyarrow as pa
 import pytest
 from demiflow import data
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.collect.reading import select_blocks
 from demiflow.collect.documents import canonical, parse_document
 
@@ -54,7 +55,7 @@ def test_empty_snapshot_and_failure_cleanup(tmp_path):
 def test_duplicate_targets_rejected_before_mutation(tmp_path):
     schema=pa.schema([('id',pa.string())]);uri=tmp_path/'out.lance'
     stream=data.from_items([]).save_lance(uri,schema=schema,key='id',stage='a').save_lance(uri,schema=schema,key='id',stage='b')
-    with pytest.raises(ValueError,match='Duplicate'): stream.run_stream()
+    with pytest.raises(DataflowError,match='targets and stage names must be unique'): stream.run_stream()
     assert not uri.exists()
 
 

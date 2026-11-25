@@ -42,20 +42,24 @@ def test_readonly_runtime_never_starts_service_even_without_zero_budget(server, 
     path = tmp_path / 'calls.sqlite'
     options = {'sqlite_journal': {'path': str(path)}}
     prompt(data.from_items([{'item': 'saved'}]), options=options).materialize()
-    from demiflow.services import VLLMService
-    class ForbiddenService(VLLMService):
-        def __init__(self):
-            pass
-        def bind(self, model):
-            return self
-        async def ensure_ready(self):
-            raise AssertionError('Read-only replay started a service')
-        async def release(self):
-            raise AssertionError('Read-only replay acquired a service')
+    import os
+    import sys
+    from demiflow.services import ManagedHTTPService
+    # A passive service declaration at the saved endpoint. Starting it fails on the occupied
+    # port (the fixture server) or, failing that, its process leaves a marker.
+    started = tmp_path / 'service-started'
+    script = tmp_path / 'service.py'
+    script.write_text('import pathlib, sys\npathlib.Path(sys.argv[1]).touch()\nraise SystemExit(3)\n')
+    endpoint = os.environ['TEST_PROMPT_URL']  # the endpoint the saved calls were made to
+    service = ManagedHTTPService([sys.executable, str(script), str(started)], base_url=endpoint,
+                                 root=tmp_path / 'service', startup_timeout_s=5, shutdown_timeout_s=.5,
+                                 readiness_timeout_s=.2, poll_interval_s=.01,
+                                 resource_directory=tmp_path / 'service-ports')
     result = prompt(data.from_items([{'item': 'saved'}, {'item': 'new'}]),
                     options={'sqlite_journal': {'path': str(path), 'read_only': True}},
-                    error_output='error', service=ForbiddenService()).materialize().take_all()
+                    error_output='error', service=service).materialize().take_all()
     by_item = {r['item']: r for r in result}
     assert by_item['saved']['answer'] == 'ok'
     assert by_item['new']['error']['type'] == 'PromptReplayMissError'
     assert len(server['requests']) == 1
+    assert not started.exists()
