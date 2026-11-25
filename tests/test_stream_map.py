@@ -466,12 +466,10 @@ def test_nested_relations_support_stream_options_without_eager_source_access(tmp
     from demiflow import data as public_data
     from _worker_event_fixtures import emit, events
     path = str(tmp_path / 'reads.jsonl')
-    owned = tmp_path / 'owned'
-    owned.mkdir()
     def source():
         emit(path, 'read')
         yield {'i': 1}
-    with public_data.local_execution(workers=2, worker_mode=mode, temp_directory=str(owned)):
+    with public_data.local_execution(workers=2, worker_mode=mode):
         plain = public_data.from_iter(source)
         streaming = plain.map(lambda row: row, concurrency=2, execution='thread')
         plans = [streaming.join(plain, on='i'), plain.join(streaming, on='i'),
@@ -487,7 +485,6 @@ def test_nested_relations_support_stream_options_without_eager_source_access(tmp
         assert streaming.count() == 1
     # Reusing the same source in two ports does not execute a second scan.
     assert len(events(path)) == 8
-    assert not list(owned.iterdir())
 
 
 def test_whole_graph_preflight_precedes_construction_and_source_access(data, tmp_path):

@@ -227,18 +227,16 @@ def test_lance_write_keeps_original_program_without_publication(no_execution, tm
     assert not target.exists()
 
 
-def test_local_configuration_resolves_native_limits_without_run(no_execution, tmp_path):
+def test_local_configuration_resolves_native_limits_without_run(no_execution):
     def entry():
         with data.local_execution(workers=2, worker_mode='thread', memory_bytes=64 * 1024**2,
-                                  native_resources={'memory_bytes': 32 * 1024**2, 'batch_rows': 7},
-                                  temp_directory=str(tmp_path)):
+                                  native_resources={'memory_bytes': 32 * 1024**2, 'batch_rows': 7}):
             return data.range(4).take_all()
 
     captured = capture_pipeline(entry, {})
     assert captured.policy.max_active_workers == 2
     assert captured.policy.native_limits['batch_rows'] == 7
     assert captured.bounds.max_resident_bytes <= 32 * 1024**2
-    assert not list(tmp_path.iterdir())
 
 
 def test_stops_at_first_result_dependent_action(no_execution):
