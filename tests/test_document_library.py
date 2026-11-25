@@ -11,6 +11,7 @@ from demiflow import data
 from demiflow.collect.contracts import DOCUMENT_RESULT
 from demiflow.collect.document_library import DocumentLibrary
 from demiflow.collect.documents import DocumentError,read_document,store_document
+from _row_capture import run_stream_rows as capture
 URL='https://source.example/page'
 
 @pytest.fixture
@@ -22,11 +23,6 @@ def existing(tmp_path, text=b'Original content', date='2026-01-01T00:00:00+00:00
     return store_document(tmp_path/'original', text, url=URL, final_url=URL,
                           content_type='text/plain', retrieved_at=date)
 
-
-def capture(stream):
-    rows=[]
-    stats=stream.map(lambda r:rows.append(r) or r).run_stream()
-    return rows,stats
 
 
 def test_native_registration_copies_objects_and_fetch_uses_them(tmp_path,library,monkeypatch):

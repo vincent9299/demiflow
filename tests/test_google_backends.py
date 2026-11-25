@@ -13,6 +13,7 @@ from demiflow.collect import SearchConfig
 from demiflow.collect.native_search import NativeSearchSession
 from demiflow.collect.native_search.google_search import parse_page
 from demiflow.collect.session import WebSession
+from _row_capture import run_stream_rows
 
 
 @pytest.mark.parametrize('content,url,code,status', [
@@ -204,9 +205,8 @@ def test_dataset_http_backend_receipt_schema(site,tmp_path):
     from demiflow.collect.contracts import SEARCH_RESULT
     import pyarrow as pa
     web=WebSession(cache_path=tmp_path/'dataset.sqlite',object_directory=tmp_path/'objects',search=config(site,'http'))
-    rows=[]
-    data.from_items([{'requests':[{'request_id':'one','query':'plain'}]}]).search_web(
-        requests='requests',output='results',session=web).map(lambda r:rows.append(r) or r).run_stream()
+    rows,_=run_stream_rows(data.from_items([{'requests':[{'request_id':'one','query':'plain'}]}]).search_web(
+        requests='requests',output='results',session=web))
     value=rows[0]['results'][0]
     table=pa.Table.from_pylist([{'result':value}],schema=pa.schema([('result',SEARCH_RESULT)]))
     assert table.to_pylist()[0]['result']['engine_receipts'][0]['backend']=='http'
