@@ -421,3 +421,103 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
         parameter_digests={},
     )
     assert clean_diags == [], clean_diags
+
+
+def test_mece_operator_richness_anti_bypass_rules(tmp_path):
+    """Verify MECE OP-L1/OP-L2/OP-O1/OP-O2/OP-S1 checks block shadow private mirrors and re-export workarounds."""
+    proj = tmp_path / 'mece-proj'
+    initialize_project(proj, name='MECE Project')
+    (proj / 'flows').mkdir()
+    (proj / 'operators').mkdir()
+    (proj / 'configs').mkdir()
+    (proj / 'configs' / 'demo.json').write_text('{}', encoding='utf-8')
+
+    # OP-L2c: Flow directly importing a private operators/_*.py utility is blocked.
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow.data import range\n'
+        'from operators import wrapped, _codec\n'
+        'def run():\n'
+        '    return range(2).map(wrapped.pool_group, inputs={"row": "id"}, output="y").count()\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / '_codec.py').write_text(
+        'def pack(row):\n'
+        '    return {"packed": row}\n'
+        'def unpack(row):\n'
+        '    return row.get("packed")\n',
+        encoding='utf-8',
+    )
+    # OP-L2a (1:1 shadow mirror of wrapped.py) + OP-L2b (private importing another private module)
+    (proj / 'operators' / '_wrapped.py').write_text(
+        'from ._codec import pack\n'
+        'def hidden_op(row):\n'
+        '    return pack(row)\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'base.py').write_text(
+        'def seed(row):\n'
+        '    """生成基础种子行。"""\n'
+        '    return {"seed": row}\n',
+        encoding='utf-8',
+    )
+    # OP-O2 (re-exporting unpack without internal use) + OP-O1 (thin wrapper to _codec.pack)
+    # + OP-L1 (nested lazy import of public base inside function body)
+    (proj / 'operators' / 'wrapped.py').write_text(
+        'from ._codec import pack, unpack\n'
+        'def fwd(row):\n'
+        '    """仅转调私有工具的薄壳。"""\n'
+        '    return pack(row)\n'
+        'def pool_group(row):\n'
+        '    """在函数内延迟导入另一公开算子模块。"""\n'
+        '    from . import base\n'
+        '    out = base.seed(row)\n'
+        '    out["p"] = pack(row)\n'
+        '    return out\n',
+        encoding='utf-8',
+    )
+    register_flow(proj, 'flows/demo.py:run', params='configs/demo.json')
+    _, control = load_project(proj)
+
+    _, diags = check_project_hygiene(
+        proj, control,
+        checked_sources={
+            'flows/demo.py', 'operators/_codec.py', 'operators/_wrapped.py',
+            'operators/base.py', 'operators/wrapped.py',
+        },
+        parameter_digests={},
+    )
+    by_path: dict[str, list[str]] = {}
+    for d in diags:
+        by_path.setdefault(d['path'], []).append(d['detail'])
+
+    assert any('Flow 直接导入了私有工具模块' in m for m in by_path.get('flows/demo.py', [])), diags
+    assert any('1:1 影子私仓' in m for m in by_path.get('operators/_wrapped.py', [])), diags
+    assert any('纯底层叶节点工具' in m for m in by_path.get('operators/_wrapped.py', [])), diags
+    assert any('无逻辑垫片' in m and 'fwd' in m for m in by_path.get('operators/wrapped.py', [])), diags
+    assert any('公开业务算子模块导入了另一公开算子模块' in m and 'base' in m for m in by_path.get('operators/wrapped.py', [])), diags
+    assert any('直接重导出了私有模块函数/类' in m and 'unpack' in m for m in by_path.get('operators/wrapped.py', [])), diags
+
+    # Clean fix: remove shadow mirror, remove Flow private import, keep only internal _codec.pack call.
+    (proj / 'operators' / '_wrapped.py').unlink()
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow.data import range\n'
+        'from operators import wrapped\n'
+        'def run():\n'
+        '    return range(2).map(wrapped.pool_group, inputs={"row": "id"}, output="y").count()\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'wrapped.py').write_text(
+        'from ._codec import pack\n'
+        'def pool_group(row):\n'
+        '    """打包并标记候选池条目。"""\n'
+        '    out = pack(row)\n'
+        '    out["tag"] = "clean"\n'
+        '    return out\n',
+        encoding='utf-8',
+    )
+    _, clean_diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/_codec.py', 'operators/base.py', 'operators/wrapped.py'},
+        parameter_digests={},
+    )
+    assert clean_diags == [], clean_diags
