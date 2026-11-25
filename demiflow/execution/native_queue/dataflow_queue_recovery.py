@@ -68,7 +68,7 @@ def restore_claims(service, value, *, has_cut):
                 or descriptor['domain'] != source.namespace.domain
                 or descriptor['task_id'] in restored):
             raise DataflowError('FENCED', 'Native queue cut changed original ownership')
-        row = service._read_json(row_ref, max_bytes=service._services.bounds.max_row_bytes)
+        row = service._read_row(row_ref, max_bytes=service._services.bounds.max_row_bytes)
         display = dict(task_id=descriptor['task_id'], fingerprint=descriptor['fingerprint'], attempt=descriptor['epoch'])
         if type(row) is not dict or row.get('_queue_delivery') != display:
             raise DataflowError('CORRUPT_ARTIFACT', 'Native queue cut row lost original delivery')
@@ -93,7 +93,7 @@ def restore_claims(service, value, *, has_cut):
         claim.descriptor = descriptor
         if entry['receipt_ref'] is not None:
             claim.receipt_row_ref = ArtifactRef(**entry['receipt_ref'])
-            claim.receipt_row = service._read_json(claim.receipt_row_ref, max_bytes=service._services.bounds.max_row_bytes)
+            claim.receipt_row = service._read_row(claim.receipt_row_ref, max_bytes=service._services.bounds.max_row_bytes)
             claim.acquisition_fact = acquisition_fact(claim.receipt_row, output=service._fetch.output, channel=source.channel, journal=service._action.context.journal)
         if proof is not None:
             with source.channel.database.connection() as db:
@@ -103,7 +103,7 @@ def restore_claims(service, value, *, has_cut):
                 raise DataflowError('UNKNOWN_EFFECT', 'Original native completion is not acknowledged')
             if claim.receipt_row is None:
                 claim.receipt_row = {**row, service._fetch.output: claim.acquisition_fact['prepared']['sinks']['raw']['result']}
-                claim.receipt_row_ref = service._put_json(claim.receipt_row, media_type='application/json', max_bytes=service._services.bounds.max_row_bytes)
+                claim.receipt_row_ref = service._put_row(claim.receipt_row, max_bytes=service._services.bounds.max_row_bytes)
             claim.finalized = True
         restored[descriptor['task_id']] = claim
     with service._lock:
