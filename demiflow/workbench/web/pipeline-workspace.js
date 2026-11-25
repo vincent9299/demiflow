@@ -1,4 +1,8 @@
-/* Unified Pipeline workspace: collapsible left sidebar (大纲|文件|运行) + single-focus center (DAG|代码) + right docked drawer (节点详情|开发助手). */
+/* Unified Pipeline workspace:
+ * - Left collapsible sidebar: 管线 (result flows) | 会话 (multi-session chat) | 组件 (reusable outline) | 文件 (workspace tree)
+ * - Center wide stage: 管线画布 (DAG + pipeline runs) ⇄ 管线开发助手会话 (wide multi-session assistant)
+ * - Right collapsible/resizable supplementary panel (补充信息区): auto-switches between 节点详情 and 代码/组件阅读器 based on interaction.
+ */
 (() => {
   'use strict';
   const el = (tag, text, cls) => {
@@ -18,10 +22,6 @@
     }
     return svg;
   };
-  const runStatusLabel = {
-    pending: '未开始', prepared: '已准备', starting: '启动中', running: '运行中',
-    stopping: '停止中', succeeded: '成功', failed: '失败', cancelled: '已取消', interrupted: '中断',
-  };
 
   async function mount(options) {
     const {
@@ -32,24 +32,25 @@
     } = options;
 
     let disposed = false, workbenchHandle = null, devHandle = null;
-    let sidebarTab = 'outline', drawerOpen = false, drawerTab = 'assistant', codeOpen = false;
-    const drawerStorageKey = 'demiflow-pipeline-drawer:' + workspaceId;
+    let currentContext = context;
+    let sidebarTab = 'flows', stageMode = 'canvas', rightMode = null;
 
     main.classList.add('pipeline-workspace-active');
     const root = el('div', undefined, 'pw-workspace');
     main.append(root);
 
-    // 1. Left collapsible sidebar (大纲 | 文件 | 运行)
+    // 1. Left collapsible sidebar (管线 | 会话 | 组件 | 文件)
     const sidebar = el('aside', undefined, 'pw-sidebar');
     sidebar.setAttribute('aria-label', '管线导航');
     const navigation = ForgeNavigation.header({
       title: '管线',
-      searchLabel: '搜索大纲、文件或运行',
-      placeholder: '搜索大纲、文件或运行',
+      searchLabel: '搜索管线、会话、组件或文件',
+      placeholder: '搜索管线、会话、组件或文件',
       onSearch: () => {
         const q = navigation.search.value;
+        workbenchHandle?.filterFlows?.(q);
+        devHandle?.setSessionFilter?.(q);
         devHandle?.files?.setFilter(q);
-        if (sidebarTab === 'runs') renderRunsList();
       },
     });
     const sideTabs = el('div', undefined, 'dev-sidebar-tabs');
@@ -63,168 +64,122 @@
       b.append(tabSvg(paths));
       return b;
     };
-    const outlineBtn = makeSideTab('大纲', ['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01'], true);
+    const flowsBtn = makeSideTab('管线', ['M6 3v12', 'M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M18 9a9 9 0 0 1-9 9'], true);
+    const sessionsBtn = makeSideTab('会话', ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z']);
+    const componentsBtn = makeSideTab('组件', ['M8 6h13', 'M8 12h13', 'M8 18h13', 'M3 6h.01', 'M3 12h.01', 'M3 18h.01']);
     const filesBtn = makeSideTab('文件', ['M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z']);
     const filesBadge = el('span', '0', 'dev-change-badge'); filesBadge.hidden = true;
     filesBtn.append(filesBadge);
-    const runsBtn = makeSideTab('运行', ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5', 'M12 7v5l3 2']);
-    sideTabs.append(outlineBtn, filesBtn, runsBtn);
+    sideTabs.append(flowsBtn, sessionsBtn, componentsBtn, filesBtn);
 
-    const outlinePane = el('div', undefined, 'pw-sidebar-pane');
+    const flowsPane = el('div', undefined, 'pw-sidebar-pane pw-flows-pane');
+    const sessionsPane = el('div', undefined, 'pw-sidebar-pane'); sessionsPane.hidden = true;
+    const componentsPane = el('div', undefined, 'pw-sidebar-pane'); componentsPane.hidden = true;
     const filesPane = el('div', undefined, 'pw-sidebar-pane'); filesPane.hidden = true;
-    const runsPane = el('div', undefined, 'pw-sidebar-pane'); runsPane.hidden = true;
-    const runsHead = el('div', undefined, 'pw-runs-head');
-    const runsAllBtn = el('button', '查看运行监控'); runsAllBtn.type = 'button';
-    runsAllBtn.onclick = () => { showCode(false); workbenchHandle?.showPage?.('monitor'); };
-    const runsRefreshBtn = el('button', '刷新'); runsRefreshBtn.type = 'button';
-    runsRefreshBtn.onclick = () => loadRuns(true);
-    runsHead.append(runsAllBtn, runsRefreshBtn);
-    const runsList = el('div');
-    runsPane.append(runsHead, runsList);
-    sidebar.append(navigation.element, sideTabs, outlinePane, filesPane, runsPane);
+    sidebar.append(navigation.element, sideTabs, flowsPane, sessionsPane, componentsPane, filesPane);
 
-    // 2. Center single-focus canvas (DAG/Run OR Code/Operator detail)
+    // 2. Center wide stage (管线画布 ⇄ 管线开发助手会话)
     const center = el('section', undefined, 'pw-center');
     const workbenchHost = el('div', undefined, 'pw-workbench-host');
-    const codeHost = el('div', undefined, 'pw-code-host'); codeHost.hidden = true;
-    const codeBar = el('div', undefined, 'pw-code-bar');
-    const backGraphBtn = el('button', '← 返回执行图', 'pw-back-graph'); backGraphBtn.type = 'button';
-    backGraphBtn.onclick = () => { showCode(false); devHandle?.files?.setOpen?.(false, {skipFocus: true}); };
-    const codeAssistantBtn = el('button', '开发助手', 'pw-assistant-toggle'); codeAssistantBtn.type = 'button';
-    codeAssistantBtn.onclick = () => toggleAssistant();
-    codeBar.append(backGraphBtn, codeAssistantBtn);
-    const codeBody = el('div', undefined, 'pw-code-body');
-    codeHost.append(codeBar, codeBody);
-    center.append(workbenchHost, codeHost);
+    const assistantHost = el('div', undefined, 'pw-assistant-host'); assistantHost.hidden = true;
+    center.append(workbenchHost, assistantHost);
 
-    // 3. Right single docked drawer (节点详情 | 开发助手) — never exceeds 3 columns, zero modals
+    // 3. Right collapsible & resizable supplementary panel (补充信息区: 节点详情 | 代码/组件阅读器)
     const drawer = el('aside', undefined, 'pw-drawer');
-    drawer.setAttribute('aria-label', '管线右侧面板');
+    drawer.setAttribute('aria-label', '补充信息区');
     drawer.hidden = true;
-    const drawerHead = el('header', undefined, 'pw-drawer-head');
-    const drawerTabs = el('div', undefined, 'pw-drawer-tabs');
-    drawerTabs.setAttribute('role', 'tablist');
-    drawerTabs.setAttribute('aria-label', '右侧面板');
-    const detailTabBtn = el('button', '节点详情', 'pw-drawer-tab');
-    detailTabBtn.type = 'button'; detailTabBtn.setAttribute('role', 'tab'); detailTabBtn.dataset.tab = 'detail';
-    const assistantTabBtn = el('button', '开发助手', 'pw-drawer-tab');
-    assistantTabBtn.type = 'button'; assistantTabBtn.setAttribute('role', 'tab'); assistantTabBtn.dataset.tab = 'assistant';
-    drawerTabs.append(detailTabBtn, assistantTabBtn);
-    const drawerClose = el('button', '×', 'pw-drawer-close');
-    drawerClose.type = 'button'; drawerClose.title = '收起右侧面板'; drawerClose.setAttribute('aria-label', drawerClose.title);
-    drawerHead.append(drawerTabs, drawerClose);
+    const detailPane = el('div', undefined, 'pw-drawer-pane'); detailPane.dataset.pane = 'detail'; detailPane.hidden = true;
+    const codePane = el('div', undefined, 'pw-drawer-pane'); codePane.dataset.pane = 'code'; codePane.hidden = true;
+    drawer.append(detailPane, codePane);
 
-    const detailPane = el('div', undefined, 'pw-drawer-pane'); detailPane.dataset.pane = 'detail';
-    const assistantPane = el('div', undefined, 'pw-drawer-pane'); assistantPane.dataset.pane = 'assistant';
-    drawer.append(drawerHead, detailPane, assistantPane);
     root.append(sidebar, center, drawer);
 
     const sidebarCollapse = ForgeNavigation.collapsible({layout: root, sidebar, header: navigation, label: '管线目录'});
-    const drawerResize = ForgeNavigation.resizable({layout: root, sidebar: drawer, label: '管线右侧面板', right: true, cssVar: '--pw-drawer-width', minWidth: 300, maxWidth: 680, minMain: 360, active: false});
+    const drawerResize = ForgeNavigation.resizable({
+      layout: root, sidebar: drawer, label: '补充信息区', right: true,
+      cssVar: '--pw-drawer-width', minWidth: 300, maxWidth: 760, minMain: 360, active: false,
+    });
+
+    const headerSourceBtn = el('button', '源码', 'pw-header-ghost');
+    headerSourceBtn.type = 'button';
+    headerSourceBtn.title = '查看当前管线源码';
+    headerSourceBtn.onclick = () => {
+      const entry = workbenchHandle?.currentEntry?.();
+      const filePath = entry ? String(entry).split(':')[0] : '';
+      if (filePath && devHandle?.files?.openFile) {
+        if (rightMode === 'code') {
+          devHandle.files.setOpen?.(false, {skipFocus: true});
+          setRightMode(null);
+        } else {
+          devHandle.files.openFile(filePath, 'source');
+        }
+      }
+    };
 
     const headerAssistantBtn = el('button', '开发助手', 'pw-assistant-toggle');
     headerAssistantBtn.type = 'button';
     headerAssistantBtn.setAttribute('aria-expanded', 'false');
-    headerAssistantBtn.onclick = () => toggleAssistant();
-
-    function showCode(open) {
-      codeOpen = !!open;
-      codeHost.hidden = !codeOpen;
-      workbenchHost.hidden = codeOpen;
-    }
-
-    function syncDrawer() {
-      root.dataset.drawer = drawerOpen ? 'open' : 'closed';
-      root.dataset.drawerTab = drawerTab;
-      drawer.hidden = !drawerOpen;
-      detailPane.hidden = drawerTab !== 'detail';
-      assistantPane.hidden = drawerTab !== 'assistant';
-      detailTabBtn.setAttribute('aria-selected', String(drawerTab === 'detail'));
-      assistantTabBtn.setAttribute('aria-selected', String(drawerTab === 'assistant'));
-      const asstExpanded = String(drawerOpen && drawerTab === 'assistant');
-      headerAssistantBtn.setAttribute('aria-expanded', asstExpanded);
-      codeAssistantBtn.setAttribute('aria-expanded', asstExpanded);
-      drawerResize.setActive(drawerOpen && !matchMedia('(max-width:900px)').matches);
-      try { sessionStorage.setItem(drawerStorageKey, JSON.stringify({open: drawerOpen, tab: drawerTab})); } catch {}
-    }
-
-    function openDrawer(tab) {
-      if (tab) drawerTab = tab;
-      drawerOpen = true;
-      syncDrawer();
-    }
-    function closeDrawer() {
-      drawerOpen = false;
-      workbenchHandle?.closeDetail?.();
-      syncDrawer();
-    }
-    function toggleAssistant() {
-      if (drawerOpen && drawerTab === 'assistant') closeDrawer();
-      else openDrawer('assistant');
-    }
-
-    detailTabBtn.onclick = () => openDrawer('detail');
-    assistantTabBtn.onclick = () => openDrawer('assistant');
-    drawerClose.onclick = () => closeDrawer();
-
-    let runRows = [], runsLoaded = false;
-    function renderRunsList() {
-      runsList.replaceChildren();
-      const q = navigation.search.value.trim().toLocaleLowerCase();
-      const items = runRows.filter(r => !q || [r.run_id, r.entry, r.status].join(' ').toLocaleLowerCase().includes(q));
-      if (!items.length) {
-        runsList.append(el('p', runsLoaded ? (q ? '没有匹配的运行记录。' : '暂无运行记录。') : '正在读取运行记录…', 'op-muted dev-op-pad'));
-        return;
+    headerAssistantBtn.onclick = () => {
+      if (stageMode === 'assistant') {
+        setStageMode('canvas');
+      } else {
+        setSidebarTab('sessions');
+        setStageMode('assistant');
       }
-      for (const item of items) {
-        const btn = el('button', undefined, 'pw-run-item'); btn.type = 'button';
-        const top = el('div', undefined, 'pw-run-item-top');
-        const name = (item.entry || item.run_id || '').split(':').pop();
-        top.append(el('span', name, 'pw-run-item-name'));
-        const st = el('span', runStatusLabel[item.status] || item.status || '', 'pw-run-item-status');
-        st.dataset.status = item.status || '';
-        top.append(st);
-        btn.append(top, el('span', item.run_id, 'pw-run-item-meta'));
-        btn.onclick = () => {
-          showCode(false);
-          devHandle?.files?.setOpen?.(false, {skipFocus: true});
-          navigate?.({v: 2, workspace: workspaceId, kind: 'run', run_id: item.run_id});
-        };
-        runsList.append(btn);
-      }
+    };
+
+    function setRightMode(next) {
+      rightMode = (next === 'detail' || next === 'code') ? next : null;
+      const open = !!rightMode;
+      root.dataset.drawer = open ? 'open' : 'closed';
+      root.dataset.drawerMode = rightMode || '';
+      drawer.hidden = !open;
+      detailPane.hidden = rightMode !== 'detail';
+      codePane.hidden = rightMode !== 'code';
+      headerSourceBtn.setAttribute('aria-pressed', String(rightMode === 'code'));
+      drawerResize.setActive(open && !matchMedia('(max-width:900px)').matches);
     }
-    async function loadRuns(force = false) {
-      if (runsLoaded && !force) { renderRunsList(); return; }
-      renderRunsList();
-      try {
-        const res = await api('runs', {limit: 20});
-        if (disposed) return;
-        runRows = res?.runs || [];
-        runsLoaded = true;
-        renderRunsList();
-      } catch (err) {
-        if (!disposed) runsList.replaceChildren(el('p', err.message || '读取运行记录失败', 'op-error dev-op-pad'));
+
+    function setStageMode(next) {
+      stageMode = next === 'assistant' ? 'assistant' : 'canvas';
+      root.dataset.stage = stageMode;
+      workbenchHost.hidden = stageMode !== 'canvas';
+      assistantHost.hidden = stageMode !== 'assistant';
+      headerAssistantBtn.setAttribute('aria-expanded', String(stageMode === 'assistant'));
+      // When switching away from canvas to assistant, hide node detail if it was open (keep code reader if open).
+      if (stageMode === 'assistant' && rightMode === 'detail') {
+        workbenchHandle?.closeDetail?.();
+        setRightMode(null);
       }
     }
 
     function setSidebarTab(next) {
-      sidebarTab = ['outline', 'files', 'runs'].includes(next) ? next : 'outline';
-      outlinePane.hidden = sidebarTab !== 'outline';
+      sidebarTab = ['flows', 'sessions', 'components', 'files'].includes(next) ? next : 'flows';
+      flowsPane.hidden = sidebarTab !== 'flows';
+      sessionsPane.hidden = sidebarTab !== 'sessions';
+      componentsPane.hidden = sidebarTab !== 'components';
       filesPane.hidden = sidebarTab !== 'files';
-      runsPane.hidden = sidebarTab !== 'runs';
-      outlineBtn.classList.toggle('is-active', sidebarTab === 'outline');
-      filesBtn.classList.toggle('is-active', sidebarTab === 'files');
-      runsBtn.classList.toggle('is-active', sidebarTab === 'runs');
-      outlineBtn.setAttribute('aria-pressed', String(sidebarTab === 'outline'));
-      filesBtn.setAttribute('aria-pressed', String(sidebarTab === 'files'));
-      runsBtn.setAttribute('aria-pressed', String(sidebarTab === 'runs'));
-      if (sidebarTab === 'files') { devHandle?.files?.setFilter(navigation.search.value); devHandle?.files?.ensureTreeLoaded?.(); }
-      else if (sidebarTab === 'outline') { devHandle?.files?.setFilter(navigation.search.value); devHandle?.files?.ensureOperatorsLoaded?.(); }
-      else if (sidebarTab === 'runs') { loadRuns(); }
+      for (const [key, btn] of [['flows', flowsBtn], ['sessions', sessionsBtn], ['components', componentsBtn], ['files', filesBtn]]) {
+        btn.classList.toggle('is-active', sidebarTab === key);
+        btn.setAttribute('aria-pressed', String(sidebarTab === key));
+      }
+      if (sidebarTab === 'files') {
+        devHandle?.files?.setFilter(navigation.search.value);
+        devHandle?.files?.ensureTreeLoaded?.();
+      } else if (sidebarTab === 'components') {
+        devHandle?.files?.setFilter(navigation.search.value);
+        devHandle?.files?.ensureOperatorsLoaded?.();
+      } else if (sidebarTab === 'sessions') {
+        devHandle?.setSessionFilter?.(navigation.search.value);
+      } else if (sidebarTab === 'flows') {
+        workbenchHandle?.filterFlows?.(navigation.search.value);
+      }
     }
-    outlineBtn.onclick = () => setSidebarTab('outline');
+
+    flowsBtn.onclick = () => { setSidebarTab('flows'); setStageMode('canvas'); };
+    sessionsBtn.onclick = () => { setSidebarTab('sessions'); setStageMode('assistant'); };
+    componentsBtn.onclick = () => setSidebarTab('components');
     filesBtn.onclick = () => setSidebarTab('files');
-    runsBtn.onclick = () => setSidebarTab('runs');
 
     const isDevView = ['development', 'development_session', 'development_new'].includes(view?.kind);
     const wbView = isDevView ? {v: 2, workspace: workspaceId, kind: 'flows', panel: 'flows'} : view;
@@ -239,29 +194,28 @@
         if (workbenchHandle?.dirty?.()) return confirm('当前有未保存的配置草稿，确定离开吗？');
         return true;
       },
-      openAssistant: () => openDrawer('assistant'),
-      openDetail: () => openDrawer('detail'),
+      openAssistant: () => { setSidebarTab('sessions'); setStageMode('assistant'); },
+      openCanvas: () => setStageMode('canvas'),
       showPage: async page => {
-        showCode(false);
-        devHandle?.files?.setOpen?.(false, {skipFocus: true});
+        setStageMode('canvas');
         if (workbenchHandle?.showPage) await workbenchHandle.showPage(page);
       },
       navigate: async nextView => {
         if (disposed) return;
         if (['development', 'development_session', 'development_new'].includes(nextView?.kind)) {
-          openDrawer('assistant');
+          setSidebarTab('sessions');
+          setStageMode('assistant');
           await devHandle?.navigate?.(nextView);
           return;
         }
         if (nextView?.panel === 'operators') {
-          setSidebarTab('outline');
+          setSidebarTab('components');
           await devHandle?.files?.selectOperatorTarget?.(true);
           return;
         }
-        showCode(false);
-        devHandle?.files?.setOpen?.(false, {skipFocus: true});
+        setStageMode('canvas');
         if (nextView?.kind === 'run' && nextView?.run_id) {
-          await workbenchHandle?.sync?.(context, {force: false});
+          await workbenchHandle?.sync?.(currentContext, {force: false});
           await workbenchHandle?.showPage?.('monitor');
         } else if (nextView?.panel === 'monitor' || nextView?.kind === 'runs') {
           await workbenchHandle?.showPage?.('monitor');
@@ -271,13 +225,10 @@
         }
       },
       sync: async (fresh, opts = {}) => {
+        if (fresh) currentContext = fresh;
         await workbenchHandle?.sync?.(fresh, opts);
         if (opts.catalogChanged || opts.graphChanged || opts.force) {
           devHandle?.files?.ensureOperatorsLoaded?.({force: true});
-        }
-        if (opts.runsChanged || opts.force) {
-          runsLoaded = false;
-          if (sidebarTab === 'runs') loadRuns(true);
         }
       },
       projectCheckSettled: () => workbenchHandle?.projectCheckSettled?.(),
@@ -293,34 +244,45 @@
     };
     register?.(handle);
 
-    // Mount ForgeDevelopment in drawerMode first so left sidebar outline/files hosts are wired.
     const devPromise = ForgeDevelopment.mount({
-      main: assistantPane,
+      main: assistantHost,
       api,
       workspaceId,
       view: devView,
       mountText,
       disposeReaders,
       drawerMode: true,
+      externalSessionsHost: sessionsPane,
       externalFilesHost: filesPane,
-      externalOperatorsHost: outlinePane,
-      externalCodeHost: codeBody,
+      externalOperatorsHost: componentsPane,
+      externalCodeHost: codePane,
+      excludeFlows: true,
       openOperators: view?.panel === 'operators' || !!operatorTarget,
       operatorTarget,
       openNew,
       openSession,
       error,
-      onCodeOpenChange: isOpen => showCode(isOpen),
+      onCodeOpenChange: isOpen => {
+        if (isOpen) {
+          workbenchHandle?.closeDetail?.();
+          setRightMode('code');
+        } else if (rightMode === 'code') {
+          setRightMode(null);
+        }
+      },
       onSelectFlow: async entry => {
-        showCode(false);
+        setStageMode('canvas');
         await workbenchHandle?.selectFlow?.(entry);
       },
       onShowFilesTab: () => setSidebarTab('files'),
+      onSessionFocus: () => setStageMode('assistant'),
+      onBackToCanvas: () => setStageMode('canvas'),
       onBadgeChange: count => { filesBadge.textContent = String(count); filesBadge.hidden = !count; },
       onTurnCompleted: async () => {
         try {
           const fresh = await api('context');
           if (!disposed && fresh) {
+            currentContext = fresh;
             onContext?.(fresh);
             await workbenchHandle?.sync?.(fresh, {graphChanged: true, catalogChanged: true, force: true});
             devHandle?.files?.ensureOperatorsLoaded?.({force: true});
@@ -342,26 +304,37 @@
       openResult,
       navigate,
       openOperator: async targetOp => {
-        setSidebarTab('outline');
+        setSidebarTab('components');
         await devHandle?.files?.selectOperatorTarget?.(targetOp || true);
       },
       register: h => { workbenchHandle = h; },
       projectCheckState,
       continueInput,
       continueWithResult,
-      onContext,
+      onContext: fresh => { if (fresh) currentContext = fresh; onContext?.(fresh); },
       onPageChange,
       rememberView,
       projectSettings,
       renderProjectInfo,
       embedded: {
         hideFlowSidebar: true,
+        flowListHost: flowsPane,
         nodeDetailHost: detailPane,
+        sourceButton: headerSourceBtn,
         assistantButton: headerAssistantBtn,
-        onDetailOpen: () => openDrawer('detail'),
-        onDetailClose: () => { if (drawerTab === 'detail') closeDrawer(); },
+        onFlowSelect: () => setStageMode('canvas'),
+        onDetailOpen: () => {
+          devHandle?.files?.setOpen?.(false, {skipFocus: true});
+          setRightMode('detail');
+        },
+        onDetailClose: () => {
+          if (rightMode === 'detail') setRightMode(null);
+        },
         onAskAssistant: target => {
-          openDrawer('assistant');
+          workbenchHandle?.closeDetail?.();
+          if (rightMode === 'detail') setRightMode(null);
+          setSidebarTab('sessions');
+          setStageMode('assistant');
           if (target?.path) {
             devHandle?.insertReference?.(target.path + (target.line ? ':' + target.line : ''));
           } else if (target?.name) {
@@ -373,29 +346,24 @@
 
     await Promise.all([
       devPromise.catch(err => {
-        if (!disposed) assistantPane.replaceChildren(el('p', err?.message || '当前服务未启用开发助手。', 'op-muted dev-op-pad'));
+        if (!disposed) assistantHost.replaceChildren(el('p', err?.message || '当前服务未启用开发助手。', 'op-muted dev-op-pad'));
       }),
       wbPromise,
     ]);
     if (disposed) return handle;
 
-    // Load semantic outline right away so counts appear cleanly on the collapsed groups.
     devHandle?.files?.ensureOperatorsLoaded?.();
 
-    // Decide initial right drawer state: explicit dev link -> assistant open; no flows -> assistant open; else restore saved or closed.
-    let savedDrawer = null;
-    try { savedDrawer = JSON.parse(sessionStorage.getItem(drawerStorageKey) || 'null'); } catch {}
     if (initialDrawer === 'assistant' || isDevView) {
-      drawerOpen = true; drawerTab = 'assistant';
-    } else if (initialDrawer === 'detail') {
-      drawerOpen = true; drawerTab = 'detail';
+      setSidebarTab('sessions');
+      setStageMode('assistant');
     } else if (!(context?.flows?.length || context?.project?.entries?.length)) {
-      drawerOpen = true; drawerTab = 'assistant';
-    } else if (savedDrawer && typeof savedDrawer.open === 'boolean') {
-      drawerOpen = savedDrawer.open;
-      drawerTab = savedDrawer.tab === 'detail' ? 'detail' : 'assistant';
+      setSidebarTab('sessions');
+      setStageMode('assistant');
+    } else {
+      setSidebarTab('flows');
+      setStageMode('canvas');
     }
-    syncDrawer();
     return handle;
   }
 
