@@ -26,14 +26,11 @@ lance = ["pylance>=0.9"]
 ray = ["ray[data]>=2.9"]
 llm = ["requests>=2.31", "httpx>=0.27"]      # operator_llm 客户端惰性 import requests（真实依赖）
 tokens = ["tiktoken>=0.9"]
-crawl = ["crawl4ai>=0.9"]
 images = ["pillow>=10"]
 embeddings = ["httpx>=0.27", "pillow>=10"]
 services = ["httpx>=0.27", "uv>=0.8,<1"]
 wikitext = ["mwparserfromhell==0.7.2"]
 pdf = ["pypdf==6.19.0"]
-# 聚合 extras：一键装齐采集栈（net/fetch 零三方依赖，crawl 与 images 惰性）
-collect = ["crawl4ai>=0.9", "pillow>=10", "httpx>=0.27"]
 # Native search worker: HTTP transport, HTML parsing and locale data for the built-in source adapters.
 search = ["httpx>=0.27", "babel==2.18.0", "lxml>=6.1.2,<7", "curl_cffi==0.16.1"]
 search-browser = ["playwright==1.63.0"]
