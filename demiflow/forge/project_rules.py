@@ -709,7 +709,114 @@ def _missing_operator_description_issues(path: Path) -> list[tuple[int, str]]:
 
 _IMPLICIT_ROW_PARAMS = frozenset({'self', 'cls', 'row', 'rows', 'batch', 'item', 'items', 'record', 'records'})
 _ARG_SECTION_HEADERS = frozenset({'args', 'arguments', 'params', 'parameters', '参数', '入参'})
-_OTHER_SECTION_HEADERS = frozenset({'returns', 'return', 'yields', 'raises', 'examples', 'example', 'notes', 'note', 'attributes', '返回', '异常', '示例', '说明'})
+_EXAMPLE_SECTION_HEADERS = frozenset({'example', 'examples', '示例', '样例'})
+_OTHER_SECTION_HEADERS = frozenset({'returns', 'return', 'yields', 'raises', 'examples', 'example', 'notes', 'note', 'attributes', '返回', '异常', '示例', '样例', '说明'})
+_EXAMPLE_INPUT_RE = re.compile(r'^(?:[-*•]\s+)?(?:输入|入|前|input|before)\s*[:：]\s*(.*)$', re.IGNORECASE)
+_EXAMPLE_OUTPUT_RE = re.compile(r'^(?:[-*•]\s+)?(?:输出|出|后|output|after)\s*[:：]\s*(.*)$', re.IGNORECASE)
+_EXAMPLE_ARROW_RE = re.compile(r'^(.+?)\s*(?:->|→|=>)\s*(.+)$')
+
+
+def parse_docstring_example(doc: str | None) -> dict[str, str] | None:
+    """Extract a minimal before/after example ({input, output}) from an Example:/示例: docstring section."""
+    if not doc or not doc.strip():
+        return None
+    lines = doc.splitlines()
+    in_example = False
+    section_indent = 0
+    block: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if in_example:
+                block.append('')
+            continue
+        indent = len(line) - len(line.lstrip())
+        header_match = re.match(r'^([A-Za-z\u4e00-\u9fff]+)\s*[:：]\s*$', stripped)
+        if header_match:
+            key = header_match.group(1).lower()
+            if key in _EXAMPLE_SECTION_HEADERS:
+                in_example = True
+                section_indent = indent
+                continue
+            if key in _ARG_SECTION_HEADERS or key in _OTHER_SECTION_HEADERS:
+                if in_example:
+                    break
+                continue
+        if in_example:
+            if indent <= section_indent and not stripped.startswith(('-', '*', '•')):
+                break
+            block.append(line)
+    if not block:
+        return None
+
+    # 1. Explicit 输入/Input and 输出/Output markers (supports multi-line values).
+    in_parts: list[str] = []
+    out_parts: list[str] = []
+    current: str | None = None
+    for raw in block:
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        m_in = _EXAMPLE_INPUT_RE.match(stripped)
+        if m_in:
+            current = 'in'
+            if m_in.group(1).strip():
+                in_parts.append(m_in.group(1).strip())
+            continue
+        m_out = _EXAMPLE_OUTPUT_RE.match(stripped)
+        if m_out:
+            current = 'out'
+            if m_out.group(1).strip():
+                out_parts.append(m_out.group(1).strip())
+            continue
+        if current == 'in':
+            in_parts.append(stripped)
+        elif current == 'out':
+            out_parts.append(stripped)
+    if in_parts and out_parts:
+        return {'input': '\n'.join(in_parts), 'output': '\n'.join(out_parts)}
+
+    # 2. Fallback: compact single-line `input -> output` or `input → output`.
+    for raw in block:
+        stripped = raw.strip().lstrip('-*• ').strip()
+        if not stripped:
+            continue
+        m_arrow = _EXAMPLE_ARROW_RE.match(stripped)
+        if m_arrow and m_arrow.group(1).strip() and m_arrow.group(2).strip():
+            return {'input': m_arrow.group(1).strip(), 'output': m_arrow.group(2).strip()}
+    return None
+
+
+def _missing_operator_example_docs(path: Path) -> list[tuple[int, str]]:
+    """OP-E1: Detect public operator functions/callable Actors lacking a minimal input->output Example:/示例: section."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    issues: list[tuple[int, str]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith('_'):
+            doc = ast.get_docstring(node)
+            if not doc or not doc.strip():
+                continue  # Already flagged by OP-S1 missing_operator_description
+            if parse_docstring_example(doc) is None:
+                issues.append((node.lineno, node.name))
+        elif isinstance(node, ast.ClassDef) and not node.name.startswith('_'):
+            call_fn = next(
+                (m for m in node.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == '__call__'),
+                None,
+            )
+            if call_fn is None:
+                continue  # Non-callable helper/dataclass
+            cls_doc = ast.get_docstring(node) or ''
+            call_doc = ast.get_docstring(call_fn) or ''
+            if not cls_doc.strip() and not call_doc.strip():
+                continue  # Already flagged by OP-S1
+            if parse_docstring_example(cls_doc) is None and parse_docstring_example(call_doc) is None:
+                issues.append((node.lineno, node.name))
+    return issues
 
 
 def _parse_docstring_arg_docs(doc: str | None) -> dict[str, str]:
@@ -1045,6 +1152,17 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             by_category.setdefault('missing_operator_param_description', []).append(
                 diagnostic('DF-02', rel,
                            f'公开算子 {first_name} 的参数 {p_list} 缺少语义说明{extra}；按 DF-02/OP-P1 规范，非数据行参数须在 docstring 的 Args:/参数: 段逐个写清中文业务含义，供工作台接口面板直接展示。',
+                           line=first_line)
+            )
+        # OP-E1: Mandatory minimal input -> output example in docstring for public operators.
+        missing_examples = _missing_operator_example_docs(root / rel)
+        if missing_examples:
+            first_line, first_name = missing_examples[0]
+            extra = f' 等 {len(missing_examples)} 个算子' if len(missing_examples) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('missing_operator_example', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开算子 {first_name} 缺少输入输出变换示例{extra}；按 DF-02/OP-E1 规范，须在 docstring 的 Example:/示例: 段补充 1 条最小「输入: ...」「输出: ...」对比样例（仅列关键变化字段，支持行变换、展开列表或过滤布尔值），供工作台接口面板直观展示。',
                            line=first_line)
             )
         if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):

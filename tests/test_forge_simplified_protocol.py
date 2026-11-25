@@ -293,8 +293,28 @@ def test_post_turn_hygiene_hook_and_slim_manifest_migration(tmp_path, reference)
         '    return range(2).map(double, inputs={"x": "id"}, output="y").count()\n',
         encoding='utf-8',
     )
-    (proj / 'operators' / 'helper.py').write_text('def add_one(x: int) -> int:\n    """将输入整数加一。"""\n    return x + 1\n', encoding='utf-8')
-    (proj / 'operators' / 'other_op.py').write_text('def double(x: int) -> int:\n    """将输入整数翻倍。"""\n    return x * 2\n', encoding='utf-8')
+    (proj / 'operators' / 'helper.py').write_text(
+        'def add_one(x: int) -> int:\n'
+        '    """将输入整数加一。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: 1\n'
+        '        输出: 2\n'
+        '    """\n'
+        '    return x + 1\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'other_op.py').write_text(
+        'def double(x: int) -> int:\n'
+        '    """将输入整数翻倍。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: 2\n'
+        '        输出: 4\n'
+        '    """\n'
+        '    return x * 2\n',
+        encoding='utf-8',
+    )
     # Legacy wrapped config & legacy bloated workspace.json + unused location
     (proj / 'configs' / 'demo.json').write_text(
         json.dumps({'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {'n': 3}}),
@@ -371,10 +391,18 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
         '\n'
         '    Args:\n'
         '        maximum: 单组最大候选图数量。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": 1}\n'
+        '        输出: {"row": {"id": 1}, "maximum": 100}\n'
         '    """\n'
         '    return {"row": row, "maximum": maximum}\n'
         'def helper(row):\n'
-        '    """保留原始行。"""\n'
+        '    """保留原始行。\n'
+        '\n'
+        '    Example:\n'
+        '        {"id": 1} -> {"id": 1}\n'
+        '    """\n'
         '    return row\n',
         encoding='utf-8',
     )
@@ -413,7 +441,12 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
         'def _private_helper(row):\n'
         '    return _util.pack(row)\n'
         'def pool_group(row):\n'
-        '    """打包候选池条目。"""\n'
+        '    """打包候选池条目。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": 1}\n'
+        '        输出: {"packed": {"id": 1}, "tag": "custom"}\n'
+        '    """\n'
         '    out = _util.pack(row)\n'
         '    out["tag"] = "custom"\n'
         '    return out\n',
@@ -460,7 +493,12 @@ def test_mece_operator_richness_anti_bypass_rules(tmp_path):
     )
     (proj / 'operators' / 'base.py').write_text(
         'def seed(row):\n'
-        '    """生成基础种子行。"""\n'
+        '    """生成基础种子行。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": 1}\n'
+        '        输出: {"seed": {"id": 1}}\n'
+        '    """\n'
         '    return {"seed": row}\n',
         encoding='utf-8',
     )
@@ -513,7 +551,12 @@ def test_mece_operator_richness_anti_bypass_rules(tmp_path):
     (proj / 'operators' / 'wrapped.py').write_text(
         'from ._codec import pack\n'
         'def pool_group(row):\n'
-        '    """打包并标记候选池条目。"""\n'
+        '    """打包并标记候选池条目。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": 1}\n'
+        '        输出: {"packed": {"id": 1}, "tag": "clean"}\n'
+        '    """\n'
         '    out = pack(row)\n'
         '    out["tag"] = "clean"\n'
         '    return out\n',
@@ -530,7 +573,12 @@ def test_mece_operator_richness_anti_bypass_rules(tmp_path):
     (proj / 'operators' / 'wrapped.py').write_text(
         'from ._codec import pack\n'
         'def pool_group(row, limit=12, tag="clean"):\n'
-        '    """打包并标记候选池条目。"""\n'
+        '    """打包并标记候选池条目。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": 1}\n'
+        '        输出: {"packed": {"id": 1}, "limit": 12, "tag": "clean"}\n'
+        '    """\n'
         '    out = pack(row)\n'
         '    out["limit"] = limit\n'
         '    out["tag"] = tag\n'
@@ -556,6 +604,10 @@ def test_mece_operator_richness_anti_bypass_rules(tmp_path):
         '    Args:\n'
         '        limit: 每个概念最多保留的候选条数。\n'
         '        tag: 写入结果行的业务标签。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": 1}\n'
+        '        输出: {"packed": {"id": 1}, "limit": 12, "tag": "clean"}\n'
         '    """\n'
         '    out = pack(row)\n'
         '    out["limit"] = limit\n'
@@ -569,3 +621,98 @@ def test_mece_operator_richness_anti_bypass_rules(tmp_path):
         parameter_digests={},
     )
     assert p1_clean == [], p1_clean
+
+
+def test_op_e1_example_and_ast_field_flow_extraction(tmp_path):
+    """Verify OP-E1 enforces Example:/示例: on public operators and AST extracts field_flow + example."""
+    import ast as _ast
+    from demiflow.workbench.definition_contracts import code_definition
+
+    proj = tmp_path / 'example-proj'
+    initialize_project(proj, name='Example Project')
+    (proj / 'flows').mkdir()
+    (proj / 'operators').mkdir()
+    (proj / 'configs').mkdir()
+    (proj / 'configs' / 'demo.json').write_text('{}', encoding='utf-8')
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow.data import range\n'
+        'from operators import transforms\n'
+        'def run():\n'
+        '    return range(2).map(transforms.enrich, inputs={"row": "id"}, output="y").count()\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'transforms.py').write_text(
+        'class ConfigRecord:\n'
+        '    """非可调用配置数据结构，不应触发 OP-E1。"""\n'
+        '    pass\n'
+        '\n'
+        'def enrich(row):\n'
+        '    """缺少变换示例的公开算子。"""\n'
+        '    return {**row, "score": row.get("raw_score", 0) + 1}\n'
+        '\n'
+        'class ScorerActor:\n'
+        '    """缺少变换示例的可调用 Actor。"""\n'
+        '    def __call__(self, item):\n'
+        '        return {"id": item["id"], "passed": item.get("score", 0) > 0}\n',
+        encoding='utf-8',
+    )
+    register_flow(proj, 'flows/demo.py:run', params='configs/demo.json')
+    _, control = load_project(proj)
+
+    _, e1_diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/transforms.py'},
+        parameter_digests={},
+    )
+    e1_msgs = [d['detail'] for d in e1_diags if d['path'] == 'operators/transforms.py']
+    assert any('OP-E1' in m and 'enrich' in m and '等 2 个算子' in m for m in e1_msgs), e1_diags
+
+    # Supplying Example:/示例: clears OP-E1 and powers workbench definition_contracts.
+    clean_src = (
+        'class ConfigRecord:\n'
+        '    """非可调用配置数据结构，不应触发 OP-E1。"""\n'
+        '    pass\n'
+        '\n'
+        'def enrich(row):\n'
+        '    """补齐归一化分数字段。\n'
+        '\n'
+        '    Example:\n'
+        '        输入: {"id": "r1", "raw_score": 4}\n'
+        '        输出: {"id": "r1", "raw_score": 4, "score": 5}\n'
+        '    """\n'
+        '    return {**row, "score": row.get("raw_score", 0) + 1}\n'
+        '\n'
+        'class ScorerActor:\n'
+        '    """按阈值判定样本是否通过。\n'
+        '\n'
+        '    示例:\n'
+        '        {"id": "r1", "score": 5} -> {"id": "r1", "passed": True}\n'
+        '    """\n'
+        '    def __call__(self, item):\n'
+        '        return {"id": item["id"], "passed": item.get("score", 0) > 0}\n'
+    )
+    (proj / 'operators' / 'transforms.py').write_text(clean_src, encoding='utf-8')
+    _, clean_diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/transforms.py'},
+        parameter_digests={},
+    )
+    assert clean_diags == [], clean_diags
+
+    tree = _ast.parse(clean_src)
+    fn_node = next(n for n in tree.body if isinstance(n, _ast.FunctionDef) and n.name == 'enrich')
+    cls_node = next(n for n in tree.body if isinstance(n, _ast.ClassDef) and n.name == 'ScorerActor')
+
+    fn_def = code_definition(fn_node, clean_src)
+    assert fn_def['field_flow'] == {'reads': ['raw_score'], 'writes': ['score'], 'passes_through': True}
+    assert fn_def['example'] == {
+        'input': '{"id": "r1", "raw_score": 4}',
+        'output': '{"id": "r1", "raw_score": 4, "score": 5}',
+    }
+
+    cls_def = code_definition(cls_node, clean_src)
+    assert cls_def['field_flow'] == {'reads': ['id', 'score'], 'writes': ['id', 'passed'], 'passes_through': False}
+    assert cls_def['example'] == {
+        'input': '{"id": "r1", "score": 5}',
+        'output': '{"id": "r1", "passed": True}',
+    }

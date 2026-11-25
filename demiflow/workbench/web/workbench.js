@@ -1055,9 +1055,28 @@
       }
       return out;
     }
+    function renderFieldChips(fields,prefix=''){
+      const wrap=$('div',undefined,'wb-field-chips');
+      if(prefix)wrap.append($('span',prefix,'wb-field-hint'));
+      for(const name of fields)wrap.append($('code',name,'wb-field-chip'));
+      return wrap;
+    }
+    function renderExampleCard(example){
+      const card=$('div',undefined,'wb-example-card');
+      const inSide=$('div',undefined,'wb-example-side');
+      inSide.append($('span','输入','wb-example-label'),$('pre',example.input,'wb-example-code'));
+      const arrow=$('div','↓','wb-example-arrow');
+      arrow.setAttribute('aria-hidden','true');
+      const outSide=$('div',undefined,'wb-example-side wb-example-out');
+      outSide.append($('span','输出','wb-example-label'),$('pre',example.output,'wb-example-code'));
+      card.append(inSide,arrow,outSide);
+      return card;
+    }
     function renderWiring(node,values,target=wiringPane,implVal=null){
       const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),config=byKind.configuration,schema=byKind.schema;
-      const opArgDocs=extractOperatorArgDocs(implVal||byKind.implementation);
+      const effectiveImpl=implVal||byKind.implementation;
+      const implDef=effectiveImpl?.metadata?.definition||effectiveImpl?.definition||null;
+      const opArgDocs=extractOperatorArgDocs(effectiveImpl);
       const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.name!=='fn'&&p.value?.type!=='Dataset');
       const provided=allArgs.filter(p=>p.origin!=='default');
       const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
@@ -1115,10 +1134,25 @@
       }
       flowRows.push(['输出',outputDesc]);
 
+      const fieldFlow=implDef?.field_flow;
+      if(Array.isArray(fieldFlow?.reads)&&fieldFlow.reads.length){
+        flowRows.push(['读取字段',renderFieldChips(fieldFlow.reads)]);
+      }
+      if(Array.isArray(fieldFlow?.writes)&&fieldFlow.writes.length){
+        flowRows.push(['产出字段',renderFieldChips(fieldFlow.writes,fieldFlow.passes_through?'在原行上新增/更新：':'')]);
+      }
+
       const flowSec=$('section',undefined,'wb-wiring-section');
       flowSec.append($('h4','数据流'));
       renderKvTable(flowSec,['方向','说明'],flowRows);
       target.append(flowSec);
+
+      const opExample=implDef?.example;
+      if(opExample?.input&&opExample?.output){
+        const exSec=$('section',undefined,'wb-wiring-section');
+        exSec.append($('h4','变换示例'),renderExampleCard(opExample));
+        target.append(exSec);
+      }
 
       // 2. 按真实签名归属拆分为：算子参数（fn_kwargs）与 API 参数（Dataset API 全部入参）
       const FLOW_OWNED_ARGS=new Set(['inputs','output','outputs','call_output','error_output','output_ref','label']);
