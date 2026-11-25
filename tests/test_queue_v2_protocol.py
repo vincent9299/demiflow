@@ -228,6 +228,7 @@ def test_terminal_refuses_lost_source_confirmation(channel,tmp_path,monkeypatch)
 
 
 from test_native_search_runtime import server,engines
+from demiflow.execution.contracts.dataflow_errors import DataflowUnresolvedCommit
 
 
 def search_messages(row):
@@ -319,7 +320,7 @@ def test_public_producer_consumer_history_and_explicit_ack(channel,tmp_path):
         from urllib.parse import urlsplit,unquote
         obj=Path(unquote(urlsplit(rows[0]['result']['raw_ref']['uri']).path))
         before=obj.read_bytes();obj.write_bytes(b'x'*len(before))
-        with pytest.raises(Exception,match='checksum'):
+        with pytest.raises(DataflowUnresolvedCommit,match='checksum'):
             data.read_queue_records(channel.config,pool='p',through=snapshot,results=True).take_all()
         metadata=data.read_queue_records(channel.config,pool='p',through=snapshot,results=True,verify='metadata').take_all()
         assert len(metadata)==3 and all(r['verification']['status']=='not_checked' for r in metadata)

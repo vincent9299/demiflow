@@ -7,6 +7,7 @@ from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.execution.host.control import RunJournal
 from demiflow.workbench.runs import manager, storage
+from demiflow.errors import ExecutionConflict
 
 
 @pytest.fixture
@@ -77,7 +78,7 @@ def test_expired_cleanup_keeps_pending_work_and_does_not_advance_attempt(stopped
     work.mkdir(parents=True)
     (work / 'scratch').write_bytes(b'keep')
     monkeypatch.setattr(storage, 'cleanup_deadline', lambda: time.monotonic() - 1)
-    with pytest.raises(Exception, match='deadline|budget'):
+    with pytest.raises(ExecutionConflict, match='deadline|budget'):
         manager._reconcile(root, identity, expected_attempt=1)
     state = journal.execution_status()
     assert state['cleanup'] == 'pending'

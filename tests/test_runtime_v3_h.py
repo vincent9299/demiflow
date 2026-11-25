@@ -65,6 +65,7 @@ from demiflow.execution.pipeline.run_context import RunAction, RunContext
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.hosts import dataflow_worker_host as WH
 from demiflow.resources.manager import ResourceManager
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 del sys.modules['ray'], sys.modules['ray.exceptions']
 
@@ -463,7 +464,7 @@ def test_h004():
         svc = e.svc
         svc.reserve('res-1', {'requests': 5}, lease=None)
         svc.reserve('res-1', {'requests': 5}, lease=None)
-        with pytest.raises(Exception):
+        with pytest.raises(RecoveryContractError, match='Budget reservation changed'):
             svc.reserve('res-1', {'requests': 9}, lease=None)
         with pytest.raises(DataflowError):
             svc.reserve('res-2', {}, lease=None)
@@ -1603,7 +1604,7 @@ def test_h076():
         j.bind_artifact_owner(fence, ref, owner='owner-1', operation_id=oid('op-1'))
         owners, _ = j.artifact_owners(ref, limit=10)
         assert owners == ('owner-1',)
-        with pytest.raises(Exception):
+        with pytest.raises(RecoveryContractError, match='different pin'):
             j.bind_artifact_owner(fence, aref('art-2'), owner='owner-1', operation_id=oid('op-1'))
 
 
@@ -1631,9 +1632,9 @@ def test_h078():
         assert len(page1) == 2 and cur is not None
         page2, cur2 = j.artifact_owners(ref, limit=2, cursor=cur)
         assert len(page2) == 2 and set(page1).isdisjoint(page2)
-        with pytest.raises(Exception):
+        with pytest.raises(RecoveryContractError, match='page limit'):
             j.artifact_owners(ref, limit=0)
-        with pytest.raises(Exception):
+        with pytest.raises(RecoveryContractError, match='page limit'):
             j.artifact_owners(ref, limit=99999)
 
 

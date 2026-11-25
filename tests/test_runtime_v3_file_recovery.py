@@ -7,6 +7,7 @@ import sys
 import pytest
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.dataflow_errors import DataflowError, DataflowUnresolvedCommit
 
 WORKTREE = Path(__file__).resolve().parents[1]
 CHILD = r'''
@@ -55,7 +56,7 @@ def test_real_file_crash_and_resume_does_not_republish_or_recharge(tmp_path,boun
 
 def test_file_failure_does_not_replace_existing_target(tmp_path):
     target=tmp_path/'out.json';target.write_text('keep old bytes')
-    with pytest.raises(Exception,match='budget'):
+    with pytest.raises(DataflowError,match='budget'):
         with RunContext.start(tmp_path/'run',limits={'max_output_bytes':100}) as run, data.local_execution():
             data.from_items([{'text':'x'*400}]).write_json(str(target))
     assert target.read_text()=='keep old bytes'
@@ -71,7 +72,7 @@ def test_file_concurrent_destination_is_not_adopted(tmp_path,monkeypatch):
         target.write_text('foreign publication')
         return result
     monkeypatch.setattr(FileSink,'prepare',replace_target)
-    with pytest.raises(Exception,match='unknown or concurrent'):
+    with pytest.raises(DataflowUnresolvedCommit,match='unknown or concurrent'):
         with RunContext.start(tmp_path/'run') as run, data.local_execution():
             data.from_items([{'v':1}]).write_json(str(target))
     assert target.read_text()=='foreign publication'

@@ -37,7 +37,7 @@ def test_native_capture_and_execute_same_contract(tmp_path):
 
 
 def test_capture_rejects_unbounded_append_before_effect(tmp_path):
-    with pytest.raises(Exception, match='requires create'):
+    with pytest.raises(ValueError, match='requires create'):
         capture_managed_pipeline(lambda: data.from_items([{'x': 1}]).write_lance(
             str(tmp_path / 'append.lance'), schema=pa.schema([('x', pa.int64())])), {}, limits=DEFAULT_LIMITS)
     assert not (tmp_path / 'append.lance').exists()

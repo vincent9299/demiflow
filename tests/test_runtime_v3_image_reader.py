@@ -4,6 +4,7 @@ from PIL import Image
 import pytest
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def test_read_images_shape_mode_paths_and_owned_array(tmp_path):
@@ -23,13 +24,13 @@ def test_read_images_shape_mode_paths_and_owned_array(tmp_path):
 
 def test_image_size_is_validated_before_decode(tmp_path):
     path=tmp_path/'rgb.png'; Image.new('RGB',(3,2)).save(path)
-    with pytest.raises(Exception,match='size requires positive'):
+    with pytest.raises(DataflowError,match='size requires positive'):
         with RunContext.start(tmp_path/'run'),data.local_execution():
             data.read_images(str(path),size=(0,1)).take_all()
 
 
 def test_image_decompression_bound_rejects_before_loading_pixels(tmp_path):
     path=tmp_path/'large.png'; Image.new('RGB',(1024,1024)).save(path)
-    with pytest.raises(Exception,match='Decoded image exceeds max_row_bytes'):
+    with pytest.raises(DataflowError,match='Decoded image exceeds max_row_bytes'):
         with RunContext.start(tmp_path/'run',limits={'max_row_bytes':1024*1024}),data.local_execution():
             data.read_images(str(path)).take_all()

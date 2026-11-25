@@ -3,6 +3,7 @@ import time
 import pytest
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 @pytest.mark.parametrize('main,prefix', [([{'n':3}],[{'n':1},{'n':2}]),([],[]),([],[{'n':1}]),([{'n':3}],[])])
@@ -32,7 +33,7 @@ def test_prefix_reaches_downstream_before_live_main_can_start(tmp_path):
 
 
 def test_prepend_bound_rejects_without_any_result_commit(tmp_path):
-    with pytest.raises(Exception,match='max_rows'):
+    with pytest.raises(DataflowError,match='max_rows'):
         with RunContext.start(tmp_path/'run') as run,data.local_execution():
             data.from_items([{'n':3}]).prepend(data.from_items([{'n':1},{'n':2}]),max_rows=1).take_all()
     assert not run.journal.execution_action('action-1')['result']

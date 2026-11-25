@@ -201,6 +201,20 @@
 - **依据。** 2026-11-25 二分：`9f3d4e53` 上前两个通过，`031359ba` 起失败（其父提交 `803fb9fc` 通过）。后三个在 `ab3b4d45`、`40c0034a` 和当前 main 上都失败，本批未逐个分析。
 - **建议。** 引擎负责人指出新路径里对应的有界性观察点（或确认这些界限已由别的测试覆盖），据此改写探测；后三个需逐一判断是行为变化还是性能退步。在此之前这 5 个测试保持失败。
 
+### T-036 README 仍在介绍已停用的流式检查点
+
+- **现象。** README「流式检查点与增量恢复」一节说：创建 `StreamCheckpoint(path, identity=..., initial=...)`，传给 `Dataset.run_stream(checkpoint=...)`。在当前引擎上，构造 `StreamCheckpoint` 这一步就报 `RecoveryContractError: Explicit checkpoint orchestration is retired: stream_checkpoint`。同一节后两段关于 `save_lance(mode='append', ...)` 的描述是否仍成立，本批未核对。
+- **依据。** 2026-11-25 用独立脚本按 README 的写法执行复现。停用本身是有测试的保证（`tests/test_execution_recovery_retired_checkpoints.py`）；`tests/test_search_web_checkpoint.py` 原有两个测试仍在测这套已停用的做法、一直失败，本批改为测"搜索算子拒绝这些选项"。
+- **建议。** 改 README：删去 `StreamCheckpoint` 的用法，改为指向 `RunContext` 续跑；顺带核对同一节其余两段。
+
+### T-037 几类错误到用户手里的样子与说明不符
+
+- **现象。**
+  1. `demiflow/errors.py` 里 `StallError` 的类注释说报错信息带"停摆时全部挂起任务的栈转储"。现在 `run_stream(stall_timeout=...)` 抛出的信息只有一句 `unified stream made no observed progress`，没有任何转储。对应测试原名 `test_stall_watchdog_raises_with_dump`，但从未检查转储（靠类型名通过），本批改名并只断言类型和这句信息。
+  2. worker 里抛出、又不在还原名单里的异常，到用户手里是 `DataflowError INTERNAL_PROTOCOL`（信息保留）。本批录到三处：`read_csv` 读到列数不对的行（pyarrow 的解析错误）；托管服务启动超时、端口被占（代码里抛的是 `ModelServiceError`）。和已修的 T-030 是同一机制。
+- **依据。** 2026-11-25 在约 60 个测试文件上记录每个"接受任意异常"的断言实际捕到的类型和信息；第 1 条另用独立脚本确认。第 2 条涉及的三处断言（`tests/test_csv_native.py`、`tests/test_runtime_v3_managed_embedding_service.py` 两处）保持只按信息匹配，没有把 `INTERNAL_PROTOCOL` 固定成保证。
+- **建议。** 平台决定：栈转储是恢复还是改注释；这三类用户能处理的错误是否应保留原类型（做法同 T-030，把类型加进还原名单）。
+
 ## 已完成
 
 ### T-024 强杀后续跑偶尔打不开运行记录库

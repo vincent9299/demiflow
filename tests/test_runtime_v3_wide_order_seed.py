@@ -5,6 +5,7 @@ import pytest
 
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 @pytest.mark.parametrize('copies,limits', [(160000, {}), (750000, {'max_batch_bytes': 64 * 1024**2})])
@@ -50,7 +51,7 @@ def test_generated_shuffle_seed_is_consumed_from_sealed_constants(tmp_path, monk
 
 
 def test_declared_row_budget_still_rejects_oversize_before_commit(tmp_path):
-    with pytest.raises(Exception, match='BUDGET_EXCEEDED|row.*exceed|exceed.*row'):
+    with pytest.raises(DataflowError, match='BUDGET_EXCEEDED|row.*exceed|exceed.*row'):
         with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 4096}) as run, data.local_execution():
             data.from_items([{'payload': b'x' * 10000}]).take_all()
     assert not run.journal.execution_commits('action-1')

@@ -13,7 +13,6 @@ import os
 import signal
 import sys
 import uuid
-from pathlib import Path
 
 import pytest
 
@@ -25,8 +24,6 @@ from demiflow.execution.executors.local import LocalDatasetExecutor
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.resources.capacity import LocalCapacityPool
-from demiflow.resources.process_unit import ManagedProcessUnit
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"),
                                 reason="Local managed units require Linux")
@@ -63,31 +60,6 @@ def _dataset(double):
 def _chain_child_id(run):
     from runtime_v3_owned_crash import materialize_action_id
     return materialize_action_id(run)
-
-
-def _release_crash_orphans(root):
-    """Reconcile capacity for allocations whose driver died before close.
-
-    A crash/fault leaves the allocation BOUND (charged); exit alone never frees
-    capacity. The canonical unit-lock + birth-identity evidence confirms the dead
-    host and releases it, exactly as the provider's ensure_absent path does.
-    """
-    root = Path(root)
-    pool = LocalCapacityPool(root / "capacity",
-                             capacity={"cpu_millis": 4000, "memory_bytes": 4 * 1024 ** 3})
-    unit = ManagedProcessUnit(root / "units")
-    for record in pool.snapshot()["active"]:
-        allocation_id = record["allocation_id"]
-        process_json = next((root / "units").glob("*/" + allocation_id + "/process.json"))
-        scope_id = process_json.parent.parent.name
-        evidence = unit.stop(scope_id, allocation_id, terminate_deadline_ms=2000)
-        assert evidence["confirmed"] is True
-        pool.release(allocation_id, evidence)
-        try:
-            os.waitpid(evidence["identity"]["pid"], os.WNOHANG)  # reap our own zombie child
-        except (ChildProcessError, OSError):
-            pass
-    assert pool.snapshot()["charged"] == {"cpu_millis": 0, "memory_bytes": 0}
 
 
 # ---------------- F2: worker crash, new allocation recovers ----------------

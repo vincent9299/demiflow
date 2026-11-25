@@ -39,7 +39,7 @@ def test_actual_concurrency_counts_fixed_workspace_once(declared, actual):
     minimum = default_profile(operation, bounds=limits, state=kernel.state,
                               codec_workspace=False).requests['memory_bytes']
     assert minimum >= fixed + actual*(limits.max_batch_bytes+limits.max_row_bytes)
-    assert window is None or window[0] == minimum
+    assert window[0] == minimum
 
 
 def test_concurrent_images_cannot_fit_by_shrinking_payload_defaults():

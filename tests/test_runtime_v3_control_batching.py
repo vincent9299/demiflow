@@ -14,6 +14,7 @@ from demiflow.execution.contracts.recovery_contract import document, RecoveryCon
 from demiflow.execution.hosts.worker_bootstrap import ControlFrameReader, send_messages, _MAX_CONTROL_BYTES
 from demiflow.execution.hosts.dataflow_worker_host import HostedDataflowWorker
 from test_runtime_v3_ray_terminal_seams import private_ray_provider
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 class Capture:
@@ -207,9 +208,9 @@ def test_ray_method_preserves_per_command_receive_and_does_not_hide_partial_fail
     with pytest.raises(RuntimeError, match='rejected ack'):
         HostedDataflowWorker.receive_many(host, commands)
     assert observed == commands[:2]
-    with pytest.raises(Exception, match='event budget'):
+    with pytest.raises(DataflowError, match='event budget'):
         HostedDataflowWorker.receive_many(host, commands * 22)
-    with pytest.raises(Exception, match='byte budget'):
+    with pytest.raises(DataflowError, match='byte budget'):
         HostedDataflowWorker.receive_many(host, [{'value': 'x' * 600000}] * 2)
 
 

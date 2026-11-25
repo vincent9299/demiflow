@@ -7,6 +7,7 @@ from demiflow import data
 from demiflow.execution import RunContext
 from demiflow.execution.hosts import datafusion as host
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def csv_table(path, columns, rows):
@@ -234,7 +235,7 @@ def test_csv_shared_batch_cursor_and_projection_keep_authenticated_occurrences(t
     projected = cache.project(tail[0], (1,0), ('value','key'), schemas)
     assert projected.record_id == tail[0].record_id and projected.payload_ref != tail[0].payload_ref
     assert ArrowBatchCache(store, bounds).row(projected) == {'value':'2','key':'b'}
-    with pytest.raises(Exception, match='schema differs'):
+    with pytest.raises(DataflowError, match='schema differs'):
         ArrowBatchCache(store, bounds).row(replace(projected, schema_ref=tail[0].schema_ref))
 
 

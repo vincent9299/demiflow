@@ -11,6 +11,7 @@ import pytest
 
 from demiflow.data.plan import LogicalPlan
 from demiflow.data.api import DataAPI
+from demiflow.errors import StallError
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.journal.run_journal import RunJournal
@@ -406,17 +407,16 @@ def test_hard_timeout_counts_miss_not_fatal():
     assert stats.emitted == 0
 
 
-def test_stall_watchdog_raises_with_dump():
-    """U1b：无超时挂起 + stall_timeout → StallError（含栈转储）。"""
+def test_stall_watchdog_raises():
+    """U1b：无超时挂起 + stall_timeout → StallError。"""
     ctx, items = build(3)
 
     async def hang(r):
         await asyncio.sleep(3600)
 
     ds = ctx.from_items(items).map_async(hang, concurrency=2, label="hang")
-    with pytest.raises(Exception) as ei:
+    with pytest.raises(StallError, match='no observed progress'):
         ds.run_stream(stall_timeout=0.6)
-    assert "stalled" in str(ei.value) or "StallError" in type(ei.value).__name__
 
 
 def test_batch_map_count_trigger_and_expand():

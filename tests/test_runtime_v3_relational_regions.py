@@ -4,6 +4,7 @@ from pathlib import Path
 from demiflow import data
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.execution.seal.sealed_plans import load_sealed_plan
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def build_chain():
@@ -383,7 +384,7 @@ def test_public_join_propagates_overflow_after_sql_started(tmp_path, monkeypatch
         pytest.fail('SQL has started; replaying the action with hash join is invalid')
     monkeypatch.setattr(datafusion, 'query_region_offsets', reduce_output_budget)
     monkeypatch.setattr(relational_region, 'hash_join_pairs', unexpected_hash)
-    with pytest.raises(Exception, match='more offset pairs than admitted'):
+    with pytest.raises(DataflowError, match='more offset pairs than admitted'):
         with RunContext.start(tmp_path / 'run', limits={'memory_bytes': 1 << 30,
                 'max_row_bytes': 65536, 'max_batch_bytes': 1 << 20}) as run, data.local_execution(
                 workers=2, partitions=2, worker_mode='thread', memory_bytes=1 << 30):

@@ -44,7 +44,6 @@ def test_native_document_payload_and_replay(server, tmp_path):
     assert next(r for r in rows if r['id'] == 'ok')['call']['input_text_sha256'] == value['text_sha256']
     ds.take_all()
     assert len(server['bodies']) == 1
-    assert ds._stages[-1]._document_reader is None
 
 
 def test_hash_size_cache_and_unicode_bounds(tmp_path):

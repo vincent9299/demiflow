@@ -10,6 +10,7 @@ from test_training_domain import Provider, setup_request
 
 
 from training_action_programs import StepPredictor, managed_trainer, trainer
+from demiflow.execution.contracts.dataflow_errors import DataflowError
 
 
 def recipe():
@@ -94,7 +95,7 @@ def test_batched_predictions_preserve_duplicate_input_occurrences(tmp_path, mode
     if mode == 'valid':
         assert execute() == [{'x': 4}, {'x': 4}]
     else:
-        with pytest.raises(Exception, match='Predictor'):
+        with pytest.raises(DataflowError, match='Predictor'):
             execute()
 
 

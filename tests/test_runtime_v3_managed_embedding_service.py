@@ -11,6 +11,8 @@ from demiflow.services.http import freeze_managed_http, restore_managed_http
 from demiflow.execution.operator_bindings.dataflow_model_factory import native_model_declaration
 from demiflow.execution.pipeline.run_context import RunContext
 from runtime_v3_managed_http_scenarios import managed_fixture, assert_reaped, events
+from demiflow.execution.contracts.dataflow_errors import DataflowError
+from demiflow.services.contracts import ModelServiceError
 
 
 def dataset(fixture, root, *, cached=True, service=True):
@@ -49,7 +51,7 @@ def test_mutated_or_live_declaration_is_not_silently_reconstructed(tmp_path, mon
     elif mutation == 'removed': actor.service = None
     elif mutation == 'live_actor': actor._owner = object()
     elif mutation == 'live_service': actor.service._process = object()
-    with pytest.raises(Exception, match='modified|differs|removed|passive|unknown'):
+    with pytest.raises(DataflowError, match='modified|differs|removed|passive|unknown'):
         native_model_declaration(operation)
     assert events(fixture) == []
 
@@ -59,14 +61,14 @@ def test_overridden_native_class_method_and_ungranted_gpu_are_rejected(tmp_path,
     fixture = managed_fixture(tmp_path, monkeypatch, request=request)
     with monkeypatch.context() as altered:
         altered.setattr(ManagedHTTPService, 'bind', lambda self, model=None: None)
-        with pytest.raises(Exception, match='methods differ'):
+        with pytest.raises(DataflowError, match='methods differ'):
             freeze_managed_http(fixture['service'])
     fixture['service'].gpus = (0,)
     # Numeric GPUs are now a passive declaration, never a runtime grant.
     operation = dataset(fixture, tmp_path)._plan.operations[-1]
     worker = native_model_declaration(operation).instantiate()
     import asyncio
-    with pytest.raises(Exception, match='device grant'):
+    with pytest.raises(ModelServiceError, match='device grant'):
         asyncio.run(worker.service.bind(worker.model).ensure_ready())
     assert events(fixture) == []
 

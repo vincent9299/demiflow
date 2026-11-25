@@ -127,7 +127,7 @@ def test_a_release_naming_another_physical_unit_is_refused_by_the_original_run(t
     spawned = json.loads(process.read_text())
     spawned['identity']['start'] = 'another-birth'
     process.write_text(json.dumps(spawned))
-    with pytest.raises(Exception):
+    with pytest.raises(ResourceError, match='physical identity differs'):
         maintain(RunJournal(tmp_path / 'run'), seconds=1)
     with sqlite3.connect(tmp_path / 'run/run.sqlite') as db:
         assert ('CLOSED',) not in set(db.execute('SELECT state FROM resource_scopes'))

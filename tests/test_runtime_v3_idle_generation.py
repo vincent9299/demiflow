@@ -8,6 +8,7 @@ from demiflow.execution.action_driver.dataflow import DataflowExecution
 from demiflow.execution.hosts.thread import ThreadHostEndpoint
 from test_runtime_v3_control_batching import Capture, _endpoint, _frames
 from test_runtime_v3_idle_notification import _finished_runner
+from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 
 def driver(endpoint):
@@ -122,6 +123,6 @@ def test_exhausted_activity_watermark_is_rejected_without_sending():
 
 def test_invalid_frame_never_advances_an_unadmitted_activity():
     capture = Capture(); endpoint = _endpoint(capture)
-    with pytest.raises(Exception):
+    with pytest.raises(RecoveryContractError, match='strict JSON'):
         endpoint.send_business({'kind': 'data', 'invalid': object()})
     assert not capture.packets and getattr(endpoint, '_activity_generation', 0) == 0

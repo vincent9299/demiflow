@@ -114,7 +114,7 @@ def test_embedding_known_http_failure_is_replayed_without_request(embedding_serv
     def build():
         return data.from_items([{'text': 'x'}]).map_embeddings(
             model=embedding_server['model'], inputs={'text': 'text'}).materialize()
-    with pytest.raises(Exception):
+    with pytest.raises(HTTPStatusError, match='HTTP 500'):
         with RunContext.start(tmp_path / 'run') as run:
             ref = run.ref
             build()
