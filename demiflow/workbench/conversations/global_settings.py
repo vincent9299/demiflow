@@ -53,7 +53,7 @@ def automatic_project(root):
             if count >= 4096: reject('项目目录条目过多。', 'resource_limit')
             if not entry.name.startswith('.') and entry.is_file(follow_symlinks=False) and Path(entry.name).suffix in {'.py', '.js', '.ts', '.yaml', '.yml', '.json', '.toml', '.md'}:
                 scopes.add(entry.name)
-    scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'results', 'outputs'})
+    scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'data_tools', 'results', 'outputs'})
     grant['watch'] = sorted(scopes)
     # Landlock write grants are additive. Grant only existing subtrees with no
     # protected descendants, so logs, notebooks and caches stay read-only.
@@ -68,7 +68,7 @@ def automatic_project(root):
         # dozens of single-file entries and blocks creating new files).
         if path.name in {'__pycache__', '.pytest_cache', '.mypy_cache'}:
             continue
-        if (path.name.startswith('.') or path.name in {'AGENTS.md','PIPELINE_SPEC.md','workspace.json','data','datasets','runs','results','outputs','notebooks','logs','node_modules','.venv'}
+        if (path.name.startswith('.') or path.name in {'AGENTS.md','PIPELINE_SPEC.md','workspace.json','data','datasets','runs','results','outputs','notebooks','data_tools','logs','node_modules','.venv'}
                 or path.suffix in {'.ipynb','.lance','.parquet','.arrow','.db','.sqlite','.sqlite3'}):
             protected.append(name); continue
         if not path.exists():
