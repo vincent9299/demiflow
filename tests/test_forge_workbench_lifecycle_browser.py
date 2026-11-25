@@ -78,11 +78,19 @@ def test_unified_three_tab_nav_and_three_column_pipeline_workspace(project,brows
         expect(nav.get_by_role('button')).to_have_text(['管线', '数据', '文档'])
         nav.get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.pw-workspace')).to_be_visible()
-        # Left sidebar exposes 管线 | 会话 | 组件 | 文件.
+        # Left sidebar exposes 管线 | 会话 | 组件 | 文件 on one single row.
         sidebar = page.locator('.pw-sidebar')
+        tab_ys = []
         for label in ('管线', '会话', '组件', '文件'):
-            expect(sidebar.get_by_role('button', name=label, exact=True)).to_be_visible()
+            btn = sidebar.get_by_role('button', name=label, exact=True)
+            expect(btn).to_be_visible()
+            tab_ys.append(round(btn.bounding_box()['y']))
+        assert max(tab_ys) - min(tab_ys) <= 2, f'sidebar tabs wrapped: {tab_ys}'
         expect(page.locator('.wb-node').first).to_be_visible(timeout=30000)
+        # Center DAG canvas fills the full right-hand width by default.
+        center_box = page.locator('.pw-center').bounding_box()
+        graph_box = page.locator('.wb-graph').bounding_box()
+        assert graph_box['width'] >= center_box['width'] * 0.85, (graph_box, center_box)
         # Clicking a DAG node opens the right supplementary panel on 节点详情 (no modal dialog).
         page.locator('.wb-node').first.click()
         expect(page.locator('.pw-drawer')).to_be_visible()
