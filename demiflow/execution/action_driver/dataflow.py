@@ -1650,12 +1650,16 @@ class DataflowExecution:
         future = Future()
 
         def publish():
+            # The terminal sink prepares and publishes its output here; this
+            # publisher measures that work where it happens (monotonic clock).
+            started = time.monotonic()
             try:
                 image = context.run(self._checkpoint.commit, cut_id, sinks=self._sinks,
                                     native_queue_state=native_queue_state, **options)
             except BaseException as exc:
                 future.set_exception(exc)
             else:
+                future.publication_elapsed = time.monotonic() - started
                 future.set_result(image)
 
         thread = Thread(target=publish, name='demiflow-checkpoint-publication', daemon=True)
@@ -1670,6 +1674,8 @@ class DataflowExecution:
             self._publication_thread.join()
             self._publication_future = self._publication_thread = None
             image = future.result()
+            from demiflow.execution.journal.dataflow_operator_observations import observe_publication
+            observe_publication(self, future.publication_elapsed)
             # Preserve the real receipt BEFORE reporting an expired deadline.
             expired = self._checkpoint_deadline is not None and time.monotonic() >= self._checkpoint_deadline
             was_stopping = self._publication_stopping

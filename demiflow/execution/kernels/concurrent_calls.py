@@ -19,8 +19,11 @@ class ConcurrentCalls:
     Completed results drain without waiting for slower calls. Slow consumers backpressure the producing
     invocation itself; a generator result is never collected into a list.
     """
-    def __init__(self, count, *, check_stop, input_limit=None):
+    def __init__(self, count, *, check_stop, input_limit=None, clock=None):
         self.count = count
+        # Optional node busy clock: busy while any invocation is in flight.
+        # Membership changes only on the business thread (launch/poll/close).
+        self.clock = clock
         self.check_stop = check_stop
         self.input_limit = input_limit
         self.input_bytes = 0
@@ -80,6 +83,8 @@ class ConcurrentCalls:
         from ...resources.capacity import track_owned_thread
         for thread in tuple(self.pool._threads):
             track_owned_thread(thread)
+        if self.clock is not None and not self.jobs:
+            self.clock.begin()
         self.jobs.append((slot, output, future, metadata))
         if self.input_limit is not None:
             self.input_bytes += input.encoded_bytes
@@ -130,6 +135,8 @@ class ConcurrentCalls:
                 available = True
                 if value is _END:
                     self.jobs.remove(job)
+                    if self.clock is not None and not self.jobs:
+                        self.clock.end()
                     if self.input_limit is not None:
                         self.input_bytes -= metadata['input'].encoded_bytes
                     self.slots.append(slot)
@@ -158,5 +165,7 @@ class ConcurrentCalls:
         _, pending = wait(futures, timeout=timeout) if futures else ((), ())
         if pending:
             raise DataflowError('DEADLINE_EXCEEDED', 'Kernel invocations did not drain before actor cleanup')
+        if self.clock is not None and self.jobs:
+            self.clock.end()
         self.jobs.clear()
         self.input_bytes = 0
