@@ -344,3 +344,72 @@ def test_post_turn_hygiene_hook_and_slim_manifest_migration(tmp_path, reference)
     full_clean = check_project(proj, reference=reference)
     assert full_clean['status'] == 'passed', full_clean
     assert full_clean['diagnostic_count'] == 0
+
+
+def test_thin_operator_wrapper_shim_detection(tmp_path):
+    proj = tmp_path / 'shim-proj'
+    initialize_project(proj, name='Shim Project')
+    (proj / 'flows').mkdir()
+    (proj / 'operators').mkdir()
+    (proj / 'configs').mkdir()
+    (proj / 'flows' / 'demo.py').write_text(
+        'from demiflow.data import range\n'
+        'from operators import wrapped\n'
+        'def run():\n'
+        '    return range(2).map(wrapped.pool_group, inputs={"row": "id"}, output="y").count()\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'base.py').write_text(
+        'MAX_ITEMS = 100\n'
+        'def pool_group(row, maximum=MAX_ITEMS):\n'
+        '    return {"row": row, "maximum": maximum}\n'
+        'def helper(row):\n'
+        '    return row\n',
+        encoding='utf-8',
+    )
+    (proj / 'operators' / 'wrapped.py').write_text(
+        'from . import base as hybrid\n'
+        'POOL_MAX = hybrid.MAX_ITEMS\n'
+        'reexported = hybrid.helper\n'
+        'def _private_shim(row):\n'
+        '    return hybrid.pool_group(row, maximum=50)\n'
+        'def pool_group(row):\n'
+        '    """Thin shim only changing default."""\n'
+        '    return hybrid.pool_group(row, maximum=200)\n'
+        'def real_logic(row):\n'
+        '    out = hybrid.pool_group(row, maximum=200)\n'
+        '    out["tag"] = "custom"\n'
+        '    return out\n',
+        encoding='utf-8',
+    )
+    (proj / 'configs' / 'demo.json').write_text('{}', encoding='utf-8')
+    register_flow(proj, 'flows/demo.py:run', params='configs/demo.json')
+    _, control = load_project(proj)
+
+    _, diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/base.py', 'operators/wrapped.py'},
+        parameter_digests={},
+    )
+    shim_diags = [d for d in diags if d['path'] == 'operators/wrapped.py' and '垫片' in d['detail']]
+    assert len(shim_diags) == 1, diags
+    assert 'reexported' in shim_diags[0]['detail'] and '等 2 处' in shim_diags[0]['detail']
+
+    # Removing the shims while keeping real_logic, ALL_CAPS constant, and _private_shim passes cleanly.
+    (proj / 'operators' / 'wrapped.py').write_text(
+        'from . import base as hybrid\n'
+        'POOL_MAX = hybrid.MAX_ITEMS\n'
+        'def _private_shim(row):\n'
+        '    return hybrid.pool_group(row, maximum=50)\n'
+        'def pool_group(row):\n'
+        '    out = hybrid.pool_group(row, maximum=200)\n'
+        '    out["tag"] = "custom"\n'
+        '    return out\n',
+        encoding='utf-8',
+    )
+    _, clean_diags = check_project_hygiene(
+        proj, control,
+        checked_sources={'flows/demo.py', 'operators/base.py', 'operators/wrapped.py'},
+        parameter_digests={},
+    )
+    assert clean_diags == [], clean_diags
