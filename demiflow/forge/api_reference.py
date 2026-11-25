@@ -102,7 +102,7 @@ def sdk_identity(catalog):
 
 
 def build_reference():
-    catalog = discover_catalog(MODULES, limits={'timeout_seconds': 12, 'catalog_bytes': REFERENCE_BYTES})
+    catalog = discover_catalog(MODULES, limits={'timeout_seconds': 30, 'catalog_bytes': REFERENCE_BYTES})
     if not catalog['inspection_complete']:
         raise ForgeError('Native SDK API catalogue is incomplete', code='resource_limit')
     return dict(catalog=catalog, catalog_id=content_digest(catalog), sdk_revision=sdk_identity(catalog))

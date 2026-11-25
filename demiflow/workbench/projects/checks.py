@@ -36,7 +36,7 @@ def check(root, *, table_resolver):
 
     # This operation already runs in the memory-limited product inspection worker.
     report = check_project(root, reference=reference, table_resolver=table_resolver, table_describer=None, publish=publish,
-                           max_variants=32, seconds=35, max_bytes=32*1024**2)
+                           max_variants=64, seconds=55, max_bytes=32*1024**2)
     if ws.current_platform_snapshot(saved_snapshot)['digests']['snapshot'] != snapshot['digests']['snapshot']:
         raise ForgeError('Checker platform changed during project inspection', code='conflict')
     results = [{**item, 'digest': digests.get((item['entry'], item['params']))} for item in report['entries']]
