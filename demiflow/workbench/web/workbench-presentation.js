@@ -608,12 +608,14 @@
   function compactApiExpr(call, fallbackLabel, dataSource) {
     const raw = typeof call?.summary === 'string' ? call.summary.replace(/\s+/g, ' ').trim() : '';
     if (!raw) return typeof fallbackLabel === 'string' && fallbackLabel.trim() && !HAS_CJK.test(fallbackLabel) ? fallbackLabel.trim() : '';
-    const m = raw.match(/^(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*\(([\s\S]*?)\)?\s*$/);
+    const m = raw.match(/^(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*\(([\s\S]*)$/);
     if (!m) {
       const clean = raw.replace(/^(?:rows|ds|dataset)\./, '.');
       return bounded(clean, 64);
     }
-    const fn = m[1], args = splitTopLevelArgs(m[2].trim());
+    const fn = m[1];
+    const inner = m[2].replace(/\)\s*$/, '').trim();
+    const args = splitTopLevelArgs(inner);
     const prefix = SOURCE_CREATORS.has(fn) ? 'data.' : '.';
     const kw = {};
     const pos = [];

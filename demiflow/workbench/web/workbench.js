@@ -944,9 +944,13 @@
         flowRows.push(['输入',upstreams.map(u=>`${portNames[u.port]||u.port}：${u.name}`).join(' ＋ ')]);
       }else if(upstreams.length===1){
         flowRows.push(['输入',`${upstreams[0].name}（整行数据）`]);
-      }else if(node?.data_source?.uri){
-        const base=String(node.data_source.uri).split('/').filter(Boolean).pop()||node.data_source.uri;
-        const ver=Number.isInteger(node.data_source.version)?` · v${node.data_source.version}`:'';
+      }else if(node?.data_source?.uri||node?.data_source?.path||apiExpr.startsWith('data.read_')||opKind.includes('read')){
+        const uriArg=dataArgs.find(p=>p.name==='uri'||p.name==='path');
+        const verArg=dataArgs.find(p=>p.name==='version');
+        const rawUri=node?.data_source?.uri||node?.data_source?.path||(uriArg?formatArgValue(uriArg):'');
+        const base=rawUri?String(rawUri).split('/').filter(Boolean).pop():'外部数据源';
+        const verNum=Number.isInteger(node?.data_source?.version)?node.data_source.version:(verArg&&verArg.value!=null?verArg.value:null);
+        const ver=verNum!=null?` · v${verNum}`:'';
         flowRows.push(['输入',`外部表 ${base}${ver}`]);
       }else{
         flowRows.push(['输入','内存数据清单']);
@@ -999,8 +1003,8 @@
       }
       if(paramRows.length){
         const paramSec=$('section',undefined,'wb-wiring-section');
-        paramSec.append($('h4','业务入参'));
-        renderKvTable(paramSec,['入参','值'],paramRows);
+        paramSec.append($('h4','调用参数'));
+        renderKvTable(paramSec,['参数','值'],paramRows);
         target.append(paramSec);
       }
 
