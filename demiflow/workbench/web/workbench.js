@@ -1058,18 +1058,26 @@
     function renderFieldChips(fields,prefix=''){
       const wrap=$('div',undefined,'wb-field-chips');
       if(prefix)wrap.append($('span',prefix,'wb-field-hint'));
-      for(const name of fields)wrap.append($('code',name,'wb-field-chip'));
+      fields.forEach((name,idx)=>{
+        if(idx>0)wrap.append(document.createTextNode(' '));
+        wrap.append($('code',name,'wb-field-chip'));
+      });
       return wrap;
+    }
+    function renderFlowCell(summary,fields,hint=''){
+      if(!Array.isArray(fields)||!fields.length)return summary;
+      const box=$('div',undefined,'wb-flow-cell');
+      if(summary)box.append($('div',summary,'wb-flow-summary'));
+      box.append(renderFieldChips(fields,hint));
+      return box;
     }
     function renderExampleCard(example){
       const card=$('div',undefined,'wb-example-card');
       const inSide=$('div',undefined,'wb-example-side');
       inSide.append($('span','输入','wb-example-label'),$('pre',example.input,'wb-example-code'));
-      const arrow=$('div','↓','wb-example-arrow');
-      arrow.setAttribute('aria-hidden','true');
       const outSide=$('div',undefined,'wb-example-side wb-example-out');
       outSide.append($('span','输出','wb-example-label'),$('pre',example.output,'wb-example-code'));
-      card.append(inSide,arrow,outSide);
+      card.append(inSide,outSide);
       return card;
     }
     function renderWiring(node,values,target=wiringPane,implVal=null){
@@ -1084,7 +1092,10 @@
       const apiExpr=presentation.compactApiExpr?.(node?.api_call,node?.label,node?.data_source,node?.op_kind)||'';
       const opKind=String(node?.op_kind||'').toLowerCase();
 
-      // 1. 数据流（每个节点必有输入与输出）
+      // 1. 数据流（仅保留输入/输出两行，将 AST 字段芯片直接融合到对应行中避免重复）
+      const fieldFlow=implDef?.field_flow;
+      const readFields=Array.isArray(fieldFlow?.reads)&&fieldFlow.reads.length?fieldFlow.reads:null;
+      const writeFields=Array.isArray(fieldFlow?.writes)&&fieldFlow.writes.length?fieldFlow.writes:null;
       const upstreams=upstreamLabelsFor(node);
       const flowRows=[];
       if(bindings.inputs&&typeof bindings.inputs==='object'&&Object.keys(bindings.inputs).length){
@@ -1093,9 +1104,10 @@
         flowRows.push(['输入',`取列：${cols}${fromHint}`]);
       }else if(upstreams.length>1){
         const portNames={left:'左表',right:'右表'};
-        flowRows.push(['输入',upstreams.map(u=>`${portNames[u.port]||u.port}：${u.name}`).join(' ＋ ')]);
+        flowRows.push(['输入',renderFlowCell(upstreams.map(u=>`${portNames[u.port]||u.port}：${u.name}`).join(' ＋ '),readFields)]);
       }else if(upstreams.length===1){
-        flowRows.push(['输入',`${upstreams[0].name}（整行数据）`]);
+        const inLabel=readFields?`来自 ${upstreams[0].name}`:`${upstreams[0].name}（整行数据）`;
+        flowRows.push(['输入',renderFlowCell(inLabel,readFields)]);
       }else if(node?.data_source?.uri||node?.data_source?.path||apiExpr.startsWith('data.read_')||opKind.includes('read')){
         const uriArg=provided.find(p=>p.name==='uri'||p.name==='path');
         const verArg=provided.find(p=>p.name==='version');
@@ -1105,7 +1117,7 @@
         const ver=verNum!=null?` · v${verNum}`:'';
         flowRows.push(['输入',`外部表 ${base}${ver}`]);
       }else{
-        flowRows.push(['输入','内存数据清单']);
+        flowRows.push(['输入',renderFlowCell('内存数据清单',readFields)]);
       }
 
       const outCols=[];
@@ -1132,15 +1144,10 @@
       }else if(apiExpr.startsWith('data.read_')||apiExpr.startsWith('data.from_')||opKind.includes('read')||opKind==='materialized'){
         outputDesc='数据行流';
       }
-      flowRows.push(['输出',outputDesc]);
-
-      const fieldFlow=implDef?.field_flow;
-      if(Array.isArray(fieldFlow?.reads)&&fieldFlow.reads.length){
-        flowRows.push(['读取字段',renderFieldChips(fieldFlow.reads)]);
-      }
-      if(Array.isArray(fieldFlow?.writes)&&fieldFlow.writes.length){
-        flowRows.push(['产出字段',renderFieldChips(fieldFlow.writes,fieldFlow.passes_through?'在原行上新增/更新：':'')]);
-      }
+      const outSummary=writeFields&&outputDesc==='新数据行（1→1）'
+        ?(fieldFlow.passes_through?'在原行上新增/更新':'产出新行')
+        :outputDesc;
+      flowRows.push(['输出',renderFlowCell(outSummary,outCols.length?null:writeFields)]);
 
       const flowSec=$('section',undefined,'wb-wiring-section');
       flowSec.append($('h4','数据流'));

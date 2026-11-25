@@ -317,22 +317,23 @@
 .workbench .wb-param-fold>summary:hover{color:#09090b}
 .workbench .wb-param-fold>pre{margin:6px 0 0;max-height:280px;overflow:auto}
 
-.workbench .wb-param-desc{color:#71717a;font-size:12px;line-height:1.45;min-width:110px}
-.workbench .wb-field-chips{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
-.workbench .wb-field-hint{color:#71717a;font-size:12px;margin-right:2px}
-.workbench .wb-field-chip{
+.wb-param-desc{color:#71717a;font-size:12px;line-height:1.45;min-width:110px}
+.wb-flow-cell{display:flex;flex-direction:column;gap:6px}
+.wb-flow-summary{color:#3f3f46;font-size:12.5px;line-height:1.4}
+.wb-field-chips{display:flex;flex-wrap:wrap;align-items:center;gap:5px 6px}
+.wb-field-hint{color:#71717a;font-size:12px;margin-right:2px}
+.wb-field-chip{
   display:inline-block;padding:1px 6px;border-radius:5px;border:1px solid #e4e4e7;background:#f4f4f5;
   color:#18181b;font:12px/1.45 var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);
 }
-.workbench .wb-example-card{
-  display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:10px;background:#fafafa;
+.wb-example-card{
+  display:flex;flex-direction:column;gap:10px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:10px;background:#fafafa;
 }
-.workbench .wb-example-side{display:flex;flex-direction:column;gap:4px}
-.workbench .wb-example-label{font-size:11px;font-weight:600;color:#71717a;letter-spacing:.02em}
-.workbench .wb-example-out .wb-example-label{color:#15803d}
-.workbench .wb-example-code{
+.wb-example-side{display:flex;flex-direction:column;gap:4px}
+.wb-example-label{font-size:11px;font-weight:600;color:#71717a;letter-spacing:.02em}
+.wb-example-out .wb-example-label{color:#15803d}
+.wb-example-code{
   margin:0;padding:7px 9px;border-radius:7px;border:1px solid #ededf0;background:#fff;color:#18181b;
   font:12px/1.5 var(--font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:180px;
 }
-.workbench .wb-example-out .wb-example-code{border-color:#dcfce7;background:#f7fee7}
-.workbench .wb-example-arrow{text-align:center;color:#a1a1aa;font-size:12px;line-height:1;user-select:none}
+.wb-example-out .wb-example-code{border-color:#dcfce7;background:#f7fee7}
