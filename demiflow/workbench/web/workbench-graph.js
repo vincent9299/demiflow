@@ -224,6 +224,7 @@
     }
     function summaryText(line) {
       if (!line) return '';
+      if (line.label === '说明' && line.value) return line.value;
       if (line.value === null || line.value === undefined) return line.label + '：未知' + (line.reason ? '（' + line.reason + '）' : '');
       return line.label + '：' + line.value;
     }

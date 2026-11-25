@@ -622,12 +622,15 @@
       const sameLogical = execution.nodes.filter(item => item.logicalNodeId === node.logicalNodeId);
       const ordinal = sameLogical.findIndex(item => item.occurrenceId === node.occurrenceId) + 1;
       const cardSelection = memberSelection(graph, node, identity, context);
-      const call = findReportNode(graph, cardSelection.reportNodeId)?.api_call;
+      const reportNode = findReportNode(graph, cardSelection.reportNodeId);
+      const desc = typeof reportNode?.description === 'string' && reportNode.description.trim() ? reportNode.description.trim() : null;
+      const call = reportNode?.api_call;
       return {
         key: v3Key(identity, node.occurrenceId), selection: cardSelection, occurrences: [],
         kindLabel: kindLabel(node.kind), title: sealedTitle(graph, node, identity, context, ordinal, sameLogical.length),
         summary: [
-          ...(typeof call?.summary === 'string' ? [{label: 'API', value: bounded(call.summary, 256), basis: 'sealed', reason: null}] : []),
+          ...(desc ? [{label: '说明', value: bounded(desc, 160), basis: 'sealed', reason: null}]
+            : typeof call?.summary === 'string' ? [{label: 'API', value: bounded(call.summary, 256), basis: 'sealed', reason: null}] : []),
           {label: '端口', value: bounded((node.inputPorts.join(', ') || '—') + ' → ' + (node.outputPorts.join(', ') || '—'), 160), basis: 'sealed', reason: null},
           placementSummary(node),
         ],
@@ -869,7 +872,11 @@
         // Optional labels are supplied by the compiler's declaration, never joined from AST nodes.
         kindLabel: kindLabel(node.op_kind), title: typeof node.label === 'string' && node.label.trim()
           && node.label.length <= 256 ? displayTitle(node.label, node.op_kind) : kindLabel(node.op_kind),
-        summary: [...(isRecord(node.api_call)&&typeof node.api_call.summary==='string'?[{label:'API',value:bounded(node.api_call.summary,256),basis:'compile',reason:null}]:[]), {label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
+        summary: [...(typeof node.description === 'string' && node.description.trim()
+            ? [{label: '说明', value: bounded(node.description.trim(), 160), basis: 'compile', reason: null}]
+            : isRecord(node.api_call) && typeof node.api_call.summary === 'string'
+              ? [{label: 'API', value: bounded(node.api_call.summary, 256), basis: 'compile', reason: null}] : []),
+          {label: '端口', value: bounded((node.input_ports.join(', ') || '—') + ' → '
           + (node.output_ports.join(', ') || '—'), 160), basis: 'compile', reason: null},
           node.data_source ? {label: '版本', value: Number.isInteger(node.data_source.version)
             ? String(node.data_source.version) : '运行时固定', basis: 'compile', reason: null}
