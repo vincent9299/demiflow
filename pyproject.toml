@@ -7,6 +7,7 @@ name = "demiflow"
 version = "0.3.0"
 description = "Declarative dataset pipelines: lazy local execution, async streaming stage, Lance I/O, LLM operators"
 requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
 dependencies = ["pyarrow==25.0.1", "PyYAML>=6", "click>=8", "packaging>=23", "datafusion==54.0.0", "pylance==12.0.0+demiflow.arrowfix1", "cloudpickle>=2.2", "psutil>=5.9", "tomli>=2; python_version < '3.11'"]
 
 [project.scripts]
