@@ -1125,8 +1125,14 @@ def test_unlimited_dev_turn_seconds_and_sandbox_seconds_zero(tmp_path):
             validate_spec_portable(bad, ['/usr/bin/python3', '-c', 'pass'], {'PATH': '/usr/bin:/bin'}, str(proj))
 
     if backend_readiness()['available']:
+        script = (
+            'import resource\n'
+            'soft, hard = resource.getrlimit(resource.RLIMIT_CPU)\n'
+            'assert soft == resource.RLIM_INFINITY or soft > 60, (soft, hard)\n'
+            'print("UNLIMITED_OK")\n'
+        )
         proc = launch_sandbox(
-            ['/usr/bin/python3', '-I', '-B', '-c', 'print("UNLIMITED_OK")'],
+            ['/usr/bin/python3', '-I', '-B', '-c', script],
             spec=dev_spec, env={'PATH': '/usr/bin:/bin'}, cwd=str(proj),
         )
         out, err = proc.communicate(timeout=15)
