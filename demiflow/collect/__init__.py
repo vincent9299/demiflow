@@ -16,12 +16,11 @@ import importlib as _il
 import sys as _sys
 
 _LAZY = ("net", "fetch", "store", "resume", "crawl", "images", "search",
-         "llm", "exec_curl", "fleet", "cosio",
-         "relay", "pan123", "supervisor", "network_config")
+         "llm", "exec_curl", "fleet", "cosio", "supervisor", "network_config")
 
 
 def __getattr__(name):
-    """惰性子模块：核心路径（cosio/relay/pan123/supervisor）零三方依赖，
+    """惰性子模块：核心路径（cosio/supervisor）零三方依赖，
     按需 import——重依赖（httpx/crawl4ai/pillow）只在真正取用对应子模块
     时才要求安装（extras 化的机制落点，机器部署零 pip）。"""
     if name in _LAZY and f"{__name__}.{name}" in _sys.modules:
