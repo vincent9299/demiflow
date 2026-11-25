@@ -1,5 +1,5 @@
 """Native object/media facts and byte-preserving behavior, without business imports."""
-from demiflow.forge.project import initialize_project
+from demiflow.forge.project import initialize_project, load_project, save_project
 import hashlib
 import io
 import json
@@ -28,10 +28,10 @@ def base(tmp_path_factory):
     initialize_project(path)
     for directory in ('flows', 'operators', 'tables', 'data'):
         (path / directory).mkdir()
-    control = ws.read_control(path / 'workspace.json')
+    _, control = load_project(path)
     expected = ws.content_digest(control)
     control['locations']['local'] = {'root': 'data', 'writable': True}
-    ws.write_control(path / 'workspace.json', control, expected=expected)
+    save_project(path, control, expected=expected)
     return path
 
 

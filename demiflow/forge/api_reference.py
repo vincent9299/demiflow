@@ -1,4 +1,5 @@
 """Bounded coding guidance from the loaded native SDK catalogue."""
+import ast
 from hashlib import sha256
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from .schema import ForgeError
 
 MODULES = ('demiflow.data', 'demiflow.execution', 'demiflow.operator_llm', 'demiflow.objects', 'demiflow.agent')
 REFERENCE_BYTES = 2 * 1024**2
+SOURCE_EXCERPT_BYTES = 2048
 SDK_ROOT = Path(__file__).resolve().parents[1]
 DATASET = 'demiflow.data:Dataset.'
 ESSENTIAL = ('demiflow.data:read_lance', 'demiflow.data:from_items', 'demiflow.data:range', *(
@@ -18,6 +20,62 @@ ESSENTIAL = ('demiflow.data:read_lance', 'demiflow.data:from_items', 'demiflow.d
         'materialize', 'take', 'count', 'write_lance',
     )
 ))
+
+
+def _symbol_source_excerpt(origin, symbol_id, doc_text, *, max_bytes=SOURCE_EXCERPT_BYTES):
+    """Return a bounded AST source definition for explicit --api queries when helpful.
+
+    Attached when the docstring is empty/terse/auto-generated dataclass signature, or when the
+    target symbol is a class (dataclass / contract definition), so callers can inspect fields
+    and validation logic without scanning the SDK tree.
+    """
+    if origin.get('kind') != 'platform' or not origin.get('path'):
+        return None, False
+    path = SDK_ROOT / origin['path']
+    try:
+        if not path.resolve().is_relative_to(SDK_ROOT) or not path.is_file():
+            return None, False
+        raw = read_bounded(path, REFERENCE_BYTES).decode('utf-8', 'replace')
+        tree = ast.parse(raw)
+    except (OSError, SyntaxError, ValueError, ForgeError):
+        return None, False
+    sym = symbol_id.partition(':')[2]
+    parts = [p for p in sym.split('.') if p]
+    if not parts:
+        return None, False
+    target = None
+    body = tree.body
+    for idx, name in enumerate(parts):
+        found = next(
+            (n for n in body
+             if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name),
+            None,
+        )
+        if found is None:
+            return None, False
+        target = found
+        if idx < len(parts) - 1:
+            if not isinstance(found, ast.ClassDef):
+                return None, False
+            body = found.body
+    clean_doc = (doc_text or '').strip()
+    leaf = parts[-1]
+    terse_or_auto = (
+        not clean_doc
+        or len(clean_doc) < 80
+        or clean_doc.startswith(leaf + '(')
+    )
+    if not terse_or_auto and not isinstance(target, ast.ClassDef):
+        return None, False
+    lines = raw.splitlines()
+    start = min([target.lineno, *(d.lineno for d in getattr(target, 'decorator_list', ()))]) - 1
+    end = getattr(target, 'end_lineno', target.lineno)
+    snippet = '\n'.join(lines[max(0, start):end])
+    encoded = snippet.encode('utf-8')
+    truncated = len(encoded) > max_bytes
+    if truncated:
+        snippet = encoded[:max_bytes].decode('utf-8', 'ignore').rstrip()
+    return snippet, truncated
 
 
 def sdk_identity(catalog):
@@ -77,6 +135,11 @@ def select_apis(reference, api=None, *, maximum=20 * 1024):
                    documentation=excerpt, documentation_truncated=len(documentation) > doc_limit,
                    native_semantics=(item['native_semantics'] if api is not None else
                                      {k: v for k, v in item['native_semantics'].items() if k == 'role'}))
+        if api is not None:
+            src_excerpt, src_trunc = _symbol_source_excerpt(origin, symbol, item['documentation']['text'])
+            if src_excerpt:
+                row['source_excerpt'] = src_excerpt
+                row['source_excerpt_truncated'] = src_trunc
         size = len(canonical(row)) + 1
         if size > remaining:
             raise ForgeError('Selected SDK signatures exceed context budget', code='resource_limit')
@@ -99,6 +162,9 @@ def api_markdown(apis):
             facts += '\n  ' + item['documentation']
             if item['documentation_truncated']:
                 facts += '（节选）'
+        if item.get('source_excerpt'):
+            suffix = '（源码节选）' if item.get('source_excerpt_truncated') else ''
+            facts += f"\n  源码定义{suffix}：\n```python\n{item['source_excerpt']}\n```"
         rows.append(facts)
     return '\n\n'.join(rows)
 

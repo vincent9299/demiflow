@@ -14,10 +14,9 @@ description: 在 DemiFlow 数据工作区渐进式发现数据及可复用 Pytho
    - `data catalog list tools [--query 关键词] [--offset N]` 列出或检索工具；`data catalog show tools "模块.函数名"` 获取导入路径、签名与说明（项目工具在 `data_tools/`，平台工具在 `demiflow.data_tools`）。
    - **何时用工具 vs 直接写 Cell**：遇到看图、质检、人工标注、复核等标准化交互需求时，**必须先检索 `tools`**，有现成工具优先复用（避免重复造轮子或破坏标注格式）；若有多个候选工具拿不准，用中文列出候选工具及用途请用户选择；仅做一次性简单统计/抽样/临时画图时直接写简洁 cell 代码。
    - 受限预览接口 `from demiflow.workbench.notebooks.data import sample, describe, count`：`sample(table, version=..., columns=..., offset=0, limit=20)` 单次 `limit` 上限为 **100**（最多 16 列），切勿传超过 100；总行数与字段元数据直接用 `count(...)` / `describe(...)`。
-3. **沉淀或修改数据工具（受控写入 `data_tools/`，强制语义）**：
+3. **沉淀或修改数据工具（受控写入 `data_tools/`，对齐 Forge docstring 规范）**：
    - 当用户要求把当前卡片沉淀为复用工具，或修改已有看图/标注/分析工具时，通过标准输入把完整模块源码交给 `data tool write <模块名>.py`（仅允许写入项目 `data_tools/` 根目录下的 `.py` 文件，绝不可触碰 `flows/`、`operators/` 等管线代码）。
-   - **强制语义规范**：写入的模块顶层**必须**声明非空的 `__demiflow_data_tools__`，且每个导出项必须包含 `kind`（`tool` / `analysis` / `view` / `annotation` / `annotation_component`）、`title`（中文名称）、`summary`（一句话用途）、`when_to_use`（适用场景），例如：
-     `__demiflow_data_tools__ = {"PoolReview": {"kind": "annotation", "title": "训练池审核", "summary": "分页看图并人工通过/拒绝", "when_to_use": "人工复核训练池候选图时使用"}}`
+   - **语义描述规范（与 Forge 算子一致）**：模块顶层公开函数/类默认自动按 `tool` 发现，**每个公开函数/类必须写清非空 docstring（首行用一句话写明中文用途）**，直接作为工具目录的语义简介展示。无需强制声明 `__demiflow_data_tools__`；仅当需要进一步标注细分类别（`analysis` / `view` / `annotation` / `annotation_component`）或补充中文标题/适用场景时，可选在顶层声明 `__demiflow_data_tools__`（如 `{"PoolReview": "annotation"}` 或带 `title`/`summary`/`when_to_use` 的字典）。
    - 修改已有工具后，在当前 cell 调用前使用 `importlib.reload(...)` 确保运行中的内核立刻生效。
 4. **编辑与内核验证**：
    - 通过标准输入把完整 Python 源码交给 `data cell edit`（如带引号的 here-document）；若用户同时修改了 cell 导致冲突，说明情况并保留用户修改。

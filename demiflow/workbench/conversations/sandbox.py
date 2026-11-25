@@ -104,7 +104,11 @@ def specification(spec, command, env, cwd):
         raise ValueError('Only developer role may use project_root write policy')
     if spec.direct_network and spec.role == 'verifier':
         raise ValueError('Verifier sandbox cannot enable direct network access')
-    for value, maximum in ((spec.seconds, 3600), (spec.rss_bytes, 16 * 1024**3),
+    if (type(spec.seconds) not in (int, float) or not math.isfinite(spec.seconds)
+            or spec.seconds < 0 or spec.seconds > 86400
+            or (spec.seconds == 0 and spec.role != 'developer')):
+        raise ValueError('Sandbox resource limit is invalid')
+    for value, maximum in ((spec.rss_bytes, 16 * 1024**3),
                            (spec.processes, 64), (spec.file_bytes, 64 * 1024**2),
                            (spec.private_bytes, 512 * 1024**2)):
         if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= maximum:

@@ -40,6 +40,7 @@ GUARDS = (
     'tests/test_dataflow_compile_inputs.py',
     'tests/test_dataflow_configuration.py',
     'tests/test_pre_v3_retention.py',
+    'tests/test_public_sdk_docstrings.py',
     'tests/test_engine_known_state.py',
     'tests/test_merge_gate.py',
 )

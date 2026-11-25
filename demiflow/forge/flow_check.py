@@ -414,6 +414,30 @@ class FlowChecker:
                 raise _LoopBreak()
             elif isinstance(node, ast.Pass):
                 pass
+            elif isinstance(node, ast.Raise):
+                exc_label = "Exception"
+                detail = ""
+                if isinstance(node.exc, ast.Call):
+                    if isinstance(node.exc.func, ast.Name):
+                        exc_label = node.exc.func.id
+                    elif isinstance(node.exc.func, ast.Attribute):
+                        exc_label = node.exc.func.attr
+                    if node.exc.args:
+                        arg0 = node.exc.args[0]
+                        if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str) and arg0.value.strip():
+                            detail = f": {arg0.value.strip()[:240]}"
+                        elif isinstance(arg0, ast.Name) and isinstance(env.get(arg0.id), str) and env[arg0.id].strip():
+                            detail = f": {env[arg0.id].strip()[:240]}"
+                elif isinstance(node.exc, ast.Name):
+                    exc_label = node.exc.id
+                self.fail(
+                    "FL-06",
+                    f"Flow wiring raised {exc_label}{detail} for the bound configuration "
+                    "(for runtime execution gates that must still pass static DAG checks when false, "
+                    "use demiflow.data.require(condition, message) instead of raising during wiring)",
+                    node,
+                    module,
+                )
             else:
                 self.fail(
                     "FL-07",

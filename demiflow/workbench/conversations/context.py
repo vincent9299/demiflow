@@ -114,24 +114,20 @@ PROJECT_LAYOUT_TOOL = dict(
         'Safely manage controlled project structure, file organization and workspace.json registrations on the host: '
         'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/data/logs/tests/docs); '
         'register_flow checks and registers a flow entry in workspace.json (defaulting to configs/<flow>.json); '
-        'bind_params updates an existing registered entry parameter binding (e.g. migrating parameters/*.json to configs/*.json); '
+        'bind_params updates an existing registered entry parameter binding under configs/*.json; '
         'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
-        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. deprecated parameters/*, legacy tables/*, orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
+        'remove_path deletes obsolete unreferenced non-data files or directories (e.g. non-standard directories or unused orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
         'sync_env_example generates/updates root .env.example (empty-value template ONLY, never real secrets) from prompts/*.yaml api_key_env/base_url_env declarations (plus optional extra variable names) and ensures .gitignore ignores .env and .forge/; '
-        'slim_manifest moves legacy Forge internal fields (format/id/platform/audit) from workspace.json into .forge/state.json and removes unused locations, leaving workspace.json as a clean human-readable project manifest.'
+        'slim_manifest normalizes workspace.json to the minimal human-readable project manifest (name/entries/budgets) while storing Forge internal state in .forge/state.json.'
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
         'action': dict(type='string', enum=[
-            'ensure_dirs', 'register_flow', 'bind_params', 'bind_table', 'move_path', 'remove_path', 'sync_env_example', 'slim_manifest',
+            'ensure_dirs', 'register_flow', 'bind_params', 'move_path', 'remove_path', 'sync_env_example', 'slim_manifest',
         ]),
         'dirs': dict(type='array', items=dict(type='string')),
         'entry': dict(type='string'),
         'params': dict(type='string'),
         'old_params': dict(type='string'),
-        'alias': dict(type='string'),
-        'path': dict(type='string'),
-        'location_id': dict(type='string'),
-        'version': dict(type='integer'),
         'src': dict(type='string'),
         'dst': dict(type='string'),
         'paths': dict(type='array', items=dict(type='string')),
@@ -252,15 +248,6 @@ def _run_project_layout(project_root, arguments):
             value['entries'][entry] = bound
             forge_project.save_project(root, value, expected=expected)
         return dict(status='updated', entry=entry, params=bound)
-    if action == 'bind_table':
-        from demiflow.forge.project_bindings import bind_table
-        return bind_table(
-            root,
-            arguments.get('alias'),
-            arguments.get('path'),
-            location_id=arguments.get('location_id'),
-            version=arguments.get('version'),
-        )
     if action == 'move_path':
         import shutil
         src_raw = arguments.get('src')
@@ -405,11 +392,6 @@ class BridgeServer:
                 recorded.add(params)
             elif isinstance(params, list):
                 recorded.update(p for p in params if isinstance(p, str) and p)
-        elif action == 'bind_table':
-            recorded.add('workspace.json')
-            alias = answer.get('alias')
-            if isinstance(alias, str) and alias:
-                recorded.add(f'tables/{alias}.json')
         elif action == 'sync_env_example':
             recorded.add('.env.example')
             if answer.get('gitignore_updated'):
