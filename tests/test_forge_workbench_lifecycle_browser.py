@@ -78,10 +78,10 @@ def test_unified_three_tab_nav_and_three_column_pipeline_workspace(project,brows
         expect(nav.get_by_role('button')).to_have_text(['管线', '数据', '文档'])
         nav.get_by_role('button', name='管线', exact=True).click()
         expect(page.locator('.pw-workspace')).to_be_visible()
-        # Left sidebar exposes 管线 | 会话 | 组件 | 文件 on one single row.
+        # Left sidebar exposes 管线 | 会话 | 文件 on one single row.
         sidebar = page.locator('.pw-sidebar')
         tab_ys = []
-        for label in ('管线', '会话', '组件', '文件'):
+        for label in ('管线', '会话', '文件'):
             btn = sidebar.get_by_role('button', name=label, exact=True)
             expect(btn).to_be_visible()
             tab_ys.append(round(btn.bounding_box()['y']))
