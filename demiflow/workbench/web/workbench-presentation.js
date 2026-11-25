@@ -605,9 +605,12 @@
     return typeof s === 'string' ? s.trim().replace(/^['"]|['"]$/g, '') : '';
   }
   const SOURCE_CREATORS = new Set(['read_lance', 'from_items', 'read_parquet', 'read_json', 'read_csv', 'read_records', 'range', 'from_arrow', 'from_pandas']);
-  function compactApiExpr(call, fallbackLabel, dataSource) {
+  function compactApiExpr(call, fallbackLabel, dataSource, opKind) {
     const raw = typeof call?.summary === 'string' ? call.summary.replace(/\s+/g, ' ').trim() : '';
-    if (!raw) return typeof fallbackLabel === 'string' && fallbackLabel.trim() && !HAS_CJK.test(fallbackLabel) ? fallbackLabel.trim() : '';
+    if (!raw) {
+      if (String(opKind || '').toLowerCase() === 'materialized') return 'data.from_items(...)';
+      return typeof fallbackLabel === 'string' && fallbackLabel.trim() && !HAS_CJK.test(fallbackLabel) ? fallbackLabel.trim() : '';
+    }
     const m = raw.match(/^(?:[A-Za-z_][\w.]*\.)?([A-Za-z_]\w*)\s*\(([\s\S]*)$/);
     if (!m) {
       const clean = raw.replace(/^(?:rows|ds|dataset)\./, '.');
@@ -962,7 +965,7 @@
         execution: null, previewDigest: value.basis.digest}, occurrences: [],
         // Optional labels are supplied by the compiler's declaration, never joined from AST nodes.
         kindLabel: kindLabel(node.op_kind), title: semanticHeadline(rawTitle, desc),
-        apiExpr: compactApiExpr(node.api_call, node.label, node.data_source),
+        apiExpr: compactApiExpr(node.api_call, node.label, node.data_source, node.op_kind),
         summary: [...(desc
             ? [{label: '说明', value: bounded(desc, 160), basis: 'compile', reason: null}]
             : isRecord(node.api_call) && typeof node.api_call.summary === 'string'

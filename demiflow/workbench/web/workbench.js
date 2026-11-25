@@ -882,7 +882,6 @@
         basis:(value.source_basis==='compiled_snapshot'?'计划绑定版本':value.source_basis==='sealed'?'运行封存版本':'')+(definitionDigest?' · '+definitionDigest.slice(0,8):''),
         truncated:value.truncated},{mountText});
     }
-    const RUNTIME_ARGS=new Set(['config','model','options','concurrency','queue_depth','max_requests','request_concurrency','token_budget','when','catch','route','routes','isolate_route_failures','cache_when','schema_retries','service','request_gate','request_policy','batch_size','batch_readahead','fragment_readahead','max_batch','max_rows','max_row_bytes','wait_timeout_s','prepare_workers','reuse_workers','reuse_worker_max_tasks','index_cache_mb','max_entries','max_key_bytes']);
     const OUTPUT_SIDE_ARGS=new Set(['call_output','error_output','output_ref']);
     const API_PARAM_DOCS={
       uri:'数据表路径或目标地址',
@@ -1061,11 +1060,9 @@
       const opArgDocs=extractOperatorArgDocs(implVal||byKind.implementation);
       const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.name!=='fn'&&p.value?.type!=='Dataset');
       const provided=allArgs.filter(p=>p.origin!=='default');
-      const runtimeArgs=provided.filter(p=>RUNTIME_ARGS.has(p.name));
       const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
-      const dataArgs=provided.filter(p=>!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
       const bindings=schema?.metadata?.bindings||{};
-      const apiExpr=presentation.compactApiExpr?.(node?.api_call,node?.label,node?.data_source)||'';
+      const apiExpr=presentation.compactApiExpr?.(node?.api_call,node?.label,node?.data_source,node?.op_kind)||'';
       const opKind=String(node?.op_kind||'').toLowerCase();
 
       // 1. 数据流（每个节点必有输入与输出）
@@ -1081,8 +1078,8 @@
       }else if(upstreams.length===1){
         flowRows.push(['输入',`${upstreams[0].name}（整行数据）`]);
       }else if(node?.data_source?.uri||node?.data_source?.path||apiExpr.startsWith('data.read_')||opKind.includes('read')){
-        const uriArg=dataArgs.find(p=>p.name==='uri'||p.name==='path');
-        const verArg=dataArgs.find(p=>p.name==='version');
+        const uriArg=provided.find(p=>p.name==='uri'||p.name==='path');
+        const verArg=provided.find(p=>p.name==='version');
         const rawUri=node?.data_source?.uri||node?.data_source?.path||(uriArg?formatArgValue(uriArg):'');
         const base=rawUri?String(rawUri).split('/').filter(Boolean).pop():'外部数据源';
         const verNum=Number.isInteger(node?.data_source?.version)?node.data_source.version:(verArg&&verArg.value!=null?verArg.value:null);
@@ -1098,8 +1095,8 @@
       for(const p of sideOutputs){const v=formatArgValue(p);if(v)outCols.push(v);}
       let outputDesc='新数据行（1→1）';
       if(apiExpr.startsWith('.join')||opKind.includes('join')){
-        const onArg=dataArgs.find(p=>p.name==='on');
-        const howArg=dataArgs.find(p=>p.name==='how');
+        const onArg=provided.find(p=>p.name==='on');
+        const howArg=provided.find(p=>p.name==='how');
         const howLabel=howArg?({left:'左连接',inner:'内连接',right:'右连接',outer:'外连接'}[formatArgValue(howArg)]||formatArgValue(howArg)):'关联';
         outputDesc=onArg?`按 ${formatArgValue(onArg)} ${howLabel}后的行`:`${howLabel}后的行`;
       }else if(outCols.length){
@@ -1109,7 +1106,7 @@
       }else if(apiExpr.startsWith('.filter')||opKind.includes('filter')){
         outputDesc='筛选保留的数据行';
       }else if(apiExpr.startsWith('.save_lance')||opKind.includes('checkpoint')||opKind.includes('save')){
-        const stageArg=dataArgs.find(p=>p.name==='stage');
+        const stageArg=provided.find(p=>p.name==='stage');
         outputDesc=stageArg?`阶段落盘（stage=${formatArgValue(stageArg)}）并继续向下传递`:'阶段落盘并继续向下传递';
       }else if(apiExpr.startsWith('.write_lance')||opKind.includes('write')){
         outputDesc='写出最终 Lance 表并返回回执';
@@ -1123,25 +1120,29 @@
       renderKvTable(flowSec,['方向','说明'],flowRows);
       target.append(flowSec);
 
-      // 2. 调用参数（固定入参，大对象默认折叠）
-      const paramRows=[];
+      // 2. 按真实签名归属拆分为：算子参数（fn_kwargs）与 API 参数（Dataset API 全部入参）
+      const FLOW_OWNED_ARGS=new Set(['inputs','output','outputs','call_output','error_output','output_ref','label']);
+      const opParamRows=[];
       const fnKwargKeys=[];
-      const otherParamNames=[];
-      for(const p of dataArgs){
+      const apiParamRows=[];
+      const apiParamObjs=[];
+      for(const p of provided){
         if(p.name==='fn_kwargs'&&p.value&&typeof p.value==='object'&&!Array.isArray(p.value)&&!p.value.unavailable){
           for(const[k,v]of Object.entries(p.value)){
             fnKwargKeys.push(k);
             const txt=typeof v==='string'?v:json(v);
-            paramRows.push([k,opArgDocs[k]||'',renderParamValueCell(v,txt)]);
+            opParamRows.push([k,opArgDocs[k]||'',renderParamValueCell(v,txt)]);
           }
-        }else if(p.name==='label'){
+        }else if(FLOW_OWNED_ARGS.has(p.name)){
           continue;
         }else{
-          otherParamNames.push(p.name);
-          paramRows.push([p.name,API_PARAM_DOCS[p.name]||opArgDocs[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]);
+          apiParamObjs.push(p);
+          apiParamRows.push([p.name,API_PARAM_DOCS[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]);
         }
       }
-      if(apiExpr&&(fnKwargKeys.length||otherParamNames.length||Object.keys(bindings.inputs||{}).length||bindings.output)){
+
+      // 头部点化签名与下方算子参数 + API 参数 1:1 严格对齐
+      if(apiExpr&&(fnKwargKeys.length||apiParamObjs.length||Object.keys(bindings.inputs||{}).length||bindings.output)){
         const sigMatch=apiExpr.match(/^([A-Za-z_.]+\w*)\(([\s\S]*)\)$/);
         if(sigMatch){
           const head=sigMatch[1],baseInner=sigMatch[2].trim();
@@ -1152,13 +1153,11 @@
             parts.push(`inputs={${Object.keys(bindings.inputs).join(', ')}}`);
           }
           if(bindings.output&&!head.endsWith('join'))parts.push(`output='${bindings.output}'`);
-          for(const name of otherParamNames){
-            if(['inputs','output','outputs'].includes(name))continue;
-            const argObj=dataArgs.find(p=>p.name===name);
-            const rawVal=argObj?.value;
-            if(typeof rawVal==='string'&&rawVal.length<=24&&!rawVal.includes('/'))parts.push(`${name}='${rawVal}'`);
-            else if(typeof rawVal==='number'||typeof rawVal==='boolean')parts.push(`${name}=${rawVal}`);
-            else parts.push(name);
+          for(const argObj of apiParamObjs){
+            const rawVal=argObj.value;
+            if(typeof rawVal==='string'&&rawVal.length<=24&&!rawVal.includes('/'))parts.push(`${argObj.name}='${rawVal}'`);
+            else if(typeof rawVal==='number'||typeof rawVal==='boolean')parts.push(`${argObj.name}=${rawVal}`);
+            else parts.push(argObj.name);
           }
           if(parts.length){
             sourceTitle.textContent=`${head}(${parts.join(', ')})`;
@@ -1166,33 +1165,29 @@
           }
         }
       }
-      if(paramRows.length){
-        const paramSec=$('section',undefined,'wb-wiring-section');
-        paramSec.append($('h4','调用参数'));
-        renderParamTable(paramSec,paramRows);
-        target.append(paramSec);
+
+      if(opParamRows.length){
+        const opSec=$('section',undefined,'wb-wiring-section');
+        opSec.append($('h4','算子参数'));
+        renderParamTable(opSec,opParamRows);
+        target.append(opSec);
       }
 
-      // 3. 运行参数（纯引擎调度与资源控制）
       const engineCfg=config?.metadata?.engine_configuration;
       const modelObj=engineCfg?.model&&typeof engineCfg.model==='object'?engineCfg.model:null;
       const modelName=modelObj?.name||modelObj?.model||(typeof engineCfg?.model==='string'?engineCfg.model:null);
       const modelTransport=modelObj?.transport||null;
       const modelLabel=[modelName,modelTransport].filter(Boolean).join(' · ');
-      const rtRows=runtimeArgs.filter(p=>!['concurrency','queue_depth','max_requests','token_budget','when','config'].includes(p.name));
-      if(runtimeArgs.length||modelLabel){
-        const runtimeSection=$('section',undefined,'wb-wiring-section');
-        runtimeSection.append($('h4','运行参数'));
-        const summaryChips=$('div',undefined,'wb-runtime-chips');
-        if(modelLabel)summaryChips.append($('span','模型 '+modelLabel,'definition-model'));
-        const chipLabels={concurrency:'并发',queue_depth:'队列',max_requests:'请求上限'};
-        for(const p of runtimeArgs){
-          if(chipLabels[p.name])summaryChips.append($('span',chipLabels[p.name]+' '+formatArgValue(p),'definition-chip'));
-          else if(p.name==='token_budget'&&p.value?.max_input!=null)summaryChips.append($('span','输入上限 '+p.value.max_input,'definition-chip'));
+      if(apiParamRows.length||modelLabel){
+        const apiSec=$('section',undefined,'wb-wiring-section');
+        apiSec.append($('h4','API 参数'));
+        if(modelLabel){
+          const chips=$('div',undefined,'wb-runtime-chips');
+          chips.append($('span','模型 '+modelLabel,'definition-model'));
+          apiSec.append(chips);
         }
-        if(summaryChips.children.length)runtimeSection.append(summaryChips);
-        if(rtRows.length)renderParamTable(runtimeSection,rtRows.map(p=>[p.name,API_PARAM_DOCS[p.name]||'',renderParamValueCell(p.value,formatArgValue(p))]));
-        target.append(runtimeSection);
+        if(apiParamRows.length)renderParamTable(apiSec,apiParamRows);
+        target.append(apiSec);
       }
     }
     async function loadPreviewSource(){
