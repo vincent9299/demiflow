@@ -180,8 +180,17 @@
     const detailButtons=new Map();
     detailHeader.append($('strong','执行情况'),detailTabs);runDetail.append(detailHeader,runDetailBody);graphSection.append(runDetail);
     for(const[key,label]of [['logs','运行日志'],['observations','节点证据'],['events','控制事件']])detailButtons.set(key,button(label,()=>showRunInspector(key),detailTabs));
-    const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','算子详情'),sourceBody=$('div',undefined,'wb-source-body');
-    sourceHeader.append(sourceTitle);bottom.append(sourceHeader,sourceBody);inspector.before(bottom);
+    const bottom=$('section',undefined,'wb-source'),sourceHeader=$('div',undefined,'wb-source-header'),sourceTitle=$('strong','算子详情'),sourceTabs=$('div',undefined,'wb-source-tabs'),sourceBody=$('div',undefined,'wb-source-body');
+    let detailTab='wiring';
+    const wiringPane=$('div',undefined,'wb-detail-pane'),behaviorPane=$('div',undefined,'wb-detail-pane');
+    const detailTabButtons=new Map();
+    function selectDetailTab(tab){
+      detailTab=tab;
+      wiringPane.hidden=tab!=='wiring';behaviorPane.hidden=tab!=='behavior';
+      for(const[k,b]of detailTabButtons){b.classList.toggle('active',k===tab);b.setAttribute('aria-pressed',String(k===tab));}
+    }
+    for(const[k,label]of [['wiring','接线'],['behavior','行为']])detailTabButtons.set(k,button(label,()=>selectDetailTab(k),sourceTabs));
+    sourceHeader.append(sourceTitle);bottom.append(sourceHeader,sourceTabs,sourceBody);inspector.before(bottom);
     const runInspectorTabs=$('div',undefined,'wb-run-inspector-tabs');runInspectorTabs.hidden=true;nodePanel.prepend(runInspectorTabs);
     for(const[key,label]of [['observations','执行情况'],['definition','定义与接线'],['logs','日志']])button(label,()=>showRunInspector(key),runInspectorTabs).dataset.kind=key;
     const results=$('section',undefined,'wb-results');results.hidden=true;root.append(results);
@@ -826,39 +835,50 @@
       materialTable(target,['配置项','来源','当前值'],items.map(p=>[p.name,
         p.expression||(p.origin==='default'?'API 默认值':'传入值'),formatArgValue(p)]));
     }
-    function renderWiring(node,values,dag=planPreview?.dag){
-      const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),call=byKind.callsite,config=byKind.configuration,schema=byKind.schema;
-      const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.value?.type!=='Dataset');
-      const provided=allArgs.filter(p=>p.origin!=='default'),defaults=allArgs.filter(p=>p.origin==='default');
+    function renderWiring(node,values,target=wiringPane){
+      const byKind=Object.fromEntries(values.map(v=>[v.kind,v])),config=byKind.configuration,schema=byKind.schema;
+      const allArgs=(config?.metadata?.arguments||[]).filter(p=>p.name!=='self'&&p.name!=='fn'&&p.value?.type!=='Dataset');
+      const provided=allArgs.filter(p=>p.origin!=='default');
       const runtimeArgs=provided.filter(p=>RUNTIME_ARGS.has(p.name));
       const sideOutputs=provided.filter(p=>OUTPUT_SIDE_ARGS.has(p.name));
       const dataArgs=provided.filter(p=>!RUNTIME_ARGS.has(p.name)&&!OUTPUT_SIDE_ARGS.has(p.name));
       const bindings=schema?.metadata?.bindings||{};
 
-      const dataSection=$('section',undefined,'wb-wiring-section');
-      dataSection.append($('h4','数据接线'));
-      if(bindings.inputs&&typeof bindings.inputs==='object')materialTable(dataSection,['上游字段','算子输入'],Object.entries(bindings.inputs).map(([k,v])=>[String(v),k]));
-      if(bindings.output)dataSection.append($('p','主输出：算子返回值 → 当前行的 '+bindings.output+' 字段','wb-wiring-binding'));
-      if(bindings.outputs)materialTable(dataSection,['算子输出','Dataset 字段'],Object.entries(bindings.outputs).map(([k,v])=>[k,String(v)]));
-      if(sideOutputs.length)materialTable(dataSection,['伴随输出','写回字段'],sideOutputs.map(p=>[p.name,formatArgValue(p)]));
-      if(dataArgs.length)renderArgTable(dataSection,dataArgs);
-      const advanced=details('本次 API 调用与高级信息',sourceBody);advanced.classList.add('wb-input-advanced');
-      const schemaFold=details('查看输入 / 输出 Schema',dataSection);schemaFold.classList.add('wb-wiring-fold');
-      if(schema?.metadata){
-        schemaMaterial(schemaFold,schema.metadata,{input:true,advanced});
-        schemaMaterial(schemaFold,schema.metadata,{advanced});
-      }else schemaFold.append($('p','尚无已确认的上下游 Dataset Schema。','wb-caption'));
-      const next=(dag?.edges||[]).filter(e=>e.from.occurrence_id===node.occurrence_id);
-      const targets=[...new Set(next.map(e=>e.to.occurrence_id))];
-      const downstream=$('div',undefined,'wb-downstream');downstream.append($('span',targets.length?'下游：':'当前动作的数据流终点。','wb-caption'));dataSection.append(downstream);
-      for(const id of targets){const target=dag.nodes.find(n=>n.occurrence_id===id);button(target?.label||target?.op_kind||'下游节点',()=>{const card=graphModel?.nodes.find(c=>c.selection.occurrenceId===id);if(card)return selectGraphNode(card.selection);},downstream);}
-      sourceBody.append(dataSection);
+      const ioRows=[];
+      if(bindings.inputs&&typeof bindings.inputs==='object')for(const[k,v]of Object.entries(bindings.inputs))ioRows.push(['输入 · '+k,String(v)]);
+      if(bindings.output)ioRows.push(['主输出',String(bindings.output)]);
+      if(bindings.outputs&&typeof bindings.outputs==='object')for(const[k,v]of Object.entries(bindings.outputs))ioRows.push(['输出 · '+k,String(v)]);
+      for(const p of sideOutputs)ioRows.push(['伴随输出 · '+p.name,formatArgValue(p)]);
+      if(ioRows.length){
+        const ioSec=$('section',undefined,'wb-wiring-section');
+        ioSec.append($('h4','输入 / 输出'));
+        materialTable(ioSec,['字段角色','绑定列'],ioRows);
+        target.append(ioSec);
+      }
+
+      const paramRows=[];
+      for(const p of dataArgs){
+        if(p.name==='fn_kwargs'&&p.value&&typeof p.value==='object'&&!Array.isArray(p.value)&&!p.value.unavailable){
+          for(const[k,v]of Object.entries(p.value))paramRows.push([k,typeof v==='string'?v:json(v)]);
+        }else if(p.name==='label'){
+          continue;
+        }else{
+          paramRows.push([p.name,formatArgValue(p)]);
+        }
+      }
+      if(paramRows.length){
+        const paramSec=$('section',undefined,'wb-wiring-section');
+        paramSec.append($('h4','参数配置'));
+        materialTable(paramSec,['参数','值'],paramRows);
+        target.append(paramSec);
+      }
 
       const engineCfg=config?.metadata?.engine_configuration;
       const modelObj=engineCfg?.model&&typeof engineCfg.model==='object'?engineCfg.model:null;
       const modelName=modelObj?.name||modelObj?.model||(typeof engineCfg?.model==='string'?engineCfg.model:null);
       const modelTransport=modelObj?.transport||null;
       const modelLabel=[modelName,modelTransport].filter(Boolean).join(' · ');
+      const rtRows=runtimeArgs.filter(p=>!['concurrency','queue_depth','max_requests','token_budget','when','config'].includes(p.name));
       if(runtimeArgs.length||modelLabel){
         const runtimeSection=$('section',undefined,'wb-wiring-section');
         runtimeSection.append($('h4','运行配置'));
@@ -870,21 +890,10 @@
           else if(p.name==='token_budget'&&p.value?.max_input!=null)summaryChips.append($('span','输入上限 '+p.value.max_input,'definition-chip'));
         }
         if(summaryChips.children.length)runtimeSection.append(summaryChips);
-        if(runtimeArgs.length)renderArgTable(runtimeSection,runtimeArgs);
-        sourceBody.append(runtimeSection);
+        if(rtRows.length)materialTable(runtimeSection,['配置项','值'],rtRows.map(p=>[p.name,formatArgValue(p)]));
+        target.append(runtimeSection);
       }
-
-      advanced.append($('div','解析时快照','wb-caption wb-material-basis'));
-      if(call?.availability==='available'){
-        advanced.append($('h4','本次 API 调用'));
-        const text=$('div',undefined,'wb-implementation-text');advanced.append(text);mountText(text,call.text,{sourceOnly:true,compactSource:true,continuousSource:true});
-        if(call.metadata?.context&&call.metadata.context!==call.text){const context=details('完整链式调用上下文',advanced);mountText(context,call.metadata.context,{sourceOnly:true,compactSource:true});}
-      }
-      if(config?.metadata?.expansions?.length)advanced.append($('p','字典展开：'+config.metadata.expansions.map(x=>'**'+x).join('，'),'wb-caption'));
-      if(defaults.length){const defBox=details('API 默认参数（'+defaults.length+' 项）',advanced);renderArgTable(defBox,defaults);}
-      if(config?.metadata?.note)advanced.append($('p',config.metadata.note,'wb-caption wb-parameter-explanation'));
-      if(engineCfg)raw('引擎内部描述（只读）',engineCfg,advanced);
-      sourceBody.append(advanced);
+      if(!target.children.length)target.append($('p','当前节点无额外参数配置。','wb-caption'));
     }
     async function loadPreviewSource(){
       savePreviewLocator();
@@ -893,7 +902,7 @@
       const ticket=state.capture(),sequence=++sourceSequence;
       sourceTitle.textContent=node?.label||node?.op_kind||'节点详情';
       const kinds=['prompt','implementation','callsite','configuration','schema'].filter(k=>node?.source_views?.[k]?.available);
-      if(!kinds.length){sourceBody.append($('p','本节点尚无绑定材料。','wb-caption'));return;}
+      if(!kinds.length){sourceTabs.hidden=true;sourceBody.append($('p','本节点尚无绑定材料。','wb-caption'));return;}
       const basis={kind:'preview',entry:preview.basis.entry,params:preview.basis.params,digest:preview.basis.digest,dag_id:preview.basis.dag_id};
       const address={basis,logical_node_id:node.logical_node_id,occurrence_id:node.occurrence_id};
       const valid=()=>current(ticket)&&sequence===sourceSequence&&sourceOpen&&!run
@@ -913,44 +922,42 @@
             throw new Error('节点材料身份不一致，请重新解析。');
         }
         disposeReaders(sourceBody);sourceBody.replaceChildren();
+        wiringPane.replaceChildren();behaviorPane.replaceChildren();
         const byKind=Object.fromEntries(values.map(v=>[v.kind,v]));
         if(node.description)sourceBody.append($('p',node.description,'wb-node-semantic-desc'));
         const wiringVals=['callsite','configuration','schema'].map(k=>byKind[k]).filter(Boolean);
-        if(wiringVals.length)renderWiring(node,wiringVals);
+        if(wiringVals.length)renderWiring(node,wiringVals,wiringPane);
+        else wiringPane.append($('p','暂无接线参数。','wb-caption'));
+        let hasBehavior=false;
         const promptVal=byKind.prompt;
         if(promptVal?.availability==='available'){
+          hasBehavior=true;
           const meta=promptVal.metadata||{};
           if(meta.name&&meta.template_sha256){definitionSource={name:meta.name,version:meta.version,template_sha256:meta.template_sha256};definitionButton.textContent='查看当前定义';}
-          const sec=$('section',undefined,'wb-wiring-section');
-          sec.append($('h4','Prompt 算子'));
           for(const item of meta.routes||[meta]){
-            if(meta.routes)sec.append($('h5',item.name));
+            if(meta.routes)behaviorPane.append($('h5',item.name));
             const baseDef=item.definition||{kind:'prompt',declared_version:item.version,output_schema:item.response_schema,model:item.model,response_format:item.response_format};
-            readDefinition(sec,item.transport?{...baseDef,transport:item.transport}:baseDef,promptVal);
+            DemiFlowDefinition.render(behaviorPane,{...(item.transport?{...baseDef,transport:item.transport}:baseDef),template:baseDef.template??promptVal.text,truncated:promptVal.truncated},{mountText,mode:'behavior'});
           }
-          sourceBody.append(sec);
         }
         const implVal=byKind.implementation;
         if(implVal?.availability==='available'){
+          hasBehavior=true;
           const meta=implVal.metadata||{};
           const isGuard=promptVal?.availability==='available';
           if(!isGuard&&implVal.path){definitionSource={path:implVal.path,line:implVal.start_line,sha256:implVal.sha256};definitionButton.textContent='查看当前定义';}
           const implDef=meta.definition||{kind:'code'};
+          const payload={...implDef,line:implDef.line||implVal.start_line,source:implDef.source||implVal.text,truncated:implVal.truncated};
           if(isGuard){
-            const guardFold=details('触发条件（when）源码',sourceBody);guardFold.classList.add('wb-wiring-fold');
-            readDefinition(guardFold,{...implDef,role_badge:'触发条件 · when 函数'},implVal);
+            const guardFold=details('触发条件（when）源码',behaviorPane);guardFold.classList.add('wb-wiring-fold');
+            DemiFlowDefinition.render(guardFold,{...payload,role_badge:'触发条件 · when 函数'},{mountText,mode:'behavior'});
           }else{
-            const sec=$('section',undefined,'wb-wiring-section');
-            sec.append($('h4','代码算子'));
-            readDefinition(sec,implDef,implVal);
-            sourceBody.append(sec);
+            DemiFlowDefinition.render(behaviorPane,payload,{mountText,mode:'behavior'});
           }
         }
-        const callDef=byKind.callsite?.metadata?.definition;
-        if(callDef){
-          const apiFold=details('Dataset API 接口定义',sourceBody);apiFold.classList.add('wb-wiring-fold');
-          readDefinition(apiFold,callDef,byKind.callsite);
-        }
+        sourceBody.append(wiringPane,behaviorPane);
+        sourceTabs.hidden=!hasBehavior;
+        selectDetailTab(hasBehavior&&detailTab==='behavior'?'behavior':'wiring');
       }catch(error){
         if(!valid()||error.name==='AbortError')return;
         disposeReaders(sourceBody);sourceBody.replaceChildren($('p',error.message?.includes('preview_expired')?'解析快照已过期，请点击“解析执行计划”重新读取。':error.message,'error-box'));
@@ -961,8 +968,8 @@
       if(!sourceOpen)return;
       if(planPreview&&previewSelection&&!run)return loadPreviewSource();
       const g=data().graph,selection=data().selection,node=selection?.reportNodeId??data().node,ticket=state.capture(true),sequence=++sourceSequence;
-      if(!g||!node){sourceBody.append($('p','选择节点后查看算子实现与流程接线。','wb-caption'));return;}
-      if(g.binding.basis_kind==='run'&&selection&&!selection.reportNodeId){sourceBody.append($('p','该出现尚无节点身份桥；不借用其它节点的源码。','wb-caption'));return;}
+      if(!g||!node){sourceTabs.hidden=true;sourceBody.append($('p','选择节点后查看接线与行为。','wb-caption'));return;}
+      if(g.binding.basis_kind==='run'&&selection&&!selection.reportNodeId){sourceTabs.hidden=true;sourceBody.append($('p','该出现尚无节点身份桥；不借用其它节点的源码。','wb-caption'));return;}
       sourceBody.append($('p','正在读取绑定来源…','wb-caption'));
       const reportNode=g.nodes.find(n=>n.id===node);
       const query={graph_binding:JSON.stringify(g.binding),node_id:node};
@@ -977,47 +984,47 @@
         if((data().selection?.key??null)!==capturedKey||identityKey(data().selection?.execution??null)!==capturedExecution)return;
         for(const value of values)if(value.node_id!==node||json(value.graph_binding)!==json(g.binding))throw new Error('源码响应身份不一致');
         disposeReaders(sourceBody);sourceBody.replaceChildren();
+        wiringPane.replaceChildren();behaviorPane.replaceChildren();
         const byKind=Object.fromEntries(kinds.map((k,i)=>[k,values[i]]));
         sourceTitle.textContent=reportNode?.display_label||reportNode?.operator?.name||reportNode?.label||'算子详情';
         if(reportNode?.description)sourceBody.append($('p',reportNode.description,'wb-node-semantic-desc'));
         const cfgVal=byKind.configuration,callVal=byKind.callsite;
         if(cfgVal&&cfgVal.availability!=='unavailable'){
           if(cfgVal.metadata){
-            const entry=(g.logical?.actions||[]).find(a=>a.action_id===selection?.actionId);
-            renderWiring({occurrence_id:selection?.occurrenceId},[callVal,cfgVal,{kind:'schema',metadata:cfgVal.schema_metadata}].filter(Boolean),entry?.dag);
+            renderWiring({occurrence_id:selection?.occurrenceId},[callVal,cfgVal,{kind:'schema',metadata:cfgVal.schema_metadata}].filter(Boolean),wiringPane);
           }else{
-            if(callVal?.text){sourceBody.append($('h4','本次 API 调用'));mountText(sourceBody,callVal.text,{sourceOnly:true,compactSource:true});}
             const info=cfgVal.wiring||{},rows=info.parameters||{};
-            sourceBody.append($('h4','输入接线'));
-            const incoming=g.edges.filter(edge=>edge.to===node);
-            for(const edge of incoming){const upstream=g.nodes.find(n=>n.id===edge.from);sourceBody.append($('p',(upstream?.label||upstream?.kind||edge.from),'wb-caption'));
-              if(upstream?.fields)materialTable(sourceBody,['字段','类型'],Object.entries(upstream.fields).map(([k,v])=>[k,v.type?.physical||v.type?.kind||'未知']));}
-            if(!incoming.length)sourceBody.append($('p','没有已绑定的上游 Dataset 材料。','wb-caption'));
-            sourceBody.append($('h4','本次参数'));materialTable(sourceBody,['参数','绑定值'],Object.entries(rows).map(([k,v])=>[k,typeof v==='string'?v:json(v)]));
-            sourceBody.append($('h4','输出接线'));
-            materialTable(sourceBody,['字段','类型'],Object.entries(info.output_fields||{}).map(([k,v])=>[k,v.type?.physical||v.type?.kind||'未知']));
-            const targets=g.edges.filter(edge=>edge.from===node).map(edge=>g.nodes.find(n=>n.id===edge.to)).filter(Boolean);
-            sourceBody.append($('p',targets.length?'下游：'+targets.map(n=>n.label||n.kind).join('、'):'本范围内没有下游节点。','wb-caption'));
+            const paramEntries=Object.entries(rows).filter(([k])=>k!=='fn'&&k!=='label');
+            if(paramEntries.length){
+              const sec=$('section',undefined,'wb-wiring-section');sec.append($('h4','参数配置'));
+              materialTable(sec,['参数','值'],paramEntries.map(([k,v])=>[k,typeof v==='string'?v:json(v)]));wiringPane.append(sec);
+            }
+            const outFields=Object.entries(info.output_fields||{});
+            if(outFields.length){
+              const sec=$('section',undefined,'wb-wiring-section');sec.append($('h4','输出字段'));
+              materialTable(sec,['字段','类型'],outFields.map(([k,v])=>[k,v.type?.physical||v.type?.kind||'未知']));wiringPane.append(sec);
+            }
+            if(!wiringPane.children.length)wiringPane.append($('p','当前节点无额外参数配置。','wb-caption'));
           }
         }
+        let hasBehavior=false;
         const promptVal=byKind.prompt;
         if(promptVal&&promptVal.availability!=='unavailable'&&promptVal.definitions?.length){
-          const sec=$('section',undefined,'wb-wiring-section');
-          sec.append($('h4','Prompt 算子'));
-          for(const definition of promptVal.definitions){sec.append($('h5',definition.symbol));readDefinition(sec,definition,promptVal);}
-          sourceBody.append(sec);
+          hasBehavior=true;
+          for(const definition of promptVal.definitions){
+            behaviorPane.append($('h5',definition.symbol));
+            DemiFlowDefinition.render(behaviorPane,{...definition,template:definition.template??promptVal.text,truncated:promptVal.truncated},{mountText,mode:'behavior'});
+          }
         }
         const implVal=byKind.implementation;
         if(implVal&&implVal.availability!=='unavailable'&&(implVal.definition||implVal.kind==='implementation')){
-          const sec=$('section',undefined,'wb-wiring-section');
-          sec.append($('h4','代码算子'));
-          readDefinition(sec,implVal.definition||{kind:'code'},implVal);
-          sourceBody.append(sec);
+          hasBehavior=true;
+          const def=implVal.definition||{kind:'code'};
+          DemiFlowDefinition.render(behaviorPane,{...def,line:def.line||implVal.start_line,source:def.source||implVal.text,truncated:implVal.truncated},{mountText,mode:'behavior'});
         }
-        if(callVal?.definition){
-          const apiFold=details('Dataset API 接口定义',sourceBody);apiFold.classList.add('wb-wiring-fold');
-          readDefinition(apiFold,callVal.definition,callVal);
-        }
+        sourceBody.append(wiringPane,behaviorPane);
+        sourceTabs.hidden=!hasBehavior;
+        selectDetailTab(hasBehavior&&detailTab==='behavior'?'behavior':'wiring');
       }catch(error){if(current(ticket)&&sequence===sourceSequence&&error.name!=='AbortError'){sourceBody.replaceChildren($('p',error.message,'error-box'));}}
     }
     async function showPage(page){

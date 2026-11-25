@@ -479,6 +479,61 @@ def _thin_operator_wrapper_issues(path: Path) -> list[tuple[int, str, str]]:
     return issues
 
 
+def _cross_operator_module_imports(path: Path) -> list[tuple[int, str]]:
+    """Detect public operator modules importing another public operator module (preventing half-shim chains)."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    issues: list[tuple[int, str]] = []
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            mod = node.module or ''
+            if node.level >= 1:
+                if not mod:
+                    for alias in node.names:
+                        if alias.name != '*' and not alias.name.startswith('_'):
+                            issues.append((node.lineno, alias.name))
+                else:
+                    head = mod.split('.')[0]
+                    if head and not head.startswith('_'):
+                        issues.append((node.lineno, mod))
+            elif mod == 'operators':
+                for alias in node.names:
+                    if alias.name != '*' and not alias.name.startswith('_'):
+                        issues.append((node.lineno, f'operators.{alias.name}'))
+            elif mod.startswith('operators.'):
+                sub = mod.split('.', 1)[1].split('.')[0]
+                if sub and not sub.startswith('_'):
+                    issues.append((node.lineno, mod))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith('operators.'):
+                    sub = alias.name.split('.', 1)[1].split('.')[0]
+                    if sub and not sub.startswith('_'):
+                        issues.append((node.lineno, alias.name))
+    return issues
+
+
+def _missing_operator_description_issues(path: Path) -> list[tuple[int, str]]:
+    """Detect public operator functions/classes in operators/*.py lacking a semantic first-line docstring."""
+    if path.stem.startswith('_'):
+        return []
+    try:
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, SyntaxError):
+        return []
+    issues: list[tuple[int, str]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not node.name.startswith('_'):
+            doc = ast.get_docstring(node)
+            if not doc or not doc.strip():
+                issues.append((node.lineno, node.name))
+    return issues
+
+
 def _points_to_runs(root: Path, value) -> bool:
     runs_root = (root / 'runs').resolve(strict=False)
     candidates = []
@@ -637,6 +692,26 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             by_category.setdefault('thin_operator_wrapper', []).append(
                 diagnostic('DF-02', rel,
                            f'算子 {first_name} 仅为转调或重导出 {first_target} 的无逻辑垫片{extra}；按 DF-02 规范，请在 Flow 中直接引用目标算子并用 fn_kwargs 传参，或将逻辑内联为自包含算子，避免多层转包增加阅读负担。',
+                           line=first_line)
+            )
+        cross_ops = _cross_operator_module_imports(root / rel)
+        if cross_ops:
+            first_line, first_mod = cross_ops[0]
+            extra = f' 等 {len(cross_ops)} 处' if len(cross_ops) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('cross_operator_module_import', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开业务算子模块导入了另一公开算子模块 {first_mod}{extra}；为避免“半垫片”多层套娃、保证算子自包含充血，公开业务算子模块之间禁止互相导入调用；纯底层通用工具（编解码、序列化、hash 等）请统一命名为 operators/_<name>.py。',
+                           line=first_line)
+            )
+        missing_docs = _missing_operator_description_issues(root / rel)
+        if missing_docs:
+            first_line, first_name = missing_docs[0]
+            extra = f' 等 {len(missing_docs)} 处' if len(missing_docs) > 1 else ''
+            inspected.add(rel)
+            by_category.setdefault('missing_operator_description', []).append(
+                diagnostic('DF-02', rel,
+                           f'公开算子 {first_name} 缺少首行语义描述 docstring{extra}；按 DF-02 规范，每个公开代码算子（函数/Actor 类）须在首行 docstring 中写清业务语义，供工作台执行图节点直接展示。',
                            line=first_line)
             )
         if not structural_only and rel not in checked_sources and not _has_declared_export(root / rel, '__demiflow_operators__'):

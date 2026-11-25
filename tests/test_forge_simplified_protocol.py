@@ -293,8 +293,8 @@ def test_post_turn_hygiene_hook_and_slim_manifest_migration(tmp_path, reference)
         '    return range(2).map(double, inputs={"x": "id"}, output="y").count()\n',
         encoding='utf-8',
     )
-    (proj / 'operators' / 'helper.py').write_text('def add_one(x: int) -> int:\n    return x + 1\n', encoding='utf-8')
-    (proj / 'operators' / 'other_op.py').write_text('def double(x: int) -> int:\n    return x * 2\n', encoding='utf-8')
+    (proj / 'operators' / 'helper.py').write_text('def add_one(x: int) -> int:\n    """将输入整数加一。"""\n    return x + 1\n', encoding='utf-8')
+    (proj / 'operators' / 'other_op.py').write_text('def double(x: int) -> int:\n    """将输入整数翻倍。"""\n    return x * 2\n', encoding='utf-8')
     # Legacy wrapped config & legacy bloated workspace.json + unused location
     (proj / 'configs' / 'demo.json').write_text(
         json.dumps({'format': 'demiflow_forge_flow_parameters_v2', 'arguments': {'n': 3}}),
@@ -359,11 +359,18 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
         '    return range(2).map(wrapped.pool_group, inputs={"row": "id"}, output="y").count()\n',
         encoding='utf-8',
     )
+    (proj / 'operators' / '_util.py').write_text(
+        'def pack(row):\n'
+        '    return {"packed": row}\n',
+        encoding='utf-8',
+    )
     (proj / 'operators' / 'base.py').write_text(
         'MAX_ITEMS = 100\n'
         'def pool_group(row, maximum=MAX_ITEMS):\n'
+        '    """按概念分组整理候选池。"""\n'
         '    return {"row": row, "maximum": maximum}\n'
         'def helper(row):\n'
+        '    """保留原始行。"""\n'
         '    return row\n',
         encoding='utf-8',
     )
@@ -376,7 +383,7 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
         'def pool_group(row):\n'
         '    """Thin shim only changing default."""\n'
         '    return hybrid.pool_group(row, maximum=200)\n'
-        'def real_logic(row):\n'
+        'def missing_doc(row):\n'
         '    out = hybrid.pool_group(row, maximum=200)\n'
         '    out["tag"] = "custom"\n'
         '    return out\n',
@@ -388,28 +395,29 @@ def test_thin_operator_wrapper_shim_detection(tmp_path):
 
     _, diags = check_project_hygiene(
         proj, control,
-        checked_sources={'flows/demo.py', 'operators/base.py', 'operators/wrapped.py'},
+        checked_sources={'flows/demo.py', 'operators/_util.py', 'operators/base.py', 'operators/wrapped.py'},
         parameter_digests={},
     )
-    shim_diags = [d for d in diags if d['path'] == 'operators/wrapped.py' and '垫片' in d['detail']]
-    assert len(shim_diags) == 1, diags
-    assert 'reexported' in shim_diags[0]['detail'] and '等 2 处' in shim_diags[0]['detail']
+    wrapped_diags = [d['detail'] for d in diags if d['path'] == 'operators/wrapped.py']
+    assert any('垫片' in msg and 'reexported' in msg and '等 2 处' in msg for msg in wrapped_diags), diags
+    assert any('公开业务算子模块导入了另一公开算子模块' in msg for msg in wrapped_diags), diags
+    assert any('missing_doc' in msg and 'docstring' in msg for msg in wrapped_diags), diags
 
-    # Removing the shims while keeping real_logic, ALL_CAPS constant, and _private_shim passes cleanly.
+    # Self-contained operator importing only private _util.py and having a docstring passes cleanly.
     (proj / 'operators' / 'wrapped.py').write_text(
-        'from . import base as hybrid\n'
-        'POOL_MAX = hybrid.MAX_ITEMS\n'
-        'def _private_shim(row):\n'
-        '    return hybrid.pool_group(row, maximum=50)\n'
+        'from . import _util\n'
+        'def _private_helper(row):\n'
+        '    return _util.pack(row)\n'
         'def pool_group(row):\n'
-        '    out = hybrid.pool_group(row, maximum=200)\n'
+        '    """打包候选池条目。"""\n'
+        '    out = _util.pack(row)\n'
         '    out["tag"] = "custom"\n'
         '    return out\n',
         encoding='utf-8',
     )
     _, clean_diags = check_project_hygiene(
         proj, control,
-        checked_sources={'flows/demo.py', 'operators/base.py', 'operators/wrapped.py'},
+        checked_sources={'flows/demo.py', 'operators/_util.py', 'operators/base.py', 'operators/wrapped.py'},
         parameter_digests={},
     )
     assert clean_diags == [], clean_diags

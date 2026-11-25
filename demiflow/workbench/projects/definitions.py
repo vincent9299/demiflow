@@ -54,7 +54,7 @@ def _items(path, raw, kind):
                 semantic_fields = {
                     'tool_kind': (public[node.name] if public is not None else 'tool'),
                     'title': meta.get('title') or node.name,
-                    'summary': meta.get('summary') or (defn.get('description') or '').splitlines()[0][:200] or module_summary[:200],
+                    'summary': meta.get('summary') or (defn.get('description') or '').partition('\n')[0].strip()[:200] or module_summary[:200],
                     'when_to_use': meta.get('when_to_use') or '',
                 }
             yield dict(defn, label=node.name,
