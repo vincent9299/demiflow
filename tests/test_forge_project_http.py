@@ -78,3 +78,20 @@ def test_http_project_create_grants_default_permissions_up_to_ceiling(tmp_path):
         deny_status, deny_body = request(app, f'/api/workspaces/{reg_id}/project-file-create', {'path': '.env', 'text': ''})
         assert deny_status == 403, deny_body
         assert '文件与配置写入' in deny_body.get('error', '') and '项目设置' in deny_body.get('error', '')
+
+        # Dev assistant outbound network defaults to False and toggles via /api/project-dev-network.
+        _, plist = request(app, '/api/projects')
+        fresh_row = next(item for item in plist['projects'] if item['workspace_id'] == new_id)
+        assert fresh_row['dev_network'] is False
+        n_status, n_body = request(app, '/api/project-dev-network', {
+            'workspace_id': new_id, 'expected': plist['digest'], 'enabled': True,
+        })
+        assert n_status == 200 and n_body['dev_network'] is True, n_body
+        assert console.load_registry(registry)['projects'][new_id]['dev_network'] is True
+        _, ctx_body = request(app, f'/api/workspaces/{new_id}/context')
+        assert ctx_body['dev_network'] is True
+        n2_status, n2_body = request(app, '/api/project-dev-network', {
+            'workspace_id': new_id, 'expected': n_body['digest'], 'enabled': False,
+        })
+        assert n2_status == 200 and n2_body['dev_network'] is False, n2_body
+        assert 'dev_network' not in console.load_registry(registry)['projects'][new_id]

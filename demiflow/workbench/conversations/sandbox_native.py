@@ -87,9 +87,11 @@ def prctl(option, *args):
     return checked(LIBC.prctl(option, *args), 'prctl failed')
 
 
-def landlock(read_paths, write_paths, runtime_paths, identities):
+def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped'):
     if platform.machine() != 'x86_64':
         raise RuntimeError('The development sandbox requires the qualified x86-64 ABI')
+    if read_policy not in {'scoped', 'inherit_os'}:
+        raise RuntimeError('Unsupported Landlock read policy')
     abi = checked(LIBC.syscall(444, 0, 0, 1), 'Landlock unavailable')
     if abi < 1:
         raise RuntimeError('Landlock ABI 1 is required')
@@ -105,17 +107,28 @@ def landlock(read_paths, write_paths, runtime_paths, identities):
     # writable project directories support native truncate/ftruncate while
     # read-only paths still deny truncation in the kernel. On ABI 1-2 kernels
     # (e.g. Linux 5.15), truncate remains denied globally by seccomp.
-    handled = ((1 << 13) - 1) | (TRUNCATE if abi >= 3 else 0)
-    write_rights = READ | WRITE | (TRUNCATE if abi >= 3 else 0)
+    # Under read_policy='inherit_os', Landlock handles write/mutation rights only
+    # so read/execute inherit the invoking OS user's native permissions while
+    # writes outside write_paths remain kernel-denied.
+    truncate_bit = TRUNCATE if abi >= 3 else 0
+    if read_policy == 'inherit_os':
+        handled = (((1 << 13) - 1) & ~(EXEC | READ)) | truncate_bit
+        write_rights = (WRITE | truncate_bit) & handled
+        rule_groups = ((write_paths, write_rights),)
+        file_mask = ((1 << 1) | truncate_bit) & handled
+    else:
+        handled = ((1 << 13) - 1) | truncate_bit
+        write_rights = READ | WRITE | truncate_bit
+        rule_groups = ((read_paths, READ), (runtime_paths, READ | EXEC), (write_paths, write_rights))
+        file_mask = EXEC | (1 << 1) | (1 << 2) | truncate_bit
     rules = Rules(handled)
     descriptor = checked(LIBC.syscall(444, ctypes.byref(rules), ctypes.sizeof(rules), 0), 'Landlock ruleset')
     try:
-        for paths, rights in ((read_paths, READ), (runtime_paths, READ | EXEC),
-                              (write_paths, write_rights)):
+        for paths, rights in rule_groups:
             for path in paths:
                 access = rights
                 if not os.path.isdir(path):
-                    access &= EXEC | (1 << 1) | (1 << 2) | (TRUNCATE if abi >= 3 else 0)
+                    access &= file_mask
                 fd = os.open(path, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW)
                 try:
                     info = os.fstat(fd)

@@ -287,6 +287,7 @@ class SandboxShims:
             'writes': list(project.get('writes') or []),
             'shared_sources': shared_roots,
             'input_access': bool(input_access),
+            'dev_network': bool(project.get('dev_network', False)),
         }
         runtime_cfg_path.write_text(json.dumps(runtime_cfg, ensure_ascii=False, indent=2), encoding='utf-8')
         os.chmod(runtime_cfg_path, 0o600)

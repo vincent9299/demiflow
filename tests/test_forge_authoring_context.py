@@ -130,8 +130,20 @@ def test_progressive_disclosure_topics_and_flow_titles(tmp_path, reference):
     assert '## 当前版本 DemiFlow 原生 API' not in overview_text
     assert '--topic <sdk|rules|files|flow|operator|prompt>' in overview_text
 
-    sdk_text = render_context(build_context(tmp_path, topic='sdk', reference=reference))
+    sdk_ctx = build_context(tmp_path, topic='sdk', reference=reference)
+    sdk_text = render_context(sdk_ctx)
     assert '## 当前版本 DemiFlow 原生 API' in sdk_text
+    assert 'demiflow.execution' in sdk_ctx['sdk']['symbol_index']
+    assert 'RunContext' in sdk_ctx['sdk']['symbol_index']['demiflow.execution']
+    assert 'local_execution' in sdk_ctx['sdk']['symbol_index']['demiflow.data']
+    assert 'Dataset.fit' in sdk_ctx['sdk']['symbol_index']['demiflow.data']
+    assert 'LocalObjectStore' in sdk_ctx['sdk']['symbol_index']['demiflow.objects']
+    assert 'demiflow.execution' in sdk_text and 'RunContext' in sdk_text
+
+    exec_ctx = build_context(tmp_path, api='demiflow.execution:RunContext', reference=reference)
+    assert exec_ctx['sdk']['apis'][0]['id'] == 'demiflow.execution:RunContext'
+    local_exec_ctx = build_context(tmp_path, api='demiflow.data:local_execution', reference=reference)
+    assert local_exec_ctx['sdk']['apis'][0]['id'] == 'demiflow.data:local_execution'
 
     rules_text = render_context(build_context(tmp_path, topic='rules', reference=reference))
     assert '## Forge 开发规范' in rules_text and 'DF-05' in rules_text

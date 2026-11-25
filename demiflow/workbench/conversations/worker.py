@@ -196,7 +196,10 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     read = [] if notebook_op else [root, *[path for path in sources if path.is_file()], *(Path(p) for p in extra_read_paths)]
     openssl = Path('/etc/ssl/openssl.cnf')
     if openssl.is_file(): read.append(openssl)
-    direct_network = bool(deployment.mode == 'restricted' and getattr(deployment, 'direct_model', False))
+    direct_network = bool(
+        deployment.mode == 'restricted'
+        and (getattr(deployment, 'direct_model', False) or (not readonly and bool(project.get('dev_network', False))))
+    )
     active_cred = None
     if direct_network:
         for net_path in ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/gai.conf',
@@ -204,7 +207,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             candidate = Path(net_path)
             if candidate.exists():
                 read.append(candidate)
-        if config.get('native_credentials'):
+        if getattr(deployment, 'direct_model', False) and config.get('native_credentials'):
             cred_path = Path(config['native_credentials']).resolve()
             if cred_path.is_file():
                 active_cred = cred_path
@@ -255,7 +258,8 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         seconds=min(3600, max(.1, duration)), rss_bytes=deployment.limits.rss_bytes,
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
         private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
-        direct_network=direct_network)
+        direct_network=direct_network,
+        read_policy='scoped' if readonly else 'inherit_os')
 
 
 def automatic_approval(project, request, *, assurance):
@@ -324,6 +328,7 @@ def _sandbox_compatible(standby_spec, actual_spec):
         and standby_spec.private_home == actual_spec.private_home
         and standby_spec.role == actual_spec.role
         and standby_spec.direct_network == actual_spec.direct_network
+        and standby_spec.read_policy == actual_spec.read_policy
     )
 
 

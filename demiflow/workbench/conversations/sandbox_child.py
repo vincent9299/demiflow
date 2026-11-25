@@ -156,7 +156,8 @@ def main():
                 cap = cap if hard == resource.RLIM_INFINITY else min(cap, hard)
                 resource.setrlimit(kind, (cap, cap))
             close_except({0, 1, 2, write_error})
-            landlock(spec['read_paths'], spec['write_paths'], spec['runtime_paths'], spec['identities'])
+            landlock(spec['read_paths'], spec['write_paths'], spec['runtime_paths'], spec['identities'],
+                     read_policy=spec.get('read_policy', 'scoped'))
             drop_capabilities()
             seccomp(direct_network=bool(spec.get('direct_network', False)))
             os.execve(spec['command'][0], spec['command'], spec['env'])

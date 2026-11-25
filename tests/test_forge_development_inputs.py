@@ -235,3 +235,17 @@ def test_native_timeout_or_stop_kills_its_owned_process_and_removes_private_home
     assert len(observed) == 1
     process, private = observed[0]
     assert process.poll() is not None and not private.exists()
+
+
+def test_missing_path_reports_not_found_and_mid_utf8_offset_aligns(access):
+    api, root, _, _, _ = access
+    with pytest.raises(ForgeError) as exc_info:
+        api.invoke(dict(action='list', path=str(root / 'does_not_exist')))
+    assert exc_info.value.code == 'not_found'
+
+    zh = root / 'zh.md'
+    zh.write_text('中文测试内容' * 20, encoding='utf-8')
+    # Offset 1 lands in the middle of the first 3-byte UTF-8 character '中'.
+    page = api.invoke(dict(action='read', path=str(zh), offset=1, bytes=64))
+    assert page['offset'] == 3
+    assert page['text'].startswith('文测试')

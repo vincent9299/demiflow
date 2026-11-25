@@ -55,6 +55,10 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
 
     if type(spec) is not SandboxSpec or spec.role not in {'developer', 'readonly', 'verifier'}:
         raise ValueError('A trusted development sandbox specification is required')
+    if spec.read_policy not in {'scoped', 'inherit_os'}:
+        raise ValueError('Sandbox read_policy must be scoped or inherit_os')
+    if spec.read_policy == 'inherit_os' and spec.role != 'developer':
+        raise ValueError('Only developer role may inherit host read permissions')
     if spec.direct_network and spec.role == 'verifier':
         raise ValueError('Verifier sandbox cannot enable direct network access')
     for value, maximum in ((spec.seconds, 3600), (spec.rss_bytes, 16 * 1024**3),
@@ -119,6 +123,7 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
         env=environment,
         cwd=str(cwd),
         direct_network=bool(spec.direct_network),
+        read_policy=spec.read_policy,
     )
 
 

@@ -31,3 +31,5 @@ __all__ = [
     "PipelineRunRequest",
     "PipelineRunResult",
 ]
+
+_EXPORTS = {name: (".pipeline", name) for name in __all__}
