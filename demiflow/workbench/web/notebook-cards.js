@@ -395,9 +395,9 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
         try{
           const inv=await api('projects');
           const proj=(inv.projects||[]).find(p=>p.workspace_id===project);
-          if(proj)return {kernel_python:proj.python||null,sandbox:proj.notebook_sandbox||{mode:'readonly',write_paths:[]}};
+          if(proj)return {kernel_python:proj.python||null,sandbox:proj.notebook_sandbox||{mode:'off',write_paths:[]}};
         }catch{}
-        return {kernel_python:null,sandbox:{mode:'readonly',write_paths:[]}};
+        return {kernel_python:null,sandbox:{mode:'off',write_paths:[]}};
       };
       if(name==='cell.show'){
         const env=await loadEnv();

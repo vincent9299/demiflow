@@ -1035,6 +1035,9 @@ def _stale_operator_example_docs(path: Path) -> list[tuple[int, str, str]]:
         elif not (out_keys & writes):
             w_text = ', '.join(flow['writes'][:3]) + ('…' if len(flow['writes']) > 3 else '')
             issues.append((node.lineno, node.name, f'示例输出字段与代码真实产出字段（{w_text}）完全脱节'))
+        elif in_keys and reads and not (in_keys & reads):
+            r_text = ', '.join(flow['reads'][:3]) + ('…' if len(flow['reads']) > 3 else '')
+            issues.append((node.lineno, node.name, f'示例输入字段与代码真实读取字段（{r_text}）完全脱节'))
     return issues
 
 
@@ -1268,7 +1271,9 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
     root = Path(root).absolute()
     entries = (control or {}).get('entries') or {}
     if not entries:
-        return set(), []
+        # A project without registered entries is still audited for directory, manifest,
+        # config protocol and secret rules; only corpus-dependent orphan checks need entries.
+        structural_only = True
     registered_flows = {e.partition(':')[0] for e in entries}
     bound_params = {p for ps in entries.values() for p in ps}
     active_sources = set(checked_sources) | bound_params
@@ -1614,7 +1619,9 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             return any(_has_legacy_param_indirection(v, depth + 1) for v in obj)
         return False
 
-    for param_rel in sorted(bound_params):
+    # Bound parameter files plus not-yet-registered configs/*.json drafts share one protocol check.
+    config_json = {rel for rel in _iter_tree_files(root, 'configs', exclude=exclude) if rel.endswith('.json')}
+    for param_rel in sorted(bound_params | config_json):
         if not param_rel.startswith('configs/'):
             continue
         fp = root / param_rel

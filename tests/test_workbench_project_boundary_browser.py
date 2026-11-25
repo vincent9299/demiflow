@@ -71,12 +71,12 @@ def test_pending_start_explicit_cli_sync_retry_and_current_dictionary(root, brow
         shown = runs.show(root, identity)
         assert shown['status'] == 'succeeded' and shown['attempt'] == 1
         page.get_by_role('button',name='输出结果',exact=True).click()
-        page.get_by_label('结果别名 target').fill('p12_fixed')
-        with page.expect_response('**/run-attach') as attached:
-            page.get_by_role('button',name='保留为输入表',exact=True).click()
-        assert attached.value.status == 200, attached.value.text()
-        result = attached.value.json()
-        assert result['table']['ref'] == shown['outputs'][0]['result']['ref']
+        expect(page.locator('.wb-sample-table tbody tr').first).to_be_visible(timeout=65000)
+        expect(page.get_by_role('button',name='在数据页打开',exact=True)).to_be_visible()
+        attached = project_operations.attach_result(
+            root, identity, 'target', 'p12_fixed', attempt=1,
+            expected_result=shown['outputs'][0]['result_digest'])
+        assert attached['table']['ref'] == shown['outputs'][0]['result']['ref']
         binding = project_operations.describe_table(root,'p12_fixed')['binding']['digest']
         open_panel(app,page,dict(v=2,workspace=ws.workspace_id(root,ws.load_workspace(root)[1]),kind='table_request',alias='p12_fixed'))
         page.wait_for_function('digest=>ForgeView.decodeView(location.hash)?.binding_digest===digest',arg=binding,timeout=65000)
@@ -87,7 +87,7 @@ def test_pending_start_explicit_cli_sync_retry_and_current_dictionary(root, brow
         assert sentinel.read_bytes() == original_notebook
         page.screenshot(path=str(out / 'p12-fixed-result-dictionary.png'),full_page=True)
         assert not errors, errors
-        receipt.update(refusal=refusal,synchronization=synced,result_ref=result['table']['ref'],binding=binding,
+        receipt.update(refusal=refusal,synchronization=synced,result_ref=attached['table']['ref'],binding=binding,
             source_preserved=True,notebook_sha256=hashlib.sha256(original_notebook).hexdigest(),
             pageerrors=errors,console=console,network=network,view=page.evaluate('ForgeView.decodeView(location.hash)'))
     shown = stopped(root, identity)
