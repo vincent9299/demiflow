@@ -13,8 +13,25 @@ function icon(doc,name,label,action){
 }
 
 const NO_PYTHON_MSG='当前项目尚未配置业务 Python 环境（Notebook 内核不继承平台环境），请先在右上角「设置 → 项目设置」中指定独立 Python 路径。';
+const TOOL_KINDS={analysis:'分析',tool:'工具',view:'查看',annotation:'标注',annotation_component:'组件'};
 
-export function mountCards({desk,controls,panel,storage,app,api,project,alive,permissions,hasProjectPython,tables,catalogCommand,layout}){
+function detectCellTools(source){
+  if(!source||!source.includes('data_tools'))return [];
+  const found=[];
+  const seen=new Set();
+  const add=name=>{const clean=name.trim().split(/\s+as\s+/)[0].trim();if(clean&&/^[A-Za-z_]\w*$/.test(clean)&&!seen.has(clean)){seen.add(clean);found.push(clean);}};
+  for(const match of source.matchAll(/from\s+(?:[\w.]+\.)?data_tools(?:\.([\w.]+))?\s+import\s+\(?([^#\n)]+)/g)){
+    const submod=match[1]||'';
+    for(const part of match[2].split(','))add(part);
+    if(!match[2].trim()&&submod)add(submod.split('.').pop());
+  }
+  for(const match of source.matchAll(/import\s+(?:[\w.]+\.)?data_tools\.([\w.]+)/g)){
+    add(match[1].split('.').pop());
+  }
+  return found;
+}
+
+export function mountCards({desk,controls,panel,storage,app,api,project,alive,permissions,hasProjectPython,loadTools,openTool,tables,catalogCommand,layout}){
   const book=panel.content,doc=book.node.ownerDocument,win=doc.defaultView;
   const frameTables='.jp-RenderedHTMLCommon table.dataframe';
   const renderTables=node=>{
@@ -64,6 +81,76 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   try{execution.checked=localStorage.getItem(autoRunKey)!=='false';}catch{execution.checked=true;}
   execution.onchange=()=>{try{localStorage.setItem(autoRunKey,String(execution.checked));}catch{}};
   executionLabel.prepend(execution);
+  const composerFooter=element(document,'div','df-composer-footer');
+  const toolPickerBtn=element(document,'button','df-tool-picker-btn','@ 工具');
+  toolPickerBtn.type='button';toolPickerBtn.title='查看或显式指定项目数据工具';
+  toolPickerBtn.setAttribute('aria-expanded','false');
+  const toolPopover=element(document,'div','df-tool-popover');toolPopover.hidden=true;
+  const toolSearch=element(document,'input','df-tool-search');
+  toolSearch.type='search';toolSearch.placeholder='搜索项目或内置工具…';toolSearch.setAttribute('aria-label','搜索工具');
+  const toolList=element(document,'div','df-tool-popover-list');
+  toolPopover.append(toolSearch,toolList);
+  let toolDefs=null;
+  async function ensureTools(){
+    if(toolDefs||!loadTools)return toolDefs||[];
+    try{
+      const index=await loadTools();
+      if(valid()){toolDefs=index?.definitions||[];schedulePaint();}
+    }catch{toolDefs=[];}
+    return toolDefs||[];
+  }
+  function findToolDef(name){
+    if(!toolDefs)return null;
+    return toolDefs.find(item=>item.symbol===name||item.module?.endsWith('.'+name)||item.module===name)||null;
+  }
+  function renderToolPopover(){
+    toolList.replaceChildren();
+    const q=toolSearch.value.trim().toLocaleLowerCase();
+    const items=(toolDefs||[]).filter(item=>!q||[item.title,item.symbol,item.summary,item.when_to_use,item.path,item.description].join(' ').toLocaleLowerCase().includes(q));
+    if(!items.length){
+      toolList.append(element(document,'p','df-chat-status',q?'没有匹配的工具。':'项目尚未声明数据工具。'));
+      return;
+    }
+    for(const item of items.slice(0,40)){
+      const row=element(document,'div','df-tool-popover-row');
+      const pick=element(document,'button','df-tool-popover-item');pick.type='button';
+      const headLine=element(document,'div','df-tool-popover-head');
+      headLine.append(element(document,'span','df-tool-popover-title',item.title||item.symbol),
+        element(document,'small',null,TOOL_KINDS[item.tool_kind]||'工具'));
+      pick.append(headLine);
+      if(item.summary)pick.append(element(document,'span','df-tool-popover-summary',item.summary));
+      pick.onclick=()=>{
+        const cell=selected()||newCell();
+        if(cell){
+          const current=refs.get(cell.model.id)||[];
+          if(current.length<16&&!current.some(i=>i.id===item.id))refs.set(cell.model.id,[...current,item]);
+          renderThread();
+        }
+        closeToolPopover();input.focus();
+      };
+      row.append(pick);
+      if(openTool){
+        const info=element(document,'button','df-tool-popover-info','···');info.type='button';
+        info.title='查看 '+item.symbol+' 说明与源码';info.setAttribute('aria-label',info.title);
+        info.onclick=()=>{closeToolPopover();openTool(item);};
+        row.append(info);
+      }
+      toolList.append(row);
+    }
+  }
+  function closeToolPopover(){toolPopover.hidden=true;toolPickerBtn.setAttribute('aria-expanded','false');}
+  toolPickerBtn.onclick=async()=>{
+    if(!toolPopover.hidden){closeToolPopover();return;}
+    toolPopover.hidden=false;toolPickerBtn.setAttribute('aria-expanded','true');
+    toolList.replaceChildren(element(document,'p','df-chat-status','正在读取工具…'));
+    await ensureTools();
+    if(valid()&&!toolPopover.hidden){renderToolPopover();toolSearch.focus();}
+  };
+  toolSearch.oninput=renderToolPopover;
+  toolPopover.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();closeToolPopover();input.focus();}};
+  const onDocClick=e=>{if(!toolPopover.hidden&&!toolPopover.contains(e.target)&&e.target!==toolPickerBtn)closeToolPopover();};
+  document.addEventListener('click',onDocClick,true);
+  composerFooter.append(executionLabel,toolPickerBtn);
   const send=icon(document,'up','发送要求');send.type='submit';
   const messages=new Map(),drafts=new Map(),refs=new Map(),decorated=new Map();
   const conversations=new Map(),inFlight=new Set();
@@ -123,7 +210,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   }
   const add=icon(document,'cell','新建卡片',()=>{const cell=newCell();cell?.editor?.focus();});
   add.disabled=!writable();controls.append(add);
-  head.append(heading,targetName,providerSelect,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(reference,input,executionLabel,send);aside.append(head,thread,form);desk.append(aside);
+  head.append(heading,targetName,providerSelect,icon(document,'close','关闭助手',()=>showAssistant(false)));form.append(toolPopover,reference,input,composerFooter,send);aside.append(head,thread,form);desk.append(aside);
   const divider=ForgeNavigation.resizable({layout:desk,sidebar:aside,label:'卡片助手',right:true,active:false});
   function ask(item){
     let cell=selected();if(!cell)cell=newCell();
@@ -146,7 +233,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
     targetName.textContent=cell?(cell.model.getMetadata('demiflow_card_title')||'当前卡片 '+(book.activeCellIndex+1)):'';
     const items=refs.get(id)||[];
     for(const item of items){
-      const chip=element(document,'span','df-tool-chip',item.symbol);
+      const chip=element(document,'span','df-tool-chip',item.title||item.symbol);
       chip.append(icon(document,'close','取消引用 '+item.symbol,()=>{refs.set(id,items.filter(i=>i.id!==item.id));renderThread();}));reference.append(chip);
     }
     const conversation=id?assistantFor(id):null;
@@ -343,6 +430,14 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       let bar=decorated.get(cell);
       if(!bar){
         bar=element(doc,'header','df-cell-tools');const name=element(doc,'span','df-cell-title');
+        const toolBadge=element(doc,'button','df-cell-tool-badge');toolBadge.type='button';toolBadge.hidden=true;
+        toolBadge.onclick=async()=>{
+          const names=detectCellTools(sourceOf(cell));
+          if(!names.length||!openTool)return;
+          await ensureTools();
+          const match=names.map(findToolDef).find(Boolean);
+          if(match)openTool(match);
+        };
         const status=element(doc,'span','df-cell-status');status.setAttribute('role','status');
         const edit=icon(doc,'code','编辑代码',()=>{
           focusCell(cell);
@@ -377,7 +472,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
         run.disabled=!permissions().analysis_execute;const assistant=icon(doc,'chat','卡片助手',()=>{
           focusCell(cell);showAssistant(true);
         });
-        bar.append(name,status,assistant,edit,run,element(doc,'small','df-save-state'),saveButton(cell));
+        bar.append(name,toolBadge,status,assistant,edit,run,element(doc,'small','df-save-state'),saveButton(cell));
         const viewport=cell.outputArea.node;
         const grip=element(doc,'div','df-output-grip');grip.tabIndex=0;
         grip.setAttribute('role','separator');grip.setAttribute('aria-orientation','horizontal');
@@ -414,14 +509,25 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
       }
       if(bar.parentNode!==cell.node)cell.node.prepend(bar);
       const expanded=cell.node.dataset.dfFolded==='false';
-      const status=bar.children[1];
+      const source=sourceOf(cell);
+      const toolBadge=bar.children[1];
+      const usedTools=detectCellTools(source);
+      if(usedTools.length){
+        if(!toolDefs&&loadTools)ensureTools();
+        const labels=usedTools.map(sym=>{const def=findToolDef(sym);return def?.title||sym;});
+        toolBadge.textContent='工具 · '+labels.slice(0,2).join('、')+(labels.length>2?' 等'+labels.length+'项':'');
+        toolBadge.title='此卡片已调用数据工具：'+labels.join('、')+'（点击查看说明与源码）';
+        toolBadge.hidden=false;
+      }else{
+        toolBadge.hidden=true;
+      }
+      const status=bar.children[2];
       const state=inFlight.has(cell.model.id)?'正在更新…':cell.model.getMetadata('demiflow_card_needs_run')?'代码已更新 · 待运行':'';
       if(status.textContent!==state)status.textContent=state;
-      bar.children[2].setAttribute('aria-expanded',String(assistantOpen&&selectedId===cell.model.id));
-      const edit=bar.children[3],label=expanded&&cell.model.outputs.length?'收起代码':'编辑代码';
+      bar.children[3].setAttribute('aria-expanded',String(assistantOpen&&selectedId===cell.model.id));
+      const edit=bar.children[4],label=expanded&&cell.model.outputs.length?'收起代码':'编辑代码';
       edit.setAttribute('aria-expanded',String(expanded));edit.setAttribute('aria-label',label);edit.title=label;
-      bar.children[5].textContent=storage.status(cell.model);bar.lastChild.disabled=!writable();
-      const source=sourceOf(cell);
+      bar.children[6].textContent=storage.status(cell.model);bar.lastChild.disabled=!writable();
       bar.firstChild.textContent=cell.model.getMetadata('demiflow_card_title')||(source.startsWith('# ')?source.slice(2,98).split('\n')[0]:'');
     }
   }
@@ -440,6 +546,7 @@ export function mountCards({desk,controls,panel,storage,app,api,project,alive,pe
   rename();showAssistant(savedOpen===true);trackSelection();decorate();
   return {ask,pending:()=>inFlight.size>0,dispose(){
     storage.persistDrafts();storage.changes.removeEventListener('change',schedulePaint);
+    document.removeEventListener('click',onDocClick,true);
     win.removeEventListener('keydown',saveShortcut,true);window.removeEventListener('keydown',saveShortcut,true);
     remember();dead=true;outputObserver.disconnect();book.node.querySelectorAll('.df-dataframe-view').forEach(view=>view.remove());win.removeEventListener('pagehide',remember);observer.disconnect();win.cancelAnimationFrame(paintFrame);book.activeCellChanged.disconnect(trackSelection);panel.model?.contentChanged.disconnect(changed);panel.context.pathChanged.disconnect(rename);
     win.removeEventListener('keydown',onResizeKey,true);divider.dispose();for(const [cell,bar] of decorated){cell.model.stateChanged.disconnect(onExecution);bar.release();bar.remove();}transcript.dispose();aside.remove();add.remove();delete desk.dataset.assistant;

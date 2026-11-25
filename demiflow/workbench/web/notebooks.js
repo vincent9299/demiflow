@@ -252,7 +252,7 @@
       host.replaceChildren();
       const files=new Map();
       for(const item of items){
-        if(![item.symbol,item.path,item.description].join(' ').toLocaleLowerCase().includes(query))continue;
+        if(![item.title,item.symbol,item.summary,item.when_to_use,item.path,item.description].join(' ').toLocaleLowerCase().includes(query))continue;
         if(!files.has(item.path))files.set(item.path,[]);
         files.get(item.path).push(item);
       }
@@ -264,8 +264,13 @@
         for(const item of entries){
           const button=node('button',undefined,'data-tool-leaf');button.type='button';
           const type={analysis:'分析',tool:'工具',view:'查看',annotation:'标注',annotation_component:'组件'}[item.tool_kind];
-          button.append(node('span',item.symbol),node('small',type));
-          button.title=item.description||item.path;
+          const display=item.title&&item.title!==item.symbol?item.title:item.symbol;
+          const main=node('span',undefined,'data-tool-main');
+          main.append(node('span',display,'data-tool-title'));
+          if(item.summary)main.append(node('span',item.summary,'data-tool-summary'));
+          button.append(main,node('small',type));
+          button.setAttribute('aria-label',display+' '+type);
+          button.title=[item.title&&item.title!==item.symbol?item.title+' ('+item.symbol+')':item.symbol,item.summary,item.when_to_use].filter(Boolean).join('\n')||item.path;
           button.onclick=()=>cards?cards.ask(item):openTool(item);
           const row=node('div',undefined,'data-tool-row'),info=node('button','···','data-tool-info');
           info.type='button';info.title='查看 '+item.symbol+' 定义';info.setAttribute('aria-label',info.title);
@@ -274,16 +279,26 @@
         host.append(file);
       }
     }
+    let toolPromise=null;
+    async function ensureToolIndex(){
+      if(toolIndex)return toolIndex;
+      if(!toolPromise){
+        toolPromise=api('project-data-tools').then(index=>{
+          toolIndex=index;
+          if(alive())filterLists();
+          return index;
+        }).finally(()=>{toolPromise=null;});
+      }
+      return toolPromise;
+    }
     async function loadTools(){
-      if(!toolIndex)panes[activeTab].textContent='正在读取'+labels[activeTab]+'…';
+      if(!toolIndex&&activeTab==='tools')panes[activeTab].textContent='正在读取'+labels[activeTab]+'…';
       if(loadingTools)return;
       loadingTools=true;
       try{
-        const index=await api('project-data-tools');
-        if(!alive())return;
-        toolIndex=index;filterLists();
+        await ensureToolIndex();
       }catch(error){
-        if(alive()&&activeTab!=='dictionary'){
+        if(alive()&&activeTab==='tools'){
           const pane=panes[activeTab];pane.replaceChildren(node('p',error.message,'op-error'));delete pane.dataset.revision;
         }
       }finally{loadingTools=false;}
@@ -321,8 +336,10 @@
         const values=dictionary
           ?[...tables.values()].filter(({item,fieldNames})=>!q||[item.label,...fieldNames].join(' ').toLocaleLowerCase().includes(q))
               .map(({item})=>({name:item.label,version:item.version}))
-          :tools.filter(item=>!q||[item.symbol,item.module,item.path,item.description].join(' ').toLocaleLowerCase().includes(q))
-              .map(item=>({name:item.module?item.module+'.'+item.symbol:item.path+'::'+item.symbol,origin:item.origin,kind:item.tool_kind}));
+          :tools.filter(item=>!q||[item.title,item.symbol,item.summary,item.when_to_use,item.module,item.path,item.description].join(' ').toLocaleLowerCase().includes(q))
+              .map(item=>({name:item.module?item.module+'.'+item.symbol:item.path+'::'+item.symbol,
+                title:item.title||item.symbol,summary:item.summary||'',when_to_use:item.when_to_use||'',
+                origin:item.origin,kind:item.tool_kind}));
         const offset=args.offset,items=values.slice(offset,offset+12);
         return {items,total:values.length,next_offset:offset+items.length<values.length?offset+items.length:null};
       }
@@ -339,7 +356,8 @@
       }
       const item=tools.find(i=>(i.module?i.module+'.'+i.symbol:i.path+'::'+i.symbol)===args.id);if(!item)throw Error('未找到此工具。');
       const info=await api('data-tool-definition',{id:item.id});
-      return {symbol:info.symbol,module:info.module,origin:info.origin,kind:info.tool_kind,
+      return {symbol:info.symbol,title:info.title||info.symbol,summary:info.summary||'',when_to_use:info.when_to_use||'',
+        module:info.module,origin:info.origin,kind:info.tool_kind,
         signature:info.signature,description:(info.description||'').slice(0,2000),
         import:info.module?'from '+info.module+' import '+info.symbol:null};
     }
@@ -665,6 +683,7 @@
           session.storage=storage;
           cards=mountCards({desk,controls,panel,storage,app:session.frame.contentWindow.jupyterapp,api,project,alive,
             permissions:()=>context.capabilities||{},hasProjectPython:()=>!!context.project_python,
+            loadTools:ensureToolIndex,openTool,
             tables:()=>[...tables.values()].map(({item,fieldNames})=>({
               table:item.label,version:item.version,fields:fieldNames,
               reader:'demiflow.workbench.notebooks.data.sample'})),

@@ -112,3 +112,11 @@ body.df-card-mode #main-panel .jp-Notebook .jp-WindowedPanel-outer { padding: 0 
 
 .df-save-state{color:var(--df-muted);font:11px/1.4 var(--sans-serif)}
 .jp-Cell:is(:hover,:focus-within,.jp-mod-active) .df-cell-tools button{opacity:1}
+.df-cell-tools .df-cell-tool-badge{
+  opacity:1 !important;display:inline-flex;align-items:center;gap:4px;max-width:16rem;
+  padding:2px 8px;margin-right:4px;border:1px solid #e4e4e7;border-radius:999px;
+  background:#f4f4f5;color:#3f3f46;font:500 11.5px/1.4 var(--sans-serif);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;
+}
+.df-cell-tools .df-cell-tool-badge:is(:hover,:focus-visible){background:#e4e4e7;color:#09090b;border-color:#d4d4d8}
+.df-cell-tools .df-cell-tool-badge[hidden]{display:none !important}

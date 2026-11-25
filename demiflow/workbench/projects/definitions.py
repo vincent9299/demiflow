@@ -11,7 +11,7 @@ import re
 import subprocess
 import yaml
 
-from demiflow.forge.definition_exports import DATA_TOOL_EXPORT, OPERATOR_EXPORT, exports
+from demiflow.forge.definition_exports import DATA_TOOL_EXPORT, OPERATOR_EXPORT, data_tool_semantics, exports
 from demiflow.forge.platform import bounded_json, content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
@@ -37,6 +37,7 @@ def _items(path, raw, kind):
     if kind in ('code', 'data_tool'):
         tree = _safe_tree(text)
         public = exports(tree, DATA_TOOL_EXPORT if kind == 'data_tool' else OPERATOR_EXPORT)
+        semantics = data_tool_semantics(tree) if kind == 'data_tool' else {}
         lines = text.splitlines(keepends=True)
         module_summary = (ast.get_docstring(tree) or '').partition('\n\n')[0][:512]
         for node in tree.body:
@@ -46,11 +47,21 @@ def _items(path, raw, kind):
                 continue
             start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
             body = ''.join(lines[start - 1:node.end_lineno])
-            yield dict(code_definition(node, body, kind=kind), label=node.name,
+            defn = code_definition(node, body, kind=kind)
+            meta = semantics.get(node.name, {})
+            semantic_fields = {}
+            if kind == 'data_tool':
+                semantic_fields = {
+                    'tool_kind': (public[node.name] if public is not None else 'tool'),
+                    'title': meta.get('title') or node.name,
+                    'summary': meta.get('summary') or (defn.get('description') or '').splitlines()[0][:200] or module_summary[:200],
+                    'when_to_use': meta.get('when_to_use') or '',
+                }
+            yield dict(defn, label=node.name,
                        export_status=('legacy' if public is None else 'declared' if node.name in public else 'internal'),
                        definition_type=('class' if isinstance(node, ast.ClassDef) else
                                         'async_function' if isinstance(node, ast.AsyncFunctionDef) else 'function'),
-                       **({'tool_kind': (public[node.name] if public is not None else 'tool')} if kind == 'data_tool' else {}),
+                       **semantic_fields,
                        module_summary=module_summary, line=start, end_line=node.end_lineno)
     else:
         value = yaml.safe_load(text)
