@@ -99,7 +99,7 @@ def test_source_labels_use_frozen_table_name_and_version_without_io(no_execution
     graph = captured.compiled.graph
     view = build_logical_plan_view(graph)
     source = next(node for node in view['nodes'] if node['op_kind'] == 'lance')
-    assert source['label'] == '读取 concepts.lance'
+    assert source['label'] == 'Read concepts.lance'
     assert source['data_source'] == {'name': 'concepts.lance', 'version': 7}
     assert 's3://' not in json.dumps(view)
     assert view['dag_id'] == graph.dag_id

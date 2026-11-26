@@ -121,7 +121,7 @@ def test_lazy_concurrent_start_replay_and_repeat_action(managed, tmp_path):
     plan = node(options={'journal_dir': str(tmp_path / 'calls')})
     assert not processes and not (tmp_path / '_demiflow').exists()
     assert plan.materialize().count() == 8
-    assert len(processes) == 1 and sum('模型就绪' in msg for msg in logs) == 1
+    assert len(processes) == 1 and sum('Model ready' in msg for msg in logs) == 1
     assert_reaped(processes)
     # Both the same actor and a new node reuse full responses without loading.
     assert plan.materialize().count() == 8
@@ -243,7 +243,7 @@ def test_resource_wait_starts_only_after_release(managed, resource):
         try:
             async with asyncio.timeout(2):
                 while not logs: await asyncio.sleep(.01)
-            assert any('等待模型资源' in msg for msg in logs)
+            assert any('Waiting for model resources' in msg for msg in logs)
             assert not processes and not pending.done()
             # A busy listener must not cause the waiting job to hold a GPU.
             if resource == 'port':

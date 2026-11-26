@@ -52,7 +52,7 @@ class COSCreds:
                  key_var: str = "COS_SECRET_KEY") -> "COSCreds":
         sid, skey = os.environ.get(sid_var, ""), os.environ.get(key_var, "")
         if not sid or not skey:
-            raise RuntimeError(f"环境变量 {sid_var}/{key_var} 不完整")
+            raise RuntimeError(f"Environment variables {sid_var}/{key_var} are incomplete")
         return cls(sid, skey)
 
     @classmethod
@@ -61,7 +61,7 @@ class COSCreds:
         line = open(path).read().strip()
         sid, _, skey = line.partition(":")
         if not sid or not skey:
-            raise RuntimeError(f"凭证文件格式应为 sid:skey：{path}")
+            raise RuntimeError(f"Credential file must contain sid:skey: {path}")
         return cls(sid, skey)
 
     @classmethod
@@ -74,7 +74,7 @@ class COSCreds:
         for p in tuple(paths) + (os.path.expanduser("~/.config/demiflow/cos_creds"), "/tmp/cos_creds"):
             if os.path.exists(p):
                 return cls.from_file(p)
-        raise RuntimeError("无 COS 凭证：环境变量与约定路径均未命中")
+        raise RuntimeError("No COS credentials: neither the environment variables nor the default paths have them")
 
 
 def build_host(bucket: str, region: str, env_var: str = "COS_HOST") -> str:
@@ -146,7 +146,7 @@ class COSIO:
                 last_exc = e
             if attempt < self.retries - 1:
                 self._sleep(self.backoff[min(attempt, len(self.backoff) - 1)])
-        raise last_exc if last_exc else RuntimeError("COS 重试耗尽")
+        raise last_exc if last_exc else RuntimeError("COS retries exhausted")
 
     # ---- 对象级原语 ----
 
