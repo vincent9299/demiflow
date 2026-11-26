@@ -8,8 +8,13 @@ from contextlib import asynccontextmanager
 # Fixed internal reasons; arbitrary cancellation never grants drain semantics.
 COOPERATIVE_STOP_REASON = 'cooperative:operator_stop_file'
 COOPERATIVE_RUN_STOP_REASON = 'cooperative:run_cancelled'
+# A stage of the action failed. The other stages stop admitting work; an exchange
+# they already sent may finish under its own deadline, so a paid response is saved
+# for replay instead of being cut off. Nothing is published.
+COOPERATIVE_FAILURE_STOP_REASON = 'cooperative:action_failed'
 _COOPERATIVE_STOPS = {COOPERATIVE_STOP_REASON: 'operator_stop_file',
-                      COOPERATIVE_RUN_STOP_REASON: 'run_cancelled'}
+                      COOPERATIVE_RUN_STOP_REASON: 'run_cancelled',
+                      COOPERATIVE_FAILURE_STOP_REASON: 'action_failed'}
 
 
 class ServiceStopped(RuntimeError):

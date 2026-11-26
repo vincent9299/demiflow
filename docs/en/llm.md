@@ -127,6 +127,8 @@ failed = [row for row in rows if row.get("error")]
 
 ## Interruption and recovery
 
+When another stage fails, the engine closes admission for new model requests. Calls already sent may finish within their request deadline and the run’s cleanup grace period. Their responses are recorded in the original journal for replay. The action reports the original failure.
+
 Inside a `RunContext`, progress is committed in batches at the downstream `materialize()`: on resume, confirmed inputs are skipped and their committed results returned; a batch that was not confirmed may call the model again. See "Resume where you stopped" in the README.
 
 A plain `run_stream()` outside a `RunContext` has no durable progress, and running it again repeats the calls. Several actions on the same Dataset that was not materialized also repeat calls; `materialize()` first when results are to be reused.

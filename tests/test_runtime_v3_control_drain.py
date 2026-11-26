@@ -81,7 +81,7 @@ def test_late_reply_drain_preserves_other_worker_boot_and_original_notify(tmp_pa
         finally:release.set()
 
 
-@pytest.mark.parametrize('reason',['cooperative:operator_stop_file','cooperative:run_cancelled'])
+@pytest.mark.parametrize('reason',['cooperative:operator_stop_file','cooperative:run_cancelled','cooperative:action_failed'])
 def test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter(tmp_path,reason):
     from concurrent.futures import ThreadPoolExecutor
     from demiflow.execution.worker.mailbox import ControlMailbox
@@ -117,3 +117,31 @@ def test_early_stopped_reserve_returns_original_error_reply_and_releases_waiter(
             finally:
                 mailbox.cancel_pending()
                 mailbox.close()
+
+
+def test_rpc_after_failed_event_in_same_poll_still_receives_its_reply():
+    from collections import deque
+    from demiflow.execution.action_driver.dataflow import DataflowExecution
+
+    driver = DataflowExecution.__new__(DataflowExecution)
+    failed = SimpleNamespace(kind='failure', allocation_id='worker')
+    rpc = SimpleNamespace(kind='artifact', allocation_id='worker')
+    returned = []
+    driver._polled_events = deque()
+    driver._bounds = SimpleNamespace(max_pending_events=4)
+    driver._services = SimpleNamespace(journal_service=SimpleNamespace(
+        poll_replies=lambda **kwargs: (), dispatch_reply=lambda event: ('reply', event)))
+    driver._endpoints = {'worker': SimpleNamespace(
+        poll=lambda **kwargs: [failed, rpc], deliver_reply=returned.append)}
+    driver._validate_event = lambda event: None
+    driver._update_checkpoint_wait_clock = lambda: None
+
+    def fail(event):
+        assert event is failed
+        raise ValueError('stage failed')
+
+    driver._handle_event = fail
+    with pytest.raises(ValueError, match='stage failed'):
+        driver._poll_control(time.monotonic() + 1)
+    assert driver._settle_polled_controls() is None
+    assert returned == [('reply', rpc)] and not driver._polled_events
