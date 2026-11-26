@@ -102,9 +102,9 @@ it is not proof that hostile descendants stopped and cannot authorize L2.
     command, environment = adapter.launch(config, home, root)
     environment = dict(environment)
     environment[UNIT_ENV] = str(lease_fd)
-    launcher = Path(__file__).with_name('provider_exec.py')
+    from demiflow.forge.native_exec import launch_command
     return subprocess.Popen(
-        [sys.executable, '-I', '-B', str(launcher), str(os.getpid()), *command],
+        launch_command(command),
         cwd=home, env=environment,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         shell=False, close_fds=True, start_new_session=True,

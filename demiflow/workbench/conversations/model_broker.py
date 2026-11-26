@@ -190,11 +190,15 @@ def validate_responses(value, config):
 
 
 class ModelBroker:
-    def __init__(self, deployment, turn, session, home, *, defer_handshake=False):
+    def __init__(self, deployment, turn, session, home, *, defer_handshake=False, request_seconds=180, deadline=None):
         self.name = session['provider']; self.config = deployment.providers[self.name]
         if not capabilities(self.name, self.config)['available']:
             reject('Configured provider has no qualified fixed model channel')
         self.deadline = turn_deadline(turn, deployment.limits) if turn is not None else math.inf
+        self.deadline = min(self.deadline, deadline) if deadline is not None else self.deadline
+        if not isinstance(request_seconds, (int, float)) or not 0 < request_seconds <= 3600:
+            reject('Invalid model request deadline')
+        self.request_seconds = request_seconds
         self.token = secrets.token_hex(32)
         self.closed = threading.Event(); self.requests = self.connections = 0
         self.input_bytes = self.output_bytes = 0; self.failure = None
@@ -210,17 +214,19 @@ class ModelBroker:
                              if k not in {'native_credentials', 'credential_env', 'base_url', 'inherit_proxy'}}
         try:
             if turn is not None:
-                self.quota = _Quota(self.home.parent.parent / (identifier(turn['id']) + '.model-budget.json'),
-                                    turn['id'], self.maximum)
+                owner = json.loads(turn.get('forge_options') or '{}').get('quota_turn', turn['id'])
+                self.quota = _Quota(self.home.parent.parent / (identifier(owner) + '.model-budget.json'),
+                                    owner, self.maximum)
             if self.name == 'deepseek':
                 from .deepseek import DeepSeek
-                command, env = DeepSeek.launch(dict(self.config, _model_broker=True), self.home, str(self.home))
-                launcher = Path(__file__).with_name('provider_exec.py')
-                self.process = subprocess.Popen([sys.executable, '-I', '-B', str(launcher), str(os.getpid()), *command],
+                command, env = DeepSeek.launch(dict(self.config, _model_broker=True, _request_seconds=self.request_seconds), self.home, str(self.home))
+                from demiflow.forge.native_exec import launch_command
+                self.process = subprocess.Popen(launch_command(command),
                     cwd=self.home, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     close_fds=True, start_new_session=True)
                 self.transport = Transport(self.process, _replace_dataclass(deployment.limits, frame_bytes=FRAME, output_bytes=0))
                 self.child_config['_boundary'] = dict(token=self.token)
+                self.child_config['_request_seconds'] = self.request_seconds
                 if defer_handshake:
                     self._init_thread = threading.Thread(target=self._run_handshake, name='development-model-init', daemon=True)
                     self._init_thread.start()
@@ -237,6 +243,7 @@ class ModelBroker:
                     reject('Fixed model endpoint must use HTTPS or explicit local test transport')
                 if not os.environ.get(self.config['credential_env']): reject('Configured model authentication is unavailable')
                 self.child_config['_boundary'] = dict(token=self.token)
+                self.child_config['_request_seconds'] = self.request_seconds
                 self._initializing = False
                 self._ready.set()
             self.listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -288,18 +295,19 @@ class ModelBroker:
             if self.transport is not None:
                 self.transport.frame_count = 0
                 self.transport.output_bytes = 0
-            self.quota = _Quota(self.home.parent.parent / (identifier(turn['id']) + '.model-budget.json'),
-                                turn['id'], self.maximum)
+            owner = json.loads(turn.get('forge_options') or '{}').get('quota_turn', turn['id'])
+            self.quota = _Quota(self.home.parent.parent / (identifier(owner) + '.model-budget.json'),
+                                owner, self.maximum)
             self.idle = False
 
     def _check(self, *, allow_init=False):
         if self.closed.is_set() or (self.idle and not (allow_init and self._initializing)) or time.time() >= self.deadline:
             raise TimeoutError('Development model channel has expired')
 
-    def _rpc(self, method, params, on_chunk, *, timeout=180, allow_init=False):
+    def _rpc(self, method, params, on_chunk, *, timeout=None, allow_init=False):
         self._check(allow_init=allow_init)
         key = self.transport.request(method, params)
-        until = min(self.deadline, time.time() + timeout)
+        until = min(self.deadline, time.time() + (self.request_seconds if timeout is None else timeout))
         while True:
             self._check(allow_init=allow_init)
             if time.time() >= until: raise TimeoutError('Model request exceeded its deadline')
@@ -381,15 +389,15 @@ class ModelBroker:
         environment = dict(PATH='/usr/bin:/bin',LANG='C.UTF-8',
             DEMIFLOW_UPSTREAM_TOKEN=os.environ[self.config['credential_env']], **proxy_environment(self.config))
         self._check()
-        launcher=Path(__file__).with_name('provider_exec.py')
-        process = subprocess.Popen([sys.executable,'-I','-B',str(launcher),str(os.getpid()),sys.executable,
-            '-I','-B',str(Path(__file__).with_name('model_http.py'))], cwd=self.home, env=environment,
+        from demiflow.forge.native_exec import launch_command
+        process = subprocess.Popen(launch_command([sys.executable,
+            '-I','-B',str(Path(__file__).with_name('model_http.py'))]), cwd=self.home, env=environment,
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,close_fds=True,start_new_session=True)
         self.http_process = process
         selector = selectors.DefaultSelector()
         try:
             self._check()
-            process.stdin.write(wire(dict(url=endpoint,body=value,deadline=min(self.deadline,time.time()+180),maximum=self.maximum),FRAME+8192))
+            process.stdin.write(wire(dict(url=endpoint,body=value,deadline=min(self.deadline,time.time()+self.request_seconds),maximum=self.maximum),FRAME+8192))
             process.stdin.close()
             os.set_blocking(process.stdout.fileno(),False)
             selector.register(process.stdout,selectors.EVENT_READ)
@@ -486,5 +494,6 @@ class ModelBroker:
         if not self.thread or not self.thread.is_alive(): shutil.rmtree(self.socket_dir, ignore_errors=True)
 
 
-def start_model_broker(deployment, turn, session, home, *, defer_handshake=False):
-    return ModelBroker(deployment, turn, session, home, defer_handshake=defer_handshake)
+def start_model_broker(deployment, turn, session, home, *, defer_handshake=False, request_seconds=180, deadline=None):
+    return ModelBroker(deployment, turn, session, home, defer_handshake=defer_handshake,
+                       request_seconds=request_seconds, deadline=deadline)

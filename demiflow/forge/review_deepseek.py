@@ -14,6 +14,7 @@ import time
 from .platform_environment import read_bounded
 from .project_io import decode_control
 from .schema import ForgeError
+from .review import REVIEW_SECONDS, MAX_REVIEW_SECONDS
 
 
 MAX_INPUT = 2 * 1024**2
@@ -88,7 +89,10 @@ def prepare_launch(config, home, *, model_channel=None):
     plugin('agent-default-model', provider=route, model=config['model'])
     env = dict(PATH=str(node.parent) + ':/usr/bin:/bin', HOME=str(home),
                DSH_HOME=str(home), TMPDIR=str(home), LANG='C.UTF-8')
-    options = {'reasoningEffort': config.get('effort', 'high')}
+    seconds = config.get('_request_seconds', REVIEW_SECONDS)
+    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0 < seconds <= MAX_REVIEW_SECONDS:
+        raise ForgeError('Invalid DeepSeek review time budget', code='invalid_request')
+    options = {'reasoningEffort': config.get('effort', 'high'), 'streamIdleTimeoutMs': seconds * 1000}
     if route not in ('deepseek-official', 'deepseek-account'):
         raise _unavailable('Unsupported DeepSeek reviewer route')
     boundary = config.get('_boundary')
@@ -101,6 +105,7 @@ def prepare_launch(config, home, *, model_channel=None):
         module = executable.parents[1] / 'node_modules/@deepseek-ai/dsh-llm/lib/index.js'
         rows.append(dict(id='review-model', name=str(model_channel), config=dict(provider=route,
             model=config['model'], token=boundary['token'], reasoningEffort=config.get('effort', 'high'),
+            requestSeconds=seconds,
             llmModule=str(module))))
     elif boundary is not None:
         raise _unavailable('The host model channel must be attached before starting review')
@@ -146,7 +151,7 @@ def prepare_launch(config, home, *, model_channel=None):
 def _encoded(prompt, timeout):
     if not isinstance(prompt, str) or not prompt.strip():
         raise ForgeError('DeepSeek review requires evidence', code='invalid_request')
-    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= 900:
+    if type(timeout) not in (int, float) or not math.isfinite(timeout) or not 0 < timeout <= MAX_REVIEW_SECONDS:
         raise ForgeError('Invalid DeepSeek review time budget', code='invalid_request')
     if len(prompt) > MAX_INPUT or len(encoded := prompt.encode('utf-8')) > MAX_INPUT:
         raise ForgeError('DeepSeek review evidence exceeds its byte budget', code='resource_limit')
@@ -197,10 +202,44 @@ def _communicate(proc, encoded, deadline, check_cancel):
     return output
 
 
+def extract_report(content):
+    """Accept one complete object with optional prose/fences; never choose among objects."""
+    depth = 0
+    quoted = escaped = False
+    start = None
+    objects = []
+    for index, char in enumerate(content):
+        if depth:
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == '\\':
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+                if depth == 0:
+                    objects.append(content[start:index + 1])
+        elif char == '{':
+            depth, start = 1, index
+    if depth or len(objects) != 1:
+        raise _unavailable('DeepSeek reviewer returned an invalid JSON report (expected one object)')
+    result = decode_control(objects[0])
+    if not isinstance(result, dict):
+        raise _unavailable('DeepSeek reviewer returned an invalid JSON report')
+    return result
+
+
 def _result(returncode, raw, model, home):
     session_id = None
     completed = False
     report = None
+    format_error = None
     for line in raw.splitlines():
         # 0.2.1-rc.2 account model listing logs to stdout even in JSON mode.
         if line.startswith(b'[llm-deepseek-account] '):
@@ -247,26 +286,30 @@ def _result(returncode, raw, model, home):
             if not completed or not isinstance(event.get('text'), str):
                 raise _unavailable('DeepSeek review final response does not match a completed turn')
             content = event['text'].strip()
-            fence = re.fullmatch(r'```(?:json)?\s*\n(.*)\n```', content, flags=re.DOTALL)
             try:
-                report = decode_control(fence[1] if fence else content)
+                report = extract_report(content)
             except ValueError as exc:
                 # Keep a bounded single-line excerpt so the 评审 panel shows what the model returned.
                 excerpt = ' '.join(content.split())[:300]
                 if any(w in excerpt.lower() for w in ('http://', 'https://', 'bearer ', 'token', 'sk-')):
                     excerpt = ''
                 suffix = f' (excerpt: {excerpt}{"…" if len(content) > 300 else ""})' if excerpt else ''
-                raise _unavailable('DeepSeek reviewer returned an invalid JSON report' + suffix) from exc
-            if not isinstance(report, dict):
+                format_error = 'DeepSeek reviewer returned an invalid JSON report' + suffix
+                report = content
+            if not isinstance(report, dict) and format_error is None:
                 raise _unavailable('DeepSeek reviewer returned an invalid report')
         elif kind not in ('status', 'text', 'thinking'):
             raise _unavailable('Unexpected DeepSeek CLI event')
     if returncode or not session_id or report is None:
         raise _unavailable('DeepSeek review ended without a completed report')
-    return dict(provider='deepseek', model=model, session_id=session_id, report=report)
+    response = dict(provider='deepseek', model=model, session_id=session_id, report=report)
+    if format_error:
+        from .review import ReviewFormatError
+        raise ReviewFormatError(format_error, response)
+    return response
 
 
-def collect_review(process, prompt, *, cwd, model, timeout=180, check_cancel=None):
+def collect_review(process, prompt, *, cwd, model, timeout=REVIEW_SECONDS, check_cancel=None):
     """Own stdio, cancellation and cleanup of the newly admitted CLI process."""
     try:
         encoded = _encoded(prompt, timeout)
@@ -286,7 +329,7 @@ def collect_review(process, prompt, *, cwd, model, timeout=180, check_cancel=Non
             process.wait()
 
 
-def run_reviewer(prompt, *, timeout=180, config=None, check_cancel=None):
+def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=None):
     """Start a fresh native headless agent with only its supplied text evidence."""
     if check_cancel is not None:
         check_cancel()
@@ -294,9 +337,10 @@ def run_reviewer(prompt, *, timeout=180, config=None, check_cancel=None):
         config = _local_config()
     with tempfile.TemporaryDirectory(prefix='demiflow-forge-review-') as directory:
         home = Path(directory)
-        command, env = prepare_launch(config, home)
+        command, env = prepare_launch(dict(config, _request_seconds=timeout), home)
         try:
-            proc = subprocess.Popen(command, cwd=home, env=env, stdin=subprocess.PIPE,
+            from .native_exec import launch_command
+            proc = subprocess.Popen(launch_command(command), cwd=home, env=env, stdin=subprocess.PIPE,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         except OSError as exc:
             raise _unavailable('Failed to launch the configured DeepSeek CLI') from exc

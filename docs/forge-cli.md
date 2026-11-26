@@ -37,7 +37,26 @@ demiflow forge check --root ./experiment
 
 在终端运行独立评审前，将 `DEMIFLOW_FORGE_REVIEW_CONFIG` 指向本机的 DeepSeek provider JSON 配置文件，也可以指定含 `providers.deepseek` 的开发部署文件。配置项 `executable` 与 `node` 是已安装的 dsh 和 Node 的绝对路径，`version` 为已验收的 dsh 版本（首版为 `0.2.1-rc.2`），`model` 选择模型。`deepseek-official` 使用 `credential_env` 命名的 API key 环境变量；`deepseek-account` 使用配置中的本机认证文件引用。账户材料由本机管理。
 
-评审可以按当前入口或文件进行，也可用 `--base REF` 比较本地基线与当前业务源码（含未提交改动、新文件和删除项）。无显式范围时默认选择本项目相对 HEAD 的实际改动。可重复使用 `--evidence REL` 附上测试或小样本结果。输出区分变更前后的行号、影响交付的问题、建议和需要补充的依据。默认时限为 180 秒，可用 `--timeout` 明确指定本次时间预算。使用 `--json` 可保留完整报告。终端退出码 0 表示评审完成，1 表示发现影响交付的问题，2 表示调用无效，3 表示评审未完成。
+评审可以按当前入口或文件进行，也可用 `--base REF` 比较本地基线与当前业务源码（含未提交改动、新文件和删除项）。无显式范围时默认选择本项目相对 HEAD 的实际改动。可重复使用 `--evidence REL` 附上测试或小样本结果。输出区分变更前后的行号、影响交付的问题、建议和需要补充的依据。默认总评审时限为 1800 秒，可用 `--timeout 3600` 延长至一小时；默认推理档为 high。所有分片、一次补读和一次格式修复共用剩余预算。报告同时给出完整度和源码是否仍是当前候选，已验真的阻断不会因其他条目格式错误而丢失。使用 `--json` 可保留完整报告。终端退出码 0 表示评审完成，1 表示发现影响交付的问题，2 表示调用无效，3 表示评审未完成。
+
+## 不依赖工作台的完整工程闭环
+
+`develop` 将需求交给原生 coding CLI，在作者回合完成并清理后调用与工作台相同的 Forge 检查、评审和反馈逻辑。发现当前候选的有效阻断时，反馈发回同一个作者 session，最多自动修正一次，再按原范围复核。原生 CLI 继续负责自己的模型和工具循环。
+
+```bash
+demiflow forge develop --root ./experiment --state-dir ../forge-receipts/counts \
+  --agent codex --goal "实现并验证筛选计数流程" --json
+demiflow forge develop --root ./experiment --state-dir ../forge-receipts/counts --status --json
+demiflow forge develop --root ./experiment --state-dir ../forge-receipts/counts --agent codex --resume --json
+```
+
+作者可选 `codex` 或 `deepseek`，使用本机已有 CLI 配置；`--executable`、`--profile` 可显式指定原生安装与配置。DeepSeek 默认 profile 为 `headless`。命令不会自动提升作者权限，可信本地模式不能替代 OS 沙箱。独立评审仍使用上文的 `DEMIFLOW_FORGE_REVIEW_CONFIG`，与作者会话分离且不提供工具。
+
+`--state-dir` 必须是项目源码之外、本 UID 独占的私有目录。回执记录目标、候选、原作者身份、工程结果与反馈投递状态。`--status` 只读；`--resume` 只推进确认尚未派发的动作，并核对原根、可执行文件、配置和清理事实。输入已发送但接收结果未知时会保留 unknown，不自动重发，也不接受任意外部 session 冒充本闭环的原作者。
+
+默认工程总时限 `--timeout 3600`，默认独立评审总时限 `--review-timeout 1800`；可分别延长至 7200 和 3600 秒。评审与自动修正不会重置剩余调用预算。`--no-review` 关闭自动付费评审，免费规范检查与有限修正继续适用。项目测试使用项目明确声明的命令和业务解释器，不猜测宿主 Python。已有 Agent 也可主动调用 `forge check/review`，同步从 CLI 输出获得结果。
+
+终端和工作台共享本 UID 的物理根写入准入，同根及父子根不能同时启动作者。工作台保留原授权、对话、人工队列和进程生命周期，通过回合结束钩子调用 Forge；人工新要求优先，旧候选反馈会明确等待或被取代。Forge 自己的受控入口登记保留，作者直接修改受保护文件仍由 Forge 保护钩子核对。
 
 各命令支持 `--json`。退出码 0 表示所选操作完成或静态检查明确不适用，1 表示已知违规或内容冲突，2 表示调用错误，3 表示必要依据不足、范围未覆盖或达到预算。检查结果给出实际覆盖的内容。登记成功后再从工作台的管道列表选取该入口。
 

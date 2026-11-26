@@ -23,12 +23,12 @@ GET_FIELDS = {
 }
 POST_FIELDS = {
     'dev-steer': ({'session_id','turn_id','submission_id','text'}, {'from_queue'}),
-    'dev-enqueue': ({'session_id','turn_id','submission_id','text'}, set()),
+    'dev-enqueue': ({'session_id','turn_id','submission_id','text'}, {'auto_review','purpose'}),
     'dev-queue-change': ({'session_id','submission_id','action'}, set()),
     'dev-compact': ({'session_id','submission_id','expected_revision'},set()),
     'dev-prewarm': (set(), {'session_id', 'provider_id', 'session_kind'}),
     'dev-session-create': ({'request_id', 'provider_id'}, {'new_conversation', 'session_kind'}),
-    'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation', 'auto_review'}),
+    'dev-turn-start': ({'session_id', 'submission_id', 'expected_revision', 'text'}, {'operation', 'auto_review', 'purpose'}),
     'dev-notebook-claim': ({'session_id','turn_id','pending_request_id','expected_digest'},set()),
     'dev-input': ({'session_id', 'turn_id', 'pending_request_id', 'expected_digest', 'answer'}, set()),
     'dev-cancel': ({'session_id', 'turn_id', 'request_id'}, set()),
@@ -139,7 +139,7 @@ def get(server, workspace, root, name, query, *, consumer_closed=None):
 def post(server, workspace, root, name, request, *, consumer_closed=None):
     if name == 'dev-turn-start' and request.get('operation', 'message') not in ('message', 'notebook_cell', 'notebook_cell_cli'):
         reject('Unsupported conversation operation', 'invalid_request')
-    if name == 'dev-turn-start' and 'auto_review' in request and type(request['auto_review']) is not bool:
+    if name in {'dev-turn-start', 'dev-enqueue'} and 'auto_review' in request and type(request['auto_review']) is not bool:
         reject('auto_review must be a boolean', 'invalid_request')
     if name == 'dev-session-create' and 'new_conversation' in request and type(request['new_conversation']) is not bool:
         reject('new_conversation must be a boolean', 'invalid_request')
@@ -149,6 +149,8 @@ def post(server, workspace, root, name, request, *, consumer_closed=None):
         if name == 'dev-prewarm':
             return dict(status='unsupported')
         return service.forward(workspace, root, name, request, mutation=True, consumer_closed=consumer_closed)
+    if 'purpose' in request and request['purpose'] not in {'message', 'review', 'repair'}:
+        reject('Invalid development request purpose', 'invalid_request')
     actions = {'dev-prewarm': service.prewarm, 'dev-steer': service.steer, 'dev-enqueue': service.enqueue, 'dev-queue-change': service.change_queue,
                'dev-session-create': service.create_project, 'dev-turn-start': service.start_project, 'dev-compact': service.compact, 'dev-input': service.input, 'dev-notebook-claim': service.claim_cell_command,
                'dev-cancel': service.cancel, 'dev-recover': service.recover}

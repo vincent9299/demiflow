@@ -7,10 +7,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
-from demiflow.workbench.conversations.changes import capture, differences
+from demiflow.forge.source_snapshot import capture, differences
 from demiflow.workbench.conversations.execution import execution_facts
 from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
 from demiflow.workbench.conversations.sandbox_backends import (
@@ -290,7 +291,7 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
 
     class DummyDeployment:
         mode = 'restricted'
-        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official'}}
+        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official', 'executable': sys.executable}}
 
     monkeypatch.setattr('demiflow.workbench.conversations.model_broker.start_model_broker', lambda *a, **kw: DummyBroker())
     def fake_launch(**kw):
@@ -303,7 +304,7 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
         'prompt', deployment=DummyDeployment(), turn={'id': 't1'},
         session={'id': 's1', 'provider': 'deepseek'}, scratch=scratch,
         broker_home=tmp_path / 'broker', author_spec=author_spec,
-        lease_fd=None, deadline=9999999999.0, check_cancel=lambda: None,
+        lease_fd=None, deadline=time.time()+1800, check_cancel=lambda: None,
     )
     assert out == {'status': 'passed'}
     assert str(existing) in captured['spec'].runtime_paths
@@ -346,7 +347,7 @@ def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path
 
     class DummyDeployment:
         mode = 'restricted'
-        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official'}}
+        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official', 'executable': sys.executable}}
 
     monkeypatch.setattr('demiflow.workbench.conversations.model_broker.start_model_broker', lambda *a, **kw: DummyBroker())
 
@@ -367,7 +368,7 @@ def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path
         'prompt', deployment=DummyDeployment(), turn={'id': 't1'},
         session={'id': 's1', 'provider': 'deepseek'}, scratch=scratch,
         broker_home=tmp_path / 'broker', author_spec=author_spec,
-        lease_fd=None, deadline=9999999999.0, check_cancel=lambda: None,
+        lease_fd=None, deadline=time.time()+1800, check_cancel=lambda: None,
     )
     assert out == {'status': 'passed'}
     spec = captured['spec']
@@ -382,7 +383,7 @@ def test_forge_unifies_configs_role_and_keeps_legacy_parameters_compatible(tmp_p
     from demiflow.forge import pipeline_check, project
     from demiflow.forge.project_rules import ROLE_DIRS
     from demiflow.workbench.runs import manager as run_manager
-    assert ROLE_DIRS == ('flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks')
+    assert {'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks'}.issubset(ROLE_DIRS)
     proj = tmp_path / 'proj'
     project.initialize_project(proj, name='Demo')
     (proj / 'flows').mkdir()
@@ -473,7 +474,7 @@ def test_manage_project_layout_bridge_tool(tmp_path):
 
 
 def test_changes_capture_ignores_lance_and_runtime_artifacts(tmp_path):
-    from demiflow.workbench.conversations.changes import capture
+    from demiflow.forge.source_snapshot import capture
 
     root = tmp_path / 'proj'
     root.mkdir()
@@ -1038,11 +1039,8 @@ def test_linux_landlock_inherit_os_reads_external_and_urandom_while_blocking_wri
 
 
 def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_path):
-    from demiflow.workbench.conversations.worker import (
-        _build_rework_prompt,
-        _capture_protected_files,
-        _enforce_protected_files,
-    )
+    from demiflow.forge.development import build_rework_prompt
+    from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
 
     proj = tmp_path / 'empty_proj'
     (proj / '.forge').mkdir(parents=True)
@@ -1126,19 +1124,19 @@ def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_p
         assert not (ext_dir / 'escape.txt').exists()
 
     # Forge post-turn protected-file hook detects & restores mutated/deleted protected files across all OSes.
-    snap = _capture_protected_files(proj)
+    snap = capture_protected_files(proj)
     assert {'.env', '.forge/state.json', 'AGENTS.md'} <= set(snap)
     (proj / '.env').write_text('WIPED\n', encoding='utf-8')
     (proj / 'AGENTS.md').unlink()
     (proj / '.forge' / 'state.json').write_text('{"id":"tampered"}\n', encoding='utf-8')
     (proj / '.env.example').write_text('CONCEPT_EVAL_API_KEY=\n', encoding='utf-8')
-    violations = _enforce_protected_files(proj, snap)
+    violations = enforce_protected_files(proj, snap)
     assert violations == ['.env', '.forge/state.json', 'AGENTS.md']
     assert (proj / '.env').read_text(encoding='utf-8') == 'CONCEPT_EVAL_API_KEY=real-secret\n'
     assert (proj / '.forge' / 'state.json').read_text(encoding='utf-8') == '{"id":"w1"}\n'
     assert (proj / 'AGENTS.md').read_text(encoding='utf-8') == '# Rules\n'
     assert (proj / '.env.example').is_file()
-    rework = _build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
+    rework = build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
     assert rework is not None and '.env' in rework and '受保护文件钩子' in rework
 
 

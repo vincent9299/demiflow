@@ -292,11 +292,12 @@ SOFTWARE.
       }
       box.focus();
     };
-    const sendGuidedMessage=text=>{
+    const sendGuidedMessage=(text,purpose='message')=>{
       if(!text||!state.composer)return;
       const box=state.composer.input;
       box.value=text;
       box.dispatchEvent(new Event('input',{bubbles:true}));
+      state.guidedPurpose={text,purpose};
       if(!state.composer.send.disabled&&!running(state.session)&&!state.sending){
         state.composer.form.requestSubmit();
       }else{
@@ -305,8 +306,8 @@ SOFTWARE.
     };
     state.files=DevelopmentNavigation.filePanel({layout,filesHost:externalFilesHost||filesPane,operatorsHost:externalOperatorsHost||(drawerMode?null:operatorsPane),paneHost:externalCodeHost||null,toggle:filesToggle,api,iconButton,mountText,disposeReaders,project:workspaceId,
       onReference:insertReference,
-      onRework:prompt=>sendGuidedMessage(prompt),
-      onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。'),
+      onRework:prompt=>sendGuidedMessage(prompt,'repair'),
+      onRequestReview:()=>sendGuidedMessage('请调用 request_pipeline_review 对当前会话的源码改动发起独立只读评审，无需修改代码。','review'),
       onShowFilesTab:()=>{if(onShowFilesTab)onShowFilesTab();else{sidebarOpen(true);setSidebarTab('files');}},
       onBadgeChange:count=>{filesBadge.textContent=String(count);filesBadge.hidden=!count;onBadgeChange?.(count);},
       onOpenChange:onCodeOpenChange,onToggleExpand:onToggleCodeExpand,onSelectFlow,excludeFlows});
@@ -506,6 +507,7 @@ SOFTWARE.
       if(!replaying&&event.type==='compaction.completed'&&event.data.status==='compacted'&&!state.historyOnly){clearTimeline();earlier.hidden=false;}
       chat.project(event);
       if(event.type==='change.observed'){state.files?.recordObservedChanges(event.data?.files||[]);}
+      else if(event.type==='check.detail')state.files?.recordChecks({checkDetail:{...event.data,turn:event.turn_id}});
       else if(event.type==='turn.state'){
         try{
           const result=(typeof event.data?.result==='string'?JSON.parse(event.data.result):event.data?.result)||{};
@@ -521,7 +523,7 @@ SOFTWARE.
         const loc=val?.path?val.path+(val.line?':'+val.line:''):'';
         const txt=typeof val==='string'?val:[loc,val?.trigger,val?.impact,val?.suggestion,val?.reason,val?.detail].filter(Boolean).join(' · ');
         const tag=({findings:val?.severity==='blocking'?'需修正':'建议',gaps:'待核实',checks:'已核对',diagnostics:'说明'})[event.data?.field]||'';
-        if(txt)state.files?.recordChecks({reviewDetail:(tag?tag+' · ':'')+txt});
+        if(txt&&event.data?.field!=='checks')state.files?.recordChecks({reviewDetail:(tag?tag+' · ':'')+txt});
       }else if(event.type==='review.completed'){
         state.files?.recordChecks({review:event.data?.status});
       }
@@ -594,7 +596,8 @@ SOFTWARE.
       if(send.disabled||!input.reportValidity()||!input.value.trim())return;
       const message=input.value, sentDraftRevision=draftRevisions.get(draftKey)||0;
       const queue=running(state.session)||!!state.session?.queued_messages?.length;
-      const submission=state.submission||{text:message,id:uid(),after:queue?state.session.turn.id:null,steer:steerGesture};
+      const submission=state.submission||{text:message,id:uid(),after:queue?state.session.turn.id:null,steer:steerGesture,auto_review:composer.autoReview,
+        purpose:state.guidedPurpose?.text===message?state.guidedPurpose.purpose:'message'};
       if(submission.text!==message){
         showSubmitError(new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;
       }
@@ -609,10 +612,11 @@ SOFTWARE.
         if(state.disposed)return;
         const payload={session_id:state.session.id,submission_id:submission.id,text:message};
         let started=null;
-        if(submission.after)await api(submission.steer?'dev-steer':'dev-enqueue',{}, {...payload,turn_id:submission.after});
+        if(submission.after)await api(submission.steer?'dev-steer':'dev-enqueue',{}, {...payload,turn_id:submission.after,
+          ...(!submission.steer&&capabilities.backend!=='existing_http'?{auto_review:submission.auto_review,purpose:submission.purpose}:{})});
         else started=await api('dev-turn-start',{}, {...payload,expected_revision:state.session.revision,
-          ...(capabilities.backend!=='existing_http'?{auto_review:composer.autoReview}:{})});
-        state.submission=null;
+          ...(capabilities.backend!=='existing_http'?{auto_review:submission.auto_review,purpose:submission.purpose}:{})});
+        state.submission=null;state.guidedPurpose=null;
         clearSubmitError();
         if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){
           drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts(true);

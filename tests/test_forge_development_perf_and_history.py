@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 import pytest
 
-from demiflow.workbench.conversations import changes
+from demiflow.forge import source_snapshot as changes
 from demiflow.workbench.conversations import model_broker as broker
 from demiflow.workbench.conversations.common import root_identity
 from demiflow.workbench.conversations.deepseek import DeepSeek

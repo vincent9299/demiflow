@@ -92,6 +92,20 @@ class Store:
                 db.execute("""CREATE TABLE IF NOT EXISTS steers(
                     turn TEXT NOT NULL, submission TEXT NOT NULL, sequence INTEGER NOT NULL,
                     status TEXT NOT NULL, PRIMARY KEY(turn,submission))""")
+                for table in ('turns', 'followups'):
+                    if 'forge_options' not in {row[1] for row in db.execute('PRAGMA table_info(' + table + ')')}:
+                        db.execute("ALTER TABLE " + table + " ADD COLUMN forge_options TEXT NOT NULL DEFAULT '{}'")
+                # Recover provenance from the old scheduler's exact submission
+                # relation and committed receipt, never from the message text.
+                for table in ('turns', 'followups'):
+                    legacy = db.execute("""SELECT child.rowid,child.submission,parent.id FROM """ + table + """ child
+                        JOIN turns parent ON parent.session=child.session
+                        AND child.submission IN ('forge-rework-'||parent.id, 'forge-rework-r-'||parent.id)
+                        WHERE child.forge_options='{}' AND json_extract(parent.result,'$.auto_rework.scheduled')=1""").fetchall()
+                    for rowid, submission, parent in legacy:
+                        options = dict(origin='forge', round=1, auto_review=submission == 'forge-rework-r-' + parent,
+                                       legacy=True, feedback_id=submission, quota_turn=parent)
+                        db.execute('UPDATE ' + table + ' SET forge_options=? WHERE rowid=?', (wire(options).decode(), rowid))
             os.chmod(self.path, 0o600)
             reserve = self.root / 'control.reserve'
             if not reserve.exists() and not (self.root / 'storage-pressure').exists():
@@ -321,7 +335,7 @@ class Store:
                 ORDER BY e.sequence DESC LIMIT 1""",(sid,)).fetchone()
             row['archive_sequence'] = archived['sequence'] if archived else 0
             row['queued_messages'] = [dict(item) for item in db.execute(
-                'SELECT submission,text,error FROM followups WHERE session=? ORDER BY rowid', (sid,))]
+                'SELECT submission,text,error,forge_options FROM followups WHERE session=? ORDER BY rowid', (sid,))]
             row.pop('provider_session', None)
             return row
 
@@ -356,18 +370,28 @@ class Store:
                       AND json_extract(e.body,'$.data.status')='passed'
                       AND json_extract(e.body,'$.data.scope.mode')='observed_changes'""", (sid,)).fetchone()[0]
             goals, size = [], 0
-            for message, reason in db.execute("""SELECT text,json_extract(result,'$.reason') FROM turns
-                    WHERE session=? AND created>? AND operation='message' ORDER BY created DESC,id DESC""",
-                    (sid, boundary)):
-                if include_paths and (reason or '').startswith('Change observation incomplete:'):
+            rows = db.execute("""SELECT t.id,t.text,t.forge_options,json_extract(t.result,'$.reason'),t.created,
+                    (SELECT min(sequence) FROM events WHERE turn=t.id) FROM turns t
+                    WHERE session=? AND operation='message' ORDER BY created,id""", (sid,)).fetchall()
+            material = []
+            for tid, message, options, reason, created, sequence in rows:
+                policy = json.loads(options or '{}')
+                if include_paths and created > boundary and (reason or '').startswith('Change observation incomplete:'):
                     reject('一次源码观察没有完整记录，请指定 Flow 入口评审当前实现。')
-                size += len(message.encode()) + (2 if goals else 0)
-                if size > 8192:
-                    if include_paths or not goals:
-                        reject('交付目标超出预算，请简述当前目标并指定 Flow 入口。', 'resource_limit')
-                    break
+                if policy.get('origin', 'user') == 'user' and policy.get('purpose') not in {'review', 'repair'}:
+                    material.append((sequence or 0, message))
+            for sequence, body in db.execute("""SELECT e.sequence,e.body FROM steers s
+                    JOIN events e ON e.turn=s.turn AND e.sequence=s.sequence
+                    WHERE e.session=? AND s.status='accepted' ORDER BY e.sequence""", (sid,)):
+                data = json.loads(body)['data']
+                if data.get('origin', 'user') == 'user':
+                    material.append((sequence, data['text']))
+            for _, message in sorted(material):
+                size += len(message.encode()) + 2
+                if size > 128 * 1024:
+                    reject('完整需求材料超过128KiB，请明确收敛目标后开启新的工程交付。', 'resource_limit')
                 goals.append(message)
-            goal = '\n\n'.join(reversed(goals))
+            goal = '\n\n'.join(goals)
             if not include_paths:
                 return goal, {}
             changes = {}
@@ -383,7 +407,7 @@ class Store:
                         reject('两轮之间的源码记录不连续，请指定 Flow 入口评审当前实现。')
                     changes[path]['after_sha256'] = after
                     continue
-                if len(changes) >= 48:
+                if len(changes) >= 256:
                     reject('会话改动超出评审范围，请按 Flow 入口拆分。', 'resource_limit')
                 original = None
                 if before is not None:
@@ -392,9 +416,10 @@ class Store:
                         baseline = json.loads(record[0]) if record and record[0] else {}
                         current_turn = turn
                     fact = baseline.get(path) or {}
-                    if fact.get('sha256') != before or 'preview' not in fact:
+                    if fact.get('sha256') != before:
                         reject('缺少改动前的完整源码，请指定 Flow 入口评审当前实现。')
-                    original = fact['preview']
+                    from demiflow.forge.source_snapshot import read_source
+                    original = read_source(self.root / sid / turn / 'sources', fact)
                 changes[path] = dict(before=original, before_sha256=before, after_sha256=after)
         sources = {path: dict(before=change['before'], after_sha256=change['after_sha256'])
                    for path, change in changes.items() if change['before_sha256'] != change['after_sha256']}
@@ -421,7 +446,12 @@ class Store:
                 if json.loads(old[0])['data']['text'] != message:
                     reject('Submission key has different text','conflict')
                 return
+            origin = 'user'
             if from_queue:
+                queued = db.execute('SELECT forge_options FROM followups WHERE session=? AND submission=?',
+                                    (sid,submission)).fetchone()
+                if queued:
+                    origin = json.loads(queued['forge_options']).get('origin', 'user')
                 removed = db.execute('DELETE FROM followups WHERE session=? AND submission=? AND text=?',
                                      (sid,submission,message)).rowcount
                 if not removed:
@@ -431,7 +461,7 @@ class Store:
                 reject('这一轮已经结束，请用 Enter 继续会话。', 'conflict')
             if db.execute('SELECT count(*) FROM steers WHERE turn=?',(tid,)).fetchone()[0]>=8:
                 reject('本轮插话已达八条，可用 Enter 排队。', 'resource_limit')
-            event = self._event(db,sid,tid,turn['epoch'],'message.steer',{'item_id':'steer:'+submission,'text':message})
+            event = self._event(db,sid,tid,turn['epoch'],'message.steer',{'item_id':'steer:'+submission,'text':message,'origin':origin})
             db.execute('INSERT INTO steers VALUES(?,?,?,?)',(tid,submission,event['sequence'],'pending'))
 
     def claim_steer(self, tid, epoch):
@@ -452,7 +482,7 @@ class Store:
                 self._event(db,turn['session'],tid,turn['epoch'],'message.steer_status',
                             {'item_id':'steer:'+submission,'status':status},control=True)
 
-    def enqueue(self, workspace, sid, turn_id, submission, message):
+    def enqueue(self, workspace, sid, turn_id, submission, message, *, forge_options=None):
         identifier(submission)
         identifier(turn_id)
         text(message)
@@ -461,7 +491,7 @@ class Store:
             if session['session_kind'] != 'development':
                 reject('此会话属于 Notebook 卡片。', 'conflict')
             sent = db.execute('SELECT text FROM turns WHERE session=? AND submission=?', (sid, submission)).fetchone()
-            old = db.execute('SELECT origin_turn,text FROM followups WHERE session=? AND submission=?',
+            old = db.execute('SELECT origin_turn,text,forge_options FROM followups WHERE session=? AND submission=?',
                              (sid, submission)).fetchone()
             steered = db.execute('''SELECT e.body FROM steers s JOIN events e ON e.turn=s.turn AND e.sequence=s.sequence
                 WHERE e.session=? AND s.submission=? LIMIT 1''',(sid,submission)).fetchone()
@@ -470,7 +500,7 @@ class Store:
                     reject('Submission key has different text', 'conflict')
                 return
             if old or sent:
-                if (old and old['origin_turn'] != turn_id) or (old or sent)['text'] != message:
+                if (old and old['origin_turn'] != turn_id) or (old or sent)['text'] != message or old and json.loads(old['forge_options']) != (forge_options or {}):
                     reject('Submission key has different content', 'conflict')
                 return
             latest = db.execute('SELECT id,operation,state FROM turns WHERE session=? ORDER BY created DESC LIMIT 1',
@@ -485,8 +515,22 @@ class Store:
             # too, including paused queues from earlier grants or restarts.
             if db.execute('SELECT count(*) FROM followups').fetchone()[0] >= 128:
                 reject('待发送消息已满，请稍后重试。', 'resource_limit')
-            db.execute('INSERT INTO followups(session,submission,origin_turn,text) VALUES(?,?,?,?)',
-                       (sid, submission, turn_id, message))
+            db.execute('INSERT INTO followups(session,submission,origin_turn,text,forge_options) VALUES(?,?,?,?,?)',
+                       (sid, submission, turn_id, message, wire(forge_options or {}).decode()))
+
+    def discard_feedback(self, workspace, sid, submission, status):
+        with self.connect(write=True) as db:
+            self._session(db, workspace, sid)
+            row = db.execute('SELECT * FROM followups WHERE session=? AND submission=?', (sid, submission)).fetchone()
+            if not row or json.loads(row['forge_options']).get('origin') != 'forge':
+                reject('Not a pending Forge feedback', 'conflict')
+            self._discard_feedback(db, row, status)
+
+    def _discard_feedback(self, db, row, status):
+        turn = db.execute('SELECT epoch FROM turns WHERE id=?', (row['origin_turn'],)).fetchone()
+        self._event(db, row['session'], row['origin_turn'], turn['epoch'], 'forge.feedback_status',
+                    dict(id=row['submission'], status=status), control=True)
+        db.execute('DELETE FROM followups WHERE session=? AND submission=?', (row['session'], row['submission']))
 
     def hold_queue(self, sid, reason):
         with self.connect(write=True) as db:
@@ -497,7 +541,11 @@ class Store:
         with self.connect(write=True) as db:
             self._session(db, workspace, sid)
             if action == 'remove':
-                db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission))
+                row = db.execute('SELECT * FROM followups WHERE session=? AND submission=?', (sid, submission)).fetchone()
+                if row and json.loads(row['forge_options']).get('origin') == 'forge':
+                    self._discard_feedback(db, row, 'cancelled')
+                else:
+                    db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission))
             elif action == 'resume':
                 head = db.execute('SELECT submission FROM followups WHERE session=? ORDER BY rowid LIMIT 1',
                                   (sid,)).fetchone()
@@ -507,7 +555,7 @@ class Store:
             else:
                 reject('Invalid queue action', 'invalid_request')
 
-    def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message", provider=None):
+    def submit(self, workspace, sid, submission_id, expected_revision, message, identity, policy_hash, operation="message", provider=None, forge_options=None):
         text(message); identifier(submission_id); integer(expected_revision, 0, 2**31)
         if operation not in {'message','compact','notebook_cell','notebook_cell_cli'}:reject('Unknown conversation operation')
         hashed = digest({'text': message, **({'operation':operation} if operation!='message' else {})})
@@ -516,6 +564,8 @@ class Store:
             old = db.execute('SELECT * FROM turns WHERE session=? AND submission=?', (sid, submission_id)).fetchone()
             if old:
                 if old['body_hash'] != hashed: reject('Submission key has different text', 'conflict')
+                if json.loads(old['forge_options']) != (forge_options or {}):
+                    reject('Submission key has different engineering options', 'conflict')
                 return dict(old), False
             if session['revision'] != expected_revision or json.loads(session['root']) != identity:
                 reject('Session root or revision changed', 'conflict')
@@ -531,7 +581,7 @@ class Store:
                 reject('请从目标卡片开启独立会话。', 'conflict')
             if not cell_turn and session['session_kind'] == 'notebook':
                 reject('此会话属于 Notebook 卡片。', 'conflict')
-            queued = db.execute('SELECT submission,text,error FROM followups WHERE session=? ORDER BY rowid LIMIT 1',
+            queued = db.execute('SELECT submission,text,error,forge_options FROM followups WHERE session=? ORDER BY rowid LIMIT 1',
                                 (sid,)).fetchone()
             if queued and (queued['submission'] != submission_id or queued['text'] != message
                            or queued['error'] or operation != 'message'):
@@ -554,10 +604,23 @@ class Store:
             tid, epoch = 't' + secrets.token_hex(16), secrets.token_hex(16)
             db.execute('INSERT INTO turns(id,session,submission,body_hash,text,state,dispatch,cleanup,epoch,created,reserve,launch_phase,operation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
                        (tid, sid, submission_id, hashed, message, 'preparing', 'not_sent', 'pending', epoch, time.time(), reserve, 'admitted', operation))
+            db.execute('UPDATE turns SET forge_options=? WHERE id=?', (wire(forge_options or {}).decode(), tid))
             db.execute('UPDATE sessions SET revision=revision+1,title=CASE WHEN title=\'\' THEN ? ELSE title END WHERE id=?', (message[:80], sid))
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (len(message.encode()), sid))
             db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission_id))
             self._event(db,sid,tid,epoch,'compaction.requested' if operation=='compact' else 'message.user',{'text':message})
+            if (forge_options or {}).get('origin', 'user') == 'user' and operation == 'message':
+                deferred = db.execute("""SELECT e.turn,e.body FROM events e WHERE e.session=?
+                    AND json_extract(e.body,'$.type')='forge.feedback'
+                    AND json_extract(e.body,'$.data.status')='deferred'
+                    AND NOT EXISTS (SELECT 1 FROM events s WHERE s.session=e.session
+                        AND json_extract(s.body,'$.type')='forge.feedback_status'
+                        AND json_extract(s.body,'$.data.id')=json_extract(e.body,'$.data.id')
+                        AND json_extract(s.body,'$.data.status')='superseded')""", (sid,)).fetchall()
+                for origin, body in deferred:
+                    feedback = json.loads(body)['data']
+                    self._event(db, sid, tid, epoch, 'forge.feedback_status', dict(
+                        id=feedback['id'], origin_turn=origin, status='superseded'), control=True)
             return dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone()), True
 
     def _event(self, db, sid, tid, epoch, kind, data, *, control=False):
@@ -615,6 +678,12 @@ class Store:
             db.execute('UPDATE sessions SET metadata_bytes=metadata_bytes+? WHERE id=?', (delta, old['session']))
         if 'state' in changes or 'delivery' in changes:
             self._event(db, old['session'], tid, old['epoch'], 'turn.state', {k: v for k, v in changes.items() if k not in {'context', 'baseline', 'process'}}, control=True)
+        policy = json.loads(old['forge_options'])
+        if policy.get('origin') == 'forge' and ('delivery' in changes or changes.get('state') in TERMINAL):
+            delivery = changes.get('delivery', old['delivery'])
+            status = 'acknowledged' if delivery == 'acknowledged' else 'unknown' if delivery in ('sent', 'unknown') else 'not_sent'
+            self._event(db, old['session'], tid, old['epoch'], 'forge.feedback_status',
+                        dict(id=policy.get('feedback_id', old['submission']), status=status), control=True)
         if changes.get('cleanup') in ('complete','unknown'):
             for row in db.execute("SELECT submission,status FROM steers WHERE turn=? AND status IN ('pending','sending')",(tid,)).fetchall():
                 status = 'missed' if row['status']=='pending' else 'unknown'
@@ -637,31 +706,104 @@ class Store:
             ownership['supervisor'] = supervisor
             self._update(db, tid, dict(process=wire(ownership).decode(), launch_phase='claimed', state='starting'))
 
-    def finish_provider(self, tid, *, state, cleanup, result, review=None):
-        """Commit the drain receipt and any source checks in the same state transition."""
+    def finish_provider(self, tid, *, state, cleanup, result, review=None, forge=None):
+        """Commit the author terminal, Forge receipt and pending feedback atomically."""
+        from demiflow.forge.development import receipt_summary
         with self.connect(write=True) as db:
             turn = dict(db.execute('SELECT * FROM turns WHERE id=?', (tid,)).fetchone())
-            if turn['stop_at'] and ('pipeline_checks' in result or review is not None):
-                result = {key: value for key, value in result.items() if key != 'pipeline_checks'}
+            if turn['stop_at']:
                 state = 'cancelled'
+                result = {key: value for key, value in result.items() if key != 'pipeline_checks'}
                 if review is not None:
                     result.update(pipeline_review='incomplete', review_reason='评审已停止。')
-            elif review is not None:
+                if forge:
+                    forge = dict(forge, status='incomplete', feedback=None, reason='工程交付已取消。')
+            else:
                 from .pipeline_review import report_events
-                # Close the review and turn in one transaction. A response observed
-                # after cancellation cannot become a completed delivery review.
-                db.execute('SAVEPOINT review_report')
+                db.execute('SAVEPOINT engineering_report')
                 try:
-                    for kind, data in report_events(review):
-                        self._event(db, turn['session'], tid, turn['epoch'], kind, data)
-                    result['pipeline_review'] = review['status']
+                    if review is not None:
+                        for kind, data in report_events(review):
+                            self._event(db, turn['session'], tid, turn['epoch'], kind, data)
+                        result['pipeline_review'] = review['status']
+                    # Full diagnostics remain replayable without growing terminal metadata.
+                    checks = result.get('pipeline_checks')
+                    if checks and len(wire(checks)) > 8000:
+                        compact_checks = dict(checks)
+                        for field in ('native_flow', 'project_layout'):
+                            item = checks.get(field)
+                            if not item:
+                                continue
+                            for row in item.get('diagnostics', ()):
+                                self._event(db, turn['session'], tid, turn['epoch'], 'check.detail',
+                                            dict(field=field, item=row))
+                            compact_checks[field] = {k:v for k,v in item.items() if k != 'diagnostics'}
+                            compact_checks[field]['details_in_events'] = True
+                        result['pipeline_checks'] = compact_checks
+                    if forge:
+                        feedback = forge.get('feedback')
+                        if feedback is not None:
+                            if state != 'completed' or cleanup != 'complete':
+                                feedback['status'] = 'cancelled'
+                            elif db.execute('SELECT 1 FROM followups WHERE session=? LIMIT 1', (turn['session'],)).fetchone():
+                                feedback['status'] = 'deferred'
+                            elif db.execute('SELECT count(*) FROM followups').fetchone()[0] >= 128:
+                                feedback['status'] = 'deferred'
+                            else:
+                                options = dict(feedback['options'], origin='forge', feedback_id=feedback['id'],
+                                               author=feedback['author'], candidate=feedback.get('candidate'),
+                                               policy_hash=db.execute('SELECT policy_hash FROM sessions WHERE id=?', (turn['session'],)).fetchone()[0],
+                                               quota_turn=json.loads(turn['forge_options']).get('quota_turn', tid))
+                                db.execute("""INSERT OR IGNORE INTO followups
+                                    (session,submission,origin_turn,text,forge_options) VALUES(?,?,?,?,?)""",
+                                    (turn['session'], feedback['id'], tid, feedback['text'], wire(options).decode()))
+                                feedback['status'] = 'queued'
+                            self._event(db, turn['session'], tid, turn['epoch'], 'forge.feedback', feedback)
+                            result['auto_rework'] = dict(scheduled=feedback['status'] == 'queued',
+                                status=feedback['status'], round=feedback['round'], max_rounds=1)
+                        result['forge'] = receipt_summary(forge)
                 except ValueError:
-                    db.execute('ROLLBACK TO review_report')
-                    result.update(pipeline_review='incomplete', review_reason='评审报告超出会话记录的限制。')
+                    db.execute('ROLLBACK TO engineering_report')
+                    result.pop('auto_rework', None)
+                    if review is not None:
+                        result.update(pipeline_review='incomplete', review_reason='工程报告未能完整保存，未派发自动修正。')
+                    if forge:
+                        forge = dict(forge, status='incomplete', feedback=None, reason='工程报告保存失败。')
+                        result['forge'] = receipt_summary(forge)
                 finally:
-                    db.execute('RELEASE review_report')
-            changes = dict(state=state, cleanup=cleanup, result=wire(result).decode())
-            self._update(db, tid, changes)
+                    db.execute('RELEASE engineering_report')
+            if len(wire(result)) > 12000:
+                # Retain terminal/drain truth even when optional projections exceed
+                # their budget. This does not turn unsaved diagnostics into a pass.
+                result = {k:v for k,v in result.items() if k not in {'pipeline_checks', 'protected_violations'}}
+                result['check_details'] = '完整检查见事件记录；终态摘要超过展示预算。'
+            self._update(db, tid, dict(state=state, cleanup=cleanup, result=wire(result).decode()))
+        self.retire_writer(tid)
+
+    def retire_writer(self, tid):
+        """Project a committed host cleanup proof into the common admission domain."""
+        turn = self.turn(tid)
+        key = json.loads(turn.get('process') or '{}').get('forge_writer')
+        if key and turn['cleanup'] == 'complete' and turn['state'] in TERMINAL:
+            from demiflow.forge.development_state import retire_writer
+            try:
+                return retire_writer(key, terminal=True, cleanup='complete')
+            except (OSError, ValueError):
+                return False  # The committed receipt remains authoritative; startup retries retirement.
+
+    def retire_completed_writers(self, root):
+        """Recover this host's committed cleanup before retrying a conflicting admission."""
+        root = Path(root)
+        # Stream the bounded host history; unknown and live intervals never
+        # qualify, including claims owned by another host or a standalone CLI.
+        with self.connect() as db:
+            rows = db.execute("""SELECT t.id,s.root FROM turns t JOIN sessions s ON s.id=t.session
+                WHERE t.cleanup='complete' AND t.state IN ('completed','failed','cancelled','interrupted')
+                AND json_extract(t.process,'$.forge_writer') IS NOT NULL""")
+            for tid, identity in rows:
+                previous = Path(json.loads(identity)['path'])
+                if root == previous or root in previous.parents or previous in root.parents:
+                    self.retire_writer(tid)
 
     def interrupt_unresolved(self, tid):
         with self.connect(write=True) as db:

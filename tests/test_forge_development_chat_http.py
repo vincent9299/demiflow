@@ -103,6 +103,9 @@ def test_output_segment_preserves_turn_epoch_and_sequence_scope(tmp_path):
 
 def test_authenticated_routes_and_stop_under_read_load(tmp_path):
     with app(tmp_path) as (server,w,root):
+        # Exercise saturation at a small explicit budget, independently of the
+        # production subscription capacity and without consuming the stop slot.
+        server.development_readers = threading.BoundedSemaphore(2)
         assert request(server,w,'dev-capabilities',token='wrong')[0]==403
         assert request(server,w,'dev-capabilities')[1]['start']
         assert request(server,w,'dev-session-create',{'request_id':'c','provider_id':'codex','cwd':'/tmp'})[0]==400

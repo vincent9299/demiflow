@@ -143,7 +143,7 @@
     let paneMode = 'file'; // 'file' | 'operator'
 
     // Per-project approved review state & preserved history (persisted in localStorage).
-    const projectKey = String(project?.workspace_id || project?.root || 'default');
+    const projectKey = String(typeof project === 'string' ? project : (project?.workspace_id || project?.root || ''));
     const approvalStorageKey = 'forge-dev-approvals:' + projectKey;
     const approvedMap = new Map(); // path -> fingerprint
     let approvedHistory = []; // [{path, fingerprint, status, added, removed, approvedAt}]
@@ -693,14 +693,18 @@
         const head = node('div', 'dev-forge-detail-head');
         head.append(node('strong', null, selected.label + ' · ' + selected.text));
         const headBtns = node('div', 'dev-forge-detail-actions');
-        if (typeof onRework === 'function' && (selected.tone === 'bad' || selected.tone === 'warn') && selected.lines.length) {
+        if (typeof onRework === 'function' && selected.tone === 'bad' && selected.lines.length) {
           const reworkBtn = node('button', 'dev-forge-rework', selected.tone === 'bad' ? '带问题打回修改' : '交给助手修复');
           reworkBtn.type = 'button';
           reworkBtn.onclick = () => {
-            const prompt = '请针对以下 Forge「' + selected.label + '」诊断逐项排查修复，并运行项目 pytest 验证：\n' + selected.lines.map(l => '- ' + l).join('\n');
+            const prompt = '请针对以下 Forge「' + selected.label + '」诊断逐项排查修复，复跑 Forge 检查，并按项目已声明的验证方式验证：\n' + selected.lines.map(l => '- ' + l).join('\n');
             onRework(prompt);
           };
           headBtns.append(reworkBtn);
+        }
+        if (selected.key === 'review' && selected.tone === 'warn' && typeof onRequestReview === 'function') {
+          const retry = node('button', 'dev-forge-review-retry', '重新评审');
+          retry.type = 'button'; retry.onclick = () => onRequestReview(); headBtns.append(retry);
         }
         const closeDetail = node('button', 'dev-forge-detail-close', '收起');
         closeDetail.type = 'button';
@@ -932,9 +936,10 @@
           expected_sha256: entry.sha256 || '',
         });
         if (disposed) return;
+        const latestDraft = typeof entry.draft === 'string' ? entry.draft : text;
         entry.modified = text;
         entry.sha256 = res.sha256 || entry.sha256;
-        entry.draft = null;
+        entry.draft = latestDraft === text ? null : latestDraft;
         entry.justSaved = true;
         entry.saveError = '';
         savingFile = false;
@@ -1226,13 +1231,24 @@
 
     function recordChecks(checks) {
       if (disposed || !checks) return;
-      if (checks.native_flow) latestChecks.native_flow = checks.native_flow;
-      if (checks.project_layout) latestChecks.project_layout = checks.project_layout;
+      for(const field of ['native_flow','project_layout'])if(checks[field]){
+        const value=checks[field],prior=latestChecks[field];
+        latestChecks[field]=value.details_in_events?{...value,diagnostics:prior?.diagnostics||[]}:value;
+      }
+      if(checks.checkDetail){
+        const {field,item,turn}=checks.checkDetail;
+        if(latestChecks.detailTurn!==turn){latestChecks.detailTurn=turn;for(const name of ['native_flow','project_layout'])latestChecks[name]=null;}
+        const target=latestChecks[field]||(latestChecks[field]={status:'incomplete',diagnostics:[]});
+        if(target.diagnostics.length<4096)target.diagnostics.push(item);
+      }
       if (checks.review) latestChecks.review = checks.review;
       if (checks.reviewReset) latestChecks.reviewDetails = [];
       if (checks.reviewDetail) {
         latestChecks.reviewDetails.push(checks.reviewDetail);
-        if (latestChecks.reviewDetails.length > 20) latestChecks.reviewDetails.shift();
+        if (latestChecks.reviewDetails.length > 4096) {
+          latestChecks.reviewDetails.length = 4096;
+          latestChecks.reviewDetails[4095] = '更多评审细节请在当前会话的完整评审中查看。';
+        }
       }
       renderForgeStrip();
     }

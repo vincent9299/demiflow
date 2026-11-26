@@ -30,6 +30,7 @@ from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.store import StorageUnavailable
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.resources.process_observation import unit_stopped
+from demiflow.forge.schema import ForgeError
 
 
 class _WarmWorker:
@@ -92,6 +93,10 @@ class Service:
             db.execute("UPDATE followups SET error='服务已重启，排队已暂停。' WHERE error=''")
         self.coding_catalog = None
         self.policy_hash, self.config_path = self.seal_policy(self.deployment)
+        with self.store.connect() as db:
+            completed = db.execute("SELECT id FROM turns WHERE cleanup='complete' AND json_extract(process,'$.forge_writer') IS NOT NULL")
+            for row in completed:
+                self.store.retire_writer(row[0])
         for t in self.store.unresolved():
             self.store.interrupt_unresolved(t['id'])
 
@@ -336,12 +341,12 @@ class Service:
         return self.store.list(workspace, offset, limit, identity=root_identity(root),
                                policy_hash=self.current_hash(workspace,root), providers=self.binding(workspace,root)[0].providers)
 
-    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text, operation='message', auto_review=False, rework_depth=0):
+    def start_project(self, workspace, root, session_id, submission_id, expected_revision, text, operation='message', auto_review=False, rework_depth=0, purpose='message', forge_options=None):
         self._require_writable(workspace,root,session_id)
         cell_capability = {'notebook_cell':'notebook_cells', 'notebook_cell_cli':'notebook_cli'}.get(operation)
         if cell_capability and not self.capabilities(workspace,root).get(cell_capability):
             reject('当前开发服务未提供只读的 Notebook 单元格生成。')
-        return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation,auto_review=auto_review,rework_depth=rework_depth)
+        return self.start(workspace,root,session_id,submission_id,expected_revision,text,operation=operation,auto_review=auto_review,rework_depth=rework_depth,purpose=purpose,forge_options=forge_options)
 
     def steer(self, workspace, root, session_id, turn_id, submission_id, text, from_queue=False):
         with self.lock:
@@ -351,12 +356,13 @@ class Service:
             self.store.steer(workspace, session_id, turn_id, submission_id, text, from_queue=from_queue)
             return {'accepted': True}
 
-    def enqueue(self, workspace, root, session_id, turn_id, submission_id, text):
+    def enqueue(self, workspace, root, session_id, turn_id, submission_id, text, auto_review=False, purpose='message'):
         with self.lock:
             self._require_writable(workspace, root, session_id)
             if self.closed or not self.capabilities(workspace, root)['start']:
                 reject('当前开发服务无法发送消息。', 'busy')
-            self.store.enqueue(workspace, session_id, turn_id, submission_id, text)
+            self.store.enqueue(workspace, session_id, turn_id, submission_id, text,
+                               forge_options=dict(auto_review=bool(auto_review), purpose=purpose, origin='user'))
             self._watch_queue(workspace, root, session_id)
             return {'accepted': True}
 
@@ -386,10 +392,21 @@ class Service:
                             return
                         if session['turn']['cleanup'] == 'complete':
                             head = queue[0]
-                            is_rework = head['submission'].startswith('forge-rework-')
-                            review_rework = head['submission'].startswith('forge-rework-r-')
+                            options = json.loads(head.get('forge_options') or '{}')
+                            if options.get('legacy'):
+                                self.store.hold_queue(sid, '历史自动反馈缺少候选绑定，已保留；请重新检查后决定是否发送。')
+                                self.queue_readers.discard(sid)
+                                return
+                            if options.get('origin') == 'forge':
+                                from demiflow.forge.development import feedback_current
+                                saved_session = self.store.session(sid)
+                                if not feedback_current(root, options, dict(provider=saved_session['provider'],
+                                                                          session=saved_session['provider_session'])):
+                                    self.store.discard_feedback(workspace, sid, head['submission'], 'stale')
+                                    continue
                             self.start_project(workspace, root, sid, head['submission'], session['revision'], head['text'],
-                                               auto_review=review_rework, rework_depth=1 if is_rework else 0)
+                                               forge_options=options, auto_review=bool(options.get('auto_review')),
+                                               rework_depth=int(options.get('round', 0)))
                     except (OSError, ValueError) as exc:
                         self.queue_readers.discard(sid)
                         self.store.hold_queue(sid, str(exc))
@@ -423,7 +440,7 @@ class Service:
         except (OSError, ValueError):
             pass
 
-    def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message", auto_review=False, rework_depth=0):
+    def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message", auto_review=False, rework_depth=0, purpose="message", forge_options=None):
         self.project(workspace, root)
         _, current_hash, _ = self.binding(workspace, root, seal=True)
         caps = self.capabilities(workspace, root)
@@ -431,6 +448,14 @@ class Service:
         available_providers = [p['id'] for p in caps['providers'] if p['available']]
         if not caps['start'] or not available_providers:
             reject('Development provider is unavailable in this deployment')
+        options = (forge_options if forge_options is not None else
+                   dict(origin='user', purpose=purpose, auto_review=bool(auto_review), round=int(rework_depth)))
+        if options.get('origin') == 'forge':
+            from demiflow.forge.development import feedback_current
+            if (session['provider'] not in available_providers or options.get('policy_hash') != current_hash
+                    or not feedback_current(root, options, dict(provider=session['provider'],
+                        session=self.store.session(session_id)['provider_session']))):
+                reject('原作者配置或候选已变化，自动修正已停止，请重新检查。', 'conflict')
         target_provider = session['provider'] if session['provider'] in available_providers else available_providers[0]
         with self.lock:
             if self.closed: reject('Development service is stopping', 'busy')
@@ -446,6 +471,8 @@ class Service:
             existing = self.store.submission(session_id, submission_id)
             if existing is not None:
                 if existing['body_hash'] != digest({'text':text,**({'operation':operation} if operation!='message' else {})}): reject('Submission key has different text', 'conflict')
+                if json.loads(existing['forge_options']) != options:
+                    reject('Submission key has different engineering options', 'conflict')
                 return self.store.public_turn(existing)
             homes = private_directory_bytes(self.root, entries=self.deployment.limits.sessions + 64)
             used = sum(homes.values())
@@ -454,15 +481,8 @@ class Service:
             if used + reserved + max(0, allowance - homes.get(session_id, 0)) > self.deployment.limits.private_total_bytes:
                 reject('Retained provider homes exhaust private disk reservation', 'resource_limit')
             value, fresh = self.store.submit(workspace, session_id, submission_id, expected_revision, text, root_identity(root), current_hash,
-                                             operation=operation, provider=target_provider)
+                                             operation=operation, provider=target_provider, forge_options=options)
             if not fresh: return self.store.public_turn(value)
-            if auto_review or rework_depth:
-                turn_dir = self.root / session_id / value['id']
-                turn_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-                opts_path = turn_dir / 'forge_options.json'
-                fd = os.open(opts_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, 'wb') as stream:
-                    stream.write(wire(dict(auto_review=bool(auto_review), rework_depth=int(rework_depth))))
             session = self.store.show(workspace, session_id)
             return self._launch_provider(value, session)
 
@@ -649,7 +669,20 @@ class Service:
                 fsync_directory(lease.parent)
                 fsync_directory(self.root)
                 ownership = dict(unit_path=str(lease), unit_identity=dict(device=info.st_dev, inode=info.st_ino), nonce=value['epoch'])
+                if value.get('operation') == 'message':
+                    from demiflow.forge.development_state import claim_writer, writer_key
+                    ownership['forge_writer'] = writer_key(str(self.root) + ':' + tid)
                 self.store.update(tid, process=wire(ownership).decode())
+                if ownership.get('forge_writer'):
+                    try:
+                        claim_writer(root_path, str(self.root) + ':' + tid, lease, ownership['unit_identity'])
+                    except ForgeError as exc:
+                        if exc.code != 'busy':
+                            raise
+                        # A terminal is visible just before the worker retires
+                        # its claim, or retirement may have failed after commit.
+                        self.store.retire_completed_writers(root_path)
+                        claim_writer(root_path, str(self.root) + ':' + tid, lease, ownership['unit_identity'])
 
                 # Try reusing a matching idle or standby warm worker for message / notebook turns
                 # (strictly matching operation so readonly notebook workers and developer workers never mix).
@@ -667,6 +700,9 @@ class Service:
                         and (self.deployment.mode != 'restricted'
                              or warm.sandbox_deadline == 0.0
                              or warm.sandbox_deadline - time.time() > self.deployment.limits.turn_seconds + 60)):
+                    if ownership.get('forge_writer'):
+                        from demiflow.forge.development_state import start_writer
+                        start_writer(ownership['forge_writer'])
                     self.store.update(tid, launch_phase='spawning')
                     self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
                     warm.idle = False
@@ -696,6 +732,9 @@ class Service:
                 env = self._worker_env(policy)
                 # Must commit uncertainty before Popen: absence of a returned
                 # Popen object does not prove absence of a real child.
+                if ownership.get('forge_writer'):
+                    from demiflow.forge.development_state import start_writer
+                    start_writer(ownership['forge_writer'])
                 self.store.update(tid, launch_phase='spawning')
                 self.worker_targets[tid] = (workspace, session_id, value['epoch'], session['root'])
                 command = [sys.executable, '-I', '-B', str(worker), str(self.root / (session['policy_hash'] + '.json')), tid, str(fd), str(worker_sock.fileno())]
@@ -736,9 +775,13 @@ class Service:
         return self.store.public_turn(self.store.turn(tid))
 
     def _finish_unstarted(self, turn):
-        if turn['cleanup'] == 'complete': return True
+        if turn['cleanup'] == 'complete':
+            self.store.retire_writer(turn['id'])
+            return True
         if turn['launch_phase'] == 'admitted':
-            return self.store.finish_unstarted(turn)
+            done = self.store.finish_unstarted(turn)
+            if done: self.store.retire_writer(turn['id'])
+            return done
         if turn['launch_phase'] == 'spawning':
             ownership = json.loads(turn['process'] or '{}')
             lease = self._unit_path(turn)
@@ -749,7 +792,10 @@ class Service:
             except OSError: return False
             # Workers claim before running any tool. An unclaimed, unlocked
             # matching unit proves no worker remains able to enter that phase.
-            if stopped: return self.store.finish_unstarted(turn)
+            if stopped:
+                done = self.store.finish_unstarted(turn)
+                if done: self.store.retire_writer(turn['id'])
+                return done
         # Once claimed, require the worker's descendant-drain receipt. An absent
         # PID or unlocked fence alone cannot prove arbitrary tools were drained.
         return False
@@ -763,6 +809,7 @@ class Service:
                 if self.store.turn(tid)['cleanup'] != 'complete':
                     if not self._finish_unstarted(self.store.turn(tid)):
                         self.store.update(tid, state='interrupted', cleanup='unknown')
+                self.store.retire_writer(tid)
                 if target and not self.closed:
                     try:
                         root_path = json.loads(target[3])['path']

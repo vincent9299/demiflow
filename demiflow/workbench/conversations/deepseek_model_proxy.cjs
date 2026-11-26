@@ -21,7 +21,7 @@ exports.apply = async function(ctx, config) {
     const socket = net.createConnection({host:'127.0.0.1',port});
     const abort = () => socket.destroy(new Error('Model request cancelled'));
     signal?.addEventListener('abort',abort,{once:true});
-    socket.setTimeout(180000,()=>socket.destroy(new Error('Model channel timed out')));
+    socket.setTimeout((Math.max(1,Math.min(3600,Number(config.requestSeconds)||180))*1000),()=>socket.destroy(new Error('Model channel timed out')));
     let buffer=Buffer.alloc(0),finished=false;
     try {
       socket.write(raw);

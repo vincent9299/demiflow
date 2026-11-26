@@ -196,6 +196,7 @@ def load_project(root):
 
 def save_project(root, value, *, expected=None, create=False):
     """Persist workspace declaration, splitting Forge internal state to .forge/state.json for slim projects."""
+    from .project_guard import publish_project_control
     root = Path(root).absolute()
     manifest = root / "workspace.json"
     state_file = root / STATE_PATH
@@ -205,7 +206,9 @@ def save_project(root, value, *, expected=None, create=False):
         or (no_symlinks(manifest).exists() and is_slim_manifest(read_control(manifest)))
     )
     if not slim:
-        write_control(manifest, value, expected=expected, create=create)
+        if expected is not None and content_digest(read_control(manifest)) != expected:
+            raise ForgeError('Control changed; refresh before replacing', code='conflict')
+        publish_project_control(manifest, bounded_json(value, 8 * 1024**2), create=create or expected is None)
         return
     if expected is not None:
         if create:
@@ -234,8 +237,8 @@ def save_project(root, value, *, expected=None, create=False):
     if isinstance(audit_val, dict) and (audit_val.get("reports") or audit_val.get("change_scope") is not None):
         state_doc["audit"] = audit_val
     ensure_directory(root / ".forge")
-    publish_bytes(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=create)
-    publish_bytes(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=create)
+    publish_project_control(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=create)
+    publish_project_control(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=create)
 
 
 def _referenced_location_ids(root, value):

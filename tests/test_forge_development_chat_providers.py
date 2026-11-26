@@ -144,6 +144,23 @@ def test_native_credential_reference_keeps_history_and_secret_out_of_configurati
     with pytest.raises(ForgeError, match='outside development projects'): Deployment(value)
 
 
+@pytest.mark.parametrize('route', ['deepseek-official', 'deepseek-account'])
+def test_model_broker_budget_reaches_native_adapter(tmp_path, route):
+    config = dict(executable=sys.executable, version='0.2.1-rc.2', model='fixture',
+        model_provider=route, native_credentials=str(tmp_path/'credentials.yaml'), effort='high')
+    home = tmp_path/'author'
+    DeepSeek.launch(config, home, str(tmp_path))
+    author = json.loads((home/'dsh/profiles/devchat/cordis.patch.yml').read_text())
+    assert not any('streamIdleTimeoutMs' in row.get('config', {}) for row in author)
+    home = tmp_path/'review-broker'
+    DeepSeek.launch(dict(config, _model_broker=True, _request_seconds=2700), home, str(tmp_path))
+    rows = json.loads((home/'dsh/profiles/devchat-model-broker/cordis.patch.yml').read_text())
+    native = next(row['config'] for row in rows if row['id'] == (
+        'llm-deepseek-account' if route == 'deepseek-account' else 'llm-deepseek'))
+    assert native['streamIdleTimeoutMs'] == 2700000
+    assert native['reasoningEffort'] == 'high'
+
+
 def test_proxy_opt_in_and_console_diagnostics_do_not_pollute_acp(tmp_path, monkeypatch):
     from demiflow.workbench.conversations.policy import proxy_environment
     from demiflow.workbench.conversations.deepseek import DeepSeek

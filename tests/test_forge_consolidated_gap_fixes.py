@@ -10,12 +10,9 @@ from demiflow.forge.api_reference import build_reference
 from demiflow.forge.pipeline_check import check_project
 from demiflow.forge.project import initialize_project, load_project, register_flow
 from demiflow.forge.project_rules import _stale_operator_example_docs, check_project_hygiene
-from demiflow.workbench.conversations.worker import (
-    _build_rework_prompt,
-    _capture_protected_files,
-    _enforce_protected_files,
-    _root_entry_names,
-)
+from demiflow.forge.development import build_rework_prompt
+from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
+from demiflow.workbench.conversations.worker import _root_entry_names
 
 
 @pytest.fixture(scope='module')
@@ -34,7 +31,7 @@ def _project(tmp_path, name='gap-proj'):
 def test_hook_guards_data_tools_and_workspace_json(tmp_path):
     proj = _project(tmp_path)
     ws_before = (proj / 'workspace.json').read_text(encoding='utf-8')
-    snap = _capture_protected_files(proj)
+    snap = capture_protected_files(proj)
     assert 'workspace.json' in snap and 'data_tools/view.py' in snap
 
     (proj / 'data_tools' / 'view.py').write_text('def view(rows):\n    return []\n', encoding='utf-8')
@@ -43,14 +40,14 @@ def test_hook_guards_data_tools_and_workspace_json(tmp_path):
     (proj / 'data_tools' / 'pkg' / 'x.py').write_text('X = 1\n', encoding='utf-8')
     (proj / 'workspace.json').write_text('{"name": "x", "entries": {}, "locations": {"a": {}}}', encoding='utf-8')
 
-    violations = _enforce_protected_files(proj, snap)
+    violations = enforce_protected_files(proj, snap)
     assert set(violations) == {'data_tools/view.py', 'data_tools/new_tool.py', 'data_tools/pkg/x.py', 'workspace.json'}
     assert '查看样本' in (proj / 'data_tools' / 'view.py').read_text(encoding='utf-8')
     assert not (proj / 'data_tools' / 'new_tool.py').exists()
     assert not (proj / 'data_tools' / 'pkg').exists()
     assert (proj / 'workspace.json').read_text(encoding='utf-8') == ws_before
-    prompt = _build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
-    assert 'data_tools/' in prompt and 'manage_project_layout' in prompt
+    prompt = build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
+    assert 'data_tools/' in prompt and 'demiflow forge add flow' in prompt
 
 
 def test_hook_keeps_host_layout_writes(tmp_path):
@@ -58,14 +55,14 @@ def test_hook_keeps_host_layout_writes(tmp_path):
     (proj / 'flows').mkdir()
     (proj / 'flows' / 'demo.py').write_text('from demiflow.data import range\ndef run():\n    return range(1).count()\n', encoding='utf-8')
     (proj / 'review_tool.py').write_text('def review(r):\n    """复核。"""\n    return r\n', encoding='utf-8')
-    snap = _capture_protected_files(proj)
+    snap = capture_protected_files(proj)
 
     # Legitimate host actions during the turn: register_flow (workspace.json + .forge/state.json)
     # and move_path of a stray tool into data_tools/.
     register_flow(proj, 'flows/demo.py:run')
     (proj / 'review_tool.py').rename(proj / 'data_tools' / 'review_tool.py')
     authorized = ['workspace.json', '.forge/state.json', 'review_tool.py', 'data_tools/review_tool.py']
-    assert _enforce_protected_files(proj, snap, authorized=authorized) == []
+    assert enforce_protected_files(proj, snap, authorized=authorized) == []
     assert 'flows/demo.py:run' in json.loads((proj / 'workspace.json').read_text(encoding='utf-8'))['entries']
     assert (proj / 'data_tools' / 'review_tool.py').is_file()
 
@@ -73,19 +70,19 @@ def test_hook_keeps_host_layout_writes(tmp_path):
 def test_ensure_dirs_authorization_does_not_cover_descendants(tmp_path):
     proj = tmp_path / 'fresh'
     initialize_project(proj, name='fresh')
-    snap = _capture_protected_files(proj)
+    snap = capture_protected_files(proj)
     (proj / 'data_tools').mkdir()
     (proj / 'data_tools' / 'sneaky.py').write_text('X = 1\n', encoding='utf-8')
     # ensure_dirs records 'data_tools'; that authorizes the directory only, not files written into it.
-    assert _enforce_protected_files(proj, snap, authorized=['data_tools']) == ['data_tools/sneaky.py']
+    assert enforce_protected_files(proj, snap, authorized=['data_tools']) == ['data_tools/sneaky.py']
     assert (proj / 'data_tools').is_dir() and not any((proj / 'data_tools').iterdir())
     # Without authorization a data_tools/ created by the developer is removed entirely.
     proj2 = tmp_path / 'fresh2'
     initialize_project(proj2, name='fresh2')
-    snap2 = _capture_protected_files(proj2)
+    snap2 = capture_protected_files(proj2)
     (proj2 / 'data_tools').mkdir()
     (proj2 / 'data_tools' / 'a.py').write_text('A = 1\n', encoding='utf-8')
-    assert _enforce_protected_files(proj2, snap2) == ['data_tools/a.py']
+    assert enforce_protected_files(proj2, snap2) == ['data_tools/a.py']
     assert not (proj2 / 'data_tools').exists()
 
 
@@ -93,8 +90,8 @@ def test_preexisting_empty_data_tools_is_kept(tmp_path):
     proj = tmp_path / 'empty-tools'
     initialize_project(proj, name='empty-tools')
     (proj / 'data_tools').mkdir()
-    snap = _capture_protected_files(proj)
-    assert _enforce_protected_files(proj, snap) == []
+    snap = capture_protected_files(proj)
+    assert enforce_protected_files(proj, snap) == []
     assert (proj / 'data_tools').is_dir()
 
 

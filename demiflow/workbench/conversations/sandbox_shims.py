@@ -36,7 +36,7 @@ args = sys.argv[4:]
 if not args or args[0] != 'forge':
     sys.stderr.write('开发沙箱仅放行 `demiflow forge ...` 子命令。\\n')
     raise SystemExit(2)
-if mode == 'restricted' and len(args) >= 2 and args[1] == 'review':
+if mode == 'restricted' and len(args) >= 2 and args[1] in {'review', 'develop'}:
     sys.stderr.write(
         '工作台受限沙箱内的独立评审由宿主自动执行（或调用 request_pipeline_review 工具），'
         '请勿在沙箱内直接运行 `demiflow forge review`。\\n'

@@ -221,8 +221,8 @@ def test_disk_admission_preserves_source_and_cleanup_reservation(tmp_path,monkey
 
 
 def test_bounded_diff_and_wide_file_hash_preservation(tmp_path):
-    from demiflow.workbench.conversations.changes import capture
-    from demiflow.workbench.conversations.changes import differences
+    from demiflow.forge.source_snapshot import capture
+    from demiflow.forge.source_snapshot import differences
     root=tmp_path/'project';root.mkdir()
     (root/'source.py').write_text('value = 1\n')
     (root/'wide.json').write_text('x'*20000)

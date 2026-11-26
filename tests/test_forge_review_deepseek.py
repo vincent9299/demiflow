@@ -119,7 +119,7 @@ def test_confined_profile_uses_only_fixed_model_channel(tmp_path):
     private = tmp_path / 'review'
     private.mkdir(mode=0o700)
     config = dict(executable=str(cli), node=sys.executable, model='test-model', version=version,
-                  model_provider='deepseek-account', _boundary={'token': 'a' * 64})
+                  model_provider='deepseek-account', _boundary={'token': 'a' * 64}, _request_seconds=2700)
     for supplied in (dict(config, credential_env='secret'), dict(config, native_credentials='/private/creds'),
                      dict(config, base_url='https://upstream.invalid'), dict(config, inherit_proxy=True)):
         with pytest.raises(ForgeError, match='fixed model channel'):
@@ -128,6 +128,8 @@ def test_confined_profile_uses_only_fixed_model_channel(tmp_path):
     profile = private / 'profiles' / backend.PROFILE
     assert json.loads((profile / 'package.json').read_text())['dsh']['profile']['bundles'] == []
     plugins = json.loads((profile / 'cordis.patch.yml').read_text())[0]['insert']
+    channel = next(r['config'] for r in plugins if r['id'] == 'review-model')
+    assert channel['requestSeconds'] == 2700 and channel['reasoningEffort'] == 'high'
     assert {r['name'] for r in plugins} == {str(proxy)} | {
         '@deepseek-ai/dsh-' + name for name in (
             'llm', 'session', 'session-projection', 'agent', 'system-prompt', 'tools',
@@ -137,3 +139,27 @@ def test_confined_profile_uses_only_fixed_model_channel(tmp_path):
     metadata.write_text(json.dumps(dict(name='@deepseek-ai/dsh', version='unqualified')))
     with pytest.raises(ForgeError, match='not qualified'):
         backend.prepare_launch(dict(config, version='unqualified'), private, model_channel=proxy)
+
+
+@pytest.mark.parametrize('route', ['deepseek-official', 'deepseek-account'])
+@pytest.mark.parametrize('seconds', [None, 2700])
+def test_review_budget_reaches_native_idle_timeout(tmp_path, monkeypatch, route, seconds):
+    cli = tmp_path/'deepseek/lib/bin.js'
+    cli.parent.mkdir(parents=True)
+    cli.touch()
+    (cli.parents[1]/'package.json').write_text(json.dumps(dict(name='@deepseek-ai/dsh', version='0.2.1-rc.2')))
+    credential = tmp_path/'credentials.yaml'
+    credential.write_text('version: 1\n')
+    monkeypatch.setenv('FORGE_TEST_FAKE_KEY', 'synthetic-test-key')
+    config = dict(executable=str(cli), node=sys.executable, model='test-model', version='0.2.1-rc.2',
+                  model_provider=route, **(dict(native_credentials=str(credential)) if route == 'deepseek-account'
+                    else dict(credential_env='FORGE_TEST_FAKE_KEY')))
+    if seconds is not None:
+        config['_request_seconds'] = seconds
+    home = tmp_path/'review'
+    home.mkdir()
+    backend.prepare_launch(config, home)
+    plugins = json.loads((home/'profiles'/backend.PROFILE/'cordis.patch.yml').read_text())[0]['insert']
+    plugin = next(p['config'] for p in plugins if p['id'] in ('llm-deepseek-api-key', 'llm-deepseek-account'))
+    assert plugin['streamIdleTimeoutMs'] == (seconds or 1800) * 1000
+    assert plugin['reasoningEffort'] == 'high'
