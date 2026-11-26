@@ -87,7 +87,7 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
 
     truncate_guard = None
     if require_truncate and abi < 3:
-        from demiflow.workbench.conversations.sandbox_native import seccomp
+        from demiflow.forge.sandbox.sandbox_native import seccomp
         truncate_guard = seccomp
     truncate = 1 << 14 if require_truncate and abi >= 3 else 0
 
@@ -137,45 +137,33 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
 
 
 def _dependency_snapshot(config, root, code_root, python):
-    """Freeze approved source bytes before starting a new kernel."""
-    import hashlib
-
+    """Freeze live verified pyproject.toml source bytes at kernel start (old kernels keep launch version)."""
     sys.path.insert(0, code_root)
-    from demiflow.forge.dependencies import binding, module_files, probe_environment
-    from demiflow.forge.io import ensure_directory, publish_bytes
-    from demiflow.forge.platform_environment import read_bounded
+    from demiflow.forge.dependencies import binding
+    from demiflow.forge.runtime import create_dependency_snapshot
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.python_sources import import_bootstrap
 
-    locked = binding(root, approval=config['dependency_lock'], python=python)
-    if probe_environment(python, locked, expected=locked['environment']['interpreter']) != locked['environment']:
-        _fail('The approved project Python environment changed')
+    try:
+        bound = binding(
+            root,
+            python=python,
+            allowed_roots=config.get('allowed_read_roots'),
+            denied_paths=config.get('denied_paths') or (),
+            verify_files=True,
+            check_imports=True,
+            require_python=True,
+            require_environment=True,
+        )
+    except (OSError, ValueError, ForgeError) as exc:
+        _fail(f'项目依赖核验失败：{exc}')
+    if bound is None:
+        return None
     directory = Path(config['runtime_dir']).parent / 'dependency-kernels'
-    ensure_directory(directory)
-    snapshot = directory / locked['digest']
-    if not snapshot.exists():
-        with os.scandir(directory) as entries:
-            if sum(1 for _ in zip(range(16), entries)) >= 16:
-                _fail('Notebook dependency snapshots exceed their retention budget')
-    ensure_directory(snapshot)
-    modules = {}
-    for name, proof in module_files(root, locked).items():
-        source = Path(proof['path'])
-        parts = name.split('.')
-        target = snapshot.joinpath('sources', *parts)
-        target = target / '__init__.py' if source.name == '__init__.py' else target.with_suffix('.py')
-        raw = read_bounded(source, proof['bytes'])
-        if hashlib.sha256(raw).hexdigest() != proof['sha256']:
-            _fail('The approved Notebook dependency changed during preparation')
-        ensure_directory(target.parent)
-        try:
-            publish_bytes(target, raw)
-        except ForgeError:
-            if not target.exists() or read_bounded(target, proof['bytes']) != raw:
-                _fail('The Notebook dependency snapshot differs from its lock')
-        modules[name] = {**proof, 'path': str(target)}
-    bootstrap = import_bootstrap(snapshot / 'bootstrap', modules, platform_root=code_root)
-    return snapshot, bootstrap, locked['environment']['interpreter']['prefix']
+    try:
+        snapshot, bootstrap = create_dependency_snapshot(directory, Path(root), bound, platform_root=code_root)
+    except (OSError, ValueError, ForgeError) as exc:
+        _fail(f'无法固定 Notebook 依赖快照：{exc}')
+    return snapshot, bootstrap, bound['environment']['interpreter']['prefix']
 
 
 def main() -> None:
@@ -196,7 +184,15 @@ def main() -> None:
 
     root = str(Path(config['root']).resolve(strict=True))
     code_root = str(Path(config['code_root']).resolve(strict=True))
-    dependency = _dependency_snapshot(config, root, code_root, target_python) if config.get('dependency_lock') else None
+    want_deps = bool(config.get('dependencies_active') or config.get('dependency_lock'))
+    if not want_deps and (Path(root) / 'pyproject.toml').is_file():
+        sys.path.insert(0, code_root)
+        from demiflow.forge.dependencies import declaration
+        try:
+            want_deps = declaration(root) is not None
+        except Exception as exc:
+            _fail(f'项目 pyproject.toml 依赖声明无效：{exc}')
+    dependency = _dependency_snapshot(config, root, code_root, target_python) if want_deps else None
     _check_ipykernel(target_python, isolated=dependency is not None)
     tmp_dir = Path(config['tmp_dir'])
     home_dir = tmp_dir / 'home'
@@ -288,8 +284,8 @@ def main() -> None:
         if not Path('/usr/bin/sandbox-exec').is_file():
             _fail('macOS Notebook 只读沙箱需要 /usr/bin/sandbox-exec。')
         sys.path.insert(0, code_root)
-        from demiflow.workbench.conversations.sandbox import SandboxSpec
-        from demiflow.workbench.conversations.sandbox_backends.macos_seatbelt import build_seatbelt_profile
+        from demiflow.forge.sandbox import SandboxSpec
+        from demiflow.forge.sandbox.backends.macos_seatbelt import build_seatbelt_profile
 
         spec = SandboxSpec(
             read_paths=tuple(p for p in read_paths if p != '/' and Path(p).exists()),

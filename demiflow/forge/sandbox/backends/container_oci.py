@@ -144,7 +144,7 @@ class ContainerOciBackend:
                 info = subprocess.run([runtime, 'info'], capture_output=True, text=True, timeout=5)
                 if info.returncode != 0:
                     raise RuntimeError('容器守护进程不可用: ' + (info.stderr or info.stdout)[:200])
-                from demiflow.workbench.conversations.sandbox import SandboxSpec
+                from demiflow.forge.sandbox.sandbox import SandboxSpec
 
                 with tempfile.TemporaryDirectory(prefix='forge-oci-probe-') as base:
                     root = Path(base).resolve()

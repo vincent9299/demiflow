@@ -1,38 +1,42 @@
-"""Controller-owned read-only CLI and business-Python shims for development sandboxes.
+"""Controller-owned read-only CLI and business-Python shims for Forge sandboxes.
 
 Two strictly separated channels are exposed in a read-only directory on PATH:
 1. ``demiflow``: allows ONLY ``demiflow forge ...`` subcommands so the agent uses
-   the exact same Forge CLI as terminal/IDE workflows without exposing the
-   workbench's Python environment to business code.
+   the exact same Forge CLI as terminal/IDE workflows without exposing the host
+   Python environment to business code. In restricted mode, ``forge dep vendor``
+   and ``forge dep remove`` dispatch through the authenticated one-turn host
+   control channel, keeping ``packages/`` and ``.forge/`` OS read-only.
 2. ``python`` / ``python3`` / ``pytest``: created ONLY when the project explicitly
-   configures its own business Python interpreter. Never falls back to the
-   workbench host Python. Adds a pure read-only ``demiflow`` SDK fallback loader
-   (never platform site-packages), generic qualified project-package resolution,
-   declared read-only ``shared-sources.json`` imports, and sandbox-safe pytest
-   defaults so tests run cleanly inside Landlock + seccomp.
+   configures its own business Python interpreter. Never falls back to the host
+   Python. Installs a pure read-only ``demiflow`` SDK fallback loader, qualified
+   project-package resolution, live ``pyproject.toml`` single-package B-class
+   loading via ``demiflow.forge.runtime``, declared ``shared-sources.json``
+   imports, and sandbox-safe pytest defaults.
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+import secrets
 import shlex
 import shutil
 import sys
 import tempfile
 
-from demiflow.workbench.python_sources import deployment_modules
-from demiflow.workbench.projects.registry import project_dependencies
+from demiflow.forge.runtime import deployment_modules, validate_python_executable
 
 _FORGE_SHIM_ENTRY = """\
+import json
 import os
-import sys
 from pathlib import Path
+import sys
 
 sdk_root = sys.argv[1]
 runtime_cfg = sys.argv[2]
 mode = sys.argv[3]
-args = sys.argv[4:]
+dep_binding_path = sys.argv[4]
+args = sys.argv[5:]
 
 if not args or args[0] != 'forge':
     sys.stderr.write('开发沙箱仅放行 `demiflow forge ...` 子命令。\\n')
@@ -53,6 +57,64 @@ if mode == 'restricted' and len(args) >= 2 and args[1] == 'init':
 os.environ['DEMIFLOW_FORGE_RUNTIME_CONFIG'] = runtime_cfg
 sys.path.insert(0, sdk_root)
 
+if mode == 'restricted' and len(args) >= 2 and args[1] == 'dep':
+    sub = args[2] if len(args) >= 3 else ''
+    if sub == 'install':
+        sys.stderr.write(
+            '受限开发沙箱保持离线；安装 A 类环境依赖须由受信项目所有者在终端显式执行 '
+            '`demiflow forge dep install --root <PROJECT> --python <PYTHON>`。\\n'
+        )
+        raise SystemExit(2)
+    if sub in {'vendor', 'remove'}:
+        from demiflow.forge.control_client import call
+        as_json = '--json' in args[3:]
+        positionals = []
+        i = 3
+        while i < len(args):
+            tok = args[i]
+            if tok == '--json':
+                i += 1
+                continue
+            if tok in {'--root', '--python'}:
+                i += 2
+                continue
+            if tok.startswith('--root=') or tok.startswith('--python='):
+                i += 1
+                continue
+            if tok in {'-h', '--help'}:
+                positionals = None
+                break
+            if tok.startswith('-'):
+                sys.stderr.write(f'Unsupported option for dep {sub}: {tok}\\n')
+                raise SystemExit(2)
+            positionals.append(tok)
+            i += 1
+        if positionals is not None:
+            if sub == 'vendor':
+                if len(positionals) != 2:
+                    sys.stderr.write('Usage: demiflow forge dep vendor NAME SOURCE --root DIR [--json]\\n')
+                    raise SystemExit(2)
+                payload = {'action': 'vendor', 'name': positionals[0], 'source': str(Path(positionals[1]).absolute())}
+            else:
+                if len(positionals) != 1:
+                    sys.stderr.write('Usage: demiflow forge dep remove NAME --root DIR [--json]\\n')
+                    raise SystemExit(2)
+                payload = {'action': 'remove', 'name': positionals[0]}
+            try:
+                binding_file = Path(dep_binding_path)
+                if not binding_file.is_file():
+                    raise ValueError('Active host control channel is unavailable for dep updates')
+                token, tid, epoch = json.loads(binding_file.read_text(encoding='utf-8'))
+                if not token or not tid or not epoch:
+                    raise ValueError('Active host control channel is inactive')
+                answer = call('', token, tid, epoch, 'forge/dep', payload)
+            except Exception as exc:
+                err = {'status': 'failed', 'diagnostics': [{'code': 'operation_rejected', 'detail': str(exc)}]}
+                sys.stdout.write(json.dumps(err, ensure_ascii=False, indent=None if as_json else 2) + '\\n')
+                raise SystemExit(1)
+            sys.stdout.write(json.dumps(answer, ensure_ascii=False, indent=None if as_json else 2) + '\\n')
+            raise SystemExit(0)
+
 import click
 from demiflow.forge.cli import register
 
@@ -61,15 +123,7 @@ def _cli():
     pass
 
 register(_cli)
-if mode == 'restricted' and len(args) >= 2 and args[1] == 'dep' and (
-        len(args) < 3 or args[2] not in {'list', 'verify'}):
-    raise SystemExit('Dependency updates require the trusted project owner')
-from demiflow.forge.dependencies import host_approval
-with open(runtime_cfg) as stream:
-    import json
-    approved = json.load(stream)
-with host_approval(approved['root'], approved.get('dependency_lock'), approved.get('python')):
-    _cli.main(args=args, prog_name='demiflow')
+_cli.main(args=args, prog_name='demiflow')
 """
 
 _SITECUSTOMIZE = """\
@@ -94,6 +148,8 @@ def _install():
     sdk_root = cfg.get('sdk_root')
     project_root = Path(cfg['project_root']) if cfg.get('project_root') else None
     shared_raw = cfg.get('shared_sources') or {}
+    allowed_read_roots = cfg.get('allowed_read_roots')
+    denied_paths = cfg.get('denied_paths') or ()
 
     # 1. Pure read-only demiflow SDK fallback (never adds workbench site-packages).
     if sdk_root:
@@ -101,7 +157,7 @@ def _install():
         need_sdk = False
         try:
             spec = importlib.util.find_spec('demiflow')
-            if spec is None or not spec.origin:
+            if spec is None or not spec.origin or Path(spec.origin).resolve() != (sdk_pkg / '__init__.py').resolve():
                 need_sdk = True
             else:
                 with open(spec.origin, 'rb'):
@@ -162,12 +218,10 @@ def _install():
                     return None
                 prefix = self._prefix
                 if prefix is None:
-                    # Check if fullname could be an ancestor of a suffix-matched package.
                     max_d = min(4, len(root_parts) - 1)
                     for depth in range(max_d, 1, -1):
                         cand = root_parts[-depth:]
                         if len(parts) < depth and cand[:len(parts)] == parts and all(p.isidentifier() for p in cand):
-                            # Verify at least one local package/module exists inside project_root.
                             spec = importlib.machinery.ModuleSpec(fullname, None, is_package=True)
                             spec.submodule_search_locations = []
                             return spec
@@ -198,26 +252,23 @@ def _install():
 
         sys.meta_path.append(_ProjectPackageFinder())
 
-    managed = cfg.get('project_dependencies') or {}
-    locked_environment = cfg.get('dependency_environment')
-    if locked_environment:
-        sys.path.insert(0, sdk_root)
+    # 3. LIVE pyproject.toml single-package B-class dependency loader via forge.runtime.
+    #    Reads current pyproject.toml at startup so editing local_ref (v1 -> v2) or
+    #    vendoring/removing packages takes effect on the very next python/pytest call.
+    if project_root is not None and sdk_root and (project_root / 'pyproject.toml').is_file():
         try:
-            sdk_pkg = Path(sdk_root) / 'demiflow'
-            spec = importlib.util.find_spec('demiflow')
-            if spec is None or not spec.origin or Path(spec.origin).resolve() != sdk_pkg / '__init__.py':
-                raise RuntimeError('Project Python loaded another DemiFlow package')
-            from demiflow.forge.dependencies import current_environment
-            if current_environment({'requirements': cfg['dependency_requirements']}) != locked_environment:
-                raise RuntimeError('Project Python environment changed')
-            from demiflow.workbench.python_sources import install_bound_imports
-            if managed:
-                install_bound_imports(managed)
-        except BaseException:
-            os.write(2, b'Unable to load the approved project Python dependencies\\n')
+            from demiflow.forge.runtime import install_live_project_imports
+            install_live_project_imports(
+                project_root,
+                allowed_roots=allowed_read_roots,
+                denied_paths=denied_paths,
+                shared_sources=shared_raw,
+            )
+        except BaseException as exc:
+            os.write(2, ('Unable to load project Python dependencies: ' + str(exc) + '\\n').encode('utf-8', errors='replace'))
             os._exit(78)
 
-    # 3. Declared read-only shared Python sources (from shared-sources.json).
+    # 4. Declared read-only shared Python sources (from shared-sources.json).
     if shared_raw:
         shared_paths = {name: Path(p) for name, p in shared_raw.items()}
         namespaces = set()
@@ -243,7 +294,7 @@ def _install():
 
         sys.meta_path.append(_DeclaredSharedFinder())
 
-    # 4. Keep pytest config discovery inside project_root so Landlock-blocked
+    # 5. Keep pytest config discovery inside project_root so Landlock-blocked
     #    ancestor pytest.ini/pyproject.toml files never crash collection.
     _argv = getattr(sys, 'orig_argv', None) or sys.argv
     if project_root is not None and any('pytest' in str(a) for a in _argv[:4]):
@@ -289,31 +340,38 @@ def _declared_shared_modules(root: Path) -> dict[str, Path]:
 
 
 class SandboxShims:
-    """Lifecycle wrapper for controller-generated read-only sandbox shims."""
+    """Lifecycle wrapper for controller-generated read-only Forge sandbox shims."""
 
-    def __init__(self, project, *, execution_mode: str, project_python: str | None = None,
-                 input_access: bool = False):
+    def __init__(
+        self,
+        project,
+        *,
+        execution_mode: str,
+        project_python: str | None = None,
+        input_access: bool = False,
+        allowed_read_roots=None,
+        denied_paths=(),
+    ):
         self.root = Path(project['root']).resolve()
         self.execution_mode = execution_mode
         self.project_python = project_python if (isinstance(project_python, str) and project_python.strip()) else None
-        from demiflow.forge.dependencies import module_files, verify_interpreter
-        locked = project_dependencies(self.root, project={**project, 'python': self.project_python})
-        if locked is not None:
-            verify_interpreter(locked['environment']['interpreter'])
-        self.dependency_lock = project.get('dependency_lock')
-        managed = module_files(self.root, locked)
+        if self.project_python:
+            validate_python_executable(self.project_python)
+        self.allowed_read_roots = (
+            tuple(str(Path(p).resolve()) for p in allowed_read_roots if p)
+            if allowed_read_roots is not None else None
+        )
+        self.denied_paths = tuple(str(Path(p).resolve()) for p in (denied_paths or ()) if p)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-shims-'))
         os.chmod(self.directory, 0o700)
         self.bin = self.directory / 'bin'
         self.bin.mkdir(mode=0o700)
+        self._dep_binding_path = self.directory / 'dep_control.json'
+        self.clear_control_binding()
         sdk_root = str(Path(__file__).resolve().parents[3])
 
         shared = _declared_shared_modules(self.root) if self.project_python else {}
-        shared_roots = {name.partition('.')[0] for name in shared}
-        if shared_roots & {name.partition('.')[0] for name in managed}:
-            self.close()
-            raise ValueError('Project dependency conflicts with a deployment shared package')
-        self.shared_read_paths = tuple(sorted(set(shared.values()) | {Path(row['path']) for row in managed.values()}, key=str))
+        self.shared_read_paths = tuple(sorted(set(shared.values()), key=str))
         shared_roots = sorted({name.split('.')[0] for name in shared})
 
         # 1. Always write Forge runtime configuration + restricted `demiflow` CLI shim.
@@ -322,7 +380,8 @@ class SandboxShims:
             'root': str(self.root),
             'execution_mode': execution_mode,
             'python': self.project_python,
-            'dependency_lock': self.dependency_lock,
+            'allowed_read_roots': list(self.allowed_read_roots) if self.allowed_read_roots is not None else None,
+            'denied_paths': list(self.denied_paths),
             'writes': list(project.get('writes') or []),
             'shared_sources': shared_roots,
             'input_access': bool(input_access),
@@ -340,7 +399,7 @@ class SandboxShims:
             '#!/bin/sh\n'
             f'exec {shlex.quote(sys.executable)} -IB {shlex.quote(str(forge_entry))} '
             f'{shlex.quote(sdk_root)} {shlex.quote(str(runtime_cfg_path))} '
-            f'{shlex.quote(execution_mode)} "$@"\n',
+            f'{shlex.quote(execution_mode)} {shlex.quote(str(self._dep_binding_path))} "$@"\n',
             encoding='utf-8',
         )
         os.chmod(demiflow_bin, 0o700)
@@ -353,11 +412,10 @@ class SandboxShims:
             binding = {
                 'sdk_root': sdk_root,
                 'project_root': str(self.root),
-                'project_dependencies': managed,
+                'allowed_read_roots': list(self.allowed_read_roots) if self.allowed_read_roots is not None else None,
+                'denied_paths': list(self.denied_paths),
                 'shared_sources': {name: str(path) for name, path in sorted(shared.items())},
             }
-            if locked is not None:
-                binding.update(dependency_environment=locked['environment'], dependency_requirements=locked['requirements'])
             binding_path.write_text(json.dumps(binding, ensure_ascii=False), encoding='utf-8')
             os.chmod(binding_path, 0o600)
 
@@ -385,6 +443,20 @@ class SandboxShims:
                 encoding='utf-8',
             )
             os.chmod(pytest_bin, 0o700)
+
+    def set_control_binding(self, token: str, turn_id: str, epoch: str) -> None:
+        payload = json.dumps([token, turn_id, epoch])
+        tmp = self.directory / ('.dep-control-' + secrets.token_hex(6) + '.json')
+        tmp.write_text(payload, encoding='utf-8')
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self._dep_binding_path)
+
+    def clear_control_binding(self) -> None:
+        payload = json.dumps(['', '', ''])
+        tmp = self.directory / ('.dep-control-' + secrets.token_hex(6) + '.json')
+        tmp.write_text(payload, encoding='utf-8')
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, self._dep_binding_path)
 
     @property
     def read_paths(self) -> tuple[Path, ...]:

@@ -353,7 +353,7 @@ def _check_demiflow_module_public(mod_name: str, imported_names: tuple[str, ...]
     return None
 
 
-def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool = True):
+def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool = True, declared_packages=()):
     """Return (sdk_issues, cross_project_issues) as [(lineno, target)] lists."""
     try:
         raw = read_bounded(path, 512 * 1024)
@@ -361,6 +361,7 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
     except Exception:
         return [], []
     prefixes = _project_import_prefixes(root)
+    declared_set = frozenset(declared_packages or ())
     sdk_issues: list[tuple[int, str]] = []
     cross_issues: list[tuple[int, str]] = []
     seen_sdk: set[str] = set()
@@ -385,7 +386,7 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
                     bad = _check_demiflow_module_public(mod)
                     if bad:
                         record_sdk(node.lineno, bad)
-                elif check_cross_project and not _is_local_to_project(root, parts, prefixes):
+                elif check_cross_project and parts[0] not in declared_set and not _is_local_to_project(root, parts, prefixes):
                     if _is_cross_project_sibling(root, parts):
                         record_cross(node.lineno, mod)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
@@ -400,7 +401,7 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
                     for sym in names:
                         if sym in _INTERNAL_DEMIFLOW_SUBPACKAGES or sym.startswith('_'):
                             record_sdk(node.lineno, f'demiflow.{sym}')
-            elif check_cross_project and not _is_local_to_project(root, parts, prefixes):
+            elif check_cross_project and parts[0] not in declared_set and not _is_local_to_project(root, parts, prefixes):
                 if _is_cross_project_sibling(root, parts):
                     record_cross(node.lineno, mod)
     return sdk_issues, cross_issues
@@ -409,8 +410,11 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
 _BOUNDARY_IMPORT_DIRS = frozenset(('flows', 'operators', 'data_tools', 'tests'))
 
 
-def _boundary_import_diagnostics(root: Path, rel: str, *, check_cross_project: bool = True) -> tuple[dict | None, dict | None]:
-    sdk_bad, cross_bad = _boundary_import_issues(root, root / rel, check_cross_project=check_cross_project)
+def _boundary_import_diagnostics(root: Path, rel: str, *, check_cross_project: bool = True,
+                                 declared_packages=()) -> tuple[dict | None, dict | None]:
+    sdk_bad, cross_bad = _boundary_import_issues(
+        root, root / rel, check_cross_project=check_cross_project, declared_packages=declared_packages,
+    )
     sdk_diag = cross_diag = None
     if sdk_bad:
         first_line, first_mod = sdk_bad[0]
@@ -425,13 +429,13 @@ def _boundary_import_diagnostics(root: Path, rel: str, *, check_cross_project: b
         extra = f' 等 {len(cross_bad)} 处' if len(cross_bad) > 1 else ''
         cross_diag = diagnostic(
             'DF-02', rel,
-            f'跨项目导入了外部业务源码 {first_mod}{extra}；按 Forge 独立项目规范，项目源码须自包含，仅依赖标准库、已安装三方包、DemiFlow 公开 SDK 及本项目自身模块，请将所需纯计算/辅助逻辑迁入本项目并解耦外部源码依赖。',
+            f'跨项目导入了外部业务源码 {first_mod}{extra}；按 Forge 独立项目规范，项目源码须自包含，仅依赖标准库、已安装三方包、pyproject.toml 声明的依赖包、DemiFlow 公开 SDK 及本项目自身模块。',
             line=first_line,
         )
     return sdk_diag, cross_diag
 
 
-def check_source_import_boundaries(root: Path, rel_paths) -> tuple[set[str], list[dict]]:
+def check_source_import_boundaries(root: Path, rel_paths, *, declared_packages=()) -> tuple[set[str], list[dict]]:
     """Verify public-SDK and project self-containment import boundaries on specific traced source files."""
     inspected: set[str] = set()
     issues: list[dict] = []
@@ -443,13 +447,254 @@ def check_source_import_boundaries(root: Path, rel_paths) -> tuple[set[str], lis
             continue
         if not (root / rel).is_file():
             continue
-        sdk_diag, cross_diag = _boundary_import_diagnostics(root, rel, check_cross_project=(p.parts[0] != 'tests'))
+        sdk_diag, cross_diag = _boundary_import_diagnostics(
+            root, rel, check_cross_project=(p.parts[0] != 'tests'), declared_packages=declared_packages,
+        )
         if sdk_diag is not None:
             inspected.add(rel)
             issues.append(sdk_diag)
         if cross_diag is not None:
             inspected.add(rel)
             issues.append(cross_diag)
+    return inspected, issues
+
+
+def _is_type_checking_test(test: ast.AST) -> bool:
+    if isinstance(test, ast.Name) and test.id == 'TYPE_CHECKING':
+        return True
+    if isinstance(test, ast.Attribute) and test.attr == 'TYPE_CHECKING':
+        return True
+    return False
+
+
+def _catches_import_error(handlers: list[ast.ExceptHandler]) -> bool:
+    for handler in handlers:
+        if handler.type is None:
+            return True
+        targets = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+        for target in targets:
+            name = target.id if isinstance(target, ast.Name) else (
+                target.attr if isinstance(target, ast.Attribute) else ''
+            )
+            if name in {'ImportError', 'ModuleNotFoundError', 'Exception', 'BaseException'}:
+                return True
+    return False
+
+
+def _walk_imports_with_guards(tree: ast.AST):
+    """Yield (lineno, kind, module, names, guarded) for every absolute import in tree.
+
+    ``guarded`` is True ONLY inside ``if TYPE_CHECKING:`` or a ``try`` block catching
+    ``ImportError``/``ModuleNotFoundError`` (used strictly to exempt missing-module diagnostics,
+    never import-boundary diagnostics).
+    """
+    def visit(node: ast.AST, guarded: bool):
+        if isinstance(node, ast.If) and _is_type_checking_test(node.test):
+            for child in node.body:
+                visit(child, True)
+            for child in node.orelse:
+                visit(child, guarded)
+            return
+        if isinstance(node, ast.Try) and _catches_import_error(node.handlers):
+            for child in node.body:
+                visit(child, True)
+            for handler in node.handlers:
+                for child in handler.body:
+                    visit(child, guarded)
+            for child in (*node.orelse, *node.finalbody):
+                visit(child, guarded)
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield (node.lineno, 'import', alias.name, (), guarded)
+            return
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            yield (node.lineno, 'from', node.module, tuple(a.name for a in node.names), guarded)
+            return
+        for child in ast.iter_child_nodes(node):
+            yield from visit(child, guarded)
+
+    yield from visit(tree, False)
+
+
+def _package_init_exports(init_path: Path) -> tuple[set[str], bool]:
+    """Return (defined_or_imported_names, has_dynamic_or_star_export) for a package __init__.py."""
+    try:
+        raw = read_bounded(init_path, 512 * 1024)
+        tree = ast.parse(raw, filename=str(init_path))
+    except Exception:
+        return set(), True
+    names: set[str] = set()
+    dynamic = False
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+            if node.name == '__getattr__':
+                dynamic = True
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+                    if target.id == '__all__' and isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+                        for elt in node.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                names.add(elt.value)
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add((alias.asname or alias.name).split('.', 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == '*':
+                    dynamic = True
+                else:
+                    names.add(alias.asname or alias.name)
+    return names, dynamic
+
+
+def collect_unguarded_third_party_imports(root: Path, rel_paths, *, declared_packages=()) -> list[str]:
+    """Collect unique unguarded third-party top-level import names across project source files."""
+    root = Path(root).absolute()
+    prefixes = _project_import_prefixes(root)
+    declared_set = frozenset(declared_packages or ())
+    candidates: set[str] = set()
+    for rel in sorted(set(rel_paths)):
+        p = Path(rel)
+        if not p.parts or p.parts[0] not in _BOUNDARY_IMPORT_DIRS or p.suffix != '.py':
+            continue
+        fp = root / rel
+        if not fp.is_file() or fp.is_symlink():
+            continue
+        try:
+            tree = ast.parse(read_bounded(fp, 512 * 1024), filename=rel)
+        except Exception:
+            continue
+        for _, _, mod, _, guarded in _walk_imports_with_guards(tree):
+            if guarded:
+                continue
+            parts = tuple(mod.split('.'))
+            if not parts:
+                continue
+            top = parts[0]
+            if top in sys.stdlib_module_names or top == 'demiflow' or top in declared_set:
+                continue
+            if _is_local_to_project(root, parts, prefixes):
+                continue
+            if _is_cross_project_sibling(root, parts):
+                continue
+            candidates.add(top)
+    return sorted(candidates)
+
+
+def check_project_dependencies(root: Path, rel_paths, *, dep_inspection: dict) -> tuple[set[str], list[dict]]:
+    """Run all 4 static project-dependency & import checks using the unified dependency inspection."""
+    from .dependencies import module_files
+    root = Path(root).absolute()
+    inspected: set[str] = set()
+    issues: list[dict] = []
+
+    if dep_inspection.get('declaration_error'):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', dep_inspection['declaration_error']))
+
+    # 1. B-class missing, invalid, orphans, module collisions.
+    for item in dep_inspection.get('missing_packages', ()):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', item['detail'], line=item.get('line')))
+    for item in dep_inspection.get('invalid_packages', ()):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', item['detail'], line=item.get('line')))
+    for item in dep_inspection.get('orphan_packages', ()):
+        inspected.add(item['path'])
+        issues.append(diagnostic('DF-02', item['path'], item['detail']))
+    for item in dep_inspection.get('module_collisions', ()):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', item['detail'], line=item.get('line')))
+
+    # 3. A-class missing/version mismatch & B-class installed-module shadowing (when explicit Python provided).
+    for item in dep_inspection.get('missing_requirements', ()):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', item['detail'], line=item.get('line')))
+    for item in dep_inspection.get('shadowed_packages', ()):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', item['detail'], line=item.get('line')))
+    if dep_inspection.get('environment_error'):
+        inspected.add('pyproject.toml')
+        issues.append(diagnostic('DF-02', 'pyproject.toml', dep_inspection['environment_error']))
+
+    # 2 & 4. Source-level B-class submodule resolution and missing third-party imports.
+    valid_packages = dep_inspection.get('packages') or {}
+    declared_all = set(((dep_inspection.get('config') or {}).get('packages') or {}).keys())
+    try:
+        pkg_modules = module_files(root, valid_packages) if valid_packages else {}
+    except ForgeError:
+        pkg_modules = {}
+    init_cache: dict[str, tuple[set[str], bool]] = {}
+    missing_third_party = set((dep_inspection.get('import_probe') or {}).get('missing') or ())
+    prefixes = _project_import_prefixes(root)
+
+    for rel in sorted(set(rel_paths)):
+        p = Path(rel)
+        if not p.parts or p.parts[0] not in _BOUNDARY_IMPORT_DIRS or p.suffix != '.py':
+            continue
+        fp = root / rel
+        if not fp.is_file() or fp.is_symlink():
+            continue
+        try:
+            tree = ast.parse(read_bounded(fp, 512 * 1024), filename=rel)
+        except Exception:
+            continue
+        seen_sub_err: set[str] = set()
+        seen_missing_err: set[str] = set()
+        for lineno, kind, mod, names, guarded in _walk_imports_with_guards(tree):
+            if guarded:
+                continue
+            parts = tuple(mod.split('.'))
+            if not parts:
+                continue
+            top = parts[0]
+            # Check 2: B-class declared & present package submodule validation.
+            if top in valid_packages:
+                if mod not in pkg_modules:
+                    if mod not in seen_sub_err:
+                        seen_sub_err.add(mod)
+                        inspected.add(rel)
+                        issues.append(diagnostic(
+                            'DF-02', rel,
+                            f'导入了 B 类依赖包 {top} 中不存在的子模块 {mod}；请核对包内模块路径。',
+                            line=lineno,
+                        ))
+                elif kind == 'from' and Path(pkg_modules[mod]['path']).name == '__init__.py':
+                    init_path = Path(pkg_modules[mod]['path'])
+                    if mod not in init_cache:
+                        init_cache[mod] = _package_init_exports(init_path)
+                    exported, dynamic = init_cache[mod]
+                    if not dynamic:
+                        for sym in names:
+                            if sym == '*':
+                                continue
+                            child_mod = f'{mod}.{sym}'
+                            if child_mod not in pkg_modules and sym not in exported:
+                                if child_mod not in seen_sub_err:
+                                    seen_sub_err.add(child_mod)
+                                    inspected.add(rel)
+                                    issues.append(diagnostic(
+                                        'DF-02', rel,
+                                        f'导入了 B 类依赖包 {top} 中不存在的子模块或符号 {child_mod}；请核对包内导出。',
+                                        line=lineno,
+                                    ))
+                continue
+            # Check 4: Unguarded missing third-party import confirmed absent in explicit project Python.
+            if top in missing_third_party and top not in declared_all and not _is_local_to_project(root, parts, prefixes):
+                if top not in seen_missing_err:
+                    seen_missing_err.add(top)
+                    inspected.add(rel)
+                    issues.append(diagnostic(
+                        'DF-02', rel,
+                        f'导入了缺失模块 {mod}（在项目 Python 中未安装，也未在 pyproject.toml [tool.demiflow.packages] 中声明）；请安装对应 A 类依赖或声明并获取 B 类源码包。',
+                        line=lineno,
+                    ))
     return inspected, issues
 
 
@@ -1309,7 +1554,8 @@ def _group_unreferenced_under(prefix: str, all_files: list[str], unreferenced: l
 
 
 def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, parameter_digests: dict,
-                          exclude=(), structural_only: bool = False, packages_approved=False, checked_workflows=()):
+                          exclude=(), structural_only: bool = False, packages_approved=False, checked_workflows=(),
+                          declared_packages=()):
     """Audit DF-02 structural & protocol cleanliness without mutating or inspecting business data.
 
     When ``structural_only=True`` (used by incremental post-turn hooks), skips corpus-dependent
@@ -1556,7 +1802,9 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             p = Path(rel)
             if p.suffix != '.py' or p.name == '__init__.py':
                 continue
-            sdk_diag, cross_diag = _boundary_import_diagnostics(root, rel, check_cross_project=check_cross)
+            sdk_diag, cross_diag = _boundary_import_diagnostics(
+                root, rel, check_cross_project=check_cross, declared_packages=declared_packages,
+            )
             if sdk_diag is not None:
                 inspected.add(rel)
                 by_category.setdefault('internal_sdk_import', []).append(sdk_diag)

@@ -362,13 +362,16 @@ class BridgeServer:
     B1 may relay this Unix endpoint into its isolated network namespace; the same
     token, epoch, active-turn and fixed-operation checks apply on this side.
     """
-    def __init__(self, input_access, *, delivery_review=None, project_root=None, protected_snapshot=None, catalog=None):
+    def __init__(self, input_access, *, delivery_review=None, project_root=None, protected_snapshot=None,
+                 catalog=None, allowed_read_roots=None, denied_paths=()):
         self.lock = threading.Lock()
         self.input_access = input_access
         self.catalog = catalog
         self.protected_snapshot = self._control_snapshot(project_root, protected_snapshot)
         self.delivery_review = delivery_review
         self.project_root = Path(project_root).absolute() if project_root is not None else None
+        self.allowed_read_roots = allowed_read_roots
+        self.denied_paths = tuple(denied_paths or ())
         self.token = secrets.token_urlsafe(32)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-control-'))
         self.path = self.directory / 'bridge.sock'
@@ -391,6 +394,8 @@ class BridgeServer:
     def finish_turn(self) -> list[str]:
         with self.lock:
             self.input_access = self.catalog = self.delivery_review = self.project_root = self.protected_snapshot = None
+            self.allowed_read_roots = None
+            self.denied_paths = ()
             paths = sorted(self.authorized_layout_paths)
             self.authorized_layout_paths.clear()
             return paths
@@ -424,13 +429,16 @@ class BridgeServer:
                 recorded.add('.gitignore')
         self.authorized_layout_paths.update(recorded)
 
-    def set_turn(self, input_access, *, delivery_review=None, project_root=None, protected_snapshot=None, catalog=None):
+    def set_turn(self, input_access, *, delivery_review=None, project_root=None, protected_snapshot=None,
+                 catalog=None, allowed_read_roots=None, denied_paths=()):
         with self.lock:
             self.input_access = input_access
             self.protected_snapshot = self._control_snapshot(project_root, protected_snapshot)
             self.catalog = catalog
             self.delivery_review = delivery_review
             self.project_root = Path(project_root).absolute() if project_root is not None else None
+            self.allowed_read_roots = allowed_read_roots
+            self.denied_paths = tuple(denied_paths or ())
             self.count = 0
             if input_access is not None:
                 self.authorized_layout_paths.clear()
@@ -459,6 +467,32 @@ class BridgeServer:
                 tools.append(PROJECT_LAYOUT_TOOL)
             if self.catalog is not None:
                 tools.append(CATALOG_TOOL)
+            if method == 'forge/dep':
+                if self.project_root is None:
+                    reject('Dependency updates require an active editable project turn', 'operation_rejected')
+                if type(params) is not dict or params.get('action') not in {'vendor', 'remove'}:
+                    reject('Unsupported restricted dependency operation', 'invalid_request')
+                from demiflow.forge.dependencies import remove as dep_remove, vendor as dep_vendor
+                action = params['action']
+                pkg_name = params.get('name')
+                if not isinstance(pkg_name, str) or not pkg_name:
+                    reject('Package name is required', 'invalid_request')
+                if action == 'vendor':
+                    source_raw = params.get('source')
+                    if not isinstance(source_raw, str) or not source_raw:
+                        reject('Vendor source directory is required', 'invalid_request')
+                    answer = dep_vendor(
+                        self.project_root,
+                        pkg_name,
+                        Path(source_raw),
+                        allowed_roots=self.allowed_read_roots,
+                        denied_paths=self.denied_paths,
+                    )
+                    self.authorized_layout_paths.update({'packages', f'packages/{pkg_name}'})
+                else:
+                    answer = dep_remove(self.project_root, pkg_name)
+                    self.authorized_layout_paths.update({'packages', f'packages/{pkg_name}'})
+                return answer
             if method == 'tools/list' and params == {}:
                 return dict(tools=tools)
             if (method != 'tools/call' or type(params) is not dict or set(params) != {'name', 'arguments'}
@@ -470,8 +504,7 @@ class BridgeServer:
                 guard = nullcontext()
                 if action in ('register_workflow', 'register_flow', 'bind_params', 'slim_manifest'):
                     guard = guarded_control_writes(self.project_root, self.protected_snapshot, active.require_active)
-                from demiflow.workbench.projects.registry import dependency_scope
-                with guard, dependency_scope(self.project_root, project=getattr(active, 'project', None)):
+                with guard:
                     answer = _run_project_layout(self.project_root, arguments)
                 self._record_layout_paths(action, answer)
             elif name == REVIEW_TOOL['name']:

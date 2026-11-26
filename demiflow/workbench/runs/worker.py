@@ -91,7 +91,7 @@ def _execute(root, run_id, run, attempt=None):
         allocation_guard(manifest['limits'], native_execution=manifest.get('native_execution'))
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
-        from demiflow.workbench.python_sources import SharedSourceImports, bound_files, package_parts, read_sealed, sealed_root
+        from demiflow.forge.runtime import SharedSourceImports, bound_files, package_parts, read_sealed, sealed_root
         binding = report['binding']
         package = package_parts(binding.get('source_package'))
         source = sealed_root(target, binding)
@@ -107,7 +107,7 @@ def _execute(root, run_id, run, attempt=None):
             imports.set_project_package(package)
             sys.meta_path.insert(0, imports)
         if dependencies and dependencies['modules']:
-            from demiflow.workbench.python_sources import import_bootstrap
+            from demiflow.forge.runtime import import_bootstrap
             bootstrap = import_bootstrap(work / 'project-imports', {
                 name: {**proof, 'path': str(shared[name][0])}
                 for name, proof in dependencies['modules'].items()
@@ -184,8 +184,12 @@ def _execute(root, run_id, run, attempt=None):
 
 
 def _verify_project_environment(binding):
-    from demiflow.forge.dependencies import current_environment
-    if current_environment(binding) != binding['environment']:
+    from demiflow.forge.runtime import current_environment
+    actual = current_environment(binding, strict=True)
+    expected = binding['environment']
+    if 'startup_sha256' not in expected.get('interpreter', {}):
+        actual = {**actual, 'interpreter': {k: v for k, v in actual['interpreter'].items() if k != 'startup_sha256'}}
+    if actual != expected:
         raise RuntimeError('Sealed project Python environment changed')
 
 
@@ -372,7 +376,7 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         dependencies = manifest.get('project_dependencies')
         python = sys.executable
         if dependencies is not None:
-            from demiflow.forge.dependencies import verify_interpreter
+            from demiflow.forge.runtime import verify_interpreter
             python = verify_interpreter(dependencies['environment']['interpreter'])
         command = [python, '-I', '-B', __file__, 'execute', str(root), run_id]
         if attempt is not None:

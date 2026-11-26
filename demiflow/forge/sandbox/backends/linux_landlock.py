@@ -10,15 +10,15 @@ class LinuxLandlockBackend:
     name = 'linux_landlock'
 
     def identity(self) -> dict:
-        from demiflow.workbench.conversations.sandbox import execution_identity
+        from demiflow.forge.sandbox.sandbox import execution_identity
         return execution_identity()
 
     def readiness(self) -> dict:
-        from demiflow.workbench.conversations.sandbox import backend_readiness
+        from demiflow.forge.sandbox.sandbox import backend_readiness
         return backend_readiness()
 
     def launch(self, command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None):
-        from demiflow.workbench.conversations.sandbox import launch_sandbox
+        from demiflow.forge.sandbox.sandbox import launch_sandbox
         return launch_sandbox(
             command,
             spec=spec,

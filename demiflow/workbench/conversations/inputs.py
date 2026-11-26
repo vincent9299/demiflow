@@ -271,7 +271,7 @@ class InputAccess:
         return self._native(request)
 
     def _native(self, request):
-        from .sandbox import SandboxSpec, launch_sandbox
+        from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox
         deadline = min(self.deadline, time.time() + _INSPECTION_SECONDS)
         limits = self.store.limits
         # Controller state is wholly denied. Temporary decoder caches therefore

@@ -155,7 +155,7 @@ class MacosSeatbeltBackend:
                 _PROBE = result
                 return dict(result)
             try:
-                from demiflow.workbench.conversations.sandbox import SandboxSpec
+                from demiflow.forge.sandbox.sandbox import SandboxSpec
 
                 py = shutil.which('python3') or '/usr/bin/python3'
                 with tempfile.TemporaryDirectory(prefix='forge-seatbelt-probe-') as base:

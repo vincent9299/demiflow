@@ -29,7 +29,7 @@ from demiflow.forge.project_bindings import table_identity
 from demiflow.forge.project_bindings import table_binding as local_table_binding
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
-from demiflow.workbench.python_sources import source_digest
+from demiflow.forge.runtime import source_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.platform_snapshot import build_snapshot
 from demiflow.forge.platform_snapshot import check_snapshot
@@ -336,13 +336,13 @@ def audit_status(root):
                 watcher=dict(status='observed' if live else 'unavailable', heartbeat=heartbeat))
 
 
-def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_policy):
+def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_policy, allowed_roots=None):
     root, value = _audit_workspace(root, expected_policy)
     if kind == 'scope' and report_digest is None:
         result = _check_change_scope(root)
         result.pop('scope', None)
     elif kind == 'report' and report_digest in value['audit']['reports']:
-        checked = _report_status(root, report_digest, table_resolver=table_resolver, verify_dependencies=True)
+        checked = _report_status(root, report_digest, table_resolver=table_resolver, verify_dependencies=True, allowed_roots=allowed_roots)
         result = dict(status=checked['status'] if checked['verification']['complete'] else 'unverifiable',
                       complete=checked['verification']['complete'], changes=checked['changes'][:256],
                       entry=checked['report']['binding']['entry'],
@@ -603,13 +603,13 @@ _DEPENDENCIES_UNSET = object()
 
 
 def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None,
-                  dependencies=_DEPENDENCIES_UNSET):
+                  dependencies=_DEPENDENCIES_UNSET, allowed_roots=None):
     from demiflow.forge.pipeline_check import inspect_variant
 
     root, value, snapshot = load_workspace(root)
     if dependencies is _DEPENDENCIES_UNSET:
         from demiflow.forge.dependencies import binding as dependency_binding
-        dependencies = dependency_binding(root)
+        dependencies = dependency_binding(root, allowed_roots=allowed_roots)
     snapshot = current_platform_snapshot(snapshot)
     path = validate_parameter_path(root, params) if isinstance(params, str) else None
     parameters = read_control(path) if path else params
@@ -795,7 +795,7 @@ def workspace_policy(value, binding):
             'locations': {key: value['locations'].get(key) for key in sorted(used)}}
 
 
-def _report_status(root, digest, *, table_resolver, platform_check=True, verify_dependencies=False):
+def _report_status(root, digest, *, table_resolver, platform_check=True, verify_dependencies=False, allowed_roots=None):
     from demiflow.errors import DemiflowError
     from demiflow.lance.preview import describe_table
 
@@ -824,8 +824,8 @@ def _report_status(root, digest, *, table_resolver, platform_check=True, verify_
         from demiflow.forge.dependencies import binding as dependency_binding
 
         def current_dependency_digest():
-            locked = dependency_binding(root)
-            return locked['digest'] if locked else None
+            live = dependency_binding(root, allowed_roots=allowed_roots)
+            return live['digest'] if live else None
 
         check('dependency', 'project_dependencies', current_dependency_digest, binding['project_dependencies'],
               'project_dependencies_changed', 'project_dependencies_unverifiable')

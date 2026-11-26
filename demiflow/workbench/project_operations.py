@@ -131,19 +131,20 @@ def set_table_view(root, alias, *, display, provenance, expected):
 def register_flow(root, entry, *, params=None, authorize, authority=None):
     """Register an authored flow using the deployment's current authority."""
     from demiflow.forge.project import register_flow as register
-    from demiflow.workbench.projects.registry import dependency_scope, project_dependencies
+    from demiflow.workbench.projects.registry import project_python_and_scope
     from demiflow.workbench.table_bindings import make_resolver
 
     authorize()
-    expected = project_dependencies(root, authority=authority, verify_files=False)
+    python, allowed_roots = project_python_and_scope(root, authority=authority)
+
     def check_authority():
         authorize()
-        if project_dependencies(root, authority=authority, verify_files=False) != expected:
-            raise ForgeError('Project dependency approval changed during registration', code='conflict')
+        cur_py, cur_roots = project_python_and_scope(root, authority=authority)
+        if (cur_py, cur_roots) != (python, allowed_roots):
+            raise ForgeError('Project scope changed during registration', code='conflict')
 
-    with dependency_scope(root, authority=authority):
-        return register(root, entry, params=params, authorize=check_authority,
-                        table_resolver=make_resolver(ws.table_binding, runs.result_table))
+    return register(root, entry, params=params, authorize=check_authority,
+                    table_resolver=make_resolver(ws.table_binding, runs.result_table))
 
 
 def inspect_flow(root, entry, *, params, save=True, limits=None, authority=None):

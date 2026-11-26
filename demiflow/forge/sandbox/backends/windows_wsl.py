@@ -83,7 +83,7 @@ class WindowsWslBackend:
         runner = (
             'import json, sys; '
             f'sys.path.insert(0, {wsl_code_root!r}); '
-            'from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox; '
+            'from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox; '
             'd = json.loads(sys.argv[1]); '
             's = SandboxSpec(read_paths=tuple(d["read_paths"]), write_paths=tuple(d["write_paths"]), '
             'runtime_paths=tuple(d["runtime_paths"]), protected_paths=tuple(d["protected_paths"]), '
@@ -132,7 +132,7 @@ class WindowsWslBackend:
                 probe = subprocess.run(
                     [wsl, '--', 'python3', '-I', '-B', '-c',
                      f'import json, sys; sys.path.insert(0, {wsl_code_root!r}); '
-                     'from demiflow.workbench.conversations.sandbox import backend_readiness; '
+                     'from demiflow.forge.sandbox.sandbox import backend_readiness; '
                      'print(json.dumps(backend_readiness()))'],
                     capture_output=True, text=True, timeout=15,
                 )

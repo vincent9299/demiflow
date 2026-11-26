@@ -51,6 +51,24 @@ def _output(root, as_json, operation, render=None):
         raise click.exceptions.Exit(code)
 
 
+def _sandbox_runtime_cfg(root: Path) -> dict:
+    """Read optional sandbox-injected runtime context (python, allowed_read_roots, denied_paths)."""
+    import os
+    raw = os.environ.get('DEMIFLOW_FORGE_RUNTIME_CONFIG')
+    if not raw:
+        return {}
+    try:
+        cfg = json.loads(Path(raw).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(cfg, dict):
+        return {}
+    cfg_root = cfg.get('root')
+    if cfg_root and Path(cfg_root).resolve() != Path(root).resolve():
+        return {}
+    return cfg
+
+
 def register(main: click.Group) -> None:
     @main.group(cls=_ForgeCommands)
     def forge():
@@ -64,55 +82,65 @@ def register(main: click.Group) -> None:
 
     @forge.group()
     def dep():
-        """Declare and verify dependencies in an explicit project Python."""
+        """Declare, vendor, remove, verify, and install project dependencies from pyproject.toml."""
 
     @dep.command('list')
     @root_option
+    @click.option('--python', default=None, type=click.Path(path_type=Path, dir_okay=False),
+                  help='Explicit project Python interpreter for optional A-class environment verification.')
     @json_option
-    def dep_list(root, as_json):
-        from .dependencies import binding, facts
-        _output(root, as_json, lambda: dict(status='passed', dependencies=facts(binding(root, verify_files=False))))
+    def dep_list(root, python, as_json):
+        from .dependencies import list_dependencies
+        def perform():
+            cfg = _sandbox_runtime_cfg(root)
+            eff_py = str(python) if python is not None else cfg.get('python')
+            return list_dependencies(
+                root, python=eff_py,
+                allowed_roots=cfg.get('allowed_read_roots'),
+                denied_paths=cfg.get('denied_paths') or (),
+            )
+        _output(root, as_json, perform)
 
     @dep.command('verify')
     @root_option
+    @click.option('--python', default=None, type=click.Path(path_type=Path, dir_okay=False),
+                  help='Explicit project Python interpreter for A-class version & shadowing verification.')
     @json_option
-    def dep_verify(root, as_json):
+    def dep_verify(root, python, as_json):
         from .dependencies import verify
-        _output(root, as_json, lambda: verify(root))
-
-    @dep.command('sync')
-    @root_option
-    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
-    @json_option
-    def dep_sync(root, python, as_json):
-        from .dependencies import update
-        _output(root, as_json, lambda: update(root, python))
-
-    @dep.command('link')
-    @root_option
-    @click.argument('name')
-    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
-    @json_option
-    def dep_link(root, name, python, as_json):
-        from .dependencies import update
-        _output(root, as_json, lambda: update(root, python, name=name))
+        def perform():
+            cfg = _sandbox_runtime_cfg(root)
+            eff_py = str(python) if python is not None else cfg.get('python')
+            return verify(
+                root, python=eff_py,
+                allowed_roots=cfg.get('allowed_read_roots'),
+                denied_paths=cfg.get('denied_paths') or (),
+            )
+        _output(root, as_json, perform)
 
     @dep.command('vendor')
     @root_option
     @click.argument('name')
     @click.argument('source', type=click.Path(path_type=Path, file_okay=False))
-    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
     @json_option
-    def dep_vendor(root, name, source, python, as_json):
-        from .dependencies import update
-        _output(root, as_json, lambda: update(root, python, name=name, vendor=source))
+    def dep_vendor(root, name, source, as_json):
+        from .dependencies import vendor
+        def perform():
+            cfg = _sandbox_runtime_cfg(root)
+            return vendor(
+                root, name, source,
+                allowed_roots=cfg.get('allowed_read_roots'),
+                denied_paths=cfg.get('denied_paths') or (),
+            )
+        _output(root, as_json, perform)
 
     @dep.command('remove')
     @root_option
+    @click.argument('name')
     @json_option
-    def dep_remove(root, as_json):
+    def dep_remove(root, name, as_json):
         from .dependencies import remove
-        _output(root, as_json, lambda: remove(root))
+        _output(root, as_json, lambda: remove(root, name))
 
     @dep.command('install')
     @root_option
@@ -250,12 +278,20 @@ def register(main: click.Group) -> None:
     @click.option('--path', 'paths', multiple=True, help='Check a changed or deleted project-relative path.')
     @click.option('--entry', help='Check one existing flow, including a draft.')
     @click.option('--params', help='Check the selected parameter binding.')
+    @click.option('--python', default=None, type=click.Path(path_type=Path, dir_okay=False),
+                  help='Explicit project Python interpreter for A-class & import availability checks.')
     @json_option
-    def check(root, paths, entry, params, as_json):
-        """Check native flow wiring and project layout without executing user code."""
+    def check(root, paths, entry, params, python, as_json):
+        """Check native flow wiring, project layout, and dependencies without executing user code."""
         from .pipeline_check import check_project
         def perform():
             if paths and entry or params and not entry:
                 raise ForgeError('Use --path or --entry [--params].', code='invalid_request')
-            return check_project(root, paths=paths, entry=entry, params=params)
+            cfg = _sandbox_runtime_cfg(root)
+            eff_py = str(python) if python is not None else cfg.get('python')
+            return check_project(
+                root, paths=paths, entry=entry, params=params, python=eff_py,
+                allowed_roots=cfg.get('allowed_read_roots'),
+                denied_paths=cfg.get('denied_paths') or (),
+            )
         _output(root, as_json, perform)

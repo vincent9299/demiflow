@@ -13,7 +13,7 @@ import time
 import pytest
 
 from demiflow.resources.process_observation import descendants
-from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
+from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox
 from demiflow.workbench.conversations.execution import launch_provider
 
 PYTHON = '/usr/bin/python3'
@@ -260,7 +260,7 @@ def test_model_placeholder_requires_actual_fixed_channel(scope):
 
 
 def test_execution_receipt_is_actual_launch_unique_and_version_bound(scope):
-    from demiflow.workbench.conversations.sandbox import execution_identity
+    from demiflow.forge.sandbox.sandbox import execution_identity
     spec, source, _, _ = scope
     identities = []
     for _ in range(2):
@@ -325,7 +325,7 @@ def test_verifier_pythonpath_is_physical_and_within_read_scope(scope):
 
 
 def test_runtime_and_loaded_control_plane_are_never_writable(scope, tmp_path):
-    from demiflow.workbench.conversations import sandbox
+    from demiflow.forge.sandbox import sandbox
     spec, source, _, _ = scope
     native = Path(sandbox.__file__).with_name('sandbox_native.py')
     original = native.read_bytes()
@@ -401,7 +401,7 @@ def observer():
     # PID 1 normally runs as an isolated script with its own module search path.
     with pytest.MonkeyPatch.context() as isolated:
         isolated.setattr(sys, 'path', list(sys.path))
-        from demiflow.workbench.conversations import sandbox_child
+        from demiflow.forge.sandbox import sandbox_child
     return sandbox_child
 
 

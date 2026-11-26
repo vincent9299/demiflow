@@ -36,7 +36,7 @@ def main():
     tool_write.add_argument('path', metavar='MODULE_PY', help='Module filename under data_tools/, e.g. pool_review.py')
     args = parser.parse_args(args)
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-    from demiflow.workbench.conversations.control_client import call
+    from demiflow.forge.control_client import call
 
     token, turn, epoch = json.loads(Path(binding).read_text())
     def send(method, params):

@@ -13,7 +13,7 @@ from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.transport import decode
 
 
-from demiflow.workbench.conversations.control_client import call
+from demiflow.forge.control_client import call
 
 
 def main(endpoint, token, turn_id, epoch):

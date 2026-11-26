@@ -134,7 +134,7 @@ def test_automatic_scope_preserves_nested_data_and_notebooks(tmp_path):
     assert set(grant['protected'])=={'src/data','src/result.ipynb','src/AGENTS.md'}
     assert grant['writes'] == ['src/app.py', 'src/models']
     assert 'src' in grant['watch']
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, specification
+    from demiflow.forge.sandbox.sandbox import SandboxSpec, specification
     home = tmp_path / 'private'; home.mkdir(mode=0o700)
     spec = SandboxSpec(read_paths=(str(root),), runtime_paths=('/usr', '/lib', '/lib64'),
                        write_paths=tuple(str(root / path) for path in grant['writes']),
@@ -271,8 +271,8 @@ def test_sandbox_shims_enforce_python_isolation_and_run_forge_cli_and_pytest_in_
     import os
     import subprocess
     import sys
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
-    from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+    from demiflow.forge.sandbox.sandbox import SandboxSpec, backend_readiness, launch_sandbox
+    from demiflow.forge.sandbox.sandbox_shims import SandboxShims
 
     # Build a nested repo layout: repo/shared_mod.py (declared shared), repo/sibling/secret.txt (blocked),
     # repo/pytest.ini (blocked parent ini), and repo/subpkg/my_pipe/ (the project root).
@@ -455,7 +455,7 @@ def test_automatic_scope_allows_more_than_128_split_writable_paths(tmp_path):
         assert caps['enabled'] and caps['start']
         _, revision, config_path = settings.binding('wbig', big, seal=True)
         assert revision and config_path.is_file()
-        from demiflow.workbench.conversations.sandbox import SandboxSpec, specification
+        from demiflow.forge.sandbox.sandbox import SandboxSpec, specification
         home = tmp_path / 'big_private'
         home.mkdir(mode=0o700)
         spec = SandboxSpec(

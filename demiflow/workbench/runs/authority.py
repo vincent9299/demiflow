@@ -19,6 +19,7 @@ ACTIONS = {'read', 'run_submit', 'run_control', 'attach'}
 @dataclass(frozen=True)
 class LocalAuthority:
     root: str
+    python: str | None = None
 
     def require(self, root, action):
         if str(Path(root).absolute()) != self.root or action not in ACTIONS:
@@ -30,7 +31,10 @@ class LocalAuthority:
         yield
 
     def bootstrap(self):
-        return dict(format=VERSION, kind='trusted_local', root=self.root)
+        value = dict(format=VERSION, kind='trusted_local', root=self.root)
+        if self.python:
+            value['python'] = self.python
+        return value
 
 
 @dataclass(frozen=True)
@@ -82,8 +86,11 @@ def from_bootstrap(value, root):
     """Closed internal protocol. No callable, import path or client grant flag."""
     if type(value) is not dict or value.get('format') != VERSION or value.get('root') != str(Path(root).absolute()):
         raise ForgeError('Missing or invalid trusted run bootstrap', code='operation_rejected')
-    if value.get('kind') == 'trusted_local' and set(value) == {'format', 'kind', 'root'}:
-        return LocalAuthority(value['root'])
+    if value.get('kind') == 'trusted_local' and set(value) <= {'format', 'kind', 'root', 'python'}:
+        py = value.get('python')
+        if py is not None and (type(py) is not str or not py or not Path(py).is_absolute()):
+            raise ForgeError('Invalid trusted run bootstrap', code='operation_rejected')
+        return LocalAuthority(value['root'], python=py)
     keys = {'format', 'kind', 'root', 'workspace_id', 'registry', 'action', 'ceiling', 'single_grant'}
     if (set(value) != keys or value['kind'] != 'web' or value['action'] not in ACTIONS
             or type(value['ceiling']) is not bool or type(value['single_grant']) is not bool

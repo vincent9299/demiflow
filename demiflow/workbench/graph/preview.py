@@ -85,16 +85,22 @@ def _node_description(detail: dict) -> str | None:
     return None
 
 
-def preview(root, *, entry, params=None, table_resolver=None, source_modules=None, dependencies=None, _authority=None):
+def preview(root, *, entry, params=None, table_resolver=None, source_modules=None, dependencies=None,
+            _authority=None, authority=None, python=None):
     """Delegate to the one-shot reader unless called by its trusted dispatcher."""
     if table_resolver is None:
         from demiflow.workbench.worker import operation
+        if authority is not None and _authority is None:
+            _authority = authority.bootstrap()
+        elif _authority is None and python is not None:
+            from demiflow.workbench.runs.authority import LocalAuthority
+            _authority = LocalAuthority(str(Path(root).absolute()), python=str(python)).bootstrap()
         return operation('plan_preview', root, entry=entry, params=params, _authority=_authority)
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
     from demiflow.workbench.pipeline_policy import limits_with
-    from demiflow.workbench.python_sources import PythonSources, SharedSources
+    from demiflow.forge.runtime import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
 
     root, control, _ = ws.load_workspace(root)

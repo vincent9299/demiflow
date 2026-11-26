@@ -18,7 +18,7 @@ import time
 import uuid
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.python_sources import bound_files, sealed_root, source_digest
+from demiflow.forge.runtime import bound_files, sealed_root, source_digest
 from demiflow.workbench.process import process_identity
 from demiflow.workbench.runs.authority import LocalAuthority
 from demiflow.workbench.runs.admission import inputs as admit_inputs
@@ -299,9 +299,9 @@ def durable_tree(target):
 
 @operation_budget.controlled
 def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
-            overrides=None, output_prefix=None, request_id=None, telemetry=True, authority=None):
+            overrides=None, output_prefix=None, request_id=None, telemetry=True, authority=None, python=None):
     from demiflow.workbench.worker import operation
-    authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
+    authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()), python=str(python) if python else None)
     authority.require(root, "run_submit")
     from demiflow.workbench.runs.domain import preparation_lock
     from functools import partial
@@ -351,7 +351,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, 'run_submit')
     from demiflow.workbench.projects.registry import project_dependencies
-    dependencies = project_dependencies(root, authority=authority.bootstrap())
+    dependencies = project_dependencies(root, authority=authority.bootstrap(), verify_files=True, require_environment=True)
     root, workspace, platform = ws.load_workspace(root)
     platform = ws.current_platform_snapshot(platform)
     change_scope = workspace.get('audit', {}).get('change_scope')
@@ -475,7 +475,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             raise ForgeError('Run requires 1..32 declared outputs with matching metadata')
         shared = None
         if dependencies is not None:
-            from demiflow.workbench.python_sources import SharedSources
+            from demiflow.forge.runtime import SharedSources
             shared = SharedSources(root, source_modules or {}, dependencies=dependencies).binding()
         report = ws._inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver(),
                                   shared_sources=shared, dependencies=dependencies)
@@ -660,6 +660,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             if dependencies is not None:
                 manifest['project_dependencies'] = {
                     'digest': dependencies['digest'],
+                    'declaration': dependencies['declaration'],
                     'environment': dependencies['environment'],
                     'requirements': dependencies['requirements'],
                     'modules': {name: {k: row[k] for k in ('sha256', 'bytes')} for name, row in managed_modules.items()},
@@ -673,9 +674,11 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             operation_budget.check()
             # Expensive freshness checks precede the authorization commit guard.
             if dependencies is not None:
-                current_dependencies = project_dependencies(root, authority=authority.bootstrap())
+                current_dependencies = project_dependencies(
+                    root, authority=authority.bootstrap(), verify_files=True, require_environment=True,
+                )
                 if current_dependencies is None or current_dependencies['digest'] != dependencies['digest']:
-                    raise ForgeError('Project dependency approval changed during preparation', code='conflict')
+                    raise ForgeError('Project dependencies changed during preparation', code='conflict')
             if native_flow:
                 native_submission.verify_basis(root, manifest, report)
             else:
@@ -875,9 +878,9 @@ def _launch_unit(target, attempt):
 
 
 @operation_budget.controlled
-def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authority=None):
+def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authority=None, python=None):
     from demiflow.workbench.worker import operation
-    authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
+    authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()), python=str(python) if python else None)
     authority.require(root, "run_submit")
     root = Path(root).absolute()
     # Potentially expensive source/platform checks run in the bounded inspector.
@@ -1016,13 +1019,56 @@ def _preflight(root, run_id, *, expected, authority=None):
     return {'status': 'checked'}
 
 
+def _dependency_matches_live(root, expected, live):
+    """Compare sealed manifest project_dependencies against live binding, preserving legacy v1 compatibility."""
+    if expected is None and live is None:
+        return True
+    if expected is None or live is None:
+        return False
+    if 'declaration' in expected:
+        if expected['digest'] == live['digest']:
+            return True
+        if expected['declaration'] != live['declaration']:
+            return False
+    # Legacy v1 prepared manifests may omit `declaration` or use v1 digest: verify modules & interpreter match.
+    from demiflow.forge.dependencies import module_files
+    live_modules = {
+        name: {k: row[k] for k in ('sha256', 'bytes')}
+        for name, row in module_files(root, live).items()
+    }
+    if live_modules != expected.get('modules', {}):
+        return False
+    if live.get('environment') is not None and expected.get('environment') is not None:
+        exp_env = expected['environment']
+        live_env = live['environment']
+        # Compare interpreter binary identity (tolerate missing startup_sha256 in legacy manifests).
+        exp_interp = exp_env.get('interpreter') or {}
+        live_interp = live_env.get('interpreter') or {}
+        for key in ('path', 'binary', 'device', 'inode', 'bytes', 'mtime_ns', 'prefix', 'base_prefix'):
+            if exp_interp.get(key) != live_interp.get(key):
+                return False
+        if 'startup_sha256' in exp_interp and exp_interp['startup_sha256'] != live_interp.get('startup_sha256'):
+            return False
+    return True
+
+
 def _verify_dependency_commit(root, manifest, authority):
-    """Recheck the approval under the existing admission and registry locks."""
+    """Recheck live pyproject.toml declaration & Python scope under the admission lock."""
     expected = manifest.get('project_dependencies')
     from demiflow.workbench.projects.registry import project_dependencies
-    current = project_dependencies(root, authority=authority.bootstrap(), verify_files=False)
-    if (current['digest'] if current else None) != (expected['digest'] if expected else None):
-        raise ForgeError('Project dependency approval changed during admission', code='conflict')
+    boot = authority.bootstrap() if authority is not None else None
+    fallback_py = (
+        expected['environment']['interpreter']['path']
+        if expected and boot and boot.get('kind') == 'trusted_local' and not boot.get('python')
+        else None
+    )
+    current = project_dependencies(root, authority=boot, python=fallback_py, verify_files=False)
+    if expected is None and current is None:
+        return
+    if expected is None or current is None:
+        raise ForgeError('Project dependencies changed during admission', code='conflict')
+    if 'declaration' in expected and expected['declaration'] != current['declaration']:
+        raise ForgeError('Project dependency declaration changed during admission', code='conflict')
 
 
 def _check_basis(root, target, m, *, phase='preflight', authority=None):
@@ -1030,18 +1076,40 @@ def _check_basis(root, target, m, *, phase='preflight', authority=None):
     dependencies = m.get('project_dependencies')
     historical_modules = ()
     if dependencies is not None:
-        from demiflow.forge.dependencies import probe_environment
+        from demiflow.forge.runtime import probe_environment
         if phase == 'resume':
             historical_modules = dependencies['modules']
         else:
             from demiflow.workbench.projects.registry import project_dependencies
-            live = project_dependencies(root, authority=authority.bootstrap() if authority else None)
-            if live is None or live['digest'] != dependencies['digest']:
-                raise ForgeError('Project dependency approval changed before start', code='conflict')
+            boot = authority.bootstrap() if authority is not None else None
+            fallback_py = (
+                dependencies['environment']['interpreter']['path']
+                if boot and boot.get('kind') == 'trusted_local' and not boot.get('python')
+                else None
+            )
+            live = project_dependencies(
+                root, authority=boot, python=fallback_py,
+                verify_files=True, require_environment=True,
+            )
+            if not _dependency_matches_live(root, dependencies, live):
+                raise ForgeError('Project dependencies changed before start', code='conflict')
         path = dependencies['environment']['interpreter']['path']
-        config = dict(requirements=dependencies['requirements'], packages={
-            name.partition('.')[0] for name in dependencies['modules']})
-        if probe_environment(path, config, expected=dependencies['environment']['interpreter']) != dependencies['environment']:
+        config = dict(
+            requirements=dependencies['requirements'],
+            platform_requirements=dependencies['requirements'],
+            packages={name.partition('.')[0] for name in dependencies['modules']},
+        )
+        actual_env = probe_environment(path, config, expected=dependencies['environment']['interpreter'], strict=True)
+        expected_env = dependencies['environment']
+        # Tolerate legacy v1 sealed manifests that predate `startup_sha256` on resume/preflight.
+        if 'startup_sha256' not in expected_env.get('interpreter', {}):
+            actual_cmp = {
+                **actual_env,
+                'interpreter': {k: v for k, v in actual_env['interpreter'].items() if k != 'startup_sha256'},
+            }
+        else:
+            actual_cmp = actual_env
+        if actual_cmp != expected_env:
             raise ForgeError('Sealed project Python environment changed', code='conflict')
     if m.get('native_submission'):
         from demiflow.workbench.runs.native_submission import verify_basis

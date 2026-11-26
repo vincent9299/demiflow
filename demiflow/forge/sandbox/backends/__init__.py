@@ -51,7 +51,7 @@ def _contains(parent: str, child: str) -> bool:
 
 def validate_spec_portable(spec, command, env, cwd) -> dict:
     """OS-agnostic validation of SandboxSpec invariants shared by non-Linux backends."""
-    from demiflow.workbench.conversations.sandbox import SandboxSpec
+    from demiflow.forge.sandbox.sandbox import SandboxSpec
 
     if type(spec) is not SandboxSpec or spec.role not in {'developer', 'readonly', 'verifier'}:
         raise ValueError('A trusted development sandbox specification is required')

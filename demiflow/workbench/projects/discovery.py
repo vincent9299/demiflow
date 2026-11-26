@@ -19,7 +19,7 @@ from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.python_sources import read_source_bytes
+from demiflow.forge.runtime import read_source_bytes
 
 FORMAT = 'demiflow_forge_project_discovery_v1'
 PARAMETERS = {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}

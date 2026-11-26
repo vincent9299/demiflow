@@ -21,7 +21,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, expli
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
     from demiflow.workbench.graph.preview import _Discard
     from demiflow.workbench.pipeline_policy import native_limits
-    from demiflow.workbench.python_sources import PythonSources, SharedSources
+    from demiflow.forge.runtime import PythonSources, SharedSources
     from demiflow.workbench.graph.preview_guard import enter_readonly
     from demiflow.workbench.projects.discovery import discover
     root, control, platform = ws.load_workspace(root)
@@ -146,7 +146,7 @@ def prepare(root, entry, *, parameters, limits, metadata, explicit_limits=None, 
 
 
 def verify_shared_sources(binding, *, sealed_packages=()):
-    from demiflow.workbench.python_sources import bound_files, source_digest
+    from demiflow.forge.runtime import bound_files, source_digest
     for name, origin, _, digest in bound_files(binding):
         if name not in sealed_packages and source_digest(origin) != digest:
             raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
@@ -154,7 +154,7 @@ def verify_shared_sources(binding, *, sealed_packages=()):
 
 def verify_basis(root, manifest, report, *, sealed_packages=()):
     from demiflow.forge import audit
-    from demiflow.workbench.python_sources import source_digest
+    from demiflow.forge.runtime import source_digest
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']

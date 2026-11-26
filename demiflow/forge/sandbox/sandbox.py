@@ -267,7 +267,7 @@ def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=Non
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, pass_fds=inherited, start_new_session=True)
         os.close(status_write)
         status_write = -1
-        from demiflow.workbench.conversations.sandbox_relay import start_host
+        from demiflow.forge.sandbox.sandbox_relay import start_host
         for host, child, target in pairs:
             child.close()
             start_host(host, target, spec.seconds)
