@@ -167,7 +167,7 @@ def drop_capabilities():
     prctl(38, 1, 0, 0, 0)
 
 
-def seccomp(*, direct_network=False):
+def seccomp(*, direct_network=False, verifier=False):
     sec = SECCOMP
     sec.seccomp_init.argtypes = [ctypes.c_uint32]
     sec.seccomp_init.restype = ctypes.c_void_p
@@ -244,6 +244,13 @@ def seccomp(*, direct_network=False):
             rule(name, ((position, 7, os.O_TRUNC, 0),))
             rule(name, ((position, 7, os.O_ACCMODE, os.O_WRONLY),))
             rule(name, ((position, 7, os.O_ACCMODE, os.O_RDWR),))
+        if verifier:
+            # The disposable plan reader stacks a tighter filter after importing native libraries.
+            # libseccomp probes syscall availability with this invalid strict-mode request.
+            rule('seccomp', ((0, 4, 0, 0), (1, 4, 1, 0), (2, 4, 0, 0)))
+            rule('seccomp', ((0, 4, 1, 0), (1, 7, 8, 0)))
+            rule('seccomp', ((0, 4, 2, 0),))
+            rule('prctl', ((0, 4, 38, 0), (1, 4, 1, 0)))
         for option in (1, 2, 3, 15, 16, 21, 39, 0x53564d41):
             rule('prctl', ((0, 4, option, 0),))
         for request in (0x5401, 0x5413, 0x541b, 0x5421, 0x5450, 0x5451):

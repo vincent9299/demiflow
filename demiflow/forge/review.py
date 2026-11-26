@@ -66,6 +66,8 @@ def _prompt(goal, guide, captured, observations):
     rules, _ = guidance(topics=('flow', 'operator', 'prompt'))
     request = dict(goal=goal, scope=captured['scope'], evidence_gaps=captured['gaps'],
                    host_observations=observations, files=files)
+    if 'dependencies' in captured:
+        request['project_dependencies'] = captured['dependencies']
     prompt = '\n\n'.join((RESPONSE_INSTRUCTIONS, guide,
                           '\n'.join(f"{r['id']} {r['text']}" for r in rules),
                           json.dumps(request, ensure_ascii=False)))

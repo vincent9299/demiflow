@@ -166,7 +166,7 @@ def main():
             landlock(spec['read_paths'], spec['write_paths'], spec['runtime_paths'], spec['identities'],
                      read_policy=spec.get('read_policy', 'scoped'))
             drop_capabilities()
-            seccomp(direct_network=bool(spec.get('direct_network', False)))
+            seccomp(direct_network=bool(spec.get('direct_network', False)), verifier=spec.get('role') == 'verifier')
             os.execve(spec['command'][0], spec['command'], spec['env'])
         except BaseException as error:
             os.write(write_error, (type(error).__name__ + ': ' + str(error))[:2048].encode())

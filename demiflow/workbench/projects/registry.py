@@ -100,12 +100,15 @@ def load_registry(path):
     for key, item in value['projects'].items():
         identity(key)
         fields = {'root','name','allow_runs'} if value['format']==FORMAT else {'root','name','permissions'}
-        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox', 'dev_network'} != fields:
+        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox', 'dev_network', 'dependency_lock'} != fields:
             raise ForgeError('Invalid console project')
         if 'python' in item:
             py = item['python']
             if py != '' and (type(py) is not str or not Path(py).is_absolute() or str(Path(py)) != py or '..' in Path(py).parts):
                 raise ForgeError('Invalid project python configuration')
+        if 'dependency_lock' in item and (
+                type(item['dependency_lock']) is not str or not re.fullmatch(r'[0-9a-f]{64}', item['dependency_lock'])):
+            raise ForgeError('Invalid approved dependency lock digest')
         if 'notebook_sandbox' in item:
             validate_notebook_sandbox(item['notebook_sandbox'])
         if 'dev_network' in item and type(item['dev_network']) is not bool:
@@ -332,12 +335,37 @@ def set_python(path, workspace_id, *, expected, python):
             raise ForgeError('Registry changed before python environment update', code='conflict')
         if workspace_id not in value['projects']:
             raise ForgeError('Workspace is not registered', code='not_found')
+        if cleaned != value['projects'][workspace_id].get('python'):
+            value['projects'][workspace_id].pop('dependency_lock', None)
         if cleaned is None:
             value['projects'][workspace_id].pop('python', None)
         else:
             value['projects'][workspace_id]['python'] = cleaned
         ws.write_control(path, value, expected=expected)
     return dict(status='updated', workspace_id=workspace_id, python=cleaned, digest=content_digest(value))
+
+
+def approve_dependencies(path, workspace_id, *, expected, digest):
+    """Approve the supplied candidate digest for the registered project Python."""
+    from demiflow.forge.dependencies import binding
+    identity(workspace_id)
+    value = load_registry(path)
+    item = value['projects'].get(workspace_id)
+    if not item or not item.get('python'):
+        raise ForgeError('An explicit registered project Python is required')
+    locked = binding(item['root'], approval=digest, python=item['python'])
+    if locked is None:
+        raise ForgeError('The project has no dependency lock to approve')
+    with _locked(path) as path:
+        value = load_registry(path)
+        if content_digest(value) != expected:
+            raise ForgeError('Registry changed before dependency approval', code='conflict')
+        current = value['projects'][workspace_id]
+        if current['root'] != item['root'] or current.get('python') != item['python']:
+            raise ForgeError('Project dependency authority changed', code='conflict')
+        current['dependency_lock'] = locked['digest']
+        ws.write_control(path, value, expected=expected)
+    return dict(status='approved', workspace_id=workspace_id, dependency_lock=digest, digest=content_digest(value))
 
 
 def set_notebook_sandbox(path, workspace_id, *, expected, mode, write_paths=()):
@@ -424,6 +452,14 @@ def register(forge):
     @click.pass_obj
     def update_permissions(registry, workspace_id, expected, submit, control, attach):
         output(lambda:set_permissions(registry,workspace_id,expected=expected,run_submit=submit,run_control=control,attach=attach),True)
+
+    @console.command('approve-dependencies')
+    @click.argument('workspace_id')
+    @click.option('--expected', required=True)
+    @click.option('--digest', required=True)
+    @click.pass_obj
+    def approve_project_dependencies(registry, workspace_id, expected, digest):
+        output(lambda: approve_dependencies(registry, workspace_id, expected=expected, digest=digest), True)
 
     @console.command('serve')
     @click.option('--port', type=click.IntRange(0, 65535), default=0)

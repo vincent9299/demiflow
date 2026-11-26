@@ -80,11 +80,11 @@ def _node_description(detail: dict) -> str | None:
     return None
 
 
-def preview(root, *, entry, params=None, table_resolver=None, source_modules=None):
+def preview(root, *, entry, params=None, table_resolver=None, source_modules=None, dependencies=None, _authority=None):
     """Delegate to the one-shot reader unless called by its trusted dispatcher."""
     if table_resolver is None:
         from demiflow.workbench.worker import operation
-        return operation('plan_preview', root, entry=entry, params=params)
+        return operation('plan_preview', root, entry=entry, params=params, _authority=_authority)
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
@@ -97,7 +97,7 @@ def preview(root, *, entry, params=None, table_resolver=None, source_modules=Non
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Entry is not declared by this project', code='not_found')
     target, symbol = ws.validate_entry(root, entry)
-    shared = SharedSources(root, {} if source_modules is None else source_modules)
+    shared = SharedSources(root, {} if source_modules is None else source_modules, dependencies=dependencies)
     sources = PythonSources(root, shared_imports=shared.importer)
     entry_sha = hashlib.sha256(sources.read(target)).hexdigest()
     # Resolve declared, fixed table metadata through the trusted platform
@@ -156,6 +156,8 @@ def preview(root, *, entry, params=None, table_resolver=None, source_modules=Non
                  details_sha256=content_digest(details), pipeline_sha256=content_digest(pipeline))
     if shared_binding:
         basis['shared_sources'] = {name: row['sha256'] for name, row in shared_binding.items()}
+    if dependencies is not None:
+        basis['project_dependencies'] = dependencies['digest']
     basis['digest'] = content_digest(basis)
     value = dict(format='demiflow.plan_preview.v1', available=True, basis=basis,
                  kind=result.kind, provider=result.provider, entry_completed=False,

@@ -82,8 +82,8 @@ def apply_control_writes(root, path, nonce, snapshot):
         if raw is not None:
             snapshot[name] = (raw, item['mode'])
 
-_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md')
-_PROTECTED_GUARD_TREES = ('data_tools',)
+_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'pyproject.toml', '.forge/deps.lock.json')
+_PROTECTED_GUARD_TREES = ('data_tools', 'packages')
 _PROTECTED_GUARD_MAX_BYTES = 512 * 1024
 _PROTECTED_TREE_MAX_ENTRIES = 2048
 _PROTECTED_TREE_MAX_BYTES = 16 * 1024**2

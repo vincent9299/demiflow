@@ -212,10 +212,11 @@ def specification(spec, command, env, cwd):
                 private_home=home, private_bytes=spec.private_bytes, source_roots=source_roots,
                 source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files,
                 direct_network=bool(spec.direct_network), read_policy=spec.read_policy,
-                write_policy=spec.write_policy)
+                write_policy=spec.write_policy, role=spec.role)
 
 
-def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None):
+def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None,
+                   stdin=subprocess.PIPE):
     """Return Popen only after the confined executable has successfully exec'd.
 
     terminate/kill target the host launcher: parent-death kills namespace PID 1,
@@ -258,7 +259,7 @@ def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=Non
             entry_args.append('--allow-net')
         entry_args.extend((str(os.getpid()), str(fd), str(status_write)))
         process = subprocess.Popen(entry_args, cwd=cwd,
-            env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, stdin=subprocess.PIPE,
+            env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, stdin=stdin,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, pass_fds=inherited, start_new_session=True)
         os.close(status_write)
         status_write = -1

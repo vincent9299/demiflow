@@ -209,13 +209,14 @@ class GlobalSettings:
             if configured_python and not (Path(configured_python).is_file() and os.access(configured_python, os.X_OK)):
                 configured_python = ''
             configured_dev_network = bool(row.get('dev_network', False))
-            if (self.value is None and configured_python is None and not configured_dev_network
+            dependency_lock = row.get('dependency_lock')
+            if (self.value is None and configured_python is None and not configured_dev_network and not dependency_lock
                     and workspace in self.service.deployment.projects
                     and explicit is self.service.deployment.projects[workspace]
                     and explicit['identity'] == identity):
                 return self.service.deployment,self.service.policy_hash,self.service.config_path
             effective=self.value or dict(provider=next(iter(self.templates)),config=next(iter(self.templates.values())))
-            cache_key=(workspace,digest(identity),digest(self.value),configured_python,configured_dev_network)
+            cache_key=(workspace,digest(identity),digest(self.value),configured_python,configured_dev_network,dependency_lock)
             if cache_key not in self.bindings:
                 if len(self.bindings)>=128: reject('自动项目绑定超过预算。','resource_limit')
                 if explicit and explicit['identity']==identity:
@@ -225,6 +226,10 @@ class GlobalSettings:
                     project['python'] = configured_python
                 else:
                     project.pop('python', None)
+                if dependency_lock:
+                    project['dependency_lock'] = dependency_lock
+                else:
+                    project.pop('dependency_lock', None)
                 if configured_dev_network:
                     project['dev_network'] = True
                 else:

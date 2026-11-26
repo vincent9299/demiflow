@@ -473,11 +473,14 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
     if pipeline_paths and not checked and not definitions and not native:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
+    from .dependencies import binding as dependency_binding
+    dependencies = dependency_binding(root)
     # Hygiene applies to every declared project, including new ones without registered entries.
     if (scope['kind'] == 'project' or include_hygiene) and view['control'] is not None:
         hygiene_paths, hygiene_issues = check_project_hygiene(
             root, control, checked_sources=sources, parameter_digests=parameter_digests,
-            exclude=exclude, structural_only=(scope['kind'] != 'project'))
+            exclude=exclude, structural_only=(scope['kind'] != 'project'),
+            packages_approved=dependencies is not None)
         layout_paths.update(hygiene_paths)
         layout.extend(hygiene_issues)
     elif sources:
@@ -486,6 +489,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
         layout.extend(boundary_issues)
     basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
                  manifest_sha256=manifest_hash, sources=sources, parameter_digests=parameter_digests, controls=table_files)
+    if dependencies is not None:
+        basis['dependencies'] = dependencies['digest']
     verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes)
     if sdk_identity(reference['catalog']) != reference['sdk_revision']:
         raise ForgeError('SDK changed during inspection', code='inputs_changed')
@@ -508,6 +513,11 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
 def verify_check_inputs(root, basis, *, deadline=None, max_bytes=MAX_SOURCE_BYTES):
     """Compare exact project bytes at inspection completion and before registration."""
     root = Path(root)
+    if 'dependencies' in basis:
+        from .dependencies import binding as dependency_binding
+        dependencies = dependency_binding(root)
+        if not dependencies or dependencies['digest'] != basis['dependencies']:
+            raise ForgeError('Dependency identity changed during inspection', code='inputs_changed')
     expected = {}
     for group in ('sources', 'parameter_digests', 'controls'):
         for path, value in basis[group].items():

@@ -144,8 +144,11 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
+    from demiflow.workbench.python_sources import project_dependencies
+    dependencies = None if notebook_op else project_dependencies(root, project=project)
     project_root_write = (
         not readonly
+        and dependencies is None
         and project.get('kind') == 'pipeline'
         and project.get('phase') == 'implementation'
     )
@@ -163,6 +166,11 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                         protected.append(root / entry.name)
         except OSError:
             pass
+    if dependencies is not None:
+        python = dependencies['environment']['interpreter']
+        package_files = [root / item['path'] for item in dependencies['packages'].values()]
+        read.extend(package_files)
+        protected.extend((root / 'pyproject.toml', root / 'packages', Path(python['prefix']), *package_files))
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     if not notebook_op:
         protected.extend(root / name for name in project.get('protected', []))
@@ -206,7 +214,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
         private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
         direct_network=direct_network,
-        read_policy='scoped' if readonly else 'inherit_os',
+        read_policy='scoped' if readonly or dependencies is not None else 'inherit_os',
         write_policy='project_root' if project_root_write else 'scoped')
 
 
@@ -841,7 +849,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
 
                 if warm_ready and not provider_opened:
                     proj_py = effective_project_python(project)
-                    shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py))
+                    shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py
+                                  and shims.dependency_lock == project.get('dependency_lock')))
                     compatible = (not compact) and (warm_operation == turn_op) and shims_ok
                     if compatible and deployment.mode == 'restricted':
                         provider_home = home / 'provider'

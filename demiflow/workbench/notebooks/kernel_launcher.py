@@ -126,6 +126,46 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
         os.close(ruleset)
 
 
+def _dependency_snapshot(config, root, code_root, python):
+    """Freeze approved source bytes before starting a new kernel."""
+    import hashlib
+
+    sys.path.insert(0, code_root)
+    from demiflow.forge.dependencies import binding, module_files, probe_environment
+    from demiflow.forge.io import ensure_directory, publish_bytes
+    from demiflow.forge.platform_environment import read_bounded
+    from demiflow.workbench.python_sources import import_bootstrap
+
+    locked = binding(root, approval=config['dependency_lock'], python=python)
+    if probe_environment(python, locked) != locked['environment']:
+        _fail('The approved project Python environment changed')
+    directory = Path(config['runtime_dir']).parent / 'dependency-kernels'
+    ensure_directory(directory)
+    snapshot = directory / locked['digest']
+    if not snapshot.exists():
+        with os.scandir(directory) as entries:
+            if sum(1 for _ in zip(range(16), entries)) >= 16:
+                _fail('Notebook dependency snapshots exceed their retention budget')
+    ensure_directory(snapshot)
+    modules = {}
+    for name, proof in module_files(root, locked).items():
+        source = Path(proof['path'])
+        parts = name.split('.')
+        target = snapshot.joinpath('sources', *parts)
+        target = target / '__init__.py' if source.name == '__init__.py' else target.with_suffix('.py')
+        raw = read_bounded(source, proof['bytes'])
+        if hashlib.sha256(raw).hexdigest() != proof['sha256']:
+            _fail('The approved Notebook dependency changed during preparation')
+        try:
+            publish_bytes(target, raw)
+        except FileExistsError:
+            if read_bounded(target, proof['bytes']) != raw:
+                _fail('The Notebook dependency snapshot differs from its lock')
+        modules[name] = {**proof, 'path': str(target)}
+    bootstrap = import_bootstrap(snapshot / 'bootstrap', modules)
+    return snapshot, bootstrap, locked['environment']['interpreter']['prefix']
+
+
 def main() -> None:
     if len(sys.argv) < 3:
         _fail('Missing kernel config or connection file')
@@ -140,10 +180,10 @@ def main() -> None:
     if not py_path.is_absolute() or not py_path.is_file() or not os.access(py_path, os.X_OK):
         _fail(f'项目配置的 Python 解释器不可用: {target_python}。请在「项目设置」中重新配置。')
 
-    _check_ipykernel(target_python)
-
     root = str(Path(config['root']).resolve(strict=True))
     code_root = str(Path(config['code_root']).resolve(strict=True))
+    dependency = _dependency_snapshot(config, root, code_root, target_python) if config.get('dependency_lock') else None
+    _check_ipykernel(target_python)
     tmp_dir = Path(config['tmp_dir'])
     home_dir = tmp_dir / 'home'
     mpl_dir = tmp_dir / 'matplotlib'
@@ -169,6 +209,9 @@ def main() -> None:
             '/sys',
             *config.get('locations', ()),
         ]
+        if dependency:
+            read_paths.remove('/')
+            read_paths.append(str(dependency[0]))
         exec_paths = [
             '/usr',
             '/bin',
@@ -191,6 +234,11 @@ def main() -> None:
             candidate = (Path(root) / rel).resolve()
             if not candidate.is_relative_to(Path(root)):
                 _fail(f'无效的允许写入路径: {rel}')
+            if dependency:
+                protected = (Path(root) / 'packages', Path(root) / 'pyproject.toml',
+                             Path(root) / '.forge', dependency[0], Path(dependency[2]))
+                if any(candidate.is_relative_to(path) or path.is_relative_to(candidate) for path in protected):
+                    _fail('Notebook write scope overlaps project dependencies')
             candidate.mkdir(parents=True, exist_ok=True)
             write_paths.append(str(candidate))
         if platform.system() == 'Linux':
@@ -200,7 +248,8 @@ def main() -> None:
 
     env = dict(os.environ)
     existing_py_path = env.get('PYTHONPATH', '')
-    env['PYTHONPATH'] = f'{existing_py_path}:{code_root}' if existing_py_path else code_root
+    env['PYTHONPATH'] = (os.pathsep.join((str(dependency[1]), code_root)) if dependency
+                         else f'{existing_py_path}:{code_root}' if existing_py_path else code_root)
     env['DEMIFLOW_NOTEBOOK_ROOT'] = root
     env['DEMIFLOW_NOTEBOOK_SANDBOX'] = sandbox_mode
     env['HOME'] = str(home_dir)

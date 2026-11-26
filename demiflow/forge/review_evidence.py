@@ -318,7 +318,11 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         raise ForgeError('Select a project directory and one valid review scope', code='invalid_request')
     if len(paths) + len(evidence) > MAX_FILES or len(exclude) > 256:
         raise ForgeError('Review path list exceeds its limit', code='resource_limit')
+    from .dependencies import binding as dependency_binding, facts as dependency_facts
+    dependencies = dependency_facts(dependency_binding(root))
     excluded = tuple(exclude)
+    if dependencies is not None:
+        excluded = (*excluded, 'packages')
     for name in (*paths, *evidence):
         _check_path(root, name, excluded)
     if prior_sources is not None:
@@ -440,6 +444,8 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
                  entries=selected_entries, changed=changed, evidence=list(evidence))
     result = dict(scope=scope, files=files, groups=groups,
                   gaps=[detail for name in files for detail in project.gaps.get(name, ())])
+    if dependencies is not None:
+        result['dependencies'] = dependencies
     result['identity'] = digest(result)
     return result
 
@@ -498,5 +504,8 @@ def review_units(captured):
     if len(packed) > MAX_UNITS:
         raise ForgeError('Review unit count exceeds the delivery budget', code='resource_limit')
     for names in packed:
-        yield dict(scope=captured['scope'], files={name: files[name] for name in sorted(names)},
-                   gaps=captured['gaps'], identity=captured['identity'])
+        unit = dict(scope=captured['scope'], files={name: files[name] for name in sorted(names)},
+                    gaps=captured['gaps'], identity=captured['identity'])
+        if 'dependencies' in captured:
+            unit['dependencies'] = captured['dependencies']
+        yield unit

@@ -301,6 +301,15 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
     env_cfg = _runtime_environment(root)
     if env_cfg is not None:
         result['environment'] = env_cfg
+    from .dependencies import binding as dependency_binding, facts as dependency_facts
+    try:
+        locked = dependency_binding(root, verify_files=False)
+        if locked is not None:
+            result['project_dependencies'] = {
+                **dependency_facts(locked), 'python': locked['environment']['interpreter']['path'],
+            }
+    except (OSError, ValueError) as error:
+        diagnostics.append(dict(code='project_dependencies', path='pyproject.toml', detail=str(error)))
     if topic == 'sdk' and api is None and reference is not None and result['sdk'].get('apis'):
         headroom = CONTEXT_BYTES - len(canonical(result)) - 2048
         if headroom > 1024:
@@ -343,6 +352,13 @@ def render_context(result):
     def append_project_header():
         rows.append('## 当前项目')
         rows.append(f"{result['project']['name']} · {result['root']} · {result['project']['state']}")
+        dependencies = result.get('project_dependencies')
+        if dependencies:
+            rows.append('项目 Python：' + dependencies['python'])
+            if dependencies['packages']:
+                rows.append('已锁定源码包：' + '、'.join(sorted(dependencies['packages'])))
+            if dependencies['distributions']:
+                rows.append('已锁定分发包：' + '、'.join(dependencies['distributions'][:32]))
         locations = result['project'].get('locations')
         if locations:
             loc_parts = [

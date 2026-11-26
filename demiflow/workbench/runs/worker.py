@@ -78,7 +78,10 @@ def _execute(root, run_id, run, attempt=None):
             raise Cancelled('Run cancellation requested')
 
     try:
-        report = runs.verify_seal(target, manifest)
+        dependencies = manifest.get('project_dependencies')
+        report = runs.verify_seal(target, manifest, environment=dependencies is None)
+        if dependencies is not None:
+            _verify_project_environment(dependencies)
         allocation_guard(manifest['limits'], native_execution=manifest.get('native_execution'))
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
@@ -97,6 +100,14 @@ def _execute(root, run_id, run, attempt=None):
                                          read=read_shared, project_roots=project_roots)
             imports.set_project_package(package)
             sys.meta_path.insert(0, imports)
+        if dependencies and dependencies['modules']:
+            from demiflow.workbench.python_sources import import_bootstrap
+            bootstrap = import_bootstrap(work / 'project-imports', {
+                name: {**proof, 'path': str(shared[name][0])}
+                for name, proof in dependencies['modules'].items()
+            }, project_roots=project_roots, project_package=package)
+            previous = os.environ.get('PYTHONPATH')
+            os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, (str(bootstrap), previous)))
         module, function = binding.get('source_entry', manifest['entry']).split(':')
         module_name = binding.get('entry_module', module[:-3].replace('/', '.'))
         entry = getattr(importlib.import_module(module_name), function)
@@ -144,7 +155,9 @@ def _execute(root, run_id, run, attempt=None):
         if errors or any(o['result'] is None for o in outputs):
             registration_failed[0] = True
             raise RuntimeError('Output registration incomplete: ' + '; '.join(errors))
-        runs.verify_seal(target, manifest)
+        runs.verify_seal(target, manifest, environment=dependencies is None)
+        if dependencies is not None:
+            _verify_project_environment(dependencies)
         run.finish(dict(outcome='succeeded', finished_at=time.time()))
     except BaseException as exc:
         import traceback
@@ -162,6 +175,12 @@ def _execute(root, run_id, run, attempt=None):
             error={'type': type(exc).__name__, 'message': str(exc)[:2048]}, finished_at=time.time()))
         return 1
     return 0
+
+
+def _verify_project_environment(binding):
+    from demiflow.forge.dependencies import current_environment
+    if current_environment(binding) != binding['environment']:
+        raise RuntimeError('Sealed project Python environment changed')
 
 
 def _source_imports(source, files, *, package=()):
@@ -344,7 +363,9 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         unit_fds = inherited_unit()
         if unit_fds:
             env[UNIT_ENV] = str(unit_fds[0])
-        command = [sys.executable, '-I', '-B', __file__, 'execute', str(root), run_id]
+        dependencies = manifest.get('project_dependencies')
+        python = dependencies['environment']['interpreter']['path'] if dependencies else sys.executable
+        command = [python, '-I', '-B', __file__, 'execute', str(root), run_id]
         if attempt is not None:
             command.append(str(attempt))
         started = time.monotonic()

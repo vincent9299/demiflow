@@ -1308,7 +1308,7 @@ def _group_unreferenced_under(prefix: str, all_files: list[str], unreferenced: l
 
 
 def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, parameter_digests: dict,
-                          exclude=(), structural_only: bool = False):
+                          exclude=(), structural_only: bool = False, packages_approved=False):
     """Audit DF-02 structural & protocol cleanliness without mutating or inspecting business data.
 
     When ``structural_only=True`` (used by incremental post-turn hooks), skips corpus-dependent
@@ -1382,7 +1382,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             elif suffix in _ARCHIVE_SUFFIXES:
                 add('root_archive', name, '根目录存在压缩归档包；废弃代码或旧配置请直接清理，不要在项目内保留源码/配置打包归档。')
         elif item.is_dir():
-            if name != 'parameters' and name not in ALLOWED_ROOT_DIRS:
+            if name != 'parameters' and name not in ALLOWED_ROOT_DIRS and not (name == 'packages' and packages_approved):
                 add('root_dir', name, f'根目录存在非规范顶层目录 {name}/；按 DF-02 规范根目录仅允许标准目录（flows/、operators/、prompts/、configs/、data_tools/、notebooks/、workflows/、data/、logs/、docs/、tests/、runs/），请按职责归位或清理。')
 
     # 2. Deprecated parameters/ directory: unbound legacy files or empty leftover directory.

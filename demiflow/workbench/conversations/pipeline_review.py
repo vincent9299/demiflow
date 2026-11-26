@@ -66,9 +66,11 @@ class DeliveryReview:
                         'turn_id': self.turn['id'], 'status': item.get('status'),
                         'diagnostic_count': item.get('diagnostic_count')}).decode()})
         check_cancel()
-        review = review_project(self.project['root'], goal=goal, **self.selection,
-            paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
-            observations=observations, reviewer=reviewer)
+        from demiflow.forge.dependencies import host_approval
+        with host_approval(self.project['root'], self.project.get('dependency_lock'), self.project.get('python')):
+            review = review_project(self.project['root'], goal=goal, **self.selection,
+                paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
+                observations=observations, reviewer=reviewer)
         check_cancel()
         return review
 

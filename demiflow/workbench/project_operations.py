@@ -136,22 +136,22 @@ def register_flow(root, entry, *, params=None, authorize):
                     table_resolver=make_resolver(ws.table_binding, runs.result_table))
 
 
-def inspect_flow(root, entry, *, params, save=True, limits=None):
+def inspect_flow(root, entry, *, params, save=True, limits=None, authority=None):
     from demiflow.workbench.worker import operation
 
     return operation(
-        "inspect", root, entry=entry, params=params, save=save, limits=limits
+        "inspect", root, entry=entry, params=params, save=save, limits=limits, _authority=authority
     )
 
 
-def check_project(root):
+def check_project(root, *, authority=None):
     from demiflow.workbench.worker import operation
-    return operation('project_check', root)
+    return operation('project_check', root, _authority=authority)
 
 
-def project_check_status(root):
+def project_check_status(root, *, authority=None):
     from demiflow.workbench.worker import operation
-    return operation('project_status', root)
+    return operation('project_status', root, _authority=authority)
 
 
 def sample_table(

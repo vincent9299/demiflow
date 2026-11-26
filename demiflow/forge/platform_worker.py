@@ -34,7 +34,7 @@ def bind_parent():
     operation_budget.bind_worker()
 
 
-def inspection_environment(pass_fds=(), *, allow_preparation=True):
+def inspection_environment(pass_fds=(), *, allow_preparation=True, inherit_authority=True):
     env = {
         "PATH": "/usr/local/bin:/usr/bin:/bin", "LANG": "C.UTF-8",
         "PYTHONDONTWRITEBYTECODE": "1", "OPENBLAS_NUM_THREADS": "1",
@@ -53,7 +53,8 @@ def inspection_environment(pass_fds=(), *, allow_preparation=True):
         env["DEMIFLOW_FORGE_DOMAIN"]=os.environ["DEMIFLOW_FORGE_DOMAIN"]
     if os.environ.get("TMPDIR"):
         env["TMPDIR"]=os.environ["TMPDIR"]
-    unit_fds=inherited_unit()
+    unit_fds=inherited_unit() if inherit_authority else ()
+    allow_preparation = allow_preparation and inherit_authority
     if unit_fds:env[UNIT_ENV]=str(unit_fds[0])
     preparation_fds=pass_fds if allow_preparation else ()
     if allow_preparation and not preparation_fds and os.environ.get('DEMIFLOW_FORGE_PREPARATION_FD'):
@@ -65,21 +66,26 @@ def inspection_environment(pass_fds=(), *, allow_preparation=True):
 
 
 @operation_budget.controlled
-def capture(argv, request, limits, *, response_formats=None, input_limit=16384, pass_fds=(), tree_rss_limit=None):
+def capture(argv, request, limits, *, response_formats=None, input_limit=16384, pass_fds=(),
+            tree_rss_limit=None, inherit_authority=True, launcher=None):
     from .platform import bounded_json
     from .schema import ForgeError
     # One-shot calls inherit the remaining control scope; reusable readers
     # use inspection_environment directly and never bind this deadline.
     deadline = operation_budget.child_deadline(limits['timeout_seconds'])
 
-    env, inherited_fds = inspection_environment(pass_fds)
+    env, inherited_fds = inspection_environment(pass_fds, inherit_authority=inherit_authority)
+    if not inherit_authority:
+        env.pop("DEMIFLOW_FORGE_DOMAIN", None)
+        env.pop("TMPDIR", None)
     env.update(operation_budget.worker_environment(deadline))
     with tempfile.TemporaryDirectory(prefix="demiflow-platform-") as scratch:
         with tempfile.TemporaryFile() as input_file:
             input_file.write(bounded_json(request, input_limit))
             input_file.seek(0)
             operation_budget.check(deadline)
-            process = subprocess.Popen(argv, stdin=input_file, stdout=subprocess.PIPE,
+            start = launcher or subprocess.Popen
+            process = start(argv, stdin=input_file, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, cwd=scratch, env=env, start_new_session=True, pass_fds=inherited_fds)
             outputs = {"stdout": bytearray(), "stderr": bytearray()}
             ceilings = {"stdout": limits["catalog_bytes"], "stderr": limits["stderr_bytes"]}

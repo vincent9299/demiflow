@@ -226,3 +226,31 @@ def run(*, directory):
         if state['status'] in runs.ACTIVE:
             runs.cancel(root, identity, expected_attempt=state['attempt'])
             stopped(root, identity)
+
+
+def test_project_dependency_preview_and_native_run_use_the_locked_package(root, tmp_path):
+    import sys
+    from demiflow.forge.dependencies import update
+    from demiflow.workbench.graph.preview import preview
+
+    package = tmp_path / 'approved'
+    package.mkdir()
+    (package / '__init__.py').write_text('VALUE = 3\n')
+    (package / 'step.py').write_text('def adjust(row):\n'
+        '    from native_dep_fixture.late import OFFSET\n'
+        '    return {"x": row["x"] + OFFSET}\n')
+    (package / 'late.py').write_text('OFFSET = 20\n')
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+        f'native_dep_fixture = {{source = "local_ref", path = "{package}"}}\n')
+    locked = update(root, sys.executable)
+    prepared = native_flow(root, 'from native_dep_fixture.step import adjust\n', '1', transform='.map(adjust)')
+    result = preview(root, entry='flows/native.py:run', params='flows/native.json')
+    assert result['basis']['project_dependencies'] == locked['digest']
+    target, value = runs._load(root, prepared['run_id'])
+    assert value['manifest']['project_dependencies']['digest'] == locked['digest']
+    assert (target / 'source/native_dep_fixture/late.py').read_text() == 'OFFSET = 20\n'
+    outcome = execute(root, prepared)
+    assert outcome['status'] == 'succeeded', (outcome, runs.logs(root, outcome['run_id']))
+    import lance
+    assert all(sorted(lance.dataset(row['uri']).to_table()['x'].to_pylist()) == [21, 22]
+               for row in outcome['outputs'])

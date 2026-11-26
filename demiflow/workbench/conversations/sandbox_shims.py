@@ -21,7 +21,7 @@ import shutil
 import sys
 import tempfile
 
-from demiflow.workbench.python_sources import deployment_modules
+from demiflow.workbench.python_sources import deployment_modules, project_dependencies
 
 _FORGE_SHIM_ENTRY = """\
 import os
@@ -60,7 +60,15 @@ def _cli():
     pass
 
 register(_cli)
-_cli.main(args=args, prog_name='demiflow')
+if mode == 'restricted' and len(args) >= 2 and args[1] == 'dep' and (
+        len(args) < 3 or args[2] not in {'list', 'verify'}):
+    raise SystemExit('Dependency updates require the trusted project owner')
+from demiflow.forge.dependencies import host_approval
+with open(runtime_cfg) as stream:
+    import json
+    approved = json.load(stream)
+with host_approval(approved['root'], approved.get('dependency_lock'), approved.get('python')):
+    _cli.main(args=args, prog_name='demiflow')
 """
 
 _SITECUSTOMIZE = """\
@@ -189,6 +197,15 @@ def _install():
 
         sys.meta_path.append(_ProjectPackageFinder())
 
+    managed = cfg.get('project_dependencies') or {}
+    if managed:
+        sys.path.insert(0, sdk_root)
+        try:
+            from demiflow.workbench.python_sources import install_bound_imports
+            install_bound_imports(managed)
+        except BaseException:
+            os._exit(78)
+
     # 3. Declared read-only shared Python sources (from shared-sources.json).
     if shared_raw:
         shared_paths = {name: Path(p) for name, p in shared_raw.items()}
@@ -268,6 +285,10 @@ class SandboxShims:
         self.root = Path(project['root']).resolve()
         self.execution_mode = execution_mode
         self.project_python = project_python if (isinstance(project_python, str) and project_python.strip()) else None
+        from demiflow.forge.dependencies import module_files
+        locked = project_dependencies(self.root, project={**project, 'python': self.project_python})
+        self.dependency_lock = project.get('dependency_lock')
+        managed = module_files(self.root, locked)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-shims-'))
         os.chmod(self.directory, 0o700)
         self.bin = self.directory / 'bin'
@@ -275,7 +296,11 @@ class SandboxShims:
         sdk_root = str(Path(__file__).resolve().parents[3])
 
         shared = _declared_shared_modules(self.root) if self.project_python else {}
-        self.shared_read_paths = tuple(sorted(set(shared.values()), key=str))
+        shared_roots = {name.partition('.')[0] for name in shared}
+        if shared_roots & {name.partition('.')[0] for name in managed}:
+            self.close()
+            raise ValueError('Project dependency conflicts with a deployment shared package')
+        self.shared_read_paths = tuple(sorted(set(shared.values()) | {Path(row['path']) for row in managed.values()}, key=str))
         shared_roots = sorted({name.split('.')[0] for name in shared})
 
         # 1. Always write Forge runtime configuration + restricted `demiflow` CLI shim.
@@ -284,6 +309,7 @@ class SandboxShims:
             'root': str(self.root),
             'execution_mode': execution_mode,
             'python': self.project_python,
+            'dependency_lock': self.dependency_lock,
             'writes': list(project.get('writes') or []),
             'shared_sources': shared_roots,
             'input_access': bool(input_access),
@@ -314,6 +340,7 @@ class SandboxShims:
             binding = {
                 'sdk_root': sdk_root,
                 'project_root': str(self.root),
+                'project_dependencies': managed,
                 'shared_sources': {name: str(path) for name, path in sorted(shared.items())},
             }
             binding_path.write_text(json.dumps(binding, ensure_ascii=False), encoding='utf-8')

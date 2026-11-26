@@ -75,9 +75,9 @@ def read_source_bytes(path):
     return read_bounded(path, path.stat().st_size)
 
 
-def source_digest(path):
+def source_digest(path, maximum=None):
     digest = hashlib.sha256()
-    for chunk in regular_file_chunks(path):
+    for chunk in regular_file_chunks(path, maximum):
         digest.update(chunk)
     return digest.hexdigest()
 
@@ -142,13 +142,18 @@ class SharedSourceImports(importlib.abc.MetaPathFinder):
 
 
 class SharedSources:
-    def __init__(self, root, configured):
+    def __init__(self, root, configured, *, dependencies=None):
+        from demiflow.forge.dependencies import module_files
         if type(configured) is not dict or len(configured) > MAX_MODULES:
             raise ForgeError('Shared Python sources exceed the module budget')
         self.paths = {name: _origin(root, name, value) for name, value in configured.items()}
+        self.managed = module_files(root, dependencies)
+        if {name.partition('.')[0] for name in self.paths} & {name.partition('.')[0] for name in self.managed}:
+            raise ForgeError('Project dependency conflicts with a deployment shared package', code='conflict')
+        self.paths.update((name, Path(row['path'])) for name, row in self.managed.items())
         if len(set(self.paths.values())) != len(self.paths):
             raise ForgeError('A shared Python file must have one module name')
-        self.digests = {}
+        self.digests = {name: row['sha256'] for name, row in self.managed.items()}
         local = set()
         for name in {name.split('.')[0] for name in self.paths}:
             if (root / name).is_dir() or (root / (name + '.py')).is_file():
@@ -156,7 +161,8 @@ class SharedSources:
         self.importer = SharedSourceImports(self.paths, read=self.read, project_roots=local)
 
     def read(self, name):
-        raw = read_source_bytes(self.paths[name])
+        managed = self.managed.get(name)
+        raw = read_bounded(self.paths[name], managed['bytes']) if managed else read_source_bytes(self.paths[name])
         digest = hashlib.sha256(raw).hexdigest()
         if name in self.digests and self.digests[name] != digest:
             raise ForgeError('Shared Python source changed: ' + name, code='conflict')
@@ -167,7 +173,8 @@ class SharedSources:
         # Include declared lazy imports used only by the eventual row callback.
         # This also rechecks every import the compiler actually executed.
         for name in sorted(self.paths):
-            digest = source_digest(self.paths[name])
+            managed = self.managed.get(name)
+            digest = source_digest(self.paths[name], managed['bytes'] if managed else None)
             if name in self.digests and self.digests[name] != digest:
                 raise ForgeError('Shared Python source changed: ' + name, code='conflict')
             self.digests[name] = digest
@@ -303,3 +310,65 @@ class PythonSources(importlib.abc.MetaPathFinder):
         for name, digest in self.digests.items():
             if source_digest(self.root / name) != digest:
                 raise ForgeError('Source changed during plan construction', code='conflict')
+
+
+def project_dependencies(root, *, authority=None, project=None, verify_files=True):
+    """Resolve trusted local or registry-approved dependency input before use."""
+    from demiflow.forge.dependencies import binding, declaration
+
+    if authority is not None and authority.get('kind') == 'web':
+        from demiflow.workbench.projects.registry import load_registry
+        registry = authority.get('registry')
+        project = load_registry(registry)['projects'].get(authority['workspace_id'], {}) if registry else {}
+    if project is None:
+        return binding(root, verify_files=verify_files)
+    if project.get('root') is not None and Path(project['root']).absolute() != Path(root).absolute():
+        raise ForgeError('Dependency approval belongs to another project', code='conflict')
+    if declaration(root) is not None and not project.get('python'):
+        raise ForgeError('Configure an explicit project Python before admitting dependencies', code='operation_rejected')
+    return binding(root, approval=project.get('dependency_lock') or '', python=project.get('python'),
+                   verify_files=verify_files)
+
+
+def install_bound_imports(modules, *, project_roots=(), project_package=()):
+    """Install the existing exact-name loader from a trusted immutable inventory."""
+    paths = {name: Path(row['path']) for name, row in modules.items()}
+
+    def read(name):
+        row = modules[name]
+        raw = read_bounded(paths[name], row['bytes'])
+        if hashlib.sha256(raw).hexdigest() != row['sha256']:
+            raise ForgeError('Bound dependency bytes changed: ' + name, code='conflict')
+        return raw
+
+    finder = SharedSourceImports(paths, read=read, project_roots=project_roots)
+    finder.set_project_package(project_package)
+    sys.meta_path.insert(0, finder)
+    return finder
+
+
+def import_bootstrap(directory, modules, *, project_roots=(), project_package=()):
+    """Write a fixed startup hook for an owned business child process."""
+    from demiflow.forge.io import ensure_directory, publish_bytes
+    from demiflow.forge.platform import bounded_json
+
+    directory = Path(directory)
+    ensure_directory(directory)
+    binding_path = directory / 'dependencies.json'
+    bootstrap_path = directory / 'sitecustomize.py'
+    configuration = dict(modules=modules, project_roots=sorted(project_roots), project_package=list(project_package))
+    publish_bytes(binding_path, bounded_json(configuration, 512 * 1024), create=not binding_path.exists())
+    body = '''import json
+import os
+from pathlib import Path
+try:
+    from demiflow.workbench.python_sources import install_bound_imports
+    with Path(__file__).with_name('dependencies.json').open() as stream:
+        binding = json.load(stream)
+    install_bound_imports(**binding)
+except BaseException:
+    os.write(2, b'DemiFlow dependency bootstrap failed\x5cn')
+    os._exit(78)
+'''
+    publish_bytes(bootstrap_path, body.encode(), create=not bootstrap_path.exists())
+    return directory
