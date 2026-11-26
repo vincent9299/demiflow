@@ -268,6 +268,18 @@ def observe_operator(execution, event, payload):
                 handoff[k] < previous[1][k] for k in ('peak', 'peak_encoded_bytes')):
             raise DataflowError('FENCED', 'kernel output handoff peak moved backwards')
         slots[key] = (event.boot_id, dict(handoff))
+    calls = payload.get('call_concurrency')
+    if calls is not None:
+        execution_calls = getattr(execution, '_operator_calls', None)
+        if execution_calls is None:
+            execution._operator_calls = execution_calls = {}
+        key = (payload['occurrence_id'], payload['partition_id'])
+        previous = execution_calls.get(key)
+        calls = validated_call_concurrency(calls)
+        if previous is not None and previous[0] == event.boot_id and any(
+                calls[k] < previous[1][k] for k in ('peak', 'byte_waits')):
+            raise DataflowError('FENCED', 'call concurrency observation moved backwards')
+        execution_calls[key] = (event.boot_id, calls)
     value = payload.get('callback_observations')
     if value is None:
         return
@@ -285,6 +297,26 @@ def observe_operator(execution, event, payload):
     # A new boot restores the actual committed prefix, not uncommitted work
     # observed before the prior process died. Never add that prefix twice.
     slots[key] = (event.boot_id, value)
+
+
+def validated_call_concurrency(value):
+    fields = {'capacity', 'peak', 'byte_waits', 'byte_limit', 'output_reserve'}
+    counts = ('capacity', 'peak', 'byte_waits', 'output_reserve')
+    if (type(value) is not dict or set(value) != fields
+            or any(type(value[k]) is not int or value[k] < 0 for k in counts)
+            or not 1 <= value['peak'] <= value['capacity']
+            or value['byte_limit'] is not None and (type(value['byte_limit']) is not int or value['byte_limit'] < 1)
+            or value['byte_limit'] is None and (value['byte_waits'] or value['output_reserve'])):
+        raise DataflowError('INVALID_CONTRACT', 'invalid call concurrency observation')
+    return dict(value)
+
+
+def call_concurrency(execution, labels):
+    """Per stage and partition: declared slots, the most calls in flight, and admissions that waited for memory."""
+    return [{'stage': labels.get(occurrence, occurrence), 'occurrence_id': occurrence,
+             'partition_id': partition, 'scope': 'attempt', **value,
+             'limited_by': 'memory' if value['byte_waits'] else None}
+            for (occurrence, partition), (_, value) in getattr(execution, '_operator_calls', {}).items()]
 
 
 def validated_node_counters(metrics):
@@ -452,6 +484,7 @@ def stream_observations(execution, stats):
         'kind': 'synchronous_output_handoff', 'scope': 'attempt', **value}
         for (occurrence, partition), (_, value)
         in getattr(execution, '_operator_handoffs', {}).items()]
+    stats.metrics['call_concurrency'] = call_concurrency(execution, labels)
     stats.metrics['stage_processing_latency'] = {name: {
         'count': v['count'], 'total_s': v['total_ns'] / 1e9,
         'min_s': v['min_ns'] / 1e9, 'max_s': v['max_ns'] / 1e9,

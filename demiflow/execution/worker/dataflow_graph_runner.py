@@ -1175,6 +1175,9 @@ class WorkerGraphRunner:
             handoff = kernel.observations.output_handoff()
             if handoff['peak']:
                 payload['output_handoff'] = handoff
+            calls = getattr(kernel, 'call_concurrency', None)
+            if calls is not None and calls['peak']:
+                payload['call_concurrency'] = calls
             lifecycle = kernel.observations.lifecycle_snapshot()
             if lifecycle['created']:
                 payload['actor_lifecycle'] = lifecycle

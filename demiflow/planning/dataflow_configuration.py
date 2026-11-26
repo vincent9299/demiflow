@@ -166,6 +166,7 @@ COMPILER_KEYS: Mapping[str, ConfigurationKey] = {key.name: key for key in (
     _key('fixed_worker_min_bytes', 'budget', _count, 'mandatory task working set within its declared worker grant; bytes'),
     _key('codec_min_bytes', 'budget', _count, 'smallest supported kernel workspace; bytes'),
     _key('call_input_min_bytes', 'budget', _count, 'in-flight input the kernel minimum reserves for concurrent per-record calls; bytes'),
+    _key('call_output_min_bytes', 'budget', _count, 'output each admitted concurrent per-record call reserves in its byte window; bytes'),
     _key('publication_min_bytes', 'budget', _count, 'smallest supported native publication workspace; bytes'),
     _key('integer_aggregate_blocks', 'budget', _flag, 'allow the sealed builtin reducer to combine exact integer rows'),
     _key('terminal_memory', 'budget', _terminal_memory, 'terminal index and payload windows, or one bounded workspace; bytes'),
@@ -284,7 +285,7 @@ def _admitted(node) -> frozenset | None:
     if node.kind in ('source', 'relational'):
         keys = SOURCE_KEYS.get(kind)
         return None if keys is None else keys | {'occurrence_id', SCHEMA_KEY, 'graph_observe', 'codec_min_bytes'}
-    common = {'occurrence_id', 'program', 'codec_min_bytes', 'call_input_min_bytes'} | GRAPH_MARKS | SHARED_KEYS
+    common = {'occurrence_id', 'program', 'codec_min_bytes', 'call_input_min_bytes', 'call_output_min_bytes'} | GRAPH_MARKS | SHARED_KEYS
     if kind in MODEL_KEYS:
         return MODEL_KEYS[kind] | common
     declared = declared_fields(kind)

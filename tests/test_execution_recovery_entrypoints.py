@@ -144,7 +144,9 @@ def test_plain_python_stream_admission_precedes_source_and_actor_calls(tmp_path)
             with calls.open('a') as stream: stream.write('actor\n')
             return row
     with pytest.raises(DataflowError,match='RESOURCE_INFEASIBLE'):
-        with RunContext.start(tmp_path/'run',limits={'memory_bytes':64*1024,
+        # The single-pass source, one call of the actor (3 rows and its state)
+        # and the terminal must run together; this run cannot hold them.
+        with RunContext.start(tmp_path/'run',limits={'memory_bytes':32*1024,
                 'max_batch_bytes':8192,'max_row_bytes':4096,'max_state_bytes':8192}):
             data.from_iter(source).map_async(Convert,concurrency=8,queue_depth=1).materialize()
     assert not calls.exists()

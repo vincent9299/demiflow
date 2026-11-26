@@ -20,7 +20,7 @@ def row(i):
 def test_restored_invocation_keeps_scope_slot_and_emitted_frontier(bounded):
     credit = row(0).encoded_bytes if bounded else None
     release = threading.Event()
-    first = ConcurrentCalls(2, check_stop=lambda: None, input_limit=credit)
+    first = ConcurrentCalls(2, check_stop=lambda: None, byte_limit=credit)
     scope = 'a' * 64
     def delayed(slot):
         yield row(0)
@@ -37,7 +37,7 @@ def test_restored_invocation_keeps_scope_slot_and_emitted_frontier(bounded):
     finally:
         release.set()
         first.close(timeout=5)
-    replay = ConcurrentCalls(2, check_stop=lambda: None, input_limit=credit)
+    replay = ConcurrentCalls(2, check_stop=lambda: None, byte_limit=credit)
     seen = []
     def compute(slot, input):
         seen.append((slot, input, INVOCATION_SCOPE.get()))
@@ -61,7 +61,7 @@ def test_corrupt_invocation_image_rejects_before_launch(mutate):
     if mutate == 'bad_scope': image[0]['scope'] = 'unknown'
     if mutate == 'negative_emitted': image[0]['emitted'] = -1
     credit = row(0).encoded_bytes - 1 if mutate == 'over_credit' else None
-    calls, launched = ConcurrentCalls(2, check_stop=lambda: None, input_limit=credit), []
+    calls, launched = ConcurrentCalls(2, check_stop=lambda: None, byte_limit=credit), []
     try:
         with pytest.raises(DataflowError):
             calls.restore(image, slots=slots, compute=lambda *args: launched.append(args))
@@ -71,14 +71,14 @@ def test_corrupt_invocation_image_rejects_before_launch(mutate):
 
 def test_byte_credit_waits_for_an_input_to_finish_and_delivers_its_output():
     first, second = row(0), row(1)
-    calls = ConcurrentCalls(2, check_stop=lambda: None, input_limit=first.encoded_bytes)
+    calls = ConcurrentCalls(2, check_stop=lambda: None, byte_limit=first.encoded_bytes)
     entered, release = threading.Event(), threading.Event()
     def delayed(slot):
         entered.set()
         release.wait(5)
         yield first
     def next_call(slot):
-        assert calls.input_bytes <= calls.input_limit
+        assert calls.bytes_in_flight <= calls.byte_limit
         yield second
     try:
         assert list(calls.submit(delayed, scope=lambda slot: 'a' * 64, input=first)) == []
@@ -86,7 +86,7 @@ def test_byte_credit_waits_for_an_input_to_finish_and_delivers_its_output():
         release.set()
         emitted = list(calls.submit(next_call, scope=lambda slot: 'b' * 64, input=second))
         emitted.extend(calls.finish())
-        assert emitted == [first, second] and calls.input_bytes == 0
+        assert emitted == [first, second] and calls.bytes_in_flight == 0
     finally:
         release.set()
         calls.close(timeout=5)

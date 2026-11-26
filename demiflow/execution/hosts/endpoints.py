@@ -278,7 +278,7 @@ class _EndpointBase:
             event = _event_from_dict(item, bounds=self._services.bounds)
             if event.kind != 'progress' or not any(event.payload.get(field) is not None
                     for field in ('actor_lifecycle', 'callback_observations', 'output_handoff',
-                                  'prompt_usage', 'model_observations')):
+                                  'call_concurrency', 'prompt_usage', 'model_observations')):
                 raise DataflowError('INVALID_CONTRACT', 'cleanup only carries actual worker progress')
             self._early_event(event)
 

@@ -195,6 +195,9 @@
    "call_input_min_bytes": [
     "execution/kernels/operator.py"
    ],
+   "call_output_min_bytes": [
+    "execution/kernels/operator.py"
+   ],
    "callable_scope": [
     "execution/kernels/operator.py",
     "planning/dataflow_shared.py"

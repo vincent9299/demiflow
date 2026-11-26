@@ -38,6 +38,8 @@ class CodecWindow(NamedTuple):
     # In-flight input bytes that ``minimum`` reserves for concurrent per-record calls; None when the
     # minimum keeps a full input window for every call slot and needs no runtime input credit.
     call_input_bytes: int | None = None
+    # The output each admitted call reserves in the same window; ``minimum`` holds one call's.
+    call_output_bytes: int | None = None
 
 
 class TerminalBudget(NamedTuple):
@@ -342,18 +344,20 @@ def codec_window(kernel, operation, bounds):
             minimum = min(minimum, bounds.max_resident_bytes - control)
     from ..execution.contracts.dataflow_kinds import record_call_kinds
     calls = kernel.configuration.get('concurrency', 1)
-    call_input = None
+    call_input = call_output = None
     if calls > 1 and kernel.kind in record_call_kinds():
-        # Per-record calls keep one full output per slot. Their input credit
-        # can shrink to a single row; another row may already be in push
-        # waiting for that credit. State and fixed costs still coexist. The
-        # kernel enforces the sealed credit plus whatever slack it is granted.
-        call_input = bounds.max_row_bytes
-        minimum -= calls * bounds.max_batch_bytes - 2 * call_input
+        # Per-record calls share one byte window: each admitted call is charged
+        # its actual input and one full output row, and one more row may wait
+        # in push for admission. The minimum holds a single call, so a legal row
+        # always proceeds once earlier calls finish; granted slack admits more
+        # calls at once. State and fixed costs per slot still coexist.
+        call_input = call_output = bounds.max_row_bytes
+        minimum -= calls * (bounds.max_batch_bytes + bounds.max_row_bytes) - (
+            call_input + call_output + bounds.max_row_bytes)
     if not matches:
         return None  # Native models, reducers and other specialized grants retain their authority.
     target = kernel.profile.requests['memory_bytes']
-    return CodecWindow(minimum, target, call_input) if target > minimum else None
+    return CodecWindow(minimum, target, call_input, call_output) if target > minimum else None
 
 
 def declare_codec_windows(nodes, codec_windows, publication_windows):
@@ -372,6 +376,8 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
             fields['codec_min_bytes'] = codec.minimum
             if codec.call_input_bytes is not None:
                 fields['call_input_min_bytes'] = codec.call_input_bytes
+            if codec.call_output_bytes is not None:
+                fields['call_output_min_bytes'] = codec.call_output_bytes
         publication = publication_windows.get(index)
         if publication and FIELD in node.kernel.configuration and workspace_bytes(node.kernel.configuration) == publication[1]:
             fields['publication_min_bytes'] = publication[0]

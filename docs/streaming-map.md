@@ -121,7 +121,9 @@ stats = (
 queue_depth × 单行输入大小 + concurrency × (单行输入 + 单行输出 + 临时对象)
 ```
 
-并发大于 1 的节点另有一个按字节计的在途输入窗口：正在处理的输入行，总字节数不超过它。行很大时，同时处理的行数会少于 `concurrency`，前面的行处理完才放行后面的；不超过行上限的单行总能被处理。行小的时候窗口不起作用，`concurrency` 个调用照常同时进行。
+并发大于 1 的逐行节点（带并发的 `map`、`map_async`、模型调用等）还有一个按字节计的调用窗口。每个调用开始前，要在窗口里预留它这一行输入的实际字节数，再加一整行输出（行上限 `max_row_bytes`）；调用结束后归还。窗口放不下时，新的调用等前面的调用结束再开始，不报错。窗口至少能容纳一个调用，所以不超过行上限的单行总能被处理。同时进行的调用数是 `concurrency` 和窗口能容纳数中较小的那个。
+
+默认 256MB 额度、16MB 行上限下，“读取 → 一个并发节点 → 输出”这样的管道最多同时进行 7 个调用，管道里同时运行的阶段越多，能同时进行的调用越少。想要更多，调大 `memory_bytes`，或者调小行上限 `max_row_bytes`。实际达到的并发见下面统计里的 `call_concurrency`。
 
 单行很大时，降低 `concurrency` 和 `queue_depth`，或者先投影出需要的字段。平台不会替任意 Python 对象设置内存硬上限。
 
@@ -135,4 +137,5 @@ queue_depth × 单行输入大小 + concurrency × (单行输入 + 单行输出 
 | `stats.miss` | 被 `catch` 丢弃的行数，按节点和异常类型计 |
 | `stats.emitted` | 最后一个节点的输出行数 |
 | `stats.metrics['stage_policies']` | 每个节点实际生效的并发、队列和执行方式 |
+| `stats.metrics['call_concurrency']` | 每个并发节点：设定并发 `capacity`、实际最高并发 `peak`、因内存窗口等待的次数 `byte_waits`、窗口字节数 `byte_limit`、每个调用预留的输出 `output_reserve`；`limited_by` 为 `'memory'` 表示并发被内存压低了。`take_all` 等动作在 `local_execution` 的 `stats['call_concurrency']` 里有同样的内容 |
 | `stats.summary()` | 上述计数的一行文字摘要 |
