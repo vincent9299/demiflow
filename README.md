@@ -244,7 +244,7 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | Streaming `map` and concurrency | [docs/en/streaming-map.md](docs/en/streaming-map.md) |
 | Calling LLMs: prompt packs, budgets, failures, routes | [docs/en/llm.md](docs/en/llm.md) |
 | Image generation | [docs/en/image_generation.md](docs/en/image_generation.md) |
-| Multi-turn agent operators | [docs/operator_environment.md](docs/operator_environment.md) |
+| Agent operators: multi-turn tool use within a row | [docs/en/agents.md](docs/en/agents.md) |
 | Joins, grouping and sorting | [docs/en/relational.md](docs/en/relational.md) |
 | Embeddings, vector index and vector search | [docs/en/vectors.md](docs/en/vectors.md) |
 | Fetch, queues and acquisition | [docs/dataset-fetch.md](docs/dataset-fetch.md) |

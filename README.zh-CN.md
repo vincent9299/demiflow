@@ -251,7 +251,7 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | 流式 `map` 与并发 | [docs/streaming-map.md](docs/streaming-map.md) |
 | 调用大模型：prompt pack、额度、失败处理、多模型路由 | [docs/llm.md](docs/llm.md) |
 | 图片生成 | [docs/image_generation.md](docs/image_generation.md) |
-| 多轮 Agent 算子 | [docs/operator_environment.md](docs/operator_environment.md) |
+| Agent 算子：行内多轮调用工具 | [docs/agents.md](docs/agents.md) |
 | 关联、分组与排序 | [docs/relational.md](docs/relational.md) |
 | 向量编码、建索引与检索 | [docs/vectors.md](docs/vectors.md) |
 | 抓取、队列与数据获取 | [docs/dataset-fetch.md](docs/dataset-fetch.md) |
