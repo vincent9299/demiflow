@@ -41,10 +41,11 @@ def test_stream_refuses_an_indivisible_stage_before_upstream_start(tmp_path, mon
     started = []
     monkeypatch.setattr(DataflowExecution, '_prepare_launch', lambda *args: started.append(args))
     with pytest.raises(DataflowError, match='resident budget'):
-        # Default windows may adapt to this small run. Explicit row/batch
-        # ceilings make the four concurrent call slots genuinely indivisible.
+        # Explicit row/batch ceilings: whatever the concurrency, one call needs
+        # its input, its output and one waiting row (3 x 32 KiB), more than
+        # this run holds after its control reserve.
         with RunContext.start(tmp_path/'run', limits={
                 'max_row_bytes': 32 * 1024, 'max_batch_bytes': 32 * 1024}), \
-                data.local_execution(workers=1, memory_bytes=128 * 1024):
+                data.local_execution(workers=1, memory_bytes=96 * 1024):
             data.from_items([{'n': 1}]).map_async(_increment, concurrency=4).run_stream()
     assert not started

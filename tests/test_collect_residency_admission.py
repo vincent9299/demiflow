@@ -38,8 +38,12 @@ def test_actual_concurrency_counts_fixed_workspace_once(declared, actual):
     window = codec_window(kernel, operation, limits)
     minimum = default_profile(operation, bounds=limits, state=kernel.state,
                               codec_workspace=False).requests['memory_bytes']
-    assert minimum >= fixed + actual*(limits.max_batch_bytes+limits.max_row_bytes)
-    assert window[0] == minimum
+    payload = actual * (limits.max_batch_bytes + limits.max_row_bytes)
+    assert minimum >= fixed + payload
+    # Concurrent calls share one byte window: their payload part shrinks to one
+    # call's three rows, while every slot keeps its fixed decoder workspace.
+    expected = minimum - payload + 3 * limits.max_row_bytes if actual > 1 else minimum
+    assert window[0] == expected and window[0] >= fixed
 
 
 def test_concurrent_images_cannot_fit_by_shrinking_payload_defaults():

@@ -288,3 +288,15 @@ def test_local_stats_carry_the_same_concurrency_facts(tmp_path):
     assert sorted(row['i'] for row in rows) == list(range(6))
     entry, = [item for item in local.stats['call_concurrency'] if item['capacity'] == 3]
     assert 1 <= entry['peak'] <= 3 and entry['limited_by'] is None
+
+
+def test_a_concurrency_that_does_not_fit_as_slots_runs_with_fewer_calls(tmp_path):
+    from demiflow.execution.pipeline.run_context import RunContext
+    # Four slots of 32 KiB rows never fit 128 KiB; one call (3 rows) does. The
+    # plan used to be refused before starting; it now runs with fewer calls.
+    with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 32 * 1024, 'max_batch_bytes': 32 * 1024}), \
+            data.local_execution(workers=1, memory_bytes=128 * 1024) as local:
+        rows = data.from_items([{'n': n} for n in range(5)]).map_async(_slow_async, concurrency=4).take_all()
+    assert sorted(row['n'] for row in rows) == list(range(5))
+    entry, = [item for item in local.stats['call_concurrency'] if item['capacity'] == 4]
+    assert 1 <= entry['peak'] < 4

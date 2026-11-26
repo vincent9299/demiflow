@@ -190,8 +190,11 @@ def test_shared_explicit_infeasible_grant_rejects_before_start(tmp_path):
     from demiflow.execution.contracts.dataflow_errors import DataflowError
     actor = Counter(tmp_path/'events')
     with pytest.raises(DataflowError, match='Shared actor closure') as error:
+        # Three concurrent stages share one actor and so one worker; each holds
+        # at least one call (3 x 16 MiB), more than a 128 MiB run grants one worker.
         with RunContext.start(tmp_path/'run', limits={'max_row_bytes': 16*1024**2,
-                'max_batch_bytes': 16*1024**2}), data.local_execution(worker_mode='thread', workers=3, partitions=1):
+                'max_batch_bytes': 16*1024**2}), data.local_execution(
+                worker_mode='thread', workers=3, partitions=1, memory_bytes=128*1024**2):
             build(actor, concurrency=4).materialize()
     assert error.value.code == 'BUDGET_EXCEEDED'
     assert not Path(actor.log).exists()
