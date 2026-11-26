@@ -503,11 +503,25 @@ class PromptActor(BoundOperatorLLMMap):
 
 
     def snapshot_state(self):
-        return {}  # clients/leases/metrics are resources, not semantic row state
+        from inspect import isawaitable
+        snapshot = getattr(self.when, 'snapshot_state', None)
+        if snapshot is None:
+            return {}
+        value = snapshot()
+        if isawaitable(value):
+            async def capture():
+                return {'when': await value}
+            return capture()
+        return {'when': value}
 
     def restore_state(self, state):
-        if state != {}:
-            raise ValueError('Prompt actor has no mutable semantic state')
+        restore = getattr(self.when, 'restore_state', None)
+        if restore is None and state == {}:
+            return
+        if restore is None or type(state) is not dict or set(state) != {'when'}:
+            raise ValueError('Checkpoint does not contain the state of the original prompt predicate')
+        return restore(state['when'])
+
     concurrency = 1
     queue_depth = None
     catch = ()

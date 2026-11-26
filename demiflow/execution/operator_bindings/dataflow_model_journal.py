@@ -256,6 +256,15 @@ class _BorrowedJournal:
         pass
 
 
+def _predicate_owners(predicate):
+    if predicate is None:
+        return ()
+    if (inspect.isfunction(predicate) or inspect.isbuiltin(predicate)) and not callable(
+            inspect.getattr_static(predicate, 'snapshot_state', None)):
+        return ()
+    return (predicate,)
+
+
 class NativePromptRecovery:
     def __init__(self, actor, action, node_id):
         self.actor, self.action, self.node_id = actor, action, node_id
@@ -268,8 +277,7 @@ class NativePromptRecovery:
         self.journal = journal
         action.native_image_effects = True
         predicate = getattr(actor, 'when', None)
-        self.semantic_owners = (() if predicate is None or inspect.isfunction(predicate) or inspect.isbuiltin(predicate)
-                                else (predicate,))
+        self.semantic_owners = _predicate_owners(predicate)
         self.row_local = not self.semantic_owners
         self.copy_inputs = predicate is not None
 
@@ -417,8 +425,7 @@ class RemotePromptRecovery(NativePromptRecovery):
         # native_image_effects is fixed when the view is constructed (M024); the
         # frozen view is read-only here, never mutated.
         predicate = getattr(actor, 'when', None)
-        self.semantic_owners = (() if predicate is None or inspect.isfunction(predicate) or inspect.isbuiltin(predicate)
-                                else (predicate,))
+        self.semantic_owners = _predicate_owners(predicate)
         self.row_local = not self.semantic_owners
         self.copy_inputs = predicate is not None
 
