@@ -169,7 +169,7 @@ def drop_capabilities():
     prctl(38, 1, 0, 0, 0)
 
 
-def seccomp(*, direct_network=False, verifier=False):
+def seccomp(*, direct_network=False, verifier=False, legacy_truncate_only=False):
     sec = SECCOMP
     sec.seccomp_init.argtypes = [ctypes.c_uint32]
     sec.seccomp_init.restype = ctypes.c_void_p
@@ -186,7 +186,7 @@ def seccomp(*, direct_network=False, verifier=False):
                                          ctypes.c_uint, ctypes.POINTER(Compare)]
     # libseccomp rejects all non-native architectures. x32 syscall numbers are
     # not in this allowlist. Unknown/new interfaces fail with ENOSYS.
-    context = sec.seccomp_init(0x00050000 | errno.ENOSYS)
+    context = sec.seccomp_init(0x7fff0000 if legacy_truncate_only else 0x00050000 | errno.ENOSYS)
     if not context:
         raise RuntimeError('seccomp context unavailable')
 
@@ -198,6 +198,22 @@ def seccomp(*, direct_network=False, verifier=False):
         result = sec.seccomp_rule_add_array(context, action, number, len(conditions), comparisons)
         if result:
             raise RuntimeError('Cannot install seccomp rule: ' + name)
+
+    if legacy_truncate_only:
+        try:
+            # Landlock ABI 1 cannot enforce pathname or descriptor truncation.
+            denied = 0x00050000 | errno.EPERM
+            for name in ('truncate', 'ftruncate'):
+                rule(name, action=denied)
+            for name, position in (('open', 1), ('openat', 2)):
+                mask = os.O_ACCMODE | os.O_TRUNC
+                rule(name, ((position, 7, mask, os.O_RDONLY | os.O_TRUNC),), action=denied)
+            # The flags of openat2 are indirect and cannot be compared in BPF.
+            rule('openat2', action=0x00050000 | errno.ENOSYS)
+            checked(sec.seccomp_load(context), 'seccomp_load')
+            return
+        finally:
+            sec.seccomp_release(context)
 
     allowed = '''read write readv writev pread64 pwrite64 preadv pwritev preadv2 pwritev2
         close close_range lseek fstat stat lstat newfstatat statx access faccessat faccessat2

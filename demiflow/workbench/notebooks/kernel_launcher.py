@@ -85,9 +85,11 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
     if abi < 1:
         _fail('当前 Linux 内核不支持 Landlock ABI 1，无法启用只读沙箱。')
 
+    truncate_guard = None
     if require_truncate and abi < 3:
-        _fail('受控依赖的只读 Notebook 内核需要支持安全截断控制的 Linux Landlock ABI 3。')
-    truncate = 1 << 14 if require_truncate else 0
+        from demiflow.workbench.conversations.sandbox_native import seccomp
+        truncate_guard = seccomp
+    truncate = 1 << 14 if require_truncate and abi >= 3 else 0
 
     class Rules(ctypes.Structure):
         _fields_ = [('handled', ctypes.c_uint64)]
@@ -130,6 +132,8 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
         checked(libc.syscall(446, ruleset, 0), 'Landlock restrict_self')
     finally:
         os.close(ruleset)
+    if truncate_guard is not None:
+        truncate_guard(legacy_truncate_only=True)
 
 
 def _dependency_snapshot(config, root, code_root, python):

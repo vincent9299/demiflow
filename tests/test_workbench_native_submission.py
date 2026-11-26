@@ -292,6 +292,8 @@ def test_project_dependency_preview_and_native_run_use_the_locked_package(root, 
     assert all(sorted(lance.dataset(row['uri']).to_table()['x'].to_pylist()) == [21, 22]
                for row in outcome['outputs'])
 
+    outcome = stopped(root, outcome['run_id'])
+    assert outcome['state']['cleanup'] == 'complete'
     upstream = outcome['outputs'][0]
     selector = f"run:{outcome['run_id']}:{upstream['name']}:1"
     (root / 'flows/continued.py').write_text('from demiflow import data\n'

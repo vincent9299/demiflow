@@ -479,10 +479,17 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         if output_bytes > limits['max_output_bytes']:
             killed_reason = 'output_disk_budget'
         complete = run.execution_view()['completion']
+        verification_error = None
         if killed_reason and killed_reason.endswith('_budget'):
             status = 'failed'
         elif complete and complete['outcome'] == 'succeeded' and process.returncode == 0:
             status = 'succeeded'
+            if dependencies is not None:
+                try:
+                    runs.verify_seal(target, manifest)
+                except (OSError, ValueError) as exc:
+                    status = 'failed'
+                    verification_error = dict(type=type(exc).__name__, message=str(exc)[:2048])
         elif killed_reason == 'cancelled':
             status = 'cancelled'
         elif killed_reason:
@@ -492,7 +499,9 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         details = dict(finished_at=time.time(), returncode=process.returncode, sampled_peaks=peaks)
         if killed_reason:
             details['reason'] = killed_reason
-        if complete and complete.get('error'):
+        if verification_error is not None:
+            details['error'] = verification_error
+        elif complete and complete.get('error'):
             details['error'] = complete['error']
             details['recoverable'] = not killed_reason and complete.get('recoverable', False)
         final_status, final_details = status, details

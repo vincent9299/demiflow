@@ -442,8 +442,8 @@ def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
     from demiflow.workbench.conversations.sandbox_native import landlock_abi
     from demiflow.workbench.notebooks import kernel_launcher
 
-    if sys.platform != 'linux' or landlock_abi() < 3:
-        pytest.skip('approved readonly project kernels require Landlock ABI 3')
+    if sys.platform != 'linux' or landlock_abi() < 1:
+        pytest.skip('approved readonly project kernels require Linux Landlock')
     root = tmp_path / 'project'
     (root / '.forge').mkdir(parents=True)
     source = tmp_path / 'owned-library'
@@ -472,7 +472,9 @@ def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
         (source / 'later.py').write_text('VALUE = 99\n')
         message = client.execute('from pathlib import Path\nfrom notebook_dependency_fixture.later import VALUE\n'
             f'assert VALUE == 7\ntry:\n    Path({str(root / "pyproject.toml")!r}).write_text("blocked")\n'
-            'except PermissionError:\n    pass\nelse:\n    raise AssertionError("dependency declaration is writable")\n')
+            'except PermissionError:\n    pass\nelse:\n    raise AssertionError("dependency declaration is writable")\n'
+            'import os\ntry:\n    fd = os.open("pyproject.toml", os.O_RDONLY | os.O_TRUNC)\n'
+            'except PermissionError:\n    pass\nelse:\n    os.close(fd)\n    raise AssertionError("dependency declaration was truncated")\n')
         while True:
             response = client.get_shell_msg(timeout=10)
             if response['parent_header'].get('msg_id') == message:

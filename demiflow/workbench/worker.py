@@ -8,9 +8,21 @@ import sqlite3
 from pathlib import Path
 import sys
 
+if __name__ == '__main__':
+    platform_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(platform_root))
+    if sys.argv[1:] == ['--confined-project']:
+        from importlib.util import find_spec
+        spec = find_spec('demiflow')
+        if spec is None or not spec.origin or Path(spec.origin).resolve() != platform_root / 'demiflow/__init__.py':
+            raise RuntimeError('Project Python loaded DemiFlow outside the trusted platform source')
+
+from demiflow.forge import operation_budget
+
 FORMAT = "demiflow_forge_workspace_response_v1"
 
 
+@operation_budget.controlled
 def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None, _dependencies=None, **arguments):
     from demiflow.forge.platform_worker import capture
     from demiflow.forge.platform import limits_with
@@ -149,6 +161,7 @@ def _inspection_inputs(root, request):
     pending = [(values, 0)]
     seen = 0
     while pending:
+        operation_budget.check()
         item, depth = pending.pop()
         seen += 1
         if seen > 4096 or depth > 16:
@@ -159,6 +172,8 @@ def _inspection_inputs(root, request):
                 paths.add(target)
             elif item.get('kind') == 'table' and set(item) == {'kind', 'alias'}:
                 alias = item['alias']
+                if isinstance(alias, str) and alias in fixed_inputs:
+                    continue
                 control, ref, target = resolver(root, workspace, alias)
                 paths.add(target)
                 if alias.startswith('run:'):
@@ -469,15 +484,7 @@ def dispatch(request):
 
 
 def main():
-    platform_root = Path(__file__).resolve().parents[2]
-    sys.path.insert(0, str(platform_root))
-    confined = sys.argv[1:] == ["--confined-project"]
-    if confined:
-        from importlib.util import find_spec
-        expected = platform_root / 'demiflow/__init__.py'
-        spec = find_spec('demiflow')
-        if spec is None or not spec.origin or Path(spec.origin).resolve() != expected:
-            raise RuntimeError('Project Python loaded DemiFlow outside the trusted platform source')
+    confined = sys.argv[1:] == ['--confined-project']
     from demiflow.forge.platform_worker import bind_parent
     if not confined:
         bind_parent()
