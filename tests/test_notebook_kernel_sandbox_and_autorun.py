@@ -484,3 +484,57 @@ def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
         _, stderr = process.communicate(timeout=7)
         if process.returncode not in (0, -15):
             pytest.fail(stderr.decode(errors='replace'))
+
+
+def test_restricted_author_reads_approved_source_and_cannot_rewrite_it(tmp_path):
+    from demiflow.forge.dependencies import update
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
+    from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+    from demiflow.workbench.conversations.execution import runtime_paths
+
+    root = tmp_path / 'project'
+    (root / '.forge').mkdir(parents=True)
+    (root / 'flows').mkdir()
+    external = tmp_path / 'vendor-parent'
+    package = external / 'approved'
+    package.mkdir(parents=True)
+    (package / '__init__.py').write_text('VALUE = 7\n')
+    (external / 'sibling.txt').write_text('undisclosed\n')
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+        f'author_dependency_fixture = {{source = "local_ref", path = "{package}"}}\n')
+    locked = update(root, sys.executable)
+    project = dict(root=str(root), kind='pipeline', writes=['flows'], python=sys.executable, dependency_lock=locked['digest'])
+    shims = SandboxShims(project, execution_mode='restricted', project_python=sys.executable)
+    home = tmp_path / 'home'
+    home.mkdir(mode=0o700)
+    spec = SandboxSpec(read_paths=(str(root), str(package)), write_paths=(str(root / 'flows'),),
+        runtime_paths=(*runtime_paths({'executable': sys.executable}, project_python=sys.executable), str(shims.directory)),
+        protected_paths=(str(root / 'pyproject.toml'), str(package)), private_home=str(home))
+    code = '''from pathlib import Path
+import sys
+from author_dependency_fixture import VALUE
+assert VALUE == 7
+for filename in sys.argv[1:3]:
+    try:
+        Path(filename).write_text('blocked')
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError('protected source was writable')
+try:
+    Path(sys.argv[3]).read_text()
+except PermissionError:
+    pass
+else:
+    raise AssertionError('unapproved sibling was readable')
+Path('flows/created.py').write_text('pass')
+'''
+    try:
+        child = launch_sandbox([str(shims.bin / 'python'), '-B', '-c', code,
+            str(root / 'pyproject.toml'), str(package / '__init__.py'), str(external / 'sibling.txt')],
+            spec=spec, env={'PATH': os.defpath}, cwd=root)
+        stdout, stderr = child.communicate(timeout=30)
+        assert child.returncode == 0, (stdout, stderr)
+        assert (root / 'flows/created.py').read_text() == 'pass'
+    finally:
+        shims.close()

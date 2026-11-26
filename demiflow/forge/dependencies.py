@@ -162,7 +162,7 @@ def _check_imports(raw, relative, package, root):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names = [node.module]
+            names = [node.module, *(node.module + '.' + alias.name for alias in node.names)]
         else:
             continue
         for name in names:

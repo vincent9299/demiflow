@@ -32,4 +32,8 @@ demiflow workbench console --registry /path/to/registry.json \
     approve-dependencies WORKSPACE_ID --expected REGISTRY_DIGEST --digest LOCK_DIGEST
 ```
 
+撤销工作台审批时，运行同一命令并将 `--digest LOCK_DIGEST` 换成 `--revoke`。若项目准备恢复为普通项目，也需移除 `[tool.demiflow.packages]` 声明。
+
+启用项目依赖后，预览和运行准备使用已配置的项目解释器。预览目前使用 Linux 的受限执行后端。运行监管继续使用平台解释器。项目解释器信任范围包括其 Python 启动配置，例如环境目录中可执行的 `.pth` 内容。
+
 Workbench 将选定的源码包固定进 run。首次启动检查当前声明和审批，已经开始的 run 恢复时继续读取原封存版本。安装包记录解释器与分发元数据，需维持已批准的环境；跨环境迁移按新 run 准备。受限开发进程使用项目的既有编辑范围，依赖和控制文件保持只读。批准的项目解释器仍由所有者管理。

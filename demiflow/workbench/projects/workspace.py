@@ -585,11 +585,15 @@ def current_platform_snapshot(snapshot):
                           limits=snapshot['limits'])
 
 
-def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None, dependencies=None):
+_DEPENDENCIES_UNSET = object()
+
+
+def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None,
+                  dependencies=_DEPENDENCIES_UNSET):
     from demiflow.forge.pipeline_check import inspect_variant
 
     root, value, snapshot = load_workspace(root)
-    if dependencies is None:
+    if dependencies is _DEPENDENCIES_UNSET:
         from demiflow.forge.dependencies import binding as dependency_binding
         dependencies = dependency_binding(root)
     snapshot = current_platform_snapshot(snapshot)
