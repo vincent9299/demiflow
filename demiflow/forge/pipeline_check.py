@@ -463,6 +463,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
                         format=wf_spec.get('format') or 'demiflow_workflow_v1',
                         symbols=[n['id'] for n in wf_spec.get('nodes') or ()],
                         scope='definition', unverified_projects=wf_spec['unverified_projects'],
+                        external_bindings=[dict(project=wf_spec['projects'][n['project']], entry=n['entry'], params=n.get('params'))
+                                           for n in wf_spec['nodes'] if n['project'] in wf_spec['projects']],
                     ))
                 checked_workflows.add(path)
                 continue

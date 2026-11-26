@@ -7,6 +7,7 @@ import time
 
 root = None
 prompt_id = None
+fail_close = False
 
 
 def send(value):
@@ -28,7 +29,8 @@ for line in sys.stdin:
             send(dict(id=value['id'],error=dict(code=-32603,message='fixture compaction failed')));continue
         result=dict(status='compacted',compaction_id='fixture-summary',shadowed_items=4,estimated_tokens_before=1200)
     elif method == 'session/prompt':
-        if params['prompt'][0]['text'].endswith('request delivery review fixture'):
+        fail_close = params['prompt'][0]['text'].endswith('request delivery review fixture')
+        if fail_close:
             (root / 'flows/fixture.py').write_text('def sample():\n    return 1\n')
             review = dict(method='tools/call', params=dict(name='request_pipeline_review', arguments={}))
             requests = [dict(method='tools/list', params={}), review, review]
@@ -85,8 +87,10 @@ for line in sys.stdin:
         send(dict(id=prompt_id, result=dict(stopReason='end_turn')))
         continue
     elif method == 'session/close':
-        send(dict(id=value['id'], error=dict(code=-32603, message='injected close failure')))
-        continue
+        if fail_close:
+            send(dict(id=value['id'], error=dict(code=-32603, message='injected close failure')))
+            continue
+        result = {}
     else:
         continue
     send(dict(id=value['id'], result=result))

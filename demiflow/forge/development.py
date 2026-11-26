@@ -125,7 +125,7 @@ def feedback_current(root, options, author):
 def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection=None,
                 auto_review=False, round=0, budget=None, reference=None, exclude=(),
                 reviewer=None, check_cancel=None, source_current=None, protected_violations=(),
-                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=()):
+                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=None):
     """Finish one engineering interval and produce a durable, candidate-bound next action.
 
     ``author`` contains provider/session and completed/acknowledged/cleanup facts.
@@ -150,10 +150,12 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
     want_review = review_requested(changes=changes, auto_review=auto_review, selection=selection)
     selected = {} if auto_review and has_code_changes(changes) else selection or {}
     paths = [item['path'] for item in changes]
+    definitions = ()
     if inspect and (paths or want_review or protected_violations):
         try:
             check = check_project(root, paths=paths if 0 < len(paths) <= 256 else (),
                                   reference=reference, exclude=exclude, include_hygiene=True)
+            definitions = check.get('definitions', ())
             receipt['checks'] = {key: check[key] for key in (
                 'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id',
                 'source_digest', 'source_count', 'check_digest', 'coverage') if key in check}
@@ -170,7 +172,7 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
                 on_review()
             if reviewer is None:
                 raise ForgeError('独立评审模型尚未配置。', code='inspection_incomplete')
-            observations = list(observations)
+            observations = observations(definitions) if observations else []
             for key in ('native_flow', 'project_layout'):
                 item = (receipt['checks'] or {}).get(key)
                 if item:

@@ -636,18 +636,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
             guided = not (compact or notebook) and project['kind'] == 'pipeline'
             catalog = None
-            catalog_observations = []
+            catalog_observations = None
             if guided and workflow_registry is not None:
-                from demiflow.workbench.workflows.resolver import registered_project_catalog
-                def catalog(arguments):
-                    result = registered_project_catalog(workflow_registry, session['workspace'], project['root'], arguments)
-                    for row in result.get('flows', ()):
-                        detail = json.dumps({key:result[key] for key in ('workspace_id', 'name')} |
-                                            {key:row[key] for key in ('entry', 'params', 'keys', 'keys_complete')}, ensure_ascii=False)
-                        fact = dict(source='workbench_registered_binding', detail=detail)
-                        if len(catalog_observations) < 8 and len(detail.encode()) <= 2048 and fact not in catalog_observations:
-                            catalog_observations.append(fact)
-                    return result
+                from demiflow.workbench.workflows.resolver import registered_project_catalog, workflow_review_observations
+                catalog = partial(registered_project_catalog, workflow_registry, session['workspace'], project['root'])
+                catalog_observations = partial(workflow_review_observations, catalog)
             delivery_review = None
             if guided and project['phase'] == 'implementation':
                 from demiflow.workbench.conversations.pipeline_review import DeliveryReview
@@ -854,6 +847,19 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     warm_ready = False
                     provider_opened = False
 
+                if warm_ready and provider_opened and guided and acp:
+                    try:
+                        wait(provider.close_request())
+                    except (ValueError, OSError, TimeoutError):
+                        # A failed control rebind precedes prompt dispatch. Drain the old owner
+                        # before restoring this same saved ACP session on a fresh connection.
+                        drained, detail = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                        if not drained:
+                            reject(detail or 'Previous author cleanup is unknown', 'inspection_incomplete')
+                        process = transport = provider = model_broker = control_bridge = shims = None
+                        effective_bound = standby_spec = None
+                        warm_ready = provider_opened = False
+
                 if warm_ready and not provider_opened:
                     proj_py = effective_project_python(project)
                     shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py))
@@ -896,9 +902,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     provider.items.clear()
                     provider.turn = None
                     if not provider_opened or guided:
-                        if provider_opened and acp:
-                            # ACP replaces the session's MCP declarations on resume after close.
-                            wait(provider.close_request())
                         saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
                         provider.thread = saved_session
                         if guided:

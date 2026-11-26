@@ -320,7 +320,7 @@
         err.resetRequired = value.reset_required === true;
         if (response.status === 403 && path === 'capabilities') authFailed = true;
         if (err.code === 'unauthorized') authFailed = true;
-        if (path === 'workflow-start' && response.status >= 500 && err.operationStarted !== false) err.outcomeUnknown = true;
+        if (path === 'workflow-start' && err.operationStarted !== false) err.outcomeUnknown = true;
         const projectRead=err.operationStarted===false&&(
           !body&&['projects','capabilities','context','changes','runs','graph','graph-source','table','sample','project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown','workflows','workflow-inspect','workflow-runs','workflow-run'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));

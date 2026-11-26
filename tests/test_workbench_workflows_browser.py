@@ -128,7 +128,7 @@ def test_workflow_dag_ui_cross_project_drilldown_and_live_run(tmp_path, browser,
             unconfirmed = []
             def unknown(route):
                 unconfirmed.append(route.request.post_data)
-                route.fulfill(status=503, json={'code':'busy','error':'回执未确认'})
+                route.fulfill(status=404, json={'code':'not_found','error':'回执未确认'})
             page.route('**/workflow-start', unknown)
             page.locator('.wf-btn-run').click()
             dialog.locator('button[type="submit"]').click()
@@ -137,6 +137,6 @@ def test_workflow_dag_ui_cross_project_drilldown_and_live_run(tmp_path, browser,
             expect(dialog).to_be_hidden()
             assert len(unconfirmed) == 1
             assert not js_errors, f'Unexpected browser page errors: {js_errors}'
-            assert [(status, url.rsplit('/', 1)[-1]) for status, url in workflow_http_errors] == [(503, 'workflow-start')] * 2
+            assert [(status, url.rsplit('/', 1)[-1]) for status, url in workflow_http_errors] == [(503, 'workflow-start'), (404, 'workflow-start')]
         finally:
             context.close()

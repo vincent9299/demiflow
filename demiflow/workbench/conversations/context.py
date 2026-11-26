@@ -95,7 +95,8 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
 CATALOG_TOOL = dict(name='list_registered_projects',
     description='List visible Workbench projects, or inspect one logical name/workspace ID for registered Flows and bound parameter keys. Use offset to page.',
     inputSchema=dict(type='object', additionalProperties=False, properties={
-        'project': dict(type='string'), 'offset': dict(type='integer', minimum=0),
+        'project': dict(type='string'), 'entry': dict(type='string'), 'params': dict(type='string'),
+        'offset': dict(type='integer', minimum=0),
         'limit': dict(type='integer', minimum=1, maximum=16)}))
 
 

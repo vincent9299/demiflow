@@ -94,7 +94,7 @@ CLI、可选 Notebook 和后台使用同一入口、同一份实际参数。参�
 
 ### 建议与示例
 
-多管线编排使用 `workflows/<name>.json`。顶层必填 `format`、`name`、`nodes`，可选 `description`、`projects`、`inputs`、`concurrency_groups`、`policy`。每个节点填写唯一的 `id` 和已登记的 `entry`，还可以填写 `title`、`description`、`project`、`params`、`overrides`、`after` 和 `concurrency_group`。同一入口绑定多个参数文件时要写明选用的项目相对路径。两个节点可以复用同一入口。
+多管线编排使用 `workflows/<name>.json`。顶层必填 `format`、`name`、`nodes`，可选 `description`、`projects`、`inputs`、`concurrency_groups`、`policy`。每个节点填写唯一的 `id` 和已登记的 `entry`，还可以填写 `title`、`description`、`project`、`params`、`overrides`、`after` 和 `concurrency_group`。同一入口绑定多个参数文件时要写明选用的项目相对路径。两个节点可以复用同一入口。节点省略 `project` 或显式填写 `"project":"self"` 都引用本项目。`self` 是内置别名，`projects` 仅声明外部项目。
 
 ```json
 {

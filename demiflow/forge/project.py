@@ -7,6 +7,7 @@ import re
 import uuid
 
 from .api_reference import MODULES
+from .project_guard import publish_project_control
 from .io import directory_handle, ensure_directory, no_symlinks, publish_bytes
 from .platform import bounded_json, content_digest, module_scope
 from .platform_environment import read_bounded
@@ -196,7 +197,6 @@ def load_project(root):
 
 def save_project(root, value, *, expected=None, create=False):
     """Persist workspace declaration, splitting Forge internal state to .forge/state.json for slim projects."""
-    from .project_guard import publish_project_control
     root = Path(root).absolute()
     manifest = root / "workspace.json"
     state_file = root / STATE_PATH
@@ -322,8 +322,8 @@ def slim_project_manifest(root):
             )
         removed_fields = sorted(set(raw_ws) - set(ws_doc))
         ensure_directory(root / ".forge")
-        publish_bytes(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=False)
-        publish_bytes(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=False)
+        publish_project_control(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=False)
+        publish_project_control(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=False)
         return dict(
             status='slimmed',
             manifest_path='workspace.json',

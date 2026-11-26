@@ -13,7 +13,7 @@ from demiflow.forge.schema import ForgeError
 from demiflow.forge.workflow import discover_workflows, validate_workflow
 from demiflow.workbench.conversations.context import BridgeServer
 from demiflow.workbench.projects import registry
-from demiflow.workbench.workflows.resolver import registered_project_catalog
+from demiflow.workbench.workflows.resolver import registered_project_catalog, workflow_review_observations
 from test_forge_development_loop import response_for
 from test_forge_workflow import _make_project
 
@@ -62,6 +62,31 @@ def test_authorized_registration_survives_then_restores_exact_published_version(
             bridge.dispatch('tools/call', request, active)
         with pytest.raises(ForgeError):
             bridge.dispatch('tools/call', request, later)
+    finally:
+        bridge.close()
+
+
+def test_slim_migration_through_tool_protects_both_published_controls(tmp_path):
+    root = _make_project(tmp_path/'project')
+    manifest, state = root/'workspace.json', root/'.forge/state.json'
+    full = load_project(root)[1]
+    manifest.write_text(json.dumps(full))
+    state.unlink()
+    snap = capture_protected_files(root)
+    active = SimpleNamespace(tid='turn', epoch='grant', require_active=lambda:None)
+    bridge = BridgeServer(active, project_root=root, protected_snapshot=snap)
+    try:
+        reply = bridge.dispatch('tools/call', dict(name='manage_project_layout',
+                                arguments=dict(action='slim_manifest')), active)
+        assert json.loads(reply['content'][0]['text'])['status'] == 'slimmed'
+        versions = manifest.read_bytes(), state.read_bytes()
+        allowed = bridge.finish_turn()
+        assert enforce_protected_files(root, snap, allowed) == []
+        manifest.write_text('{}')
+        state.unlink()
+        assert set(enforce_protected_files(root, snap, allowed)) == {'workspace.json', '.forge/state.json'}
+        assert (manifest.read_bytes(), state.read_bytes()) == versions
+        assert load_project(root)[1]['id'] == full['id']
     finally:
         bridge.close()
 
@@ -140,6 +165,13 @@ def test_project_catalog_is_paged_read_only_and_rechecks_membership(tmp_path):
     text = json.dumps(view)
     assert str(tmp_path) not in text and 'data/a.lance' not in text and 'from_items' not in text
     assert query(project='peer', offset=1)['flows'][0]['entry'] != ENTRY
+    definitions = [dict(external_bindings=[dict(project='peer', entry=ENTRY, params=PARAMS)])]
+    def observe():
+        facts = workflow_review_observations(lambda args: query(**args), definitions)
+        return json.loads(facts[0]['detail'])
+    assert observe()['keys'] == ['output_table', 'scale']
+    (peer/PARAMS).write_text('{"changed_public_key": 5}')
+    assert observe()['keys'] == ['changed_public_key']
     with pytest.raises(ForgeError):
         query(project=str(peer))
     inventory = registry.load_registry(path)
@@ -147,3 +179,4 @@ def test_project_catalog_is_paged_read_only_and_rechecks_membership(tmp_path):
     path.write_text(json.dumps(inventory))
     with pytest.raises(ForgeError):
         query(project='peer')
+    assert observe()['unavailable']

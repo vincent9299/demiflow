@@ -158,6 +158,7 @@ def cli_project(tmp_path):
         with open(os.environ['FORGE_TEST_LOG'], 'a') as log:
             log.write(json.dumps(dict(session=sid, resumed=resumed, prompt=prompt))+'\\n')
         print(json.dumps(dict(type='thread.started', thread_id=sid)), flush=True)
+        print(json.dumps(dict(type='item.completed', item=dict(type='error', message='startup diagnostic'))), flush=True)
         if os.environ.get('FORGE_TEST_UNCERTAIN'):
             raise SystemExit(2)
         print(json.dumps(dict(type='turn.started')), flush=True)

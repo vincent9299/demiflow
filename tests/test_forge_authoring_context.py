@@ -128,7 +128,7 @@ def test_progressive_disclosure_topics_and_flow_titles(tmp_path, reference):
     overview_text = render_context(overview)
     assert '评测题与参考图联合交付 | flows/delivery.py:run' in overview_text
     assert '## 当前版本 DemiFlow 原生 API' not in overview_text
-    assert '--topic <sdk|rules|files|flow|operator|prompt>' in overview_text
+    assert '--topic <sdk|rules|files|flow|operator|prompt|workflow>' in overview_text
 
     sdk_ctx = build_context(tmp_path, topic='sdk', reference=reference)
     sdk_text = render_context(sdk_ctx)
