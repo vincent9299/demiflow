@@ -144,7 +144,7 @@ def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2, exclude=())
     return result
 
 
-def directory_bytes(root, *, entries=65536, deadline=None):
+def directory_bytes(root, *, entries=65536, deadline=None, codex_executable=None):
     # Include directory blocks and small-file allocation overhead. Logical size
     # alone undercounts retained provider state; sparse files still reserve their
     # logical size here because later writes can allocate their holes.
@@ -176,7 +176,14 @@ def directory_bytes(root, *, entries=65536, deadline=None):
                 except FileNotFoundError:
                     continue
                 if stat.S_ISLNK(info.st_mode):
-                    reject('Unexpected link in private provider state')
+                    from .codex import native_helper_link
+                    link = Path(row.path)
+                    try:
+                        target = link.readlink()
+                    except FileNotFoundError:
+                        continue
+                    if not native_helper_link(link.relative_to(root), target, codex_executable):
+                        reject('Unexpected link in private provider state: ' + str(link.relative_to(root))[:256])
                 total += max(info.st_size, info.st_blocks * 512)
                 if stat.S_ISDIR(info.st_mode):
                     pending.append(Path(row.path))
@@ -185,7 +192,7 @@ def directory_bytes(root, *, entries=65536, deadline=None):
     return total
 
 
-def private_directory_bytes(root, *, entries):
+def private_directory_bytes(root, *, entries, codex_executable=None):
     """One shared inventory for retained provider homes and Forge evidence.
 
     Top-level database/control files use their own reservations. Count every
@@ -205,7 +212,7 @@ def private_directory_bytes(root, *, entries):
         reject('State inventory exceeds entry/time budget', 'resource_limit')
 
     def scan(path):
-        return path.name, directory_bytes(path, deadline=deadline)
+        return path.name, directory_bytes(path, deadline=deadline, codex_executable=codex_executable)
 
     if len(directories) < 2:
         return dict(map(scan, directories))

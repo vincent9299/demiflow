@@ -30,6 +30,8 @@ def main(endpoint, token, turn_id, epoch):
             if method == 'initialize':
                 result = dict(protocolVersion=params['protocolVersion'], serverInfo=dict(name='demiflow-development', version='2'), capabilities=dict(tools={}))
             elif method in {'tools/list', 'tools/call'}:
+                if isinstance(params, dict) and isinstance(params.get('_meta'), dict):
+                    params = {key: value for key, value in params.items() if key != '_meta'}
                 result = call(endpoint, token, turn_id, epoch, method, params)
             elif method == 'ping': result = {}
             else: raise ValueError('Unsupported MCP method')

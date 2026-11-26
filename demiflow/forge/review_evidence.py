@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 from collections import deque
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -16,7 +17,8 @@ from .platform_environment import read_bounded
 from .project import discover_project_sources, validate_entry, validate_parameter_path
 from .project_io import relative_path
 from .project_rules import ROLE_DIRS
-from .schema import ForgeError, digest
+from .schema import ForgeError, canonical, digest
+from .workflow import MAX_WORKFLOW_BYTES, local_workflow_bindings
 
 MAX_FILES = 256
 FILE_BYTES = 96 * 1024
@@ -315,6 +317,21 @@ class _ProjectEvidence:
         return seen
 
 
+def _local_bindings(source, entries):
+    if source is None:
+        return []
+    try:
+        bindings = set(local_workflow_bindings(json.loads(source), entries))
+    except (ValueError, RecursionError):
+        return []  # The raw target and its static workflow diagnostics are still reviewable.
+    return sorted(bindings, key=lambda pair: (pair[0], pair[1] or ''))
+
+
+def evidence_file_size(item):
+    sources = sum(len(item[side].encode()) for side in ('before', 'after') if item.get(side) is not None)
+    return sources + (len(canonical(item['workspace_registration'])) if 'workspace_registration' in item else 0)
+
+
 def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evidence=(), exclude=(),
                      prior_sources=None):
     """Capture actual candidate bytes, their preimages and explicitly attached evidence."""
@@ -383,8 +400,10 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         targets = [name for name in explicit if name not in changed_controls]
         history = _baseline(root, revision, excluded, targets) if revision else {}
 
-    view = discover_project_sources(root, exclude=excluded, include_roles=False)
+    view = discover_project_sources(root, exclude=excluded, role_names=('workflows',))
     entries = view['entries']
+    control = view['control'] or {}
+    declared_entries = control.get('entries', {})
     known_before = history.keys() | (prior_sources or {}).keys()
     deleted = {name for name in targets if name in known_before and not (root / name).exists()}
     project = _ProjectEvidence(root, excluded, deleted, locked_facts['packages'] if locked_facts else ())
@@ -423,15 +442,70 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         selected_entries = []
         for declared, bindings in entries.items():
             flow = declared.partition(':')[0]
-            if not (root / flow).is_file():
+            if not (root / flow).is_file() and flow not in deleted:
                 continue
-            closure = project.closure([flow])
+            closure = {flow} if flow in deleted else project.closure([flow])
             imports = dependency_imports(declared, closure)
             if (closure.intersection(targets) or set(bindings).intersection(targets) or imports & affected_packages
                     or all_dependencies_changed and (imports or locked_facts['distributions'])):
                 selected_entries.append(declared)
                 related.update(closure)
                 groups.insert(0, sorted(closure | set(bindings)))
+    # A workflow and each affected local node form a review unit. A changed
+    # binding only pulls consumers of that binding, even when one Flow has several.
+    node_groups = []
+    workflow_targets = {p for p in targets if p.startswith('workflows/') and p.endswith('.json')}
+    consumers = view['roles']['workflows'] if selected_entries or any(p.endswith('.py') for p in deleted) else ()
+    for workflow in sorted(set(consumers) | workflow_targets):
+        if not _permitted(workflow, excluded):
+            continue
+        texts = []
+        if (root / workflow).is_file():
+            if workflow in workflow_targets:
+                texts.append(project.read(workflow))
+            else:
+                # Discover consumers under the same scan budget. Only an actual dependency must
+                # fit the tighter review-file limit, so a large unrelated draft cannot block review.
+                raw = read_bounded(_check_path(root, workflow, excluded), min(MAX_WORKFLOW_BYTES, SCAN_BYTES - project.scanned))
+                project.scanned += len(raw)
+                texts.append(raw)
+        if workflow in workflow_targets:
+            old = (prior_sources or {}).get(workflow, {}).get('before')
+            if old is None and workflow in history:
+                old = _git(root, 'cat-file', 'blob', history[workflow], maximum=FILE_BYTES).decode()
+            if old is not None and old not in texts:
+                texts.append(old)
+        bindings = set()
+        for raw in texts:
+            bindings.update(_local_bindings(raw, declared_entries))
+        for declared, bound in sorted(bindings, key=lambda pair: (pair[0], pair[1] or '')):
+            flow = declared.partition(':')[0]
+            if workflow not in workflow_targets and declared not in selected_entries and flow not in deleted:
+                continue
+            deps = set()
+            for path in (flow, bound):
+                if not path:
+                    continue
+                if not _permitted(path, excluded):
+                    project._note(workflow, f'{workflow}: local node material outside review scope')
+                    continue
+                candidate = project._lookup(path)
+                if candidate is not None and candidate.is_file():
+                    deps.update(project.closure([path]))
+                elif path in targets and path in known_before:
+                    deps.add(path)
+                else:
+                    project._note(workflow, f'{workflow}: local node material unavailable: {path}')
+            if (workflow not in workflow_targets and
+                    (params and bound != params or not entry and not deps.intersection(targets))):
+                continue
+            deps.add(workflow)
+            group = sorted(deps)
+            if group not in node_groups:
+                node_groups.append(group)
+                related.update(deps)
+    primary_count = len(selected_entries)
+    groups[primary_count:primary_count] = node_groups
     selected_params = {params} if params else {p for key in selected_entries for p in entries.get(key, ())}
     related.update(selected_params)
     for name in targets:
@@ -469,13 +543,24 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             before = None
         if after is None and before is None:
             raise ForgeError('Selected material is missing: ' + name, code='invalid_request')
-        remaining -= sum(len(value.encode()) for value in (before, after) if value is not None)
+        item = dict(role=role, after=after, before=before)
+        if name.startswith('workflows/') and name.endswith('.json'):
+            local = []
+            for declared, bound in _local_bindings(after, declared_entries):
+                if _permitted(declared.partition(':')[0], excluded):
+                    visible = bound is None or _permitted(bound, excluded)
+                    local.append(dict(entry=declared, entry_registered=declared in declared_entries,
+                                      params=bound if visible else None,
+                                      params_bound=bound in declared_entries.get(declared, ()) if visible else None))
+            item['workspace_registration'] = dict(manifest='workspace.json',
+                registered=name in control.get('workflows', ()), local_bindings=local)
+        remaining -= evidence_file_size(item)
         if remaining < 0:
             raise ForgeError('Evidence exceeds its total byte limit; narrow the review scope', code='resource_limit')
-        files[name] = dict(role=role, after=after, before=before)
+        files[name] = item
     scope = dict(mode=mode, base=revision, entry=entry, params=params, paths=list(paths),
                  entries=selected_entries, changed=changed, evidence=list(evidence))
-    result = dict(scope=scope, files=files, groups=groups,
+    result = dict(scope=scope, files=files, groups=groups, required_groups=primary_count + len(node_groups),
                   gaps=[detail for name in files for detail in project.gaps.get(name, ())])
     if locked_facts is not None:
         result['dependencies'] = {**locked_facts, 'changed': bool(changed_controls),
@@ -504,11 +589,10 @@ def review_units(captured):
     grouped = {name for group in captured.get('groups', ()) for name in group}
     attachments.update(files.keys() - grouped - targets)
     units, covered = [], set()
+    sizes = {name: evidence_file_size(item) for name, item in files.items()}
 
     def fits(names):
-        return len(names) <= UNIT_FILES and sum(
-            len(value.encode()) for name in names for side in ('before', 'after')
-            if (value := files[name].get(side)) is not None) <= UNIT_BYTES
+        return len(names) <= UNIT_FILES and sum(sizes[name] for name in names) <= UNIT_BYTES
 
     def add(names):
         names = set(names) & files.keys() | attachments
@@ -522,7 +606,7 @@ def review_units(captured):
     # every affected Flow; unregistered sources and deleted files remain targets.
     for index, group in enumerate(captured.get('groups', ())):
         names = set(group) & files.keys()
-        if index >= len(captured['scope']['entries']) and not (names & (targets - covered)):
+        if index >= captured.get('required_groups', len(captured['scope']['entries'])) and not (names & (targets - covered)):
             continue
         add(names)
     for name in sorted(targets - covered):

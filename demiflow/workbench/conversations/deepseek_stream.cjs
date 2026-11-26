@@ -8,7 +8,7 @@ exports.apply = function(ctx, config) {
   const FRAME=1024*1024, TOTAL=16*1024*1024, BLOCK=128*1024, ATTEMPT=1024*1024;
   let input='', decoder=new StringDecoder('utf8'), agent, session, current, timer;
   let closed=false, failed=false, sent=0, frames=0, attempts=0, revision=0;
-  let metricStep, metricSequence=-1, promptId;
+  let metricStep, metricSequence=-1, promptId, ownerSessionId;
   const calls=new Map();
   const identity=value=>typeof value==='string' && value.length>0 && Buffer.byteLength(value)<=256;
   const validIndex=value=>Number.isSafeInteger(value) && value>=0 && value<65536;
@@ -229,15 +229,21 @@ exports.apply = function(ctx, config) {
           write({promptId,submission:p.submission,status},'demiflow/steer-result');
           continue;
         }
+        if(value.method==='session/close' && value.params?.sessionId===ownerSessionId && !current) {
+          clearTimeout(timer);timer=undefined;agent=undefined;session=undefined;promptId=undefined;
+          revision=0;metricStep=undefined;metricSequence=-1;calls.clear();
+          sent=0;frames=0;attempts=0;
+          continue;
+        }
         if(value.method!=='session/prompt') continue;
         const id=value.params?.sessionId;
         if(!identity(id)) throw new Error('prompt identity');
         const target=ctx.agents.get(id), bound=target?.session;
-        if(!target || target.id!==id || bound?.id!==id || bound.header?.cwd!==config.cwd ||
+        if((ownerSessionId && ownerSessionId!==id) || !target || target.id!==id || bound?.id!==id || bound.header?.cwd!==config.cwd ||
             bound.header?.origin==='subagent' || bound.header?.parentSession!==undefined ||
             agent && (agent!==target || session!==bound)) throw new Error('prompt root identity');
         if(agent && !current) {sent=0;frames=0;attempts=0;}
-        agent=target;session=bound;promptId=value.id;
+        ownerSessionId=id;agent=target;session=bound;promptId=value.id;
       }
     } catch {fail();}
   };

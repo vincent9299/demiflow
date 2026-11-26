@@ -17,7 +17,8 @@ ALLOWED_ROOT_DIRS = frozenset({
     'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'workflows',
     'data', 'logs', 'docs', 'tests', 'runs',
 })
-TOPICS = ('flow', 'operator', 'prompt')
+ROLE_TOPICS = {'flows': 'flow', 'operators': 'operator', 'prompts': 'prompt', 'workflows': 'workflow'}
+TOPICS = tuple(ROLE_TOPICS.values())
 GUIDE_RESOURCE = 'standards/pipeline-authoring.md'
 _IGNORED_NAMES = frozenset({
     '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
@@ -1308,7 +1309,7 @@ def _group_unreferenced_under(prefix: str, all_files: list[str], unreferenced: l
 
 
 def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, parameter_digests: dict,
-                          exclude=(), structural_only: bool = False, packages_approved=False):
+                          exclude=(), structural_only: bool = False, packages_approved=False, checked_workflows=()):
     """Audit DF-02 structural & protocol cleanliness without mutating or inspecting business data.
 
     When ``structural_only=True`` (used by incremental post-turn hooks), skips corpus-dependent
@@ -1694,21 +1695,24 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
 
     # 9c. Declarative multi-pipeline workflows under workflows/*.json.
     workflow_files = _iter_tree_files(root, 'workflows', exclude=exclude)
-    registered_workflows = list((control or {}).get('workflows') or ())
+    registered_workflows = [name for name in (control or {}).get('workflows', ())
+                            if not any(name == p or name.startswith(p + '/') for p in exclude)]
     if workflow_files or registered_workflows:
         from .workflow import validate_workflow
-        checked_workflows: set[str] = set()
+        seen_workflows = set(checked_workflows)
         for rel in workflow_files:
+            if rel in seen_workflows:
+                continue
             if not rel.endswith('.json'):
                 add('workflow_non_json', rel, 'workflows/ 目录仅允许存放声明式 JSON 编排文件（workflows/*.json）。')
                 continue
-            checked_workflows.add(rel)
+            seen_workflows.add(rel)
             spec = validate_workflow(root, rel, control=control)
             inspected.add(rel)
             for item in spec['diagnostics']:
                 by_category.setdefault('workflow_invalid', []).append(item)
         for rel in registered_workflows:
-            if rel in checked_workflows:
+            if rel in seen_workflows:
                 continue
             spec = validate_workflow(root, rel, control=control)
             inspected.add(rel)

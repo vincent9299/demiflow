@@ -149,6 +149,11 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
                                 if not bound or started:
                                     raise ForgeError('Author started without a bound session', code='conflict')
                                 started = True
+                            elif (kind == 'item.completed' and bound and not started and
+                                  isinstance(event.get('item'), dict) and event['item'].get('type') == 'error'):
+                                # The pinned CLI emits startup diagnostics between thread.started and turn.started.
+                                # Only an active turn can acknowledge the submitted author input.
+                                continue
                             elif kind in ('item.started', 'item.completed', 'turn.completed'):
                                 if not started or completed:
                                     raise ForgeError('Author output is outside its active turn', code='conflict')

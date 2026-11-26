@@ -21,7 +21,7 @@ Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/data
 
 ## 架构意图基线
 
-平台架构、Forge边界和实现Review以[架构总意图与职责边界 v1.4](docs/architecture-master-intent-v1.md)为当前已定版基线，原产品root意图保持。Forge负责context/tools与独立工程闭环，统一 CLI 可以脱离工作台驱动原 Agent 完成检查、独立评审、反馈和修正复核；工作台通过可靠回合结束钩子复用同一 Forge 用例，保留授权、传输、对话与队列，不反向耦合。Pipeline运行管理及交互应用保留各自状态。现有包名/命令兼容路径不等于领域归属。SQL当前可随Notebook，当前版交付不等待新引擎；后续适配遵守双方C1–C6/R1–R4约定。定版不表示已重构，历史准入、权限与数据保护继续有效。
+平台架构、Forge边界和实现Review以[架构总意图与职责边界 v1.5](docs/architecture-master-intent-v1.md)为当前已定版基线，原产品root意图保持。Forge负责context/tools与独立工程闭环，统一 CLI 可以脱离工作台驱动原 Agent 完成检查、独立评审、反馈和修正复核；工作台通过可靠回合结束钩子复用同一 Forge 用例，保留授权、传输、对话与队列，不反向耦合。Pipeline运行管理及交互应用保留各自状态。现有包名/命令兼容路径不等于领域归属。SQL当前可随Notebook，当前版交付不等待新引擎；后续适配遵守双方C1–C6/R1–R4约定。定版不表示已重构，历史准入、权限与数据保护继续有效。
 
 ## Forge 开发辅助边界
 

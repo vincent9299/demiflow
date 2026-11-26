@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 root = None
@@ -30,6 +31,17 @@ for line in sys.stdin:
     elif method == 'config/read':
         result = dict(config=dict(features=dict(apps=False, hooks=False, multi_agent=False, multi_agent_v2=False),
             shell_environment_policy=dict(inherit='none'), web_search='disabled'))
+    elif method == 'config/batchWrite':
+        new_servers = params['edits'][0]['value']
+        result = {}
+    elif method == 'config/mcpServer/reload':
+        server = new_servers['development-protocol']
+        request = json.dumps(dict(id=1, method='tools/list', params={})) + '\n'
+        reply = subprocess.check_output([server['command'], *server['args']], input=request, text=True)
+        tools = {tool['name']:tool for tool in json.loads(reply)['result']['tools'] if tool['name'] != 'read_input'}
+        result = {}
+    elif method == 'mcpServerStatus/list':
+        result = dict(data=[dict(name='development-protocol', tools=tools)])
     elif method in {'thread/start', 'thread/resume'}:
         root = Path(params['cwd'])
         assert params['dynamicTools'][0]['name'] == 'read_input'

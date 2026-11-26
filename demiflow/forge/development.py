@@ -13,7 +13,7 @@ from .project_rules import diagnostic
 from .platform import content_digest
 from .platform_environment import read_bounded
 from .review import review_project, MAX_REVIEW_CALLS, REVIEW_SECONDS
-from .schema import ForgeError
+from .schema import ForgeError, canonical
 
 def has_code_changes(changes):
     """True when at least one non-documentation business code/config file changed."""
@@ -24,7 +24,7 @@ def has_code_changes(changes):
         if not rel:
             continue
         parts = rel.split('/')
-        if parts[0] in code_dirs:
+        if parts[0] in code_dirs or (parts[0] == 'workflows' and Path(rel).suffix == '.json'):
             return True
         if len(parts) == 1 and Path(rel).suffix.lower() in code_exts:
             return True
@@ -122,10 +122,28 @@ def feedback_current(root, options, author):
     return candidate_identity(capture(root, basis['watch'], exclude=basis['exclude'])) == basis['digest']
 
 
+def _static_review_observation(source, check, definitions, stage):
+    detail = dict(stage=stage, status=check['status'], diagnostic_count=check.get('diagnostic_count', 0))
+    samples = {'diagnostics': check.get('diagnostics', ())[:4]}
+    if source == 'project_layout':
+        workflows = [dict(path=item['path'], status=item['status']) for item in definitions
+                     if item['path'].startswith('workflows/') and 'status' in item]
+        if workflows:
+            detail['workflow_count'] = len(workflows)
+            samples['workflow_checks'] = workflows[:4]
+    detail.update({field: [] for field in samples})
+    for field, rows in samples.items():
+        for row in rows:
+            detail[field].append(row)
+            if len(canonical(detail)) > 2048:
+                detail[field].pop()
+    return dict(source=source, detail=canonical(detail).decode())
+
+
 def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection=None,
                 auto_review=False, round=0, budget=None, reference=None, exclude=(),
                 reviewer=None, check_cancel=None, source_current=None, protected_violations=(),
-                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None):
+                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=None):
     """Finish one engineering interval and produce a durable, candidate-bound next action.
 
     ``author`` contains provider/session and completed/acknowledged/cleanup facts.
@@ -150,13 +168,15 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
     want_review = review_requested(changes=changes, auto_review=auto_review, selection=selection)
     selected = {} if auto_review and has_code_changes(changes) else selection or {}
     paths = [item['path'] for item in changes]
+    definitions = ()
     if inspect and (paths or want_review or protected_violations):
         try:
             check = check_project(root, paths=paths if 0 < len(paths) <= 256 else (),
                                   reference=reference, exclude=exclude, include_hygiene=True)
+            definitions = check.get('definitions', ())
             receipt['checks'] = {key: check[key] for key in (
                 'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id',
-                'source_digest', 'source_count', 'check_digest')}
+                'source_digest', 'source_count', 'check_digest', 'coverage') if key in check}
         except (OSError, ValueError, KeyError, RecursionError) as exc:
             incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
             receipt['checks'] = dict(status='incomplete', native_flow=incomplete, project_layout=incomplete)
@@ -170,12 +190,12 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
                 on_review()
             if reviewer is None:
                 raise ForgeError('独立评审模型尚未配置。', code='inspection_incomplete')
-            observations = []
+            observations = list(observations(definitions)) if observations else []
+            stage = 'recheck_after_feedback' if round else 'author_submission'
             for key in ('native_flow', 'project_layout'):
                 item = (receipt['checks'] or {}).get(key)
                 if item:
-                    observations.append(dict(source=key, detail=json.dumps(dict(
-                        status=item['status'], diagnostic_count=item.get('diagnostic_count', 0)))))
+                    observations.append(_static_review_observation(key, item, definitions, stage))
             receipt['review'] = review_project(root, goal=text, **selected,
                 paths=() if selected else tuple(prior or paths), prior_sources=None if selected else prior,
                 exclude=exclude, observations=observations, reviewer=reviewer, budget=budget,

@@ -324,7 +324,8 @@ def check_project(root, *, paths=(), entry=None, params=None, reference=None, ta
         reference = reference or build_reference()
         if content_digest(reference['catalog']) != reference['catalog_id']:
             raise ForgeError('SDK catalogue differs from its supplied identity', code='inputs_changed')
-        view = discover_project_sources(root, exclude=exclude, include_roles=bool(paths))
+        view = discover_project_sources(root, exclude=exclude, include_roles=entry is None,
+                                        role_names=ROLE_DIRS if paths else ('workflows',))
         describer = table_describer
         if table_describer is not None:
             table_cache = {}
@@ -346,6 +347,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     native, layout, checked, rows, definitions = [], [], [], [], []
     sources, parameter_digests, table_files = {}, {}, {}
     layout_paths = set()
+    checked_workflows = set()
     control = view['control']
     manifest = 'workspace.json'
     manifest_hash = None
@@ -369,6 +371,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
         return local_resolver(root, current, alias)
 
     variants, relevant = _candidates(root, view, paths, entry, params, sources, native, layout)
+    if not paths and entry is None:
+        relevant.update(view['roles']['workflows'])
     declarations = _declared_exports(root, sorted(relevant), sources, layout, deadline, max_bytes)
     visible = [item for item in variants if _visible(item[0].partition(':')[0], exclude)
                and (item[1] is None or _visible(item[1], exclude))]
@@ -449,7 +453,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
         try:
             operation_budget.check(deadline)
             if Path(path).parts[0] == 'workflows':
-                from .workflow import MAX_WORKFLOW_BYTES, validate_workflow
+                from .workflow import MAX_WORKFLOW_BYTES, external_workflow_bindings, validate_workflow
                 raw_wf = read_bounded(relative_path(root, path), MAX_WORKFLOW_BYTES)
                 _record(sources, path, sha256(raw_wf).hexdigest())
                 layout_paths.add(path)
@@ -459,11 +463,13 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
                     wf_spec = validate_workflow(root, path, control=view['control'])
                     layout.extend(wf_spec['diagnostics'])
                     definitions.append(dict(
-                        path=path,
+                        path=path, status=wf_spec['status'],
                         format=wf_spec.get('format') or 'demiflow_workflow_v1',
                         symbols=[n['id'] for n in wf_spec.get('nodes') or ()],
-                        scope='definition',
+                        scope='definition', unverified_projects=wf_spec['unverified_projects'],
+                        external_bindings=external_workflow_bindings(wf_spec),
                     ))
+                checked_workflows.add(path)
                 continue
             definition = _definition(root, path, deadline, exclude, sources, declarations.get(path))
             if definition:
@@ -482,7 +488,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
         hygiene_paths, hygiene_issues = check_project_hygiene(
             root, control, checked_sources=sources, parameter_digests=parameter_digests,
             exclude=exclude, structural_only=(scope['kind'] != 'project'),
-            packages_approved=dependencies is not None)
+            packages_approved=dependencies is not None, checked_workflows=checked_workflows)
         layout_paths.update(hygiene_paths)
         layout.extend(hygiene_issues)
     elif sources:
@@ -507,7 +513,9 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
                 native_flow=flow, project_layout=roles, rules_id=RULES_ID, catalog_id=reference['catalog_id'],
                 source_digest=content_digest(sources), source_count=len(sources), basis=basis,
                 diagnostics=diagnostics[:256], diagnostic_count=len(diagnostics),
-                coverage=dict(checked=len(checked), unverified=unverified[:64], requested_variants=len(variants)))
+                coverage=dict(checked=len(checked), unverified=unverified[:64], requested_variants=len(variants),
+                              external_projects_pending=sorted({alias for d in definitions
+                                                                for alias in d.get('unverified_projects', ())})))
     data['check_digest'] = content_digest(data)
     return data
 

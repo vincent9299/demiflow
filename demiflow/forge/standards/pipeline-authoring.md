@@ -89,3 +89,43 @@ CLI、可选 Notebook 和后台使用同一入口、同一份实际参数。参�
 对评测类 Prompt，可选一对容易混淆的正反例，说明证据不足时如何输出。只传判断所需的字段，避免把待评测的答案放入输入。结构化字段留给代码校验，模型专注于需要判断的部分。用小样本查看实际渲染消息和输出解析。真实模型调用按用户授权和预算执行。
 
 固定说明与每条变化的输入分别组织，写明判断条件、使用的证据和输出边界。检查原生渲染产生的真实消息、变量缺失行为及后端长度限制。区分固定前缀缓存与响应复用，分别统计模型请求数、输出行数和节点预算。在无待办输入的样例中核对请求数为零。
+
+## workflow
+
+### 建议与示例
+
+多管线编排使用 `workflows/<name>.json`。顶层必填 `format`、`name`、`nodes`，可选 `description`、`projects`、`inputs`、`concurrency_groups`、`policy`。每个节点填写唯一的 `id` 和已登记的 `entry`，还可以填写 `title`、`description`、`project`、`params`、`overrides`、`after` 和 `concurrency_group`。同一入口绑定多个参数文件时要写明选用的项目相对路径。两个节点可以复用同一入口。节点省略 `project` 或显式填写 `"project":"self"` 都引用本项目。`self` 是内置别名，`projects` 仅声明外部项目。
+
+```json
+{
+  "format": "demiflow_workflow_v1",
+  "name": "生成并评测",
+  "projects": {"evaluation": "eval-project"},
+  "inputs": {"scale": {"type": "integer", "default": 2}},
+  "concurrency_groups": {"gpu": 1},
+  "policy": {"max_parallel": 2, "on_failure": "fail_fast"},
+  "nodes": [
+    {"id": "generate", "entry": "flows/generate.py:run", "params": "configs/generate.json",
+     "overrides": {"scale": {"$input": "scale"}}},
+    {"id": "evaluate", "project": "evaluation", "entry": "flows/evaluate.py:run",
+     "params": "configs/evaluate.json", "concurrency_group": "gpu",
+     "overrides": {"input_table": {"$from": "generate.outputs.output_table"}}}
+  ]
+}
+```
+
+`projects` 将别名映射到宿主登记的逻辑项目名或工作区 ID。省略节点的 `project` 表示当前项目。跨项目前在工作台开发回合调用 `list_registered_projects`，核对目标和入口。独立 Forge 检查本地声明时会列出待宿主核实的外部项目。输入声明支持 `type`、`required`、`default`、`description`，类型可选 string、integer、number、boolean、object、array、any。用 `{"$input":"scale"}` 引用已声明输入，这个对象只放一个键。
+
+`after` 是上游节点 ID 数组，用于表达控制顺序。`$from` 自动形成数据依赖。表引用为 `node.outputs.name` 或追加 `uri`、`version`、`row_count`、`schema_hash`、`dataset_id` 字段。模型文件引用为 `train.models.default.files.adapter.safetensors.uri`，指定步骤可写 `train.models.default.steps.1000.files.adapter.safetensors.sha256`，文件字段支持 `uri`、`sha256`、`size_bytes`。模型本身可取 `manifest_uri`、`manifest_digest`、`final_step`、`instance_id`、`fit_key`。并发组限制组内同时运行数，`policy.max_parallel` 限制整个编排。`on_failure` 取字符串 `fail_fast` 或 `continue_independent`。
+
+| 规则 | 触发示例及核验阶段 |
+|---|---|
+| WF-01 | 声明字段或类型无效，例如把失败策略写成数组 |
+| WF-02 | 节点依赖自身或形成环 |
+| WF-03 | 引用了未声明输入、未知节点或项目别名 |
+| WF-04 | 目标入口未登记，或参数文件未绑定到该入口 |
+| WF-05 | 宿主实际提交前核验参与项目的运行权限 |
+| WF-06 | 调度时解析上游已提交的表或模型产物，核实名称、版本和文件 |
+| WF-07 | 声明路径或项目引用非法，例如用宿主绝对路径指代外部项目 |
+
+使用 `demiflow forge check --root . --path workflows/demo.json` 检查。独立终端用 `demiflow forge add workflow --root . --register --path workflows/demo.json` 登记。工作台开发回合使用宿主的 `manage_project_layout`，操作为 `register_workflow`。

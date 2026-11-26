@@ -62,6 +62,7 @@ class Service:
         self.input_denied_paths = tuple(dict.fromkeys(str(Path(p).absolute())
             for p in (config_path, *input_denied_paths)))
         self.settings = None
+        self.workflow_registry = None
         self.deployment = Deployment.load(config_path)
         self.root = self.deployment.state
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -206,6 +207,8 @@ class Service:
 
     def _worker_env(self, policy):
         env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
+        if self.workflow_registry is not None:
+            env['DEMIFLOW_WORKFLOW_REGISTRY'] = wire(self.workflow_registry, 8192).decode()
         env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
         if self.deployment.value.get('runtime_domain'):
             env['DEMIFLOW_FORGE_DOMAIN'] = self.deployment.value['runtime_domain']
@@ -288,7 +291,8 @@ class Service:
                 fs = os.statvfs(self.root)
                 if fs.f_bavail * fs.f_frsize < self.deployment.limits.provider_bytes + self.deployment.limits.output_bytes:
                     return dict(status='skipped')
-                homes = private_directory_bytes(self.root, entries=self.deployment.limits.sessions + 64)
+                homes = private_directory_bytes(self.root, entries=self.deployment.limits.sessions + 64,
+                                             codex_executable=deployment.providers.get('codex', {}).get('executable'))
                 used = sum(homes.values())
                 allowance = self.deployment.limits.provider_bytes
                 reserved_bytes = sum(max(0, allowance - homes.get(t['session'], 0)) for t in self.store.unresolved())
@@ -442,7 +446,7 @@ class Service:
 
     def start(self, workspace, root, session_id, submission_id, expected_revision, text, *, operation="message", auto_review=False, rework_depth=0, purpose="message", forge_options=None):
         self.project(workspace, root)
-        _, current_hash, _ = self.binding(workspace, root, seal=True)
+        deployment, current_hash, _ = self.binding(workspace, root, seal=True)
         caps = self.capabilities(workspace, root)
         session = self.store.show(workspace, session_id)
         available_providers = [p['id'] for p in caps['providers'] if p['available']]
@@ -474,7 +478,8 @@ class Service:
                 if json.loads(existing['forge_options']) != options:
                     reject('Submission key has different engineering options', 'conflict')
                 return self.store.public_turn(existing)
-            homes = private_directory_bytes(self.root, entries=self.deployment.limits.sessions + 64)
+            homes = private_directory_bytes(self.root, entries=self.deployment.limits.sessions + 64,
+                                             codex_executable=deployment.providers.get('codex', {}).get('executable'))
             used = sum(homes.values())
             allowance = self.deployment.limits.provider_bytes
             reserved = sum(max(0, allowance - homes.get(t['session'], 0)) for t in self.store.unresolved())

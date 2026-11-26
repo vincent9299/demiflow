@@ -1,6 +1,7 @@
 """Prepare current coding guidance and serve turn-bound read-only input."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 import hashlib
 import hmac
 import os
@@ -89,6 +90,14 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
         reject('Context with trusted header exceeds initial budget', 'resource_limit')
     manifest['digest'] = digest(manifest)
     return manifest, prompt
+
+
+CATALOG_TOOL = dict(name='list_registered_projects',
+    description='List visible Workbench projects, or inspect one logical name/workspace ID for registered Flows and bound parameter keys. Use offset to page.',
+    inputSchema=dict(type='object', additionalProperties=False, properties={
+        'project': dict(type='string'), 'entry': dict(type='string'), 'params': dict(type='string'),
+        'offset': dict(type='integer', minimum=0),
+        'limit': dict(type='integer', minimum=1, maximum=16)}))
 
 
 INPUT_TOOL = dict(name='read_input', description='Discover and read bounded input data.',
@@ -353,12 +362,13 @@ class BridgeServer:
     B1 may relay this Unix endpoint into its isolated network namespace; the same
     token, epoch, active-turn and fixed-operation checks apply on this side.
     """
-    def __init__(self, input_access, *, delivery_review=None, project_root=None):
+    def __init__(self, input_access, *, delivery_review=None, project_root=None, protected_snapshot=None, catalog=None):
         self.lock = threading.Lock()
         self.input_access = input_access
+        self.catalog = catalog
+        self.protected_snapshot = self._control_snapshot(project_root, protected_snapshot)
         self.delivery_review = delivery_review
         self.project_root = Path(project_root).absolute() if project_root is not None else None
-        self.bound_identity = (input_access.tid, input_access.epoch) if input_access is not None else None
         self.token = secrets.token_urlsafe(32)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-control-'))
         self.path = self.directory / 'bridge.sock'
@@ -371,8 +381,16 @@ class BridgeServer:
         self.thread = threading.Thread(target=self._run, name='development-control', daemon=True)
         self.thread.start()
 
-    def take_layout_paths(self) -> list[str]:
+    @staticmethod
+    def _control_snapshot(root, snapshot):
+        if snapshot is None and root is not None:
+            from demiflow.forge.project_guard import capture_protected_files
+            return capture_protected_files(root)
+        return snapshot
+
+    def finish_turn(self) -> list[str]:
         with self.lock:
+            self.input_access = self.catalog = self.delivery_review = self.project_root = self.protected_snapshot = None
             paths = sorted(self.authorized_layout_paths)
             self.authorized_layout_paths.clear()
             return paths
@@ -395,7 +413,6 @@ class BridgeServer:
                 if isinstance(p, str) and p:
                     recorded.add(p)
         elif action in ('register_flow', 'bind_params'):
-            recorded.update(('workspace.json', '.forge/state.json'))
             params = answer.get('params')
             if isinstance(params, str) and params:
                 recorded.add(params)
@@ -405,64 +422,70 @@ class BridgeServer:
             recorded.add('.env.example')
             if answer.get('gitignore_updated'):
                 recorded.add('.gitignore')
-        elif action == 'slim_manifest':
-            recorded.update(('workspace.json', '.forge/state.json'))
-        if recorded:
-            with self.lock:
-                self.authorized_layout_paths.update(recorded)
+        self.authorized_layout_paths.update(recorded)
 
-    def set_turn(self, input_access, *, delivery_review=None, project_root=None):
+    def set_turn(self, input_access, *, delivery_review=None, project_root=None, protected_snapshot=None, catalog=None):
         with self.lock:
             self.input_access = input_access
+            self.protected_snapshot = self._control_snapshot(project_root, protected_snapshot)
+            self.catalog = catalog
             self.delivery_review = delivery_review
             self.project_root = Path(project_root).absolute() if project_root is not None else None
             self.count = 0
             if input_access is not None:
                 self.authorized_layout_paths.clear()
-            if input_access is not None and self.bound_identity is None:
-                self.bound_identity = (input_access.tid, input_access.epoch)
 
     def _answer(self, request):
         with self.lock:
             active = self.input_access
             if (active is None or type(request) is not dict or set(request) != {'token', 'turn_id', 'epoch', 'method', 'params'}
                     or type(request['token']) is not str or not hmac.compare_digest(request['token'], self.token)
-                    or (request['turn_id'], request['epoch']) not in {(active.tid, active.epoch), self.bound_identity}):
+                    or (request['turn_id'], request['epoch']) != (active.tid, active.epoch)):
                 reject('Development control capability does not match this turn', 'not_found')
             active.require_active()
         return self.dispatch(request['method'], request['params'], active)
 
     def dispatch(self, method, params, active):
         from .pipeline_review import REVIEW_TOOL
+        from demiflow.forge.project_guard import guarded_control_writes
         with self.lock:
-            if active is not self.input_access:
+            if active is None or active is not self.input_access:
                 reject('Development control capability does not match this turn', 'not_found')
+            active.require_active()
+            tools = [INPUT_TOOL]
+            if self.delivery_review is not None:
+                tools.append(REVIEW_TOOL)
+            if self.project_root is not None:
+                tools.append(PROJECT_LAYOUT_TOOL)
+            if self.catalog is not None:
+                tools.append(CATALOG_TOOL)
             if method == 'tools/list' and params == {}:
-                tools = [INPUT_TOOL]
-                if self.delivery_review is not None:
-                    tools.append(REVIEW_TOOL)
-                if self.project_root is not None:
-                    tools.append(PROJECT_LAYOUT_TOOL)
                 return dict(tools=tools)
-            if method != 'tools/call' or type(params) is not dict or set(params) != {'name', 'arguments'}:
+            if (method != 'tools/call' or type(params) is not dict or set(params) != {'name', 'arguments'}
+                    or params['name'] not in [tool['name'] for tool in tools]):
                 reject('Unsupported development control operation')
-            name = params['name']
-            layout_root = self.project_root
-            if name == REVIEW_TOOL['name'] and self.delivery_review is not None:
-                # End-of-turn detachment serializes with this short durable admission.
-                answer = self.delivery_review.request(params['arguments'])
-            elif name == PROJECT_LAYOUT_TOOL['name'] and layout_root is not None:
-                answer = None
-            elif name != INPUT_TOOL['name']:
-                reject('Unsupported development control operation')
+            name, arguments = params['name'], params['arguments']
+            if name == PROJECT_LAYOUT_TOOL['name']:
+                action = arguments.get('action') if isinstance(arguments, dict) else None
+                guard = nullcontext()
+                if action in ('register_workflow', 'register_flow', 'bind_params', 'slim_manifest'):
+                    guard = guarded_control_writes(self.project_root, self.protected_snapshot, active.require_active)
+                from demiflow.workbench.projects.registry import dependency_scope
+                with guard, dependency_scope(self.project_root, project=active.project):
+                    answer = _run_project_layout(self.project_root, arguments)
+                self._record_layout_paths(action, answer)
+            elif name == REVIEW_TOOL['name']:
+                answer = self.delivery_review.request(arguments)
+            elif name == CATALOG_TOOL['name']:
+                answer = self.catalog(arguments)
         if name == INPUT_TOOL['name']:
-            answer = active.invoke(params['arguments'])
-        elif name == PROJECT_LAYOUT_TOOL['name']:
-            from demiflow.workbench.projects.registry import dependency_scope
-            with dependency_scope(layout_root, project=active.project):
-                answer = _run_project_layout(layout_root, params['arguments'])
-            self._record_layout_paths(params['arguments'].get('action') if isinstance(params.get('arguments'), dict) else None, answer)
+            answer = active.invoke(arguments)
         return dict(content=[dict(type='text', text=wire(answer, 60000).decode())], isError=False)
+
+    def mcp_server(self, tid, epoch):
+        return dict(name='development-protocol', command=sys.executable,
+                    args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect',
+                          str(self.path), self.token, tid, epoch], env=[])
 
     def _run(self):
         from demiflow.workbench.conversations.transport import decode
