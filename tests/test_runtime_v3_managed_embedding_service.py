@@ -3,6 +3,7 @@ import json
 import threading
 import time
 
+import httpx
 import pytest
 
 from demiflow import data
@@ -76,7 +77,7 @@ def test_overridden_native_class_method_and_ungranted_gpu_are_rejected(tmp_path,
 @pytest.mark.parametrize('mode', ['failure', 'unready'])
 def test_failure_reaps_real_service(tmp_path, monkeypatch, request, mode):
     fixture = managed_fixture(tmp_path, monkeypatch, request=request, mode=mode)
-    with pytest.raises(Exception, match='503|ready|readiness'):
+    with pytest.raises(httpx.HTTPStatusError if mode == 'failure' else ModelServiceError, match='503|ready|readiness'):
         dataset(fixture, tmp_path).take_all()
     assert_reaped(fixture, requests=1 if mode == 'failure' else 0)
 
@@ -85,7 +86,7 @@ def test_original_port_owner_is_not_attached_or_terminated(tmp_path, monkeypatch
     from http.server import HTTPServer, BaseHTTPRequestHandler
     with HTTPServer(('127.0.0.1', 0), BaseHTTPRequestHandler) as occupied:
         fixture = managed_fixture(tmp_path, monkeypatch, request=request, port=occupied.server_port)
-        with pytest.raises(Exception, match='occupied'):
+        with pytest.raises(ModelServiceError, match='occupied'):
             dataset(fixture, tmp_path).take_all()
         assert occupied.fileno() >= 0 and events(fixture) == []
 

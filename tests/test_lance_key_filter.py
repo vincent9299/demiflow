@@ -191,11 +191,10 @@ def test_right_scan_keeps_callback_input_and_other_consumers(tmp_path):
 
 
 def test_right_projection_keeps_errors_in_unused_expressions(tmp_path):
-    from demiflow.execution.contracts.dataflow_errors import DataflowError
-
     left = lance.write_dataset(pa.table({'k': ['a', 'b']}), tmp_path / 'left')
     right = lance.write_dataset(pa.table({'k': ['a', 'a'], 'textnum': ['1', 'junk']}), tmp_path / 'right')
-    with pytest.raises(DataflowError, match="Cannot cast string 'junk'"):
+    # Arrow reports the bad cast with a ValueError subclass; the caller sees ValueError.
+    with pytest.raises(ValueError, match="Cannot cast string 'junk'"):
         with RunContext.start(tmp_path / 'run'), data.local_execution(workers=2, partitions=1, worker_mode='thread'):
             rhs = data.read_lance(right.uri, version=1, projection={'k': 'k', 'aux': 'cast(textnum as int)'})
             list(data.read_lance(left.uri, version=1).exclude_keys(rhs, on='k').iter_rows())

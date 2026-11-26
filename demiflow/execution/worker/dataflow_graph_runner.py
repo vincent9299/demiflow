@@ -746,7 +746,7 @@ class WorkerGraphRunner:
         except BaseException as exc:
             if not self.e._cancel_event.is_set():
                 from demiflow.execution.contracts.dataflow_failures import failure_payload
-                self._send('failure', failure_payload(exc))
+                self._send('failure', failure_payload(exc, builtin_base=True))
 
     def _ready_peer_commands(self):
         """Metadata-only selection; never dequeue or read future payloads."""
