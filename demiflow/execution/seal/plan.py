@@ -143,13 +143,13 @@ def _program_value(declaration: ProgramDeclaration):
     raise DataflowError("INVALID_CONTRACT", "ProgramDeclaration has no program body")
 
 
-def _base_code_identity_from_value(kind: str, value):
+def _base_code_identity_from_value(kind: str, value, *, lazy_absolute=False):
     """Recompute the historical code-pin from an actually-loaded program value."""
     try:
         if kind == "callable":
-            return plan_code_pin(LogicalPlan((MapOp(callable=value),)))
+            return plan_code_pin(LogicalPlan((MapOp(callable=value),)), lazy_absolute=lazy_absolute)
         if kind == "source":
-            return plan_code_pin(LogicalPlan(()), source=value)
+            return plan_code_pin(LogicalPlan(()), source=value, lazy_absolute=lazy_absolute)
         if kind == "aggregate":
             from ...data.aggregate import AggregateFnV2
             aggregates = value if isinstance(value, tuple) else (value,)
@@ -157,7 +157,7 @@ def _base_code_identity_from_value(kind: str, value):
                 raise DataflowError("INVALID_CONTRACT", "aggregate program must declare AggregateFnV2")
             return {"aggregates": [
                 {"configuration": describe(vars(a)), "methods": [plan_code_pin(LogicalPlan((MapOp(
-                    callable=CallableSpec.create(getattr(type(a), method))),)))
+                    callable=CallableSpec.create(getattr(type(a), method))),)), lazy_absolute=lazy_absolute)
                     for method in ("aggregate_partial", "aggregate_block", "merge_states", "combine", "finalize_state", "finalize")]}
                 for a in aggregates]}
         if kind == "sink":
@@ -178,14 +178,24 @@ def _base_code_identity_from_value(kind: str, value):
     raise DataflowError("INVALID_CONTRACT", "Unknown program kind: " + str(kind))
 
 
-def _code_identity_from_value(kind, value, *, sources=None):
+def _code_identity_from_value(kind, value, *, sources=None, lazy_absolute=False):
     from .business_sources import business_sources, source_identity
-    return {**_base_code_identity_from_value(kind, value),
-            'imports': source_identity(business_sources(kind, value) if sources is None else sources)}
+    if sources is None:
+        sources = business_sources(kind, value, lazy_absolute=lazy_absolute)
+    return {**_base_code_identity_from_value(kind, value, lazy_absolute=lazy_absolute),
+            'imports': source_identity(sources)}
 
 
 def _matches_original_program(kind, value, expected):
-    return identity(_code_identity_from_value(kind, value)) == identity(expected)
+    """Whether the program this process holds is the one the sealed pin describes.
+
+    The pin is recomputed with the current dependency discovery. A seal written
+    from eafb549a until absolute imports inside function bodies stopped counting
+    may list such a module; that seal is authenticated with the discovery that
+    wrote it. New seals are only ever written with the current discovery.
+    """
+    return any(identity(_code_identity_from_value(kind, value, lazy_absolute=legacy)) == identity(expected)
+               for legacy in (False, True))
 
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
