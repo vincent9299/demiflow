@@ -347,13 +347,16 @@ def codec_window(kernel, operation, bounds):
     call_input = call_output = None
     if calls > 1 and kernel.kind in record_call_kinds():
         # Per-record calls share one byte window: each admitted call is charged
-        # its actual input and one full output row, and one more row may wait
-        # in push for admission. The minimum holds a single call, so a legal row
+        # its actual input and one full output row. Granted slack widens that
+        # window, so outside it the minimum keeps one batch window: input that
+        # waits in push for admission and the encoding of an emitted output
+        # (whose typed tree may be many times its encoded row) use it, as in a
+        # single-call map. The minimum holds a single call, so a legal row
         # always proceeds once earlier calls finish; granted slack admits more
         # calls at once. State and fixed costs per slot still coexist.
         call_input = call_output = bounds.max_row_bytes
         minimum -= calls * (bounds.max_batch_bytes + bounds.max_row_bytes) - (
-            call_input + call_output + bounds.max_row_bytes)
+            call_input + call_output + bounds.max_batch_bytes)
     if not matches:
         return None  # Native models, reducers and other specialized grants retain their authority.
     target = kernel.profile.requests['memory_bytes']
