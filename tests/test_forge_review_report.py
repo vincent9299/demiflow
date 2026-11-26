@@ -41,7 +41,7 @@ def test_dependency_credentials_stay_out_of_provider_requests_and_still_invalida
 
     config = project / 'pyproject.toml'
     req = 'widgets @ https://fixture-user:fixture-pass@packages.example.org/widgets.whl?token=fixture-signature'
-    declared = f'[project]\ndependencies = ["{req}"]\n[tool.demiflow.packages]\n'
+    declared = f'[project]\ndependencies = ["{req}", "packaging>=20"]\n[tool.demiflow.packages]\n'
     config.write_text(declared)
     sent = []
 
@@ -62,6 +62,7 @@ def test_dependency_credentials_stay_out_of_provider_requests_and_still_invalida
     assert len(sent) == 2
     request = json.loads(sent[0].split('\n')[-1])
     assert request['project_dependencies']['declaration_sha256'] == sha256(declared.encode()).hexdigest()
+    assert request['project_dependencies']['requirements'][1] == 'packaging>=20'
     assert '2 | dependencies' in request['files']['pyproject.toml']['after']
     for prompt in sent:
         assert 'packages.example.org/widgets.whl' in prompt
