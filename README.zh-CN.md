@@ -251,7 +251,8 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | 流式 `map` 与并发 | [docs/streaming-map.md](docs/streaming-map.md) |
 | 大模型算子与 HTTP 契约 | [docs/prompt_http.md](docs/prompt_http.md) |
 | 多轮 Agent 算子 | [docs/operator_environment.md](docs/operator_environment.md) |
-| 向量化与向量检索 | [docs/embeddings.md](docs/embeddings.md) · [docs/vector_search.md](docs/vector_search.md) |
+| 关联、分组与排序 | [docs/relational.md](docs/relational.md) |
+| 向量编码、建索引与检索 | [docs/vectors.md](docs/vectors.md) |
 | 抓取、队列与数据获取 | [docs/dataset-fetch.md](docs/dataset-fetch.md) |
 | 写入 Lance 表与部分列合并 | [docs/lance-write.md](docs/lance-write.md) |
 | 训练与评测 | [docs/dataset-training.md](docs/dataset-training.md) |
