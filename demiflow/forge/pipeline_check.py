@@ -341,6 +341,8 @@ def check_project(root, *, paths=(), entry=None, params=None, reference=None, ta
 
 
 def _check(root, view, paths, entry, params, reference, table_resolver, table_describer, exclude, deadline, publish, max_variants, max_bytes, *, include_hygiene=False):
+    from .dependencies import binding as dependency_binding
+    dependencies = dependency_binding(root)
     native, layout, checked, rows, definitions = [], [], [], [], []
     sources, parameter_digests, table_files = {}, {}, {}
     layout_paths = set()
@@ -417,6 +419,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             layout_paths.update(inspected)
             layout.extend({**d, 'entry': candidate, 'params': param} for d in issues)
             report['binding']['parameter_path'] = param
+            if dependencies is not None:
+                report['binding']['project_dependencies'] = dependencies['digest']
             kept_entry_diags = [d for d in report['diagnostics'] if _keep_diagnostic(d)]
             entry_status = (
                 'invalid' if any(d.get('status') == 'invalid' for d in kept_entry_diags)
@@ -473,8 +477,6 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
     if pipeline_paths and not checked and not definitions and not native:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
-    from .dependencies import binding as dependency_binding
-    dependencies = dependency_binding(root)
     # Hygiene applies to every declared project, including new ones without registered entries.
     if (scope['kind'] == 'project' or include_hygiene) and view['control'] is not None:
         hygiene_paths, hygiene_issues = check_project_hygiene(

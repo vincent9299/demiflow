@@ -20,7 +20,7 @@ def begin_change_scope(root, *, writes, expected, watch_roots=None, limits=None)
     return ws._store_scope(root, value, baseline, writes, expected)
 
 
-def audit_check(root, *, kind, report_digest=None, expected_policy, full_interval=300):
+def audit_check(root, *, kind, report_digest=None, expected_policy, full_interval=300, authority=None):
     """Verify one object, then publish only a bounded derived observation."""
     from demiflow.workbench.worker import operation
     import time
@@ -31,7 +31,7 @@ def audit_check(root, *, kind, report_digest=None, expected_policy, full_interva
         raise ForgeError('Invalid audit target or interval', code='invalid_request')
     with ws.audit_lease(root, 'check'):
         try:
-            result = operation('audit_check', root, kind=kind, report_digest=report_digest, expected_policy=expected_policy)
+            result = operation('audit_check', root, kind=kind, report_digest=report_digest, expected_policy=expected_policy, _authority=authority)
         except ForgeError as exc:
             result = dict(status='unverifiable', complete=False, error=dict(code=exc.code, message=str(exc)[:2048]))
         stamp = time.time()
@@ -219,10 +219,10 @@ def table_evidence(root, alias, *, row_id, field_path, expected_binding=None, ve
     return operation('table_evidence', root, **arguments)
 
 
-def report_status(root, digest, *, platform_check=True):
+def report_status(root, digest, *, platform_check=True, authority=None):
     from demiflow.workbench.worker import operation
 
-    return operation("status", root, digest=digest, platform_check=platform_check)
+    return operation("status", root, digest=digest, platform_check=platform_check, _authority=authority)
 
 
 def project_table(root, identity, *, expected, version=None):

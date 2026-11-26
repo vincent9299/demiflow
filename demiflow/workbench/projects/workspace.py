@@ -328,7 +328,7 @@ def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_pol
         result = _check_change_scope(root)
         result.pop('scope', None)
     elif kind == 'report' and report_digest in value['audit']['reports']:
-        checked = _report_status(root, report_digest, table_resolver=table_resolver)
+        checked = _report_status(root, report_digest, table_resolver=table_resolver, verify_dependencies=True)
         result = dict(status=checked['status'] if checked['verification']['complete'] else 'unverifiable',
                       complete=checked['verification']['complete'], changes=checked['changes'][:256],
                       entry=checked['report']['binding']['entry'],
@@ -585,10 +585,13 @@ def current_platform_snapshot(snapshot):
                           limits=snapshot['limits'])
 
 
-def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None):
+def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None, dependencies=None):
     from demiflow.forge.pipeline_check import inspect_variant
 
     root, value, snapshot = load_workspace(root)
+    if dependencies is None:
+        from demiflow.forge.dependencies import binding as dependency_binding
+        dependencies = dependency_binding(root)
     snapshot = current_platform_snapshot(snapshot)
     path = validate_parameter_path(root, params) if isinstance(params, str) else None
     parameters = read_control(path) if path else params
@@ -597,6 +600,8 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
     report['binding']['parameter_path'] = str(path.relative_to(root)) if path else None
     if shared_sources:
         report['binding']['shared_sources'] = shared_sources
+    if dependencies is not None:
+        report['binding']['project_dependencies'] = dependencies['digest']
     return _publish_inspection(root, value, snapshot, report, save=save)
 
 
@@ -772,7 +777,7 @@ def workspace_policy(value, binding):
             'locations': {key: value['locations'].get(key) for key in sorted(used)}}
 
 
-def _report_status(root, digest, *, table_resolver, platform_check=True):
+def _report_status(root, digest, *, table_resolver, platform_check=True, verify_dependencies=False):
     from demiflow.errors import DemiflowError
     from demiflow.lance.preview import describe_table
 
@@ -796,6 +801,16 @@ def _report_status(root, digest, *, table_resolver, platform_check=True):
             reasons.append(unavailable_reason if outcome == 'unavailable' and unavailable_reason else reason)
         if len(checks) < 256:
             checks.append(dict(kind=kind, subject=subject, outcome=outcome, reason_code=code))
+
+    if verify_dependencies and 'project_dependencies' in binding:
+        from demiflow.forge.dependencies import binding as dependency_binding
+
+        def current_dependency_digest():
+            locked = dependency_binding(root)
+            return locked['digest'] if locked else None
+
+        check('dependency', 'project_dependencies', current_dependency_digest, binding['project_dependencies'],
+              'project_dependencies_changed', 'project_dependencies_unverifiable')
 
     if report["format"] != "demiflow_forge_flow_inspection_v3":
         reasons.append("historical_contract_read_only")

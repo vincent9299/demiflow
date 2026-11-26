@@ -48,7 +48,8 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, expli
             path = Path(os.fsdecode(args[0])).absolute()
             # Native libraries own their files; only project Python/config
             # closure is copied. Fixed external inputs remain in place.
-            if path.is_relative_to(root) and path not in managed_paths:
+            private = dependencies is not None and path.name.startswith('.env')
+            if path.is_relative_to(root) and path not in managed_paths and not private:
                 if len(reads) >= 512 and path not in reads:
                     raise ForgeError('Native source resource closure exceeds budget')
                 reads.add(path)

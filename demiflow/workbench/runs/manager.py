@@ -478,7 +478,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             from demiflow.workbench.python_sources import SharedSources
             shared = SharedSources(root, source_modules or {}, dependencies=dependencies).binding()
         report = ws._inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver(),
-                                  shared_sources=shared)
+                                  shared_sources=shared, dependencies=dependencies)
         if report.get('status') != 'checked':
             raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
         if not 1 <= len(report['actions']) <= 32:
@@ -1019,11 +1019,9 @@ def _preflight(root, run_id, *, expected, authority=None):
 def _verify_dependency_commit(root, manifest, authority):
     """Recheck the approval under the existing admission and registry locks."""
     expected = manifest.get('project_dependencies')
-    if expected is None:
-        return
     from demiflow.workbench.python_sources import project_dependencies
     current = project_dependencies(root, authority=authority.bootstrap(), verify_files=False)
-    if current is None or current['digest'] != expected['digest']:
+    if (current['digest'] if current else None) != (expected['digest'] if expected else None):
         raise ForgeError('Project dependency approval changed during admission', code='conflict')
 
 

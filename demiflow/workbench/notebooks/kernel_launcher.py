@@ -220,8 +220,8 @@ def main() -> None:
             *config.get('locations', ()),
         ]
         if dependency:
-            read_paths.remove('/')
-            read_paths.append(str(dependency[0]))
+            read_paths = [root, config['runtime_dir'], str(dependency[0]), '/etc/ssl', '/etc/ld.so.cache',
+                          *config.get('locations', ())]
         exec_paths = [
             '/usr',
             '/bin',

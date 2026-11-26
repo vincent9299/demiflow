@@ -796,7 +796,8 @@ class Handler(BaseHTTPRequestHandler):
                     args=dict(query)
                     for key in ('attempt','node_offset'):
                         if key in args:args[key]=int(args[key])
-                    value=get(root,**args)
+                    authority = run_authority(self.server, urlsplit(self.path).path, root, 'read')
+                    value=get(root,authority=authority.bootstrap(),**args)
                 elif url.path == '/api/pipeline-source':
                     from demiflow.workbench.graph.source_view import pipeline
                     value=pipeline(root,**query)
@@ -915,7 +916,8 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path=="/api/project-table-profile":
                     value=project_ops.project_profile(root,query["id"],expected=query["expected"],version=int(query["version"]),binding=query["binding"],columns=query["columns"])
                 elif url.path == "/api/report":
-                    value = project_ops.report_status(root, query["digest"])
+                    authority = run_authority(self.server, urlsplit(self.path).path, root, 'read')
+                    value = project_ops.report_status(root, query["digest"], authority=authority.bootstrap())
                 elif url.path == "/api/sample":
                     match = query["match"] if "match" in query else None
                     value = project_ops.sample_table(
@@ -1188,8 +1190,9 @@ class Handler(BaseHTTPRequestHandler):
                     authority.require(root, 'read')
                     value = project_ops.check_project(root, authority=authority.bootstrap())
                 elif name == 'audit-check':
+                    authority = run_authority(self.server, self.path, root, 'read')
                     value = project_ops.audit_check(root, kind=request['kind'], expected_policy=request['expected_policy'],
-                                            report_digest=request.get('digest'))
+                                                    report_digest=request.get('digest'), authority=authority.bootstrap())
                 elif name in {'workflow-start', 'workflow-cancel', 'workflow-resume', 'workflow-reconcile'}:
                     from demiflow.workbench.workflows import manager as wf_mgr
                     inv = self.server.inventory()

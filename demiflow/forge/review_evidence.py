@@ -334,7 +334,9 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
     if locked_facts is not None:
         excluded = (*excluded, 'packages', 'pyproject.toml')
     for name in (*paths, *evidence):
-        if not is_dependency_path(name):
+        if is_dependency_path(name):
+            relative_path(root, name)
+        else:
             _check_path(root, name, excluded)
     if prior_sources is not None:
         if not paths or base or not isinstance(prior_sources, dict) or set(prior_sources) != set(paths):

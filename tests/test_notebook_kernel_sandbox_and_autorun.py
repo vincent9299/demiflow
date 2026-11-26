@@ -433,3 +433,54 @@ def test_dev_sandbox_and_grant_keep_data_tools_readonly(tmp_path):
     assert str((proj / 'flows').resolve()) in spec.write_paths
     assert str((proj / 'data_tools').resolve()) not in spec.write_paths
     assert str((proj / 'data_tools').resolve()) in spec.protected_paths
+
+
+def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
+    from jupyter_client import BlockingKernelClient
+    from jupyter_client.connect import write_connection_file
+    from demiflow.forge.dependencies import update
+    from demiflow.workbench.conversations.sandbox_native import landlock_abi
+    from demiflow.workbench.notebooks import kernel_launcher
+
+    if sys.platform != 'linux' or landlock_abi() < 3:
+        pytest.skip('approved readonly project kernels require Landlock ABI 3')
+    root = tmp_path / 'project'
+    (root / '.forge').mkdir(parents=True)
+    source = tmp_path / 'owned-library'
+    source.mkdir()
+    (source / '__init__.py').write_text('')
+    (source / 'later.py').write_text('VALUE = 7\n')
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+        f'notebook_dependency_fixture = {{source = "local_ref", path = "{source}"}}\n')
+    locked = update(root, sys.executable)
+    state = tmp_path / 'state'
+    runtime = state / 'runtime'
+    runtime.mkdir(parents=True)
+    config = state / 'kernel.json'
+    config.write_text(json.dumps(dict(python=sys.executable, root=str(root), code_root=str(Path(demiflow.__file__).parents[1]),
+        runtime_dir=str(runtime), tmp_dir=str(state / 'tmp'), sandbox_mode='readonly', locations=[],
+        write_paths=['data'], dependency_lock=locked['digest'])))
+    connection = str(runtime / 'connection.json')
+    write_connection_file(fname=connection)
+    client = BlockingKernelClient(connection_file=connection)
+    client.load_connection_file()
+    process = subprocess.Popen([sys.executable, '-IB', kernel_launcher.__file__, str(config), connection],
+                               cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        client.start_channels()
+        client.wait_for_ready(timeout=25)
+        (source / 'later.py').write_text('VALUE = 99\n')
+        message = client.execute('from pathlib import Path\nfrom notebook_dependency_fixture.later import VALUE\n'
+            f'assert VALUE == 7\ntry:\n    Path({str(root / "pyproject.toml")!r}).write_text("blocked")\n'
+            'except PermissionError:\n    pass\nelse:\n    raise AssertionError("dependency declaration is writable")\n')
+        while True:
+            response = client.get_shell_msg(timeout=10)
+            if response['parent_header'].get('msg_id') == message:
+                assert response['content']['status'] == 'ok', response['content']
+                break
+    finally:
+        client.stop_channels()
+        process.terminate()
+        _, stderr = process.communicate(timeout=7)
+        if process.returncode not in (0, -15):
+            pytest.fail(stderr.decode(errors='replace'))

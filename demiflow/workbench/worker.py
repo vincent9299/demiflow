@@ -23,6 +23,8 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     from demiflow.workbench.reader import ALLOWED
     from demiflow.workbench.reader import in_native_dispatch
     request={"operation":name,"root":str(Path(root).absolute()),"arguments":arguments}
+    root = Path(request['root'])
+    inspection_reads = ()
     if _authority is not None:
         request["bootstrap"] = _authority
     if name in {'plan_preview', 'run_prepare'}:
@@ -34,6 +36,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     if name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None:
         request.pop('bootstrap', None)
         request['dependencies'] = _dependencies
+        inspection_reads, request['table_inputs'] = _inspection_inputs(root, request)
     if _source_modules is not None:
         request['source_modules'] = _source_modules
     settings=limits_with({"catalog_bytes":9*1024**2,**({"timeout_seconds":20} if name in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"} else {})})
@@ -46,7 +49,6 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         value=dispatch(request)
     elif context is not None and _dependencies is None:
         reader,consumer_closed=context
-        import os
         reusable=not _pass_fds and not os.environ.get('DEMIFLOW_FORGE_PREPARATION_FD') and name in ALLOWED
         if reusable:
             value=reader.call(request,timeout=min(20,settings['timeout_seconds']),consumer_closed=consumer_closed)
@@ -65,8 +67,8 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         launcher = None
         if business:
             argv.append('--confined-project')
-            launcher = partial(_launch_project_inspection, Path(root).absolute(), _dependencies, _source_modules,
-                               request, settings['timeout_seconds'])
+            launcher = partial(_launch_project_inspection, root, _dependencies, _source_modules,
+                               inspection_reads, settings['timeout_seconds'])
         value=capture(argv,request,settings,response_formats={FORMAT},input_limit=1024**2,
             pass_fds=_pass_fds,inherit_authority=not business,launcher=launcher,
             tree_rss_limit=PREPARATION_RSS if business or _pass_fds or name in {"analysis_media_sources","analysis_source_read","table_profile"} else (READONLY_RSS if (location() / 'host-budget.json').exists() else None))
@@ -80,7 +82,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     return value["value"]
 
 
-def _launch_project_inspection(root, locked, source_modules, request, seconds, command, *, stdin, cwd, env, **_):
+def _launch_project_inspection(root, locked, source_modules, inspection_reads, seconds, command, *, stdin, cwd, env, **_):
     """Apply OS bounds before the fixed project Python inspection starts."""
     from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
     from demiflow.workbench.host_partition import PREPARATION_RSS
@@ -90,15 +92,18 @@ def _launch_project_inspection(root, locked, source_modules, request, seconds, c
     home = Path(cwd) / 'home'
     home.mkdir(mode=0o700)
     interpreter = locked['environment']['interpreter']
-    files = _inspection_read_paths(root, request)
-    files.update(root / item['path'] for item in locked['packages'].values())
-    files.update(map(Path, (source_modules or {}).values()))
+    from demiflow.forge.dependencies import module_files
+    files = set(inspection_reads)
+    source_files = {Path(row['path']) for row in module_files(root, locked).values()}
+    source_files.update(map(Path, (source_modules or {}).values()))
+    traversal = {root, *(path.parent for path in source_files)}
+    files.update(source_files)
     runtime = {Path(__file__).resolve().parents[2], Path(interpreter['prefix']),
                Path(interpreter['base_prefix']), Path(interpreter['binary'])}
     runtime.update(path for path in map(Path, ('/usr', '/lib', '/lib64')) if path.exists())
     if any(root.is_relative_to(path) for path in runtime):
         raise ValueError('Project Python runtime root must not cover the project directory')
-    spec = SandboxSpec(read_paths=tuple(map(str, sorted(files | {Path(cwd)}))), traversal_paths=(str(root),),
+    spec = SandboxSpec(read_paths=tuple(map(str, sorted(files | {Path(cwd)}))), traversal_paths=tuple(map(str, sorted(traversal))),
                        write_paths=(), runtime_paths=tuple(sorted(map(str, runtime))),
                        protected_paths=(), denied_paths=(), private_home=str(home),
                        role='verifier', seconds=seconds, rss_bytes=PREPARATION_RSS)
@@ -106,7 +111,7 @@ def _launch_project_inspection(root, locked, source_modules, request, seconds, c
                           cwd=cwd, stdin=stdin)
 
 
-def _inspection_read_paths(root, request):
+def _inspection_inputs(root, request):
     """Grant project source and exact input tables while keeping controls private."""
     from demiflow.forge.platform_environment import read_bounded
     from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_table_uri
@@ -118,13 +123,19 @@ def _inspection_read_paths(root, request):
 
     _, workspace = ws.load_workspace_control(root)
     supplied = request['arguments']
-    if request['operation'] == 'plan_preview':
-        selected = supplied.get('params')
-        parameters = json.loads(read_bounded(ws.validate_parameter_path(root, selected), 65536)) if selected else {}
-    else:
-        parameters = supplied['parameters']
     from demiflow.forge.project import STATE_PATH
     paths = {root / 'workspace.json', root / STATE_PATH, ws.relative_path(root, workspace['platform']['path'])}
+    parameters = supplied.get('parameters', {})
+    if request['operation'] == 'plan_preview' and supplied.get('params') is not None:
+        parameter_file = ws.validate_parameter_path(root, supplied['params'])
+        paths.add(parameter_file)
+        from demiflow.workbench.graph.preview import parameter_document
+        parameters = parameter_document(read_bounded(parameter_file, 65536))
+        if parameters.get('format') is None and set(parameters) <= {'arguments', 'run_directory'}:
+            if isinstance(parameters.get('arguments'), dict):
+                # This historical preview format passes raw arguments to the Flow.
+                parameters = {}
+    fixed_inputs = {}
     allowed = set(ROLE_DIRS) | {'tables', 'configs', 'parameters', 'lib', 'src', 'data'}
     with os.scandir(root) as entries:
         for index, item in enumerate(entries):
@@ -147,13 +158,23 @@ def _inspection_read_paths(root, request):
                 target, _ = resolve_table_uri(root, item['uri'], item.get('version'))
                 paths.add(target)
             elif item.get('kind') == 'table' and set(item) == {'kind', 'alias'}:
-                _, _, target = resolver(root, workspace, item['alias'])
+                alias = item['alias']
+                control, ref, target = resolver(root, workspace, alias)
                 paths.add(target)
+                if alias.startswith('run:'):
+                    fixed_inputs[alias] = dict(control=control, ref=ref.to_dict(), path=str(target))
+            elif item.get('kind') == 'location' and set(item) == {'kind', 'location_id'}:
+                location = workspace['locations'].get(item['location_id'])
+                if location is not None and location.get('writable') is False:
+                    from demiflow.workbench.python_sources import scoped_data_location
+                    target = scoped_data_location(root, ws.location_root(root, location))
+                    if target is not None:
+                        paths.add(target)
             else:
                 pending.extend((child, depth + 1) for child in item.values())
         elif isinstance(item, list):
             pending.extend((child, depth + 1) for child in item)
-    return {path for path in paths if path.exists()}
+    return {path for path in paths if path.exists()}, fixed_inputs
 
 
 def prepare_native(*, analysis_read, confined=False):
@@ -206,6 +227,16 @@ def dispatch(request):
     from demiflow.workbench.table_bindings import make_resolver
     from demiflow.workbench.python_sources import dependency_scope
     table_resolver = make_resolver(ws.table_binding, runs.result_table)
+    if 'dependencies' in request:
+        from demiflow.lance.refs import DatasetRef
+
+        def table_resolver(root, control, selector):
+            if isinstance(selector, str) and selector.startswith('run:'):
+                fact = request['table_inputs'].get(selector)
+                if fact is None:
+                    raise ForgeError('Missing admitted run output reference', code='conflict')
+                return fact['control'], DatasetRef.from_dict(fact['ref']), Path(fact['path'])
+            return ws.table_binding(root, control, selector)
     try:
         from demiflow.errors import DemiflowError
         from demiflow.lance import preview
@@ -291,7 +322,8 @@ def dispatch(request):
         elif op == "status":
             from demiflow.workbench.projects.workspace import _report_status
 
-            value = _report_status(root, table_resolver=table_resolver, **args)
+            with dependency_scope(root, authority=request.get('bootstrap')):
+                value = _report_status(root, table_resolver=table_resolver, verify_dependencies=True, **args)
         elif op == 'audit_capture':
             from demiflow.workbench.projects.workspace import _capture_change_baseline
             value = _capture_change_baseline(root, **args)
@@ -302,7 +334,8 @@ def dispatch(request):
             value = _check_change_scope(root)
         elif op == 'audit_check':
             from demiflow.workbench.projects.workspace import _audit_check
-            value = _audit_check(root, table_resolver=table_resolver, **args)
+            with dependency_scope(root, authority=request.get('bootstrap')):
+                value = _audit_check(root, table_resolver=table_resolver, **args)
         elif op == 'audit_hint':
             from demiflow.workbench.projects.workspace import _audit_hint
             value = _audit_hint(root, **args)
@@ -458,12 +491,12 @@ def main():
     request=json.loads(raw)
     required = {"operation", "root", "arguments"}
     if (type(request) is not dict or not required <= request.keys()
-            or request.keys() - required - {"bootstrap", "source_modules", "dependencies"}
+            or request.keys() - required - {"bootstrap", "source_modules", "dependencies", "table_inputs"}
             or "source_modules" in request and (
                 request["operation"] not in {"plan_preview", "run_prepare", "native_submission_inspect"}
                 or type(request["source_modules"]) is not dict)):
         raise ValueError("Invalid workspace request")
-    if ('dependencies' in request) != confined:
+    if ('dependencies' in request) != confined or ('table_inputs' in request) != confined:
         raise ValueError("Project dependency inspection requires the confined worker path")
     if confined:
         if request['operation'] not in {'plan_preview', 'native_submission_inspect'} or 'bootstrap' in request:

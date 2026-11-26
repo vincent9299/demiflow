@@ -54,6 +54,10 @@ def declaration(root):
         raw = read_bounded(root / 'pyproject.toml', 128 * 1024)
     except FileNotFoundError:
         return None
+    except ForgeError as error:
+        if not (root / LOCK).exists() and (error.code == 'resource_limit' or (root / 'pyproject.toml').is_symlink()):
+            return None
+        raise
     try:
         value = tomllib.loads(raw.decode('utf-8'))
     except (UnicodeError, ValueError, RecursionError) as error:
@@ -102,7 +106,7 @@ def _source(root, item):
     return no_symlinks(root / item['path'])
 
 
-def _scan(name, source, *, files_left, bytes_left, check_imports=False):
+def _scan(name, source, *, files_left, bytes_left, project_root=None):
     if not source.is_dir() or not (source / '__init__.py').is_file():
         raise ForgeError('Expected a regular Python package with __init__.py: ' + name)
     pending = [source]
@@ -132,8 +136,8 @@ def _scan(name, source, *, files_left, bytes_left, check_imports=False):
                     raise ForgeError('Dependency package exceeds its file or byte budget: ' + name, code='resource_limit')
                 raw = read_bounded(Path(entry.path), min(FILE_BYTES, min(8 * 1024**2, bytes_left) - total))
                 total += len(raw)
-                if check_imports:
-                    _check_imports(raw, rel, name)
+                if project_root is not None:
+                    _check_imports(raw, rel, name, project_root)
                 files[rel.as_posix()] = dict(sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
         if before.st_mtime_ns != folder.lstat().st_mtime_ns:
             raise ForgeError('Dependency package changed while scanning: ' + name, code='inputs_changed')
@@ -148,11 +152,12 @@ def _scan(name, source, *, files_left, bytes_left, check_imports=False):
     return files, total
 
 
-def _check_imports(raw, relative, package):
+def _check_imports(raw, relative, package, root):
     try:
         tree = ast.parse(raw, filename=str(relative))
     except (SyntaxError, ValueError, RecursionError) as error:
         raise ForgeError('Invalid Python in dependency package: ' + str(relative)) from error
+    reverse_roots = _RESERVED - {'sitecustomize', 'usercustomize'}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
@@ -160,8 +165,12 @@ def _check_imports(raw, relative, package):
             names = [node.module]
         else:
             continue
-        if any(name.partition('.')[0] in _RESERVED - {'sitecustomize', 'usercustomize'} for name in names):
-            raise ForgeError(f'Dependency {package}/{relative}:{node.lineno} imports a project role or platform module')
+        for name in names:
+            parts = name.split('.')
+            qualified_project = any(tuple(parts[:depth]) == root.parts[-depth:] and parts[depth] in reverse_roots
+                                    for depth in range(1, min(8, len(parts) - 1) + 1))
+            if parts[0] in reverse_roots or qualified_project:
+                raise ForgeError(f'Dependency {package}/{relative}:{node.lineno} imports a project role or platform module')
 
 
 def _inventory_packages(root, config, *, check_imports=False):
@@ -169,7 +178,8 @@ def _inventory_packages(root, config, *, check_imports=False):
     left_files, left_bytes = MAX_FILES, MAX_BYTES
     for name, item in sorted(config['packages'].items()):
         path = _source(root, item)
-        files, size = _scan(name, path, files_left=left_files, bytes_left=left_bytes, check_imports=check_imports)
+        files, size = _scan(name, path, files_left=left_files, bytes_left=left_bytes,
+                            project_root=root if check_imports else None)
         left_files -= len(files)
         left_bytes -= size
         result[name] = dict(**item, files=files, tree_sha256=content_digest(files))
@@ -253,6 +263,12 @@ def probe_environment(python, config, *, expected=None, identity_only=False):
     return result
 
 
+def _requirements(config):
+    from .platform_environment import platform_declaration
+    platform = platform_declaration(Path(__file__).resolve().parents[1], _ENV_LIMITS)
+    return list(dict.fromkeys([*platform['requires'], *config['requirements']]))
+
+
 def _lock_view(root, config, approval):
     locked = read_control(root / LOCK, MAX_LOCK)
     if type(locked) is not dict or set(locked) != {'format', 'project', 'declaration', 'packages', 'environment', 'requirements', 'digest'}:
@@ -260,7 +276,8 @@ def _lock_view(root, config, approval):
     digest = content_digest({k: v for k, v in locked.items() if k != 'digest'})
     if locked['format'] != FORMAT or digest != locked['digest'] or (approval is not None and digest != approval):
         raise ForgeError('Project dependency lock is unapproved or differs from the approved identity', code='conflict')
-    if locked['project'] != physical_root(root) or locked['declaration'] != config['sha256']:
+    if (locked['project'] != physical_root(root) or locked['declaration'] != config['sha256']
+            or locked['requirements'] != _requirements(config)):
         raise ForgeError('Dependency declaration or project changed; refresh the lock', code='conflict')
     return locked
 
@@ -342,9 +359,7 @@ def update(root, python, *, name=None, vendor=None):
         raise ForgeError('Declare [tool.demiflow.packages] in pyproject.toml first')
     if name is not None and name not in config['packages']:
         raise ForgeError('Package is absent from the dependency declaration: ' + name)
-    from .platform_environment import platform_declaration
-    platform = platform_declaration(Path(__file__).resolve().parents[1], _ENV_LIMITS)
-    requirements = list(dict.fromkeys([*platform['requires'], *config['requirements']]))
+    requirements = _requirements(config)
     environment = probe_environment(python, {**config, 'requirements': requirements})
     with control_lock(root):
         if declaration(root) != config:
@@ -356,7 +371,7 @@ def update(root, python, *, name=None, vendor=None):
                 if item['source'] != 'vendored':
                     raise ForgeError('Vendor requires a declared vendored package')
                 source = no_symlinks(Path(vendor).absolute())
-                files, _ = _scan(name, source, files_left=MAX_FILES, bytes_left=MAX_BYTES, check_imports=True)
+                files, _ = _scan(name, source, files_left=MAX_FILES, bytes_left=MAX_BYTES, project_root=root)
                 target = _source(root, item)
                 ensure_directory(target.parent)
                 target.mkdir(mode=0o700)

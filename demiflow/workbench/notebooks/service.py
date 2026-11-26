@@ -262,6 +262,12 @@ class Notebooks:
             payload['dependency_error'] = str(exc)[:512]
         else:
             if dependencies is not None:
+                from demiflow.workbench.python_sources import scoped_data_location
+                private = [self.temp.name]
+                if self.server.registry is not None:
+                    private.append(self.server.registry)
+                payload['locations'] = [str(path) for location in locations
+                                        if (path := scoped_data_location(root, location, private=private)) is not None]
                 payload['dependency_lock'] = dependencies['digest']
         temporary = state / 'kernel-config.tmp'
         temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')

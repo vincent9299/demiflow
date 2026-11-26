@@ -330,6 +330,20 @@ def project_dependencies(root, *, authority=None, project=None, verify_files=Tru
                    verify_files=verify_files)
 
 
+def scoped_data_location(root, path, *, private=()):
+    """Admit registered data roots without granting project/host control ancestors."""
+    path = Path(path).resolve()
+    protected = (Path(root), Path.home(), *map(Path, private),
+                 *map(Path, ('/etc', '/proc', '/sys', '/dev', '/run', '/root')))
+    if any(path == parent or parent.is_relative_to(path) for parent in protected):
+        return None
+    if any(path.is_relative_to(parent) for parent in protected[2:]):
+        return None
+    if any(part.startswith('.') for part in path.parts[1:]):
+        return None
+    return path
+
+
 def dependency_scope(root, *, authority=None, project=None):
     """Give a Forge authoring use case the approval provided by its Workbench host."""
     from contextlib import nullcontext
@@ -369,7 +383,7 @@ def import_bootstrap(directory, modules, *, platform_root, project_roots=(), pro
     bootstrap_path = directory / 'sitecustomize.py'
     configuration = dict(modules=modules, project_roots=sorted(project_roots), project_package=list(project_package),
                          platform_root=str(platform_root))
-    publish_bytes(binding_path, bounded_json(configuration, 512 * 1024), create=not binding_path.exists())
+    publish_bytes(binding_path, bounded_json(configuration, 512 * 1024), create=False)
     body = r'''import json
 import os
 from pathlib import Path
@@ -389,5 +403,5 @@ except BaseException:
     os.write(2, b'DemiFlow dependency bootstrap failed\n')
     os._exit(78)
 '''
-    publish_bytes(bootstrap_path, body.encode(), create=not bootstrap_path.exists())
+    publish_bytes(bootstrap_path, body.encode(), create=False)
     return directory

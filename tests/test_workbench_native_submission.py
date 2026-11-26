@@ -160,14 +160,28 @@ def test_native_source_drift_rejected_before_worker(root):
     assert not (root / 'native-output.lance').exists()
 
 
-def test_native_stop_resume_keeps_original_run_and_stage_receipts(root):
+@pytest.mark.parametrize('vendored', [False, True], ids=['legacy', 'vendored'])
+def test_native_stop_resume_keeps_original_run_and_stage_receipts(root, tmp_path, vendored):
+    extra = ''
+    if vendored:
+        import sys
+        from demiflow.forge.dependencies import update
+
+        seed = tmp_path / 'vendor-seed'
+        (seed / 'nested').mkdir(parents=True)
+        (seed / '__init__.py').write_text('')
+        (seed / 'nested/__init__.py').write_text('')
+        (seed / 'nested/settings.py').write_text('STEP = 0\n')
+        (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+            'native_dep_recovery = {source = "vendored", path = "packages/native_dep_recovery"}\n')
+        update(root, sys.executable, name='native_dep_recovery', vendor=seed)
+        extra = '    from native_dep_recovery.nested.settings import STEP\n    return {"x": row["x"] + STEP}\n'
     (root / 'flows/native_stop.py').write_text('''from demiflow import data
 import pyarrow as pa
 import time
 def slow(row):
     time.sleep(2)
-    return row
-def run(*, directory):
+''' + (extra or '    return row\n') + '''def run(*, directory):
     schema = pa.schema([('x', pa.int64())])
     rows = data.from_items([{'x': i} for i in range(8)])
     rows = rows.save_lance(directory+'/stage.lance', schema=schema, key='x', stage='rows',
@@ -199,6 +213,9 @@ def run(*, directory):
         old_binding = project_ops.describe_table(root, latest_selector)['binding']['digest']
         from demiflow.workbench.runs.view import snapshot
         assert snapshot(root, identity)['availability'] == 'available'
+        if vendored:
+            path = root / 'packages/native_dep_recovery/nested/settings.py'
+            path.write_text('STEP = 100\n')
         runs.resume(root, identity, expected=prepared['digest'], expected_attempt=1)
         after = wait(root, identity)
         assert after['status'] == 'succeeded', (after, runs.logs(root, identity))
@@ -274,3 +291,57 @@ def test_project_dependency_preview_and_native_run_use_the_locked_package(root, 
     import lance
     assert all(sorted(lance.dataset(row['uri']).to_table()['x'].to_pylist()) == [21, 22]
                for row in outcome['outputs'])
+
+    upstream = outcome['outputs'][0]
+    selector = f"run:{outcome['run_id']}:{upstream['name']}:1"
+    (root / 'flows/continued.py').write_text('from demiflow import data\n'
+        'def run(*, source, target):\n'
+        '    return data.read_lance(source["uri"], version=source["version"]).write_lance(target, mode="create", return_receipt=True)\n')
+    params = 'flows/continued.json'
+    (root / params).write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments={
+        'source': {'kind': 'table', 'alias': selector}, 'target': str(root / 'continued.lance'),
+    })))
+    entry = 'flows/continued.py:run'
+    declare_existing_flow(root, entry, params=params)
+    assert preview(root, entry=entry, params=params)['basis']['project_dependencies'] == locked['digest']
+    continued = runs.prepare(root, entry, params=params)
+    assert continued['report']['binding']['tables'][selector]['version'] == upstream['result']['ref']['lance_version']
+    followed = execute(root, continued)
+    assert followed['status'] == 'succeeded', (followed, runs.logs(root, followed['run_id']))
+    assert sorted(lance.dataset(followed['outputs'][0]['uri']).to_table()['x'].to_pylist()) == [21, 22]
+
+
+def test_project_dependency_bootstrap_reaches_real_local_stage_process(tmp_path, monkeypatch):
+    import hashlib
+    import os
+    import sys
+    from demiflow import data
+    from demiflow.workbench.python_sources import import_bootstrap, install_bound_imports
+
+    platform_root = Path(__file__).resolve().parents[1]
+    package = tmp_path / 'run/source/stage_dependency_fixture'
+    package.mkdir(parents=True)
+    modules = {}
+    for name, filename, raw in [
+        ('stage_dependency_fixture', '__init__.py', b''),
+        ('stage_dependency_fixture.callback', 'callback.py',
+         b'def enrich(row):\n    import os\n    from stage_dependency_fixture.later import OFFSET\n'
+         b'    return {"x": row["x"] + OFFSET, "pid": os.getpid()}\n'),
+        ('stage_dependency_fixture.later', 'later.py', b'OFFSET = 7\n'),
+    ]:
+        path = package / filename
+        path.write_bytes(raw)
+        modules[name] = dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    install_bound_imports(modules)
+    bootstrap = import_bootstrap(tmp_path / 'run/work/imports', modules, platform_root=platform_root)
+    monkeypatch.setenv('PYTHONPATH', os.pathsep.join((str(bootstrap), str(platform_root))))
+    try:
+        from stage_dependency_fixture.callback import enrich
+        assert 'stage_dependency_fixture.later' not in sys.modules
+        with data.local_execution(worker_mode='process', workers=1, partitions=1):
+            rows = data.from_items([{'x': 3}]).map(enrich).take_all()
+        assert rows[0]['x'] == 10 and rows[0]['pid'] != os.getpid()
+    finally:
+        for name in modules:
+            sys.modules.pop(name, None)

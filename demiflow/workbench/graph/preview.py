@@ -19,15 +19,20 @@ from demiflow.forge.platform_environment import read_bounded
 from demiflow.workbench.projects import workspace as ws
 
 
+def parameter_document(raw):
+    from demiflow.workbench.projects.discovery import _json
+    document = _json(raw)
+    if type(document) is not dict:
+        raise ForgeError('解析配置需要 JSON 对象；不会执行配置中的命令。', code='invalid_request')
+    return document
+
+
 def _parameters(root, control, entry, path, *, table_resolver):
     if path is None:
         return {}, None
     target = ws.validate_parameter_path(root, path)
     raw = read_bounded(target, 65536)
-    from demiflow.workbench.projects.discovery import _json
-    document = _json(raw)
-    if type(document) is not dict:
-        raise ForgeError('解析配置需要 JSON 对象；不会执行配置中的命令。', code='invalid_request')
+    document = parameter_document(raw)
     if document.get('format') in {'demiflow_forge_flow_parameters_v1', 'demiflow_forge_flow_parameters_v2'}:
         # Preserve the same declared resource binding as native run preparation.
         arguments, _, _, _ = resolve_arguments(root, control, document, table_resolver=table_resolver)
