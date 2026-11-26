@@ -298,13 +298,15 @@ def durable_tree(target):
 
 
 @operation_budget.controlled
-def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None, request_id=None, telemetry=True, authority=None):
+def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
+            overrides=None, output_prefix=None, request_id=None, telemetry=True, authority=None):
     from demiflow.workbench.worker import operation
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, "run_submit")
     from demiflow.workbench.runs.domain import preparation_lock
     from functools import partial
-    args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,telemetry=telemetry)
+    args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,
+                overrides=overrides, output_prefix=output_prefix, telemetry=telemetry)
     from demiflow.workbench.runs.native_resources import trusted_deployment, capacity_domain, trusted_process_environment
     args['capacity_domain'] = capacity_domain()
     args.update(trusted_process_environment(workspace=root))
@@ -327,12 +329,25 @@ def _fact_actions(report, outputs):
     return list(dict.fromkeys([*report['actions'],*(o['action_id'] for o in outputs.values())]))
 
 
+_OUTPUT_PREFIX_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}(?:/[A-Za-z0-9_-]{1,64}){0,3}$')
+
+
+def _validate_output_prefix(prefix):
+    if prefix is None:
+        return None
+    if type(prefix) is not str or not _OUTPUT_PREFIX_RE.fullmatch(prefix):
+        raise ForgeError('output_prefix must be 1..4 safe non-hidden path segments', code='invalid_request')
+    return prefix
+
+
 def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
+             overrides=None, output_prefix=None,
              reserved_run_id=None, prepare_request_id=None, telemetry=True, authority=None, native_deployment=None,
              capacity_domain=None, environment_names=None, executable_dirs=None, source_modules=None, training_location=None):
     operation_budget.check()
     if type(telemetry) is not bool:
         raise ForgeError('telemetry must be boolean',code='invalid_request')
+    output_prefix = _validate_output_prefix(output_prefix)
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, 'run_submit')
     root, workspace, platform = ws.load_workspace(root)
@@ -346,10 +361,22 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     if type(new_outputs) is not bool:
         raise ForgeError('new_outputs must be boolean')
     original = ws.read_control(parameter_path) if parameter_path else copy.deepcopy(params)
-    # Existing resolver validates the closed parameter format before modifications.
-    resolve_arguments(root, workspace, original, table_resolver=_table_resolver())
+    if overrides is None:
+        # Existing resolver validates the closed parameter format before modifications.
+        resolve_arguments(root, workspace, original, table_resolver=_table_resolver())
+    else:
+        if type(overrides) is not dict or len(overrides) > 64:
+            raise ForgeError('Parameter overrides must be an object of at most 64 entries', code='invalid_request')
+        bounded_json(overrides, 256 * 1024)
+        extract_arguments(original)
     effective = copy.deepcopy(original)
     eff_args, _ = extract_arguments(effective)
+    if overrides is not None:
+        for key, val in overrides.items():
+            if type(key) is not str or not key or len(key) > 128:
+                raise ForgeError('Override parameter names must be non-empty strings', code='invalid_request')
+            eff_args[key] = copy.deepcopy(val)
+        resolve_arguments(root, workspace, effective, table_resolver=_table_resolver())
     if inputs is not None:
         if type(inputs) is not dict or len(inputs) > 32:
             raise ForgeError('Input overrides must map entry arguments to fixed table references')
@@ -387,16 +414,17 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             mode, expected_version = value.get('mode', 'create'), value.get('expected_version')
             if 'uri' in value and 'location_id' not in value:
                 if new_outputs and mode in {'create', 'checkpoint'}:
-                    candidate = f'data/{name}.lance'
+                    base_prefix = f'data/{output_prefix}/' if output_prefix else 'data/'
+                    candidate = f'{base_prefix}{name}.lance'
                     suffix = 2
                     while ws.relative_path(root, candidate).exists():
-                        candidate = f'data/{name}-{suffix}.lance'
+                        candidate = f'{base_prefix}{name}-{suffix}.lance'
                         suffix += 1
                     value['uri'] = candidate
                 uri = resolve_output_uri(root, value['uri'])
                 data_root = (root / 'data').absolute()
-                if mode in {'create', 'checkpoint'} and not data_root.exists():
-                    data_root.mkdir(exist_ok=True)
+                if mode in {'create', 'checkpoint'}:
+                    uri.parent.mkdir(parents=True, exist_ok=True)
                 extra_spec = {
                     'location_id': 'data',
                     'location_root': str(data_root),
@@ -405,7 +433,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             else:
                 base = ws.location_root(root, workspace['locations'][value['location_id']])
                 if new_outputs and mode in {'create', 'checkpoint'}:
-                    prefix = '' if base.name == 'data' else 'data/'
+                    sub = f'{output_prefix}/' if output_prefix else ''
+                    prefix = sub if base.name == 'data' else f'data/{sub}'
                     candidate = f'{prefix}{name}.lance'
                     suffix = 2
                     while ws.relative_path(base, candidate).exists():
@@ -413,6 +442,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                         suffix += 1
                     value['relative_uri'] = candidate
                 uri = ws.relative_path(base, value['relative_uri'])
+                if mode in {'create', 'checkpoint'}:
+                    uri.parent.mkdir(parents=True, exist_ok=True)
                 extra_spec = {}
             if mode in {'create', 'checkpoint'} and uri.exists():
                 raise ForgeError('Create target already exists: ' + str(uri))
@@ -1237,6 +1268,46 @@ def result_table(root, run_id, name, *, attempt=None):
     alias = f'run:{run_id}:{name}' + (f':{attempt}' if attempt is not None else '')
     return {'format': 'demiflow_forge_table_v1', 'alias': alias,
             'location_id': ref.store_id, 'ref': ref.to_dict()}, ref, uri
+
+
+def run_artifacts(root, run_id, *, attempt=None):
+    """Collect verified committed output tables and published training models for a finished run."""
+    target, value = _load(root, run_id, attempt=attempt)
+    described = _describe(run_id, value)
+    selected_attempt = described['attempt']
+    outputs = {}
+    for item in described['outputs']:
+        if item.get('status') != 'committed' or item.get('result') is None:
+            continue
+        _, ref, uri = result_table(root, run_id, item['name'], attempt=selected_attempt)
+        outputs[item['name']] = {
+            'uri': str(uri),
+            'version': ref.lance_version,
+            'row_count': ref.row_count,
+            'schema_hash': ref.schema_hash,
+            'dataset_id': ref.dataset_id,
+        }
+    models_list = []
+    with read_run(target, deadline=operation_budget.current_deadline()) as reader:
+        models_list = reader.published_models()
+    models = {}
+    for idx, model in enumerate(models_list):
+        models[str(idx)] = model
+        if model.get('occurrence'):
+            models[model['occurrence']] = model
+        if model.get('action_id') and model['action_id'] not in models:
+            models[model['action_id']] = model
+    if len(models_list) == 1:
+        models['default'] = models_list[0]
+    return {
+        'run_id': run_id,
+        'attempt': selected_attempt,
+        'status': described['status'],
+        'entry': described['entry'],
+        'outputs': outputs,
+        'models': models,
+        'models_list': models_list,
+    }
 
 
 def register_results(root, run_id, *, recover=False, attempt=None, maintenance_deadline=None):

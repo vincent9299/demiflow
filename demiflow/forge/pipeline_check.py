@@ -187,7 +187,7 @@ def _candidates(root, view, paths, entry, params, sources, native, layout):
             drafts.add(path)
         direct.append((path + ':' + public[0], None, not is_flow))
 
-    shared = any(Path(p).parts[0] != 'data_tools' for p in relevant - declared - parameters - drafts)
+    shared = any(Path(p).parts[0] not in {'data_tools', 'workflows'} for p in relevant - declared - parameters - drafts)
     variants = [(e, p, False) for e, bound in entries.items() for p in bound
                 if shared or e.partition(':')[0] in relevant or p in relevant]
     return variants + direct, relevant
@@ -444,6 +444,23 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             continue
         try:
             operation_budget.check(deadline)
+            if Path(path).parts[0] == 'workflows':
+                from .workflow import MAX_WORKFLOW_BYTES, validate_workflow
+                raw_wf = read_bounded(relative_path(root, path), MAX_WORKFLOW_BYTES)
+                _record(sources, path, sha256(raw_wf).hexdigest())
+                layout_paths.add(path)
+                if Path(path).suffix != '.json':
+                    layout.append(diagnostic('DF-02', path, 'workflows/ 目录仅允许存放声明式 JSON 编排文件（workflows/*.json）。'))
+                else:
+                    wf_spec = validate_workflow(root, path, control=view['control'])
+                    layout.extend(wf_spec['diagnostics'])
+                    definitions.append(dict(
+                        path=path,
+                        format=wf_spec.get('format') or 'demiflow_workflow_v1',
+                        symbols=[n['id'] for n in wf_spec.get('nodes') or ()],
+                        scope='definition',
+                    ))
+                continue
             definition = _definition(root, path, deadline, exclude, sources, declarations.get(path))
             if definition:
                 definitions.append(definition)

@@ -41,6 +41,9 @@
 .wb-graph-view .wb-edge-value{stroke:#60a5fa;stroke-dasharray:5 4}
 .wb-graph-view .wb-edge-action{stroke:#a1a1aa;stroke-dasharray:2 4}
 .wb-graph-view .wb-edge-reference{stroke:#d4d4d8;stroke-dasharray:4 4}
+.wb-graph-view .wb-edge-workflow_data{stroke:#2563eb;stroke-width:1.75}
+.wb-graph-view .wb-edge-workflow_model{stroke:#7c3aed;stroke-width:1.75;stroke-dasharray:6 3}
+.wb-graph-view .wb-edge-workflow_after{stroke:#94a3b8;stroke-dasharray:3 4}
 .wb-graph-view .wb-edge-port{
   font:12px var(--font-sans,system-ui,-apple-system,"Segoe UI",sans-serif);fill:#52525b;
   text-anchor:middle;paint-order:stroke;stroke:#fcfcfd;stroke-width:4px;

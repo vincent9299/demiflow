@@ -99,10 +99,10 @@ INPUT_TOOL = dict(name='read_input', description='Discover and read bounded inpu
         'limit': dict(type='integer'), 'columns': dict(type='array', items=dict(type='string'))}))
 
 _STANDARD_PROJECT_DIRS = frozenset({
-    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'data', 'logs', 'tests', 'docs',
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'workflows', 'data', 'logs', 'tests', 'docs',
 })
 _MOVE_DEST_DIRS = frozenset({
-    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'tests', 'docs',
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'workflows', 'tests', 'docs',
 })
 _PROTECTED_TOP_DIRS = frozenset({'.forge', '.git', '.venv', 'runs', 'data', 'logs'})
 _PROTECTED_ROOT_FILES = frozenset({'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'README.md'})
@@ -112,8 +112,9 @@ PROJECT_LAYOUT_TOOL = dict(
     name='manage_project_layout',
     description=(
         'Safely manage controlled project structure, file organization and workspace.json registrations on the host: '
-        'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/data/logs/tests/docs); '
+        'ensure_dirs creates missing standard directories (flows/operators/prompts/configs/data_tools/notebooks/workflows/data/logs/tests/docs); '
         'register_flow checks and registers a flow entry in workspace.json (defaulting to configs/<flow>.json); '
+        'register_workflow validates and registers a declarative workflows/<name>.json file in workspace.json; '
         'bind_params updates an existing registered entry parameter binding under configs/*.json; '
         'move_path moves an existing project file or directory into a standard role directory (e.g. root configs to configs/, root *.ipynb to notebooks/, review tools to data_tools/) without losing bytes or overwriting existing files; '
         'remove_path deletes obsolete unreferenced non-data files or directories (e.g. non-standard directories or unused orphan flows/configs/prompts/scripts), strictly blocking notebooks, business data, runs/, and registered entries; '
@@ -122,12 +123,13 @@ PROJECT_LAYOUT_TOOL = dict(
     ),
     inputSchema=dict(type='object', additionalProperties=False, required=['action'], properties={
         'action': dict(type='string', enum=[
-            'ensure_dirs', 'register_flow', 'bind_params', 'move_path', 'remove_path', 'sync_env_example', 'slim_manifest',
+            'ensure_dirs', 'register_flow', 'register_workflow', 'bind_params', 'move_path', 'remove_path', 'sync_env_example', 'slim_manifest',
         ]),
         'dirs': dict(type='array', items=dict(type='string')),
         'entry': dict(type='string'),
         'params': dict(type='string'),
         'old_params': dict(type='string'),
+        'path': dict(type='string'),
         'src': dict(type='string'),
         'dst': dict(type='string'),
         'paths': dict(type='array', items=dict(type='string')),
@@ -146,6 +148,8 @@ def _registered_control_paths(root: Path) -> set[str]:
     used = {e.partition(':')[0] for e in entries}
     for plist in entries.values():
         used.update(plist)
+    for wf in value.get('workflows') or ():
+        used.add(wf)
     return used
 
 
@@ -221,6 +225,11 @@ def _run_project_layout(project_root, arguments):
         if params is not None and not isinstance(params, str):
             reject('params must be a relative JSON path', 'invalid_request')
         return forge_project.register_flow(root, entry, params=params)
+    if action == 'register_workflow':
+        wf_path = arguments.get('path')
+        if not isinstance(wf_path, str) or not wf_path:
+            reject('register_workflow requires path (e.g. workflows/demo.json)', 'invalid_request')
+        return forge_project.register_workflow(root, wf_path)
     if action == 'bind_params':
         entry = arguments.get('entry')
         params = arguments.get('params')

@@ -12,9 +12,9 @@ from .platform_environment import read_bounded
 from .schema import ForgeError
 
 
-ROLE_DIRS = ('flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks')
+ROLE_DIRS = ('flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'workflows')
 ALLOWED_ROOT_DIRS = frozenset({
-    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks',
+    'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks', 'workflows',
     'data', 'logs', 'docs', 'tests', 'runs',
 })
 TOPICS = ('flow', 'operator', 'prompt')
@@ -1383,7 +1383,7 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
                 add('root_archive', name, '根目录存在压缩归档包；废弃代码或旧配置请直接清理，不要在项目内保留源码/配置打包归档。')
         elif item.is_dir():
             if name != 'parameters' and name not in ALLOWED_ROOT_DIRS:
-                add('root_dir', name, f'根目录存在非规范顶层目录 {name}/；按 DF-02 规范根目录仅允许标准目录（flows/、operators/、prompts/、configs/、data_tools/、notebooks/、data/、logs/、docs/、tests/、runs/），请按职责归位或清理。')
+                add('root_dir', name, f'根目录存在非规范顶层目录 {name}/；按 DF-02 规范根目录仅允许标准目录（flows/、operators/、prompts/、configs/、data_tools/、notebooks/、workflows/、data/、logs/、docs/、tests/、runs/），请按职责归位或清理。')
 
     # 2. Deprecated parameters/ directory: unbound legacy files or empty leftover directory.
     param_dir = root / 'parameters'
@@ -1688,9 +1688,32 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             extra_locs = set((raw_ws.get('locations') or {}).keys()) - used_locs if isinstance(raw_ws, dict) else set()
             if not is_slim_manifest(raw_ws) or extra_locs:
                 add('legacy_manifest', 'workspace.json',
-                    'workspace.json 仅保留可读项目清单（name、entries 及可选 budgets），平台内部状态应保存在 .forge/state.json；请调用 manage_project_layout(action="slim_manifest") 规范化。')
+                    'workspace.json 仅保留可读项目清单（name、entries 及可选 budgets、workflows），平台内部状态应保存在 .forge/state.json；请调用 manage_project_layout(action="slim_manifest") 规范化。')
         except Exception:
             pass
+
+    # 9c. Declarative multi-pipeline workflows under workflows/*.json.
+    workflow_files = _iter_tree_files(root, 'workflows', exclude=exclude)
+    registered_workflows = list((control or {}).get('workflows') or ())
+    if workflow_files or registered_workflows:
+        from .workflow import validate_workflow
+        checked_workflows: set[str] = set()
+        for rel in workflow_files:
+            if not rel.endswith('.json'):
+                add('workflow_non_json', rel, 'workflows/ 目录仅允许存放声明式 JSON 编排文件（workflows/*.json）。')
+                continue
+            checked_workflows.add(rel)
+            spec = validate_workflow(root, rel, control=control)
+            inspected.add(rel)
+            for item in spec['diagnostics']:
+                by_category.setdefault('workflow_invalid', []).append(item)
+        for rel in registered_workflows:
+            if rel in checked_workflows:
+                continue
+            spec = validate_workflow(root, rel, control=control)
+            inspected.add(rel)
+            for item in spec['diagnostics']:
+                by_category.setdefault('workflow_invalid', []).append(item)
 
     # 10. Project-owned runtime env template (.env.example) & plaintext secret guard.
     from .project_env import (

@@ -167,6 +167,21 @@ def register(main: click.Group) -> None:
             return create_role_file(root, 'prompt', name, content=content)
         _output(root, as_json, perform)
 
+    @add.command()
+    @root_option
+    @click.option('--register', 'register_flag', is_flag=True)
+    @click.option('--path', 'workflow_path', required=True, help='Project-relative workflows/<name>.json path.')
+    @json_option
+    def workflow(root, register_flag, workflow_path, as_json):
+        """Validate and register a declarative workflows/*.json file in workspace.json."""
+        from .project import register_workflow
+        def perform():
+            if not register_flag:
+                raise ForgeError('Pass --register --path workflows/<name>.json to register a workflow.',
+                                 code='invalid_request')
+            return register_workflow(root, workflow_path)
+        _output(root, as_json, perform)
+
     @forge.command()
     @root_option
     @click.option('--path', 'paths', multiple=True, help='Check a changed or deleted project-relative path.')

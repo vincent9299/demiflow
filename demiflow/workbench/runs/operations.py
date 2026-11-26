@@ -88,6 +88,7 @@ _SPECS = (
     OperationSpec('prepare', 'prepare', 'POST', 'run-prepare', (
         ('entry', Field('text', required=True)), ('params', Field('parameters', required=True)),
         ('inputs', Field('object', nullable=True)), ('outputs', Field('object', nullable=True)),
+        ('overrides', Field('object', nullable=True)), ('output_prefix', Field('text', nullable=True)),
         ('limits', Field('object', nullable=True)), ('new_outputs', Field('bool')),
         ('telemetry', Field('bool')), ('request_id', Field('text', nullable=True)),
     ), 'run_submit', 'Seal inputs and create a prepared run; optional durable prepare receipt.',

@@ -42,6 +42,7 @@ STATIC_ASSETS = {
     "/notebooks.css": ("notebooks.css", "text/css; charset=utf-8"),
     "/pipeline-workspace.js": ("pipeline-workspace.js", "text/javascript; charset=utf-8"),
     "/pipeline-workspace.css": ("pipeline-workspace.css", "text/css; charset=utf-8"),
+    "/workflow-panel.js": ("workflow-panel.js", "text/javascript; charset=utf-8"),
     "/run-presentation.js": ("run-presentation.js", "text/javascript; charset=utf-8"),
     "/workbench-runs.css": ("workbench-runs.css", "text/css; charset=utf-8"),
     '/operator-browser.js': ('operator-browser.js', 'text/javascript; charset=utf-8'),
@@ -139,6 +140,10 @@ GET_FIELDS = {
     'media': ({'alias', 'row_id'}, {'field', 'field_path', 'expected_binding', 'version', 'version_binding'}),
     'table-evidence': ({'alias', 'row_id', 'field_path'}, {'expected_binding', 'version', 'version_binding'}),
     'report': ({'digest'}, set()), 'diff': ({'left', 'right'}, set()),
+    'workflows': (set(), set()),
+    'workflow-inspect': ({'path'}, set()),
+    'workflow-runs': (set(), {'workflow_path', 'offset', 'limit'}),
+    'workflow-run': ({'wf_run_id'}, {'attempt', 'limit'}),
 }
 POST_FIELDS = {
     'development-settings': ({'expected','provider','model','effort','authentication','base_url','api_key'}, set()),
@@ -168,6 +173,10 @@ POST_FIELDS = {
     'run-request-reconcile': ({'request_id'},set()),
     'run-reconcile': ({'run_id', 'expected_attempt'}, set()),
     'run-attach': ({'run_id', 'attempt', 'output', 'alias', 'expected_result'}, set()),
+    'workflow-start': ({'path'}, {'inputs', 'reuse_runs'}),
+    'workflow-cancel': ({'wf_run_id'}, {'expected_attempt'}),
+    'workflow-resume': ({'wf_run_id'}, {'from_node', 'reuse_runs'}),
+    'workflow-reconcile': ({'wf_run_id'}, set()),
 }
 GET_FIELDS.update({name: spec.wire_fields() for name, spec in run_operations.HTTP_GET.items()})
 POST_FIELDS.update({name: spec.wire_fields() for name, spec in run_operations.HTTP_POST.items()})
@@ -675,7 +684,7 @@ class Handler(BaseHTTPRequestHandler):
             if key in {'expected_attempt', 'attempt'}:
                 if value is not None and (type(value) is not int or not 1 <= value <= 32):
                     raise ForgeError('Invalid attempt', code='invalid_request')
-            elif key in {'inputs', 'outputs', 'limits','graph_binding','capabilities', 'arguments'}:
+            elif key in {'inputs', 'outputs', 'limits','graph_binding','capabilities', 'arguments', 'reuse_runs'}:
                 if type(value) is not dict:
                     raise ForgeError('Expected an object: ' + key, code='invalid_request')
             elif key=='replace':
@@ -939,6 +948,30 @@ class Handler(BaseHTTPRequestHandler):
                     value = api.diff_reports(
                         root, query["left"], query["right"]
                     )
+                elif url.path in {'/api/workflows', '/api/workflow-inspect', '/api/workflow-runs', '/api/workflow-run'}:
+                    from demiflow.workbench.workflows import manager as wf_mgr
+                    inv = self.server.inventory()
+                    ceiling = self.server.permission_ceiling()
+                    if url.path == '/api/workflows':
+                        value = wf_mgr.list_workflows(root, registry_path=self.server.registry,
+                                                      registry_inventory=inv, permission_ceiling=ceiling)
+                    elif url.path == '/api/workflow-inspect':
+                        value = wf_mgr.inspect_workflow(root, query['path'], registry_path=self.server.registry,
+                                                        registry_inventory=inv, permission_ceiling=ceiling)
+                    elif url.path == '/api/workflow-runs':
+                        value = wf_mgr.list_workflow_runs(
+                            root,
+                            workflow_path=query.get('workflow_path'),
+                            offset=int(query.get('offset', '0')),
+                            limit=int(query.get('limit', '20')),
+                        )
+                    else:
+                        value = wf_mgr.show_workflow_run(
+                            root,
+                            query['wf_run_id'],
+                            attempt=int(query['attempt']) if 'attempt' in query else None,
+                            event_limit=int(query.get('limit', '80')),
+                        )
                 else:
                     self._send({"error": "Unknown endpoint"}, 404)
                     return
@@ -1081,7 +1114,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             permission=(run_operations.HTTP_POST[name].permission if name in run_operations.HTTP_POST else
                         'config_write' if name in {'flow-register','parameter-preview','parameters-update','flow-arguments-save','project-file-save','project-file-create'} else
-                        'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile'} else
+                        'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile','workflow-cancel','workflow-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
             if name not in {'inspect','plan-preview','plan-node-detail','plan-pipeline-source','audit-check','project-check','run-admission'} and not permissions[permission]:
                 label = {'config_write': '文件与配置写入', 'run_submit': '管线运行', 'run_control': '管线停止与控制',
@@ -1143,6 +1176,38 @@ class Handler(BaseHTTPRequestHandler):
                 elif name == 'audit-check':
                     value = project_ops.audit_check(root, kind=request['kind'], expected_policy=request['expected_policy'],
                                             report_digest=request.get('digest'))
+                elif name in {'workflow-start', 'workflow-cancel', 'workflow-resume', 'workflow-reconcile'}:
+                    from demiflow.workbench.workflows import manager as wf_mgr
+                    inv = self.server.inventory()
+                    ceiling = self.server.permission_ceiling()
+                    if name == 'workflow-start':
+                        value = wf_mgr.start_workflow(
+                            root, request['path'],
+                            inputs=request.get('inputs'),
+                            reuse_runs=request.get('reuse_runs'),
+                            registry_path=self.server.registry,
+                            registry_inventory=inv,
+                            permission_ceiling=ceiling,
+                        )
+                    elif name == 'workflow-cancel':
+                        value = wf_mgr.cancel_workflow_run(
+                            root, request['wf_run_id'],
+                            expected_attempt=request.get('expected_attempt'),
+                            registry_path=self.server.registry,
+                            registry_inventory=inv,
+                            permission_ceiling=ceiling,
+                        )
+                    elif name == 'workflow-resume':
+                        value = wf_mgr.resume_workflow_run(
+                            root, request['wf_run_id'],
+                            from_node=request.get('from_node'),
+                            reuse_runs=request.get('reuse_runs'),
+                            registry_path=self.server.registry,
+                            registry_inventory=inv,
+                            permission_ceiling=ceiling,
+                        )
+                    else:
+                        value = wf_mgr.reconcile_workflow_run(root, request['wf_run_id'])
                 else:
                     from demiflow.workbench.runs import manager as runs
                     if name == 'run-reconcile':
