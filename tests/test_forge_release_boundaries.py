@@ -81,19 +81,27 @@ def test_default_terminal_requires_the_restricted_backend(tmp_path, monkeypatch)
 def test_restricted_terminal_network_is_off_without_a_model_channel(tmp_path, monkeypatch):
     from demiflow.forge import development, sandbox
     root = project(tmp_path)
+    credential = tmp_path / 'private-account'
+    credential.write_text('fixture')
+    reviewer = tmp_path / 'review.json'
+    reviewer.write_text(json.dumps({'native_credentials': str(credential)}))
+    monkeypatch.setenv('DEMIFLOW_FORGE_REVIEW_CONFIG', str(reviewer))
     seen = []
     original = sandbox.build_development_sandbox_spec
     def build(*args, **kwargs):
         spec = original(*args, **kwargs)
-        seen.append(spec.direct_network)
+        seen.append((spec.direct_network, spec.read_policy, set(spec.denied_paths)))
         return spec
     monkeypatch.setattr(sandbox, 'backend_readiness', lambda: {'available': True})
     monkeypatch.setattr(sandbox, 'build_development_sandbox_spec', build)
     monkeypatch.setattr(development, 'run_development', lambda *a, **kw: {'status':'checked'})
     result = CliRunner().invoke(main, ['forge','develop','--root',str(root),'--state-dir',str(tmp_path/'state'),
-        '--executable',sys.executable,'--python',sys.executable,'--goal','check','--no-review','--json'])
+        '--executable',sys.executable,'--python',sys.executable,'--goal','check','--json'])
     assert result.exit_code == 0, result.output
-    assert seen == [False]
+    assert len(seen) == 1
+    network, reads, denied = seen[0]
+    assert not network and reads == 'scoped'
+    assert {str(credential), str(reviewer)} <= denied
 
 
 def test_partial_deletion_keeps_all_original_bytes(tmp_path, monkeypatch):

@@ -350,6 +350,15 @@ def register(forge, output):
                         elif executable is None:
                             raise ForgeError('Configure --model-config for restricted inference or supply an offline --executable')
                         settings = providers.get(agent)
+                        if settings and profile:
+                            raise ForgeError('The restricted model channel supplies its own private profile')
+                        if agent == 'deepseek' and settings:
+                            from .review_deepseek import _installation
+                            _installation(settings)
+                        review_settings = providers.get('deepseek')
+                        if review and not review_settings and os.getenv('DEMIFLOW_FORGE_REVIEW_CONFIG'):
+                            from .review_deepseek import _local_config
+                            review_settings = _local_config()
                         native = settings.get('executable') if settings else None
                         if executable and native and Path(executable).resolve() != Path(native).resolve():
                             raise ForgeError('Author executable differs from the configured provider')
@@ -360,7 +369,7 @@ def register(forge, output):
                         priv_home = _private(no_symlinks(state.directory.with_name(state.directory.name + '.author-home')))
                         native_home = Path(binding['home']).resolve()
                         denied = [state.directory]
-                        for provider_config in providers.values():
+                        for provider_config in (*providers.values(), review_settings):
                             if isinstance(provider_config, dict) and provider_config.get('native_credentials'):
                                 denied.append(Path(provider_config['native_credentials']).resolve())
                         for path in (model_config, os.getenv('DEMIFLOW_FORGE_REVIEW_CONFIG')):
@@ -378,7 +387,8 @@ def register(forge, output):
                         else:
                             denied.append(native_home)
                         binding['execution'] = dict(mode='restricted', python=py_str, reads=list(allowed_roots),
-                                                    model_settings=content_digest(providers), home=str(priv_home))
+                                                    model_settings=content_digest(dict(providers=providers, review=review_settings)),
+                                                    home=str(priv_home))
                         turn_id = 'cli-' + uuid4().hex[:16]
 
                         class ActiveTurn:
@@ -461,10 +471,10 @@ def register(forge, output):
                                                      control_socket=bridge.path, channel=channel, **kw)
 
                         def reviewer_fn(prompt, *, timeout=review_timeout):
-                            from .review_deepseek import _local_config
-                            config = providers.get('deepseek') or _local_config()
-                            with model_connection('deepseek', config, time.time() + timeout, timeout) as channel:
-                                return run_reviewer(prompt, timeout=timeout, config=config, channel=channel, restricted=True,
+                            if not isinstance(review_settings, dict):
+                                raise ForgeError('Configure the DeepSeek reviewer in host settings', code='inspection_incomplete')
+                            with model_connection('deepseek', review_settings, time.time() + timeout, timeout) as channel:
+                                return run_reviewer(prompt, timeout=timeout, config=review_settings, channel=channel, restricted=True,
                                                     author_spec=dev_spec, denied_paths=denied)
 
                         return run_development(
