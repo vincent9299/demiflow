@@ -172,6 +172,14 @@ class ConcurrentCalls:
                     return
                 if value[0] == 'error':
                     raise value[1]
+                if self.byte_limit is not None and self.output_reserve:
+                    # The window admitted this call for its input and reserved
+                    # output; an output beyond that would use unadmitted memory.
+                    size, charge = getattr(value[1], 'encoded_bytes', 0), self._charges[slot]
+                    if size > charge:
+                        raise DataflowError('BUDGET_EXCEEDED',
+                            f'a call returned a {size}-byte row; its window reserved {charge} bytes '
+                            f'for its input and declared output')
                 emitted += 1
                 metadata['emitted'] += 1
                 yield value[1]

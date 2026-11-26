@@ -148,6 +148,37 @@ def publishes_natively(sink) -> bool:
     return not isinstance(sink, QueueResultSink)
 
 
+# A typed row encodes each JSON value as {"t": kind, "v": value}: at most nine times
+# the value's canonical JSON bytes with its separator (one digit and a comma become
+# '{"t":"int","v":1}' and a comma). Ten bounds that, plus the field it is stored in.
+TYPED_ROW_EXPANSION = 10
+OUTPUT_FIELD_BYTES = 4096
+
+
+def declared_output_growth(operation):
+    """Bytes a per-record call of an exact platform actor can add to its input row, or None.
+
+    Only actors whose own code bounds what they append supply it, from their
+    declared facts. Never probe an unknown callable or run its constructor.
+    """
+    import types
+    from demiflow.data.plan import CallableSpec
+    declaration = getattr(operation, 'callable', None)
+    if not isinstance(declaration, CallableSpec):
+        return None
+    target = declaration.target
+    actor = target.__self__ if type(target) is types.MethodType else target
+    from demiflow.execution.native_queue.raw_fetch import RawFetch, raw_fetch_facts
+    if type(actor) is RawFetch:
+        # The fetch actor appends one receipt to the row and checks it with
+        # document(receipt, max_receipt_bytes) before returning it; object
+        # bytes stay in the object store.
+        policy = next(resource['policy'] for resource in raw_fetch_facts(actor)['resources']
+                      if resource['kind'] == 'network')
+        return TYPED_ROW_EXPANSION * policy['max_receipt_bytes'] + OUTPUT_FIELD_BYTES
+    return None
+
+
 def collect_fixed_residency(operation, *, concurrency):
     """Fixed native collect workspace, counted once per actual concurrent call.
 
