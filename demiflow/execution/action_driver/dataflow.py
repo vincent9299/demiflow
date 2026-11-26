@@ -1238,8 +1238,11 @@ class DataflowExecution:
             return
         if event.kind == "failure":
             from demiflow.execution.contracts.dataflow_failures import restore_failure
+            from demiflow.services.request_limits import COOPERATIVE_FAILURE_STOP_REASON
             self._failure = restore_failure(payload)
             self._state = "failed"
+            # An already-started publisher can still pump controls on unwind.
+            self._services.journal_service.stop_model_admission(COOPERATIVE_FAILURE_STOP_REASON)
             raise self._failure
         if event.kind == "progress":
             occ, partition = payload['occurrence_id'], payload['partition_id']
