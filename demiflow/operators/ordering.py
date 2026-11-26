@@ -88,6 +88,14 @@ def reducer_sort_window(bounds, *, key_only):
         merge_fan_in=2, key_only=key_only, merge_resident_bytes=7 * row)
 
 
+def measured_reducer_sort_window(bounds, grant):
+    """Reducer ordering inside a measured grant: proportional subwindows, two-way merge passes."""
+    run, codec = max(1, grant // 8), max(1, 3 * grant // 8)
+    return SortWindow(resident_bytes=max(run + codec, 7 * grant // 8), run_bytes=run, frame_bytes=run,
+        read_chunk_bytes=min(4096, bounds.max_row_bytes, max(1, run // 16)), merge_fan_in=2,
+        key_only=False, merge_resident_bytes=2 * codec, codec_bytes=codec, merge_reader_bytes=codec)
+
+
 SORT_FRAME_OVERHEAD = 256
 
 

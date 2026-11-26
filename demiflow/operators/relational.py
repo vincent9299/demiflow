@@ -303,7 +303,7 @@ def group_key_values(raw):
 
 
 def reduce_ordered_groups(ordered, *, reducer, initial, fn_kwargs, validation,
-                          memory, bounds, output, output_roots, check_stop, retain=None):
+                          memory, bounds, output, output_roots, check_stop, retain=None, pending_bytes=None):
     """Original sequential key-group fold over rows and explicit bound ports.
 
     Group order, initial copying, state validation and suspended-yield accounting
@@ -327,7 +327,7 @@ def reduce_ordered_groups(ordered, *, reducer, initial, fn_kwargs, validation,
                     sequence+=1
                     if memory is not None and retain is not None:
                         retain(yielded_peers(initial,state,output_roots(out),memory,bounds,
-                                            pending=(row,current_key,key)))
+                                            pending=(row,current_key,key),pending_bytes=pending_bytes))
                     try:
                         yield out
                     finally:

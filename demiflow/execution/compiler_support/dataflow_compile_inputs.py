@@ -88,6 +88,9 @@ class CompileInputs:
     defaults: CompileDefaults = CompileDefaults()
     report: ReportBindings | None = None
     source_schema: Callable = field(default_factory=_source_schema_reader)
+    # Execution limits the caller declared rather than took by default. A
+    # declared row/batch/state ceiling keeps a relational kernel's full window.
+    explicit_limits: frozenset[str] = frozenset()
 
 
 def executor_defaults(executor) -> CompileDefaults:
@@ -102,5 +105,7 @@ def compile_inputs(request) -> CompileInputs:
     """Read the compiler's inputs from the request's own executor and the current report context."""
     from demiflow.execution.pipeline.checked import current
     context = current()
+    run = getattr(getattr(request, 'action', None), 'context', None)
     return CompileInputs(defaults=executor_defaults(getattr(request, 'executor', None)),
-                         report=ReportBindings(context) if context is not None else None)
+                         report=ReportBindings(context) if context is not None else None,
+                         explicit_limits=frozenset(getattr(run, 'explicit_limits', None) or ()))

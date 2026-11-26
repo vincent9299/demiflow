@@ -126,8 +126,9 @@ def relational_profile(kind, source, bounds):
     """Profile of a relational node, and for a reducer its (field, declaration) memory contract."""
     profile = default_profile(None, bounds=bounds)
     if kind in ('join', 'exclude_keys'):
+        from demiflow.execution.contracts.relational_region import join_resident_bytes
         requests = dict(profile.requests)
-        requests['memory_bytes'] = bounds.max_batch_bytes + 6 * bounds.max_row_bytes
+        requests['memory_bytes'] = join_resident_bytes(bounds)
         profile = ResourceProfile(requests=requests, limits=profile.limits, requirements=profile.requirements)
     reducer_memory = None
     if kind == 'reduce':
@@ -304,13 +305,23 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
     return TerminalBudget(configuration, profile, phased_publication, publication_window, codec)
 
 
-def codec_window(kernel, operation, bounds):
+def codec_window(kernel, operation, bounds, *, explicit_limits=frozenset()):
     """The optional codec slack of one node as a CodecWindow; None when it has none to share."""
     resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
     if 'memory_bytes' in resources:
         return None  # An explicit user grant is never redistributed.
-    if kernel.kind in {'join', 'exclude_keys', 'reduce'}:
-        return None  # These kernels own explicit copy/reducer working sets.
+    from demiflow.execution.contracts.relational_region import MEASURED_KINDS, relational_floor_bytes
+    if kernel.kind in MEASURED_KINDS:
+        # Only a default row/batch (and reducer state) ceiling may be met by a
+        # measured window. A declared ceiling promises that values of that size
+        # fit, so its plan keeps the full window and its up-front refusal.
+        promised = {'max_row_bytes', 'max_batch_bytes'} | ({'max_state_bytes'} if kernel.kind == 'reduce' else set())
+        if promised & explicit_limits:
+            return None
+        floor, target = relational_floor_bytes(kernel, bounds), kernel.profile.requests['memory_bytes']
+        return CodecWindow(floor, target) if target > floor else None
+    if kernel.kind == 'exclude_keys':
+        return None  # The native anti join owns its explicit key/copy working set.
     if kernel.kind in {'prompt', 'embedding', 'agent', 'fetch', 'document'}:
 
         concurrency = kernel.configuration.get('concurrency', 1)
@@ -389,14 +400,19 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
             nodes[index] = replace(node, kernel=replace(node.kernel, configuration=config))
 
 
-def minimum_workspace_graph(graph, bounds, *, allow_measured_terminal=False):
-    """Use real, indivisible demands when testing a physical layout."""
+def minimum_workspace_graph(graph, bounds, *, allow_measured_terminal=False, measured_relational=False):
+    """Use real, indivisible demands when testing a physical layout.
+
+    A join or reducer keeps its full window unless ``measured_relational``: that
+    layout is tried only after no layout fits their maximum-row windows.
+    """
+    from demiflow.execution.contracts.relational_region import MEASURED_KINDS
     from demiflow.execution.scheduler.dataflow_publication_budget import with_publication_workspace
     nodes = []
     for node in graph.nodes:
         config = node.kernel.configuration
         kernel = node.kernel
-        if 'codec_min_bytes' in config:
+        if 'codec_min_bytes' in config and (measured_relational or kernel.kind not in MEASURED_KINDS):
             minimum = config['codec_min_bytes']
             terminal = config.get('terminal_memory', {})
             if terminal and not allow_measured_terminal and 'publication_workspace' not in config:
@@ -419,6 +435,7 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
     """
     from fractions import Fraction
     from demiflow.execution.scheduler.dataflow_publication_budget import PublicationReservation, graph_workspace_bytes
+    from demiflow.execution.contracts.relational_region import MEASURED_KINDS, owns_member_windows
     reservation = PublicationReservation(floor_graph, stages, bounds)
     publication_extra = graph_workspace_bytes(graph) - reservation.bytes
     nodes = {n.occurrence_id: n.kernel for n in graph.nodes}
@@ -436,6 +453,8 @@ def allocate_workspace_slack(graph, floor_graph, stages, residency, *, hosts, bo
             if terminal and 'publication_workspace' not in kernel.configuration:
                 conventional = bounds.max_row_bytes + bounds.max_batch_bytes + terminal.get('metadata_bytes', 0)
                 priority[occ] = max(0, min(target, conventional) - minimum)
+            if kernel.kind in MEASURED_KINDS and owns_member_windows(stage):
+                continue  # The region/native placement already granted its own working set.
             if target > minimum:
                 values[occ] = target - minimum
         extras[stage.stage_id] = values

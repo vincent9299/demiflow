@@ -478,6 +478,9 @@ class KernelSpec:
         """Did this physical grant select actual occupancy for codec and task state?"""
         if 'codec_min_bytes' not in self.configuration:
             return False
+        from demiflow.execution.contracts.relational_region import MEASURED_KINDS, relational_full_bytes
+        if self.kind in MEASURED_KINDS:
+            return self.profile.requests['memory_bytes'] < relational_full_bytes(self, sealed_bounds)
         full = sealed_bounds.max_batch_bytes + sealed_bounds.max_row_bytes
         if 'task_batch_rows' in self.configuration and self.state != 'none':
             full += sealed_bounds.max_state_bytes

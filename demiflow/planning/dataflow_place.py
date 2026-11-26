@@ -10,6 +10,7 @@ from __future__ import annotations
 from demiflow.execution.contracts.dataflow_kinds import MANAGED_HTTP_DEVICES_FIELD
 
 import json
+import logging
 from dataclasses import replace
 from typing import Mapping
 
@@ -33,6 +34,7 @@ from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.resources.contracts import ResourceProfile
 from .dataflow_policy import gpu_count
 
+_LOG = logging.getLogger('demiflow.planning.memory')
 _RECOVERY_STRENGTH = {"attempt_only": 0, "delivery_only": 1, "final_commit": 2, "checkpoint": 3}
 _RECOVERY_NAME = {value: key for key, value in _RECOVERY_STRENGTH.items()}
 _MEMORY_MODE = "memory_incremental"
@@ -183,6 +185,9 @@ def partition_stages(
             reducer_memory = contract(kernel)
             if reducer_memory is not None:
                 resident = resident_bytes(reducer_memory,bounds)
+                if 'codec_min_bytes' in kernel.configuration:
+                    # A layout tried with the measured floor holds that floor.
+                    resident = min(resident, kernel.profile.requests['memory_bytes'])
                 state_bytes = bounds.max_state_bytes
         replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
 
@@ -949,8 +954,41 @@ def compile_physical_dataflow(
     hosts: tuple[HostDescriptor, ...],
     bounds: Bounds,
     constants_ref: ArtifactRef,
-    _allow_offset_sql: bool = True,
 ) -> PhysicalDataflow:
+    """Select and seal one physical layout.
+
+    Join and reducer kernels first get their maximum-row windows. Only when no
+    layout fits those does a second selection give the kernels that declared a
+    floor that floor (and then any slack); their grant then counts actual bytes.
+    If that also cannot fit, the original refusal stands.
+    """
+    arguments = dict(policy=policy, hosts=hosts, bounds=bounds, constants_ref=constants_ref)
+    try:
+        return _compile_physical(graph, snapshots, splits, **arguments, _measured_relational=False)
+    except DataflowError as exc:
+        from demiflow.execution.contracts.relational_region import MEASURED_KINDS
+        if exc.code != 'RESOURCE_INFEASIBLE' or not any(
+                node.kernel.kind in MEASURED_KINDS and 'codec_min_bytes' in node.kernel.configuration
+                for node in graph.nodes):
+            raise
+        refused = exc
+    try:
+        physical = _compile_physical(graph, snapshots, splits, **arguments, _measured_relational=True)
+    except DataflowError as exc:
+        if exc.code == 'RESOURCE_INFEASIBLE':
+            raise refused
+        raise
+    from demiflow.execution.contracts.relational_region import measured_relational_windows
+    for occurrence, kind, granted, preferred in measured_relational_windows(graph, physical):
+        _LOG.warning('%s %s runs with measured memory: %d of its preferred %d bytes, because the plan does not '
+                     'fit with maximum-size rows; a row above about %d bytes may fail with BUDGET_EXCEEDED during '
+                     'the run. Raise memory_bytes, or declare max_row_bytes to have the plan checked before it starts.',
+                     kind, occurrence[:12], granted, preferred, bounds.max_row_bytes * granted // preferred)
+    return physical
+
+
+def _compile_physical(graph, snapshots, splits, *, policy, hosts, bounds, constants_ref,
+                      _allow_offset_sql=True, _measured_relational=False) -> PhysicalDataflow:
     _check_bounds(bounds)
     snapshot_ids = {snapshot.source_id for snapshot in snapshots}
     if snapshot_ids != set(graph.sources):
@@ -962,7 +1000,7 @@ def compile_physical_dataflow(
     from .dataflow_budget import minimum_workspace_graph, allocate_workspace_slack
     declared_graph = graph
     graph = minimum_workspace_graph(graph, bounds, allow_measured_terminal=any(
-        s.replay == "attempt_only" for s in snapshots))
+        s.replay == "attempt_only" for s in snapshots), measured_relational=_measured_relational)
     from .dataflow_training import physical_values, reference_only_sources
     refs = reference_only_sources(graph)
     splits = tuple(split for split in splits if split.source_id not in refs)
@@ -1017,8 +1055,9 @@ def compile_physical_dataflow(
             raise
         # A larger optional stage may not coexist with other mandatory
         # reservations. Retry only this fresh physical choice, before sealing.
-        return compile_physical_dataflow(graph, snapshots, splits, policy=policy, hosts=hosts, bounds=bounds,
-                                         constants_ref=constants_ref, _allow_offset_sql=False)
+        return _compile_physical(graph, snapshots, splits, policy=policy, hosts=hosts, bounds=bounds,
+                                 constants_ref=constants_ref, _allow_offset_sql=False,
+                                 _measured_relational=_measured_relational)
     from .dataflow_graph_adapter import pack_graph_residency
     exchanges, residency = pack_graph_residency(graph, stages, exchanges, residency,
         requested=graph_requested_exchanges, hosts=hosts, bounds=bounds, policy=policy)

@@ -204,6 +204,7 @@
    ],
    "codec_min_bytes": [
     "execution/contracts/dataflow.py",
+    "execution/contracts/relational_region.py",
     "execution/kernels/operator.py",
     "planning/dataflow_place.py",
     "planning/dataflow_thread_fusion.py"
