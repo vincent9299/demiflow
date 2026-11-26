@@ -172,12 +172,20 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
                 on_review()
             if reviewer is None:
                 raise ForgeError('独立评审模型尚未配置。', code='inspection_incomplete')
-            observations = observations(definitions) if observations else []
+            observations = list(observations(definitions)) if observations else []
             for key in ('native_flow', 'project_layout'):
                 item = (receipt['checks'] or {}).get(key)
                 if item:
-                    observations.append(dict(source=key, detail=json.dumps(dict(
-                        status=item['status'], diagnostic_count=item.get('diagnostic_count', 0)))))
+                    detail = dict(status=item['status'], diagnostic_count=item.get('diagnostic_count', 0),
+                                  stage='recheck_after_feedback' if round else 'author_submission', diagnostics=[])
+                    for row in item.get('diagnostics', ())[:4]:
+                        finding = {k: row[k] for k in ('rule', 'path', 'line', 'status', 'detail') if k in row}
+                        if 'detail' in finding:
+                            finding['detail'] = finding['detail'][:160]
+                        detail['diagnostics'].append(finding)
+                        if len(json.dumps(detail, ensure_ascii=False).encode()) > 2048:
+                            detail['diagnostics'].pop()
+                    observations.append(dict(source=key, detail=json.dumps(detail, ensure_ascii=False)))
             receipt['review'] = review_project(root, goal=text, **selected,
                 paths=() if selected else tuple(prior or paths), prior_sources=None if selected else prior,
                 exclude=exclude, observations=observations, reviewer=reviewer, budget=budget,
