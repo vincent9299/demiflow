@@ -767,8 +767,8 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(value,OutputRange):media_http.send_range(self,value)
                 else:self._send(value)
                 return
-            with self._work(control=url.path in {'/api/run-snapshot','/api/run-events'},
-                            project=name in {'project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-file-diff','project-changes','project-files','project-documents','project-markdown'}):
+            with self._work(control=url.path in {'/api/run-snapshot','/api/run-events','/api/workflow-run'},
+                            project=name in {'project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-file-diff','project-changes','project-files','project-documents','project-markdown','workflows','workflow-inspect','workflow-runs'}):
                 if url.path == "/api/context":
                     value = api.workspace_context(root)
                     value['runs_enabled'] = permissions['run_submit']
