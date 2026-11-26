@@ -22,7 +22,7 @@ from .schema import ForgeError
 from .review import REVIEW_SECONDS, MAX_REVIEW_SECONDS
 
 
-def agent_binding(provider, executable=None, profile=None, model=None):
+def agent_binding(provider, executable=None, profile=None, model=None, *, restricted=False):
     command = executable or shutil.which('codex' if provider == 'codex' else 'dsh')
     if not command or not Path(command).is_file():
         raise ForgeError('The configured native author CLI is unavailable', code='not_found')
@@ -42,7 +42,7 @@ def agent_binding(provider, executable=None, profile=None, model=None):
         files = [home / 'profiles' / (profile or 'headless') / name for name in ('package.json', 'cordis.patch.yml')]
     binding['home'] = str(home.absolute())
     binding['configuration'] = {str(path): content_digest(read_bounded(path, 256 * 1024).decode())
-                                for path in files if path.exists()}
+                                for path in files if not restricted and path.exists()}
     return binding
 
 
@@ -129,7 +129,8 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
     if extra_path:
         env['PATH'] = str(extra_path) + (os.pathsep + env['PATH'] if env.get('PATH') else '')
     original = {key: value for key, value in binding.items() if key != 'execution'}
-    if agent_binding(binding['provider'], binding['executable'], binding['profile'], binding['model']) != original:
+    if agent_binding(binding['provider'], binding['executable'], binding['profile'], binding['model'],
+                     restricted=sandbox_spec is not None) != original:
         raise ForgeError('Original author configuration changed before dispatch', code='conflict')
     from .project_guard import CONTROL_ENV
     env.pop(CONTROL_ENV, None)
@@ -323,7 +324,6 @@ def register(forge, output):
             if status:
                 return state.load()
             with state.lock():
-                binding = agent_binding(agent, executable, profile, model)
                 if agent == 'deepseek' and model:
                     raise ForgeError('Select the DeepSeek model in its native profile', code='invalid_request')
                 py_str = str(project_python.absolute()) if project_python is not None else None
@@ -350,19 +350,33 @@ def register(forge, output):
                         elif executable is None:
                             raise ForgeError('Configure --model-config for restricted inference or supply an offline --executable')
                         settings = providers.get(agent)
+                        native = settings.get('executable') if settings else None
+                        if executable and native and Path(executable).resolve() != Path(native).resolve():
+                            raise ForgeError('Author executable differs from the configured provider')
+                        binding = agent_binding(agent, executable or native, profile, model, restricted=True)
                         if settings and (not isinstance(settings.get('model'), str) or not settings['model']
                                          or model and model != settings['model']):
                             raise ForgeError('Author model must match its host provider configuration')
                         priv_home = _private(no_symlinks(state.directory.with_name(state.directory.name + '.author-home')))
-                        denied = (state.directory, Path(binding['home']).resolve())
+                        native_home = Path(binding['home']).resolve()
+                        denied = [state.directory]
                         for provider_config in providers.values():
                             if isinstance(provider_config, dict) and provider_config.get('native_credentials'):
-                                denied += (Path(provider_config['native_credentials']).resolve(),)
-                        if model_config is not None:
-                            denied += (model_config.resolve(),)
-                        allowed_roots = authorized_read_roots(
-                            root, read_roots=raw_read_roots, denied_paths=denied, private_home=priv_home,
-                        )
+                                denied.append(Path(provider_config['native_credentials']).resolve())
+                        for path in (model_config, os.getenv('DEMIFLOW_FORGE_REVIEW_CONFIG')):
+                            if path:
+                                denied.append(Path(path).resolve())
+                        # A native installation may live under DSH_HOME. Grant only the
+                        # verified executable/runtime there, never that home as project input.
+                        forbidden_inputs = (*denied, native_home, priv_home)
+                        if any(root.resolve().is_relative_to(p) or p.is_relative_to(root.resolve()) for p in forbidden_inputs):
+                            raise ForgeError('Project source overlaps private author or host settings', code='operation_rejected')
+                        allowed_roots = authorized_read_roots(root, read_roots=raw_read_roots,
+                                                              denied_paths=forbidden_inputs)
+                        if agent == 'deepseek':
+                            denied.extend((native_home / '.credentials.yaml', native_home / 'profiles'))
+                        else:
+                            denied.append(native_home)
                         binding['execution'] = dict(mode='restricted', python=py_str, reads=list(allowed_roots),
                                                     model_settings=content_digest(providers), home=str(priv_home))
                         turn_id = 'cli-' + uuid4().hex[:16]
@@ -403,7 +417,7 @@ def register(forge, output):
                             'writes': list(writables),
                             'protected': [],
                             'python': py_str,
-                            'read_roots': list(raw_read_roots),
+                            'read_roots': list(allowed_roots),
                         }
                         shims = SandboxShims(
                             project_view,
@@ -415,7 +429,7 @@ def register(forge, output):
                         rt_paths = default_runtime_paths(
                             executable=binding['executable'],
                             project_python=py_str,
-                            extra_paths=(*shims.runtime_paths,),
+                            extra_paths=(*shims.runtime_paths, *((settings['node'],) if agent == 'deepseek' and settings else ())),
                         )
                         extra_reads = list(shims.read_paths)
                         pyproj = Path(root) / 'pyproject.toml'
@@ -424,7 +438,7 @@ def register(forge, output):
                             root,
                             writes=writables,
                             protected=(),
-                            read_roots=raw_read_roots,
+                            read_roots=allowed_roots,
                             extra_read_paths=extra_reads,
                             runtime_paths=rt_paths,
                             denied_paths=denied,
@@ -460,6 +474,7 @@ def register(forge, output):
                             allowed_roots=allowed_roots, denied_paths=denied, author_controls=controls,
                         )
 
+                    binding = agent_binding(agent, executable, profile, model)
                     author_fn = native_author
                     if py_str:
                         shims = SandboxShims({'root': str(root)}, execution_mode='trusted_local', project_python=py_str)

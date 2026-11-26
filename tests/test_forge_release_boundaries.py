@@ -1,12 +1,10 @@
 """Behavioral release guards for Forge's project dependency and interpreter boundaries."""
 import json
-import os
 from pathlib import Path
 import shutil
 import sys
 import threading
 from contextlib import contextmanager
-from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -33,10 +31,12 @@ def package(path):
 
 
 def test_authorized_vendor_survives_two_public_terminal_turns(tmp_path, monkeypatch):
-    root = project(tmp_path, 'samplelib')
+    root = project(tmp_path)
     (root / 'flows').mkdir(exist_ok=True)
     (root / 'flows/main.py').write_text("from demiflow.data import from_items\ndef run():\n    return from_items([{'id': 1}]).materialize()\n")
     register_flow(root, 'flows/main.py:run')
+    with (root / 'pyproject.toml').open('a') as config:
+        config.write('samplelib = {source="vendored", path="packages/samplelib"}\n')
     source = package(tmp_path / 'upstream' / 'samplelib')
     # The native harness fixture uses only stdin and its documented completion frames.
     author = tmp_path / 'author'
@@ -202,3 +202,57 @@ def test_readonly_notebook_probes_after_confinement(tmp_path, monkeypatch, syste
     monkeypatch.chdir(tmp_path)
     kernel.main()
     assert events == (['landlock','probe','exec'] if system == 'Linux' else ['seatbelt-probe','exec'])
+
+
+def test_configured_native_author_uses_host_model_channel(tmp_path, monkeypatch):
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    root = project(tmp_path)
+    calls = []
+
+    class Model(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            calls.append((self.path, self.headers['Authorization'], body['model']))
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"received":true}')
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(('127.0.0.1', 0), Model)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    monkeypatch.setenv('FORGE_UPSTREAM_FIXTURE', 'host-fixture')
+    cfg = tmp_path / 'host.json'
+    cfg.write_text(json.dumps({'providers': {'codex': dict(model='test-model', credential_env='FORGE_UPSTREAM_FIXTURE',
+        base_url=f'http://127.0.0.1:{server.server_port}/v1')}}))
+    author = tmp_path / 'native'
+    author.write_text(f'''#!{sys.executable}
+import json, os, sys, urllib.request
+sys.stdin.read()
+assert 'FORGE_UPSTREAM_FIXTURE' not in os.environ
+endpoint = 'http://' + os.environ['DEMIFLOW_MODEL_ENDPOINT'] + '/v1'
+assert any(endpoint in option for option in sys.argv)
+req = urllib.request.Request(endpoint + '/responses', data=b'{{"model":"test-model","input":"hello"}}',
+    headers={{'Authorization':'Bearer ' + os.environ['DEMIFLOW_MODEL_TOKEN']}})
+with urllib.request.urlopen(req, timeout=15) as reply:
+    assert json.load(reply)['received']
+for frame in [{{"type":"thread.started","thread_id":"native"}},{{"type":"turn.started"}},
+    {{"type":"item.completed","item":{{"type":"agent_message","text":"ok"}}}},{{"type":"turn.completed"}}]:
+    print(json.dumps(frame), flush=True)
+''')
+    author.chmod(0o755)
+    try:
+        result = CliRunner().invoke(main, ['forge', 'develop', '--root', str(root), '--state-dir', str(tmp_path / 'receipt'),
+            '--executable', str(author), '--python', sys.executable, '--model-config', str(cfg),
+            '--goal', 'read the project', '--no-review', '--json'])
+        assert result.exit_code == 0, result.output
+        assert calls == [('/v1/responses', 'Bearer host-fixture', 'test-model')]
+        assert json.loads(result.output)['author']['completed']
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()

@@ -365,11 +365,11 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             raise ForgeError('Observed changes require a before/after basis for every selected path',
                              code='invalid_request')
         total = 0
-        for row in prior_sources.values():
+        for name, row in prior_sources.items():
             if not isinstance(row, dict) or set(row) != {'before', 'after_sha256'}:
                 raise ForgeError('Invalid observed source basis', code='invalid_request')
             before, after = row['before'], row['after_sha256']
-            if before is not None:
+            if before is not None and not is_package_source_path(name):
                 if not isinstance(before, str) or len(before.encode()) > FILE_BYTES:
                     raise ForgeError('Observed source preimage exceeds budget', code='resource_limit')
                 total += len(before.encode())

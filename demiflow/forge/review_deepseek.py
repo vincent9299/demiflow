@@ -144,6 +144,7 @@ def prepare_launch(config, home, *, model_channel=None, broker=False):
     if broker:
         from .bridge.model_channel import plugin_path
         profile_name = 'forge-model'
+        plugin('acp-app')
         rows.append(dict(id='model-broker', name=str(plugin_path('deepseek_model_broker.cjs')),
                          config=dict(provider=route, model=config['model'],
                                      reasoningEffort=config.get('effort', 'high'), requestSeconds=seconds)))

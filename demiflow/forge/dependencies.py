@@ -1131,7 +1131,10 @@ def _remove_package_files(root: Path, target: Path):
     """Keep a full recovery copy until both deletion and declaration commit have succeeded."""
     nonce = secrets.token_hex(8)
     staging = target.with_name(f'.remove-{target.name}-{nonce}')
-    recovery = Path(tempfile.mkdtemp(prefix='remove-', dir=root / '.forge'))
+    private = root / '.forge'
+    # Rollback must be a same-filesystem rename, including on a mounted packages directory.
+    scratch_parent = private if private.stat().st_dev == target.parent.stat().st_dev else target.parent
+    recovery = Path(tempfile.mkdtemp(prefix='.remove-backup-', dir=scratch_parent))
     original = recovery / 'original'
     moved = copied = False
     try:
@@ -1148,11 +1151,12 @@ def _remove_package_files(root: Path, target: Path):
         yield
     except BaseException:
         if moved:
-            if copied and original.is_dir():
-                shutil.copytree(original, staging, dirs_exist_ok=True, symlinks=True)
-            elif copied:
-                shutil.copy2(original, staging, follow_symlinks=False)
-            os.replace(staging, target)
+            if copied:
+                if staging.exists():
+                    os.replace(staging, recovery / 'partially-removed')
+                os.replace(original, target)
+            else:
+                os.replace(staging, target)
         shutil.rmtree(recovery, ignore_errors=True)
         raise
     else:

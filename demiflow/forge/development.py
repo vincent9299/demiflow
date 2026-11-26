@@ -18,7 +18,7 @@ from .schema import ForgeError, canonical
 
 def has_code_changes(changes):
     """True when at least one non-documentation business code/config file changed."""
-    code_dirs = {'flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests', 'src', 'lib'}
+    code_dirs = {'flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests', 'src', 'lib', 'packages'}
     code_exts = {'.py', '.yaml', '.yml', '.json', '.toml', '.js', '.ts'}
     for change in changes or ():
         rel = str(change.get('path') or '').lstrip('/')
@@ -207,7 +207,9 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
     definitions = ()
     if inspect and (paths or want_review or protected_violations):
         try:
-            check = check_project(root, paths=paths if 0 < len(paths) <= 256 else (),
+            # A dependency change can affect every registered entry, even when no Flow file was edited.
+            project_wide = any(p == 'pyproject.toml' or p.startswith('packages/') for p in paths)
+            check = check_project(root, paths=paths if 0 < len(paths) <= 256 and not project_wide else (),
                                   reference=reference, exclude=exclude, include_hygiene=True,
                                   python=project_python, allowed_roots=allowed_roots, denied_paths=denied_paths)
             definitions = check.get('definitions', ())

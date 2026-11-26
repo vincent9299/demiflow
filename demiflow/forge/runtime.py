@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import site
 import sys
-import subprocess
 
 from .io import ensure_directory, no_symlinks, publish_bytes
 from .platform import bounded_json, content_digest
@@ -245,15 +244,11 @@ def launch_confined_probe(
         rss_bytes=rss_bytes,
         direct_network=False,
     )
+    launch = launch_sandbox
     if sys.platform == 'darwin':
-        from .sandbox.backends.macos_seatbelt import build_seatbelt_profile
-        profile = build_seatbelt_profile(spec)
-        return subprocess.Popen(
-            ['/usr/bin/sandbox-exec', '-p', profile, *command], cwd=cwd_path,
-            env={**env, 'HOME': str(home), 'TMPDIR': str(home)}, stdin=stdin,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-        )
-    return launch_sandbox(
+        from .sandbox.backends.macos_seatbelt import MacosSeatbeltBackend
+        launch = MacosSeatbeltBackend().launch
+    return launch(
         command,
         spec=spec,
         env={**env, 'HOME': str(home), 'TMPDIR': str(home)},
