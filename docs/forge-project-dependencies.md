@@ -23,7 +23,7 @@ demiflow forge dep list --root /project
 demiflow forge dep verify --root /project
 ```
 
-源码包应为具有 __init__.py 的正规 Python 包。文件树只接纳直接的 Python 源码。权重、配置与数据使用既有业务资源声明。发布锁的命令会核对源码散列和导入边界，遇到未登记包、冲突名称或超限会失败。remove 撤销当前锁，源码、安装和历史保留。
+源码包应为具有 __init__.py 的正规 Python 包。文件树只接纳直接的 Python 源码。权重、配置与数据使用既有业务资源声明。发布锁的命令会核对源码散列和导入边界，遇到未登记包、冲突名称或超限会失败。多个 vendored 包可以逐个登记。最后执行 `dep sync`，确认完整声明已锁定。`dep remove` 撤销当前锁，源码、安装和历史保留。
 
 Workbench 的项目配置需选择与锁相同的 Python。所有者通过受信终端为该项目批准 lock digest，使用 console 注册表的当前 digest 进行并发校验。所有命令均为 CLI，工作台当前设置继续读取该注册表。
 

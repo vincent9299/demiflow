@@ -330,20 +330,6 @@ def project_dependencies(root, *, authority=None, project=None, verify_files=Tru
                    verify_files=verify_files)
 
 
-def scoped_data_location(root, path, *, private=()):
-    """Admit registered data roots without granting project/host control ancestors."""
-    path = Path(path).resolve()
-    protected = (Path(root), Path.home(), *map(Path, private),
-                 *map(Path, ('/etc', '/proc', '/sys', '/dev', '/run', '/root')))
-    if any(path == parent or parent.is_relative_to(path) for parent in protected):
-        return None
-    if any(path.is_relative_to(parent) for parent in protected[2:]):
-        return None
-    if any(part.startswith('.') for part in path.parts[1:]):
-        return None
-    return path
-
-
 def dependency_scope(root, *, authority=None, project=None):
     """Give a Forge authoring use case the approval provided by its Workbench host."""
     from contextlib import nullcontext

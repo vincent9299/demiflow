@@ -241,6 +241,7 @@ class Notebooks:
         return kernel_python, sandbox, sorted(set(locations)), item
 
     def _write_kernel_config(self, project, root, state):
+        from demiflow.workbench.projects.workspace import scoped_data_location
         kernel_python, sandbox, locations, item = self._project_kernel_policy(project, root)
         code_root = Path(__file__).resolve().parents[3]
         payload = {
@@ -262,7 +263,6 @@ class Notebooks:
             payload['dependency_error'] = str(exc)[:512]
         else:
             if dependencies is not None:
-                from demiflow.workbench.python_sources import scoped_data_location
                 private = [self.temp.name]
                 if self.server.registry is not None:
                     private.append(self.server.registry)

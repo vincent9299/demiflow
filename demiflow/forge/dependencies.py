@@ -382,6 +382,12 @@ def update(root, python, *, name=None, vendor=None):
                         raise ForgeError('Vendor source changed during the copy', code='inputs_changed')
                     ensure_directory((target / rel).parent)
                     publish_bytes(target / rel, raw)
+                missing = [other for other, entry in config['packages'].items()
+                           if entry['source'] == 'vendored' and not (root / entry['path']).exists()]
+                if missing:
+                    if declaration(root) != config:
+                        raise ForgeError('Dependency declaration changed during vendoring', code='inputs_changed')
+                    return dict(status='staged', package=name, missing=sorted(missing))
             packages = _inventory_packages(root, config, check_imports=True)
             record = dict(format=FORMAT, project=physical_root(root), declaration=config['sha256'],
                           packages=packages, environment=environment, requirements=requirements)

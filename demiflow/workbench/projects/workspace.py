@@ -39,6 +39,20 @@ from demiflow.forge.schema import ForgeError
 README_BYTES = 1024**2
 
 
+def scoped_data_location(root, path, *, private=()):
+    """Admit registered data roots without granting project/host control ancestors."""
+    path = Path(path).resolve()
+    protected = (Path(root), Path.home(), *map(Path, private),
+                 *map(Path, ('/etc', '/proc', '/sys', '/dev', '/run', '/root')))
+    if any(path == parent or parent.is_relative_to(path) for parent in protected):
+        return None
+    if any(path.is_relative_to(parent) for parent in protected[2:]):
+        return None
+    if any(part.startswith('.') for part in path.parts[1:]):
+        return None
+    return path
+
+
 def _audit_workspace(root, expected):
     root, value, _ = load_workspace(root)
     if value['format'] != FORMAT_V3:

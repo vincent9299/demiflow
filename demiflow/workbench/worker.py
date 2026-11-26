@@ -181,8 +181,7 @@ def _inspection_inputs(root, request):
             elif item.get('kind') == 'location' and set(item) == {'kind', 'location_id'}:
                 location = workspace['locations'].get(item['location_id'])
                 if location is not None and location.get('writable') is False:
-                    from demiflow.workbench.python_sources import scoped_data_location
-                    target = scoped_data_location(root, ws.location_root(root, location))
+                    target = ws.scoped_data_location(root, ws.location_root(root, location))
                     if target is not None:
                         paths.add(target)
             else:

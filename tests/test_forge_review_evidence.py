@@ -186,3 +186,29 @@ def test_git_untracked_link_is_never_opened_as_review_source(tmp_path):
     (tmp_path / 'operators/alias.py').symlink_to(tmp_path / 'README.md')
     result = capture_evidence(tmp_path)
     assert set(result['files']) == {'operators/actual.py'}
+
+
+def test_vendored_dependencies_can_be_added_one_at_a_time_and_reject_reverse_imports(tmp_path):
+    import sys
+    from demiflow.forge.dependencies import LOCK, binding, update
+    from demiflow.forge.schema import ForgeError
+
+    root = tmp_path / 'project_fixture'
+    (root / '.forge').mkdir(parents=True)
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+        'first_dep_fixture = {source = "vendored", path = "packages/first_dep_fixture"}\n'
+        'second_dep_fixture = {source = "vendored", path = "packages/second_dep_fixture"}\n')
+    first, second = tmp_path / 'first', tmp_path / 'second'
+    for source in (first, second):
+        source.mkdir()
+        (source / '__init__.py').write_text('')
+    staged = update(root, sys.executable, name='first_dep_fixture', vendor=first)
+    assert staged == {'status': 'staged', 'package': 'first_dep_fixture', 'missing': ['second_dep_fixture']}
+    assert not (root / LOCK).exists()
+    (second / '__init__.py').write_text('from project_fixture import flows\n')
+    with pytest.raises(ForgeError, match='imports a project role'):
+        update(root, sys.executable, name='second_dep_fixture', vendor=second)
+    assert not (root / 'packages/second_dep_fixture').exists()
+    (second / '__init__.py').write_text('')
+    final = update(root, sys.executable, name='second_dep_fixture', vendor=second)
+    assert final['digest'] == binding(root)['digest']
