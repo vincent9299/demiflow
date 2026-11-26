@@ -143,13 +143,6 @@
 - **影响。** 用户给本机执行设置几十 MB 的额度，或用 1 个 worker 跑带 union/join 的计划，会在启动前被拒绝；默认额度下并发较高的计划也可能被拒。`tests/test_local_kernel.py` 10 个、`tests/test_local_union_plan.py` 3 个、`tests/test_stream_map.py` 1 个、`tests/test_sqlite_journal.py` 1 个因此失败，测试未改；它们在 `ab3b4d45` 上都通过。默认额度下被拒的还有 `tests/test_document_library.py` 2 个、`tests/test_google_backends.py::test_dataset_http_backend_receipt_schema`（第 5 批修好结果收集后，调大默认额度可通过）、`tests/test_prompt_routes.py` 2 个（`ab3b4d45` 上 3 个全过，`9f3d4e53` 上 2 个失败）。`tests/test_prompt_stream_recovery.py` 守的是 prompt 崩溃续跑，第 2 批（`7a74d464`）为了让它测到续跑行为，把运行条件从 1 个 worker、128MB 改成默认 worker 数、512MB，绕开的就是这里的问题。这个 prompt 测试在 `ab3b4d45` 上能被接受，到 `9f3d4e53` 被拒绝。
 - **建议。** 由引擎负责人确认是否有意。如果不是：给没有 `codec_min_bytes` 的算子恢复按额度缩小窗口和状态，并恢复单 worker 计划的放置；修好后以上 42 个测试和 `test_stream_map`、`test_sqlite_journal` 各 1 个应全部通过。如果是有意：在 `local_execution` 的文档里写明 reduce、join 的最低额度和单 worker 的限制，再按新规则改这 15 个测试。
 
-### T-026 `local_execution(temp_directory=...)` 被接受但不起作用
-
-- **现象。** `LocalKernelOptions` 保存这个参数，但 v3 执行代码不读它，运行中的文件都在运行目录的存储里。`local_execution` 的说明没有提这个参数。工作台的运行进程（`workbench/runs/worker.py`）仍然传 `temp_directory=str(work)`，可能以为溢出文件会落在那里。
-- **依据。** 2026-11-25 全仓检索，`demiflow/` 下除 DataFusion 主机自己的同名参数外没有读取方。最后几处读取在 11-23 的退役提交里删除（`96a55963`、`2cb25ec5`、`bf8bb2bf`）。
-- **影响。** 几个测试原本靠“运行后这个目录为空”证明清理，这样的断言永远成立。第 3 批已改为检查本次运行的 worker 退出、分配归还（`tests/test_local_kernel.py`），或删掉重复的检查（`tests/test_plan_capture.py`、`tests/test_stream_map.py`）。
-- **建议。** 引擎负责人决定：去掉这个参数并改掉工作台的调用；或者保留但在说明里写明不再使用。
-
 ### T-027 prompt 节点的有状态 `when` 判断器不存盘也不恢复
 
 - **现象。** 判断器提供 `snapshot_state` / `restore_state`，运行在第一次存盘后中断再续跑：整个过程中这两个方法一次都没被调用，续跑时判断器从初始状态重新计数，重复判断已判过的行。用“只对前 3 行为真”的判断器，续跑后有回答的是第 0 到 4 行，多发了请求。
@@ -209,6 +202,10 @@
 ### T-033 封存指纹取决于进程里已加载的模块：函数体内延迟导入同级模块时，worker 误判"代码已改"
 
 已修（2026-11-26，用户同意改平台）。函数体内的绝对导入不再算作静态依赖：它在函数被调用时才执行，封存进程是否恰好加载过那个模块，不应该改变指纹。相对导入仍按文件系统解析（包内延迟导入的同级模块照样随包分发），模块导入时就会执行的绝对导入仍按已加载计入。做法是这样选的：按文件系统把函数体内的绝对导入也算进去会更"全"，但会改变所有常见用法（驱动端没加载过该模块）下已封存运行的指纹，旧运行就续不了；现在的做法在常见用法下指纹不变。`eafb549a` 到本次之间封存、且清单里列了"当时已加载的延迟导入模块"的运行，核对时再按旧的发现规则算一次，原来能续的仍能续，被列入的模块若被改动仍会拒绝。实测（行函数体内 `import` 同级模块，驱动端提前导入与否 × 启动与续跑）：改前进程 worker 4 种组合通 1 种、线程 worker 通 2 种，改后 8 种全通；旧代码封存、新代码续跑没有任何一种变差。验收范围内原本失败的 61 个测试通过。`tests/test_runtime_v3_graph_adapter.py` 有 2 个测试原来被这个误判盖住，现在露出各自原有的失败（`test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion[True]` 没有抛出预期的拒绝；`test_source_credit_pause_drains_pending_memory_before_original_cut` 没有出现在途内存数据），未分析。
+
+### T-026 `local_execution(temp_directory=...)` 被接受但不起作用
+
+已处理（2026-11-26）。选了"保留参数、写明不再使用"：`local_execution` 的说明现在写明这个参数只为兼容而接受，引擎的工作文件都在运行自己的存储里，不会读、建或清理那个目录；工作台的运行进程不再传它（仍照旧为运行设置 `TMPDIR` 和 `work_root`）。没有删除参数，以免现有脚本因多传一个参数而报错。`tests/test_local_kernel.py` 新增一个用例：传入已存在或不存在的目录，action 正常运行，目录保持原样。
 
 ### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
 

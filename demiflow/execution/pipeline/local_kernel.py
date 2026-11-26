@@ -81,6 +81,9 @@ def local_execution(*, workers=4, worker_mode=None, partitions=None,
     current run's diagnostics fallback. Neither option creates a directory here.
     block_size controls the executor's source blocks independently of batch_rows;
     its ordinary default remains 256. Managed hosts may explicitly bind both.
+    temp_directory is accepted for compatibility and is not used: the engine keeps
+    its working files in the run's own storage and never reads, creates or cleans
+    anything in that directory.
     """
     from demiflow.data.execution_contract import _current_executor, _use_executor
     from demiflow.execution.executors.local import LocalDatasetExecutor

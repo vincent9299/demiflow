@@ -135,7 +135,7 @@ def _execute(root, run_id, run, attempt=None):
                 limits=manifest['limits'], explicit_limits=manifest.get('limits_explicit'), check_stop=check_stop), local_execution(
                 worker_mode=(manifest.get('native_execution') or {}).get('worker_mode', 'thread'), partitions=1,
                 batch_rows=limits['batch_rows'], memory_bytes=limits['memory_bytes'],
-                temp_directory=str(work), inherited_native_resources=native_limits(limits), resource_root=source,
+                inherited_native_resources=native_limits(limits), resource_root=source,
                 diagnostics_root=target / 'diagnostics', block_size=limits['batch_rows']):
             with context.bind_context():
                 entry(**report['binding']['arguments'])
