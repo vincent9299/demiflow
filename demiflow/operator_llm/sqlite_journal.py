@@ -789,7 +789,7 @@ class _SQLiteJournalShard:
                                    (row['key'].split('/', 1)[1], canonical({'request_ref': ref})))
                         count += 1
                 if log:
-                    log(f'旧调用导入：{count:,} 个请求键；正在读取响应（不复制图片字节）')
+                    log(f'Legacy call import: {count:,} request keys; reading responses (image bytes are not copied)')
                 completed = 0
                 for batch in ds.to_batches(columns=['key', 'payload', 'written_version'],
                                            filter="starts_with(key, 'response/')", batch_size=batch_size):
@@ -804,7 +804,7 @@ class _SQLiteJournalShard:
                                    (row['payload'], canonical(refs), key))
                         completed += 1
                     if log:
-                        log(f'旧调用导入：已复制 {completed:,} 条完整响应')
+                        log(f'Legacy call import: copied {completed:,} complete responses')
                 db.execute("UPDATE journal_state SET value=? WHERE name='request_count'", (str(count),))
                 db.execute("INSERT INTO journal_state VALUES ('legacy_source', ?)", (marker,))
             return self.stats()

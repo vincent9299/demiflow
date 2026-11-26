@@ -95,7 +95,7 @@ def test_material_limits_are_honest_and_do_not_expand_all_wrappers(no_execution)
     for spec in (deep, many, tree):
         changed = replace(declaration, callable_spec=spec, code_identity={})
         result = program_prompt_materials(changed)
-        assert result.state == 'unavailable' and not result.prompts and '预算' in result.reason
+        assert result.state == 'unavailable' and not result.prompts and 'budget' in result.reason
         compiled = replace(captured.compiled, declarations=tuple(
             changed if d is declaration else d for d in captured.compiled.declarations))
         details = build_plan_details(compiled, root=Path('/nonexistent'), sources={})

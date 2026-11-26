@@ -65,7 +65,7 @@ def program_prompt_materials(declaration: ProgramDeclaration, *, max_depth=4, ma
         nonlocal visits
         visits += 1
         if depth > max_depth or visits > max_prompts * (max_depth + 1) + 1:
-            raise ValueError('Prompt 声明超过展示遍历预算。')
+            raise ValueError('The Prompt declaration exceeds the display traversal budget.')
         if type(spec) is not CallableSpec:
             return
         variant = model_variant(spec)
@@ -73,37 +73,37 @@ def program_prompt_materials(declaration: ProgramDeclaration, *, max_depth=4, ma
             return
         args = spec.constructor_args
         if type(args) is not tuple or not args:
-            raise ValueError('Prompt 原生声明材料不可用。')
+            raise ValueError('The native Prompt declaration material is unavailable.')
         if variant == CACHE:
             visit(args[0], depth + 1, prefix)
         elif variant == ROUTED_PROMPT:
             children = args[0]
             if type(children) is not dict or len(children) > max_prompts:
-                raise ValueError('Prompt 路由超过展示预算或声明不可用。')
+                raise ValueError('The Prompt route exceeds the display budget or its declaration is unavailable.')
             for route, child in children.items():
                 if type(route) is not str or len(prefix) + len(route) + 1 > 2048:
-                    raise ValueError('Prompt 路由名称超过展示预算。')
+                    raise ValueError('The Prompt route name exceeds the display budget.')
                 visit(child, depth + 1, prefix + route + '/')
         elif variant == PROMPT:
             operation = args[0]
             if type(operation) is not OperatorLLMMapOp or type(operation.config) is not PromptPack:
-                raise ValueError('Prompt 原生声明材料不可用。')
+                raise ValueError('The native Prompt declaration material is unavailable.')
             definitions = operation.config.prompts
             if type(definitions) is not tuple or len(definitions) > 256 or len(prompts) >= max_prompts:
-                raise ValueError('Prompt 定义数量超过展示预算。')
+                raise ValueError('The number of Prompt definitions exceeds the display budget.')
             name = operation.prompt_name
             if type(name) is not str or len(prefix) + len(name) > 2048:
-                raise ValueError('Prompt 名称超过展示预算。')
+                raise ValueError('The Prompt name exceeds the display budget.')
             # Avoid building the whole pack's prompt_definitions mapping. This
             # selects from the exact pack the compiler already validated.
             selected = None
             for definition in definitions:
                 if type(definition) is not PromptDefinition:
-                    raise ValueError('Prompt 编译定义材料不可用。')
+                    raise ValueError('The compiled Prompt definition material is unavailable.')
                 if definition.name == name:
                     selected = definition
             if selected is None:
-                raise ValueError('Prompt 编译定义材料不可用。')
+                raise ValueError('The compiled Prompt definition material is unavailable.')
             settings = args[1] if len(args) > 1 and type(args[1]) is dict else {}
             predicate = settings.get('when')
             prompts.append(PromptMaterial(prefix + name, selected, operation.inputs, operation.output,
@@ -393,7 +393,7 @@ def build_logical_plan_view(graph: DataflowGraph, *, declarations: tuple[Program
                 source = dict(name=name, version=version if type(version) is int else None)
         label = labels.get(node.occurrence_id) or (prompt if type(prompt) is str else
                  program['qualname'] if program is not None else
-                 '读取 ' + source['name'] if source and source['name'] else node.kernel.kind)
+                 'Read ' + source['name'] if source and source['name'] else node.kernel.kind)
         return dict(label=label[:256], program=program, data_source=source)
 
     ports = {}

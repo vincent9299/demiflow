@@ -191,7 +191,7 @@ class _HTTPOwner:
                 suffix = '; resource wait timed out' if spec.resource_wait_timeout_s else ''
                 raise ModelServiceError(blocked + suffix)
             if last_log is None or elapsed-last_log >= spec.startup_log_interval_s:
-                self._report(f'等待模型资源：{blocked}；已等 {elapsed:.1f}s')
+                self._report(f'Waiting for model resources: {blocked}; waited {elapsed:.1f}s')
                 last_log = elapsed
             await asyncio.sleep(min(spec.poll_interval_s, remaining))
 
@@ -250,11 +250,11 @@ class _HTTPOwner:
                                        else spec.expected_model in names)
                             if not matched:
                                 raise ModelServiceError('Managed endpoint does not serve the declared model')
-                        self._report(f'模型就绪：{spec.expected_model or spec.base_url}，PID={self._process.pid}')
+                        self._report(f'Model ready: {spec.expected_model or spec.base_url}, PID={self._process.pid}')
                         return
                     except (httpx.HTTPError, asyncio.TimeoutError):
                         if time.monotonic()-last_log >= spec.startup_log_interval_s:
-                            self._report(f'模型仍在加载：{spec.expected_model or spec.base_url}；日志={spec.log_path}')
+                            self._report(f'Model still loading: {spec.expected_model or spec.base_url}; log={spec.log_path}')
                             last_log = time.monotonic()
                         await asyncio.sleep(min(spec.poll_interval_s,max(0,deadline-time.monotonic())))
             raise ModelServiceError('HTTP service readiness timed out; see '+str(spec.log_path))

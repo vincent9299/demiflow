@@ -38,12 +38,12 @@ def compiled_provenance(graph, *, sources, operations):
         return CompilationProvenance(graph.action_id, graph.dag_id, (), (), reason)
 
     if len(graph.nodes) > MAX_NODES or len(sources) + len(operations) > MAX_BINDINGS:
-        return unavailable('来源关系超过展示预算。')
+        return unavailable('The provenance relations exceed the display budget.')
     bindings = []
     for kind, aliases in (('source', sources), ('operation', operations)):
         for key, index in aliases.items():
             if type(index) is not int or not 0 <= index < len(graph.nodes):
-                return unavailable('来源关系没有对应的最终编译节点。')
+                return unavailable('A provenance relation has no final compiled node.')
             object_id = key if kind == 'source' else key[1]
             bindings.append(OriginBinding(kind, object_id, graph.nodes[index].occurrence_id))
     return CompilationProvenance(graph.action_id, graph.dag_id, tuple(bindings), graph.terminals)

@@ -32,7 +32,7 @@ def display_json(value):
         if isinstance(obj, dict):
             for key, val in obj.items():
                 if key == "url" and isinstance(val, str) and val.startswith("data:image/"):
-                    obj[key] = "[实际像素见同案例图片；完整data URL保存在请求JSON]"
+                    obj[key] = "[pixels: see the image of the same case; the full data URL is kept in the request JSON]"
                 else:
                     redact(val)
         elif isinstance(obj, list):

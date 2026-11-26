@@ -42,6 +42,6 @@ class StreamStats:
     def summary(self) -> str:
         st = "、".join(f"{k}[in={v['in']}→out={v['emitted']}]"
                       for k, v in self.stages.items())
-        miss = "、".join(f"{k}×{v}" for k, v in
+        miss = ", ".join(f"{k}×{v}" for k, v in
                          sorted(self.miss.items(), key=lambda x: -x[1]))
-        return st + (f"\n认缺：{miss}" if miss else "")
+        return st + (f"\nAcknowledged missing: {miss}" if miss else "")
