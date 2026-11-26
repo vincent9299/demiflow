@@ -43,6 +43,7 @@ GUARDS = (
     'tests/test_public_sdk_docstrings.py',
     'tests/test_engine_known_state.py',
     'tests/test_merge_gate.py',
+    'tests/test_architecture_boundaries.py',
     'tests/test_forge_release_boundaries.py',
     'tests/test_release_gate.py',
 )
