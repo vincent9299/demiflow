@@ -43,7 +43,7 @@ def test_workflow_dag_ui_cross_project_drilldown_and_live_run(tmp_path, browser,
         page.on(
             'response',
             lambda res: workflow_http_errors.append((res.status, res.url.split('#')[0]))
-            if res.status >= 400 and res.status != 503 and 'workflow' in res.url
+            if res.status >= 400 and 'workflow' in res.url
             else None,
         )
         try:
