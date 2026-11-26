@@ -471,7 +471,7 @@ class BridgeServer:
                 if action in ('register_workflow', 'register_flow', 'bind_params', 'slim_manifest'):
                     guard = guarded_control_writes(self.project_root, self.protected_snapshot, active.require_active)
                 from demiflow.workbench.projects.registry import dependency_scope
-                with guard, dependency_scope(self.project_root, project=active.project):
+                with guard, dependency_scope(self.project_root, project=getattr(active, 'project', None)):
                     answer = _run_project_layout(self.project_root, arguments)
                 self._record_layout_paths(action, answer)
             elif name == REVIEW_TOOL['name']:
