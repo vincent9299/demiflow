@@ -135,6 +135,24 @@ def test_bounded_followup_reads_checked_project_evidence(project):
         assert result['status'] == 'incomplete' and result['diagnostics']
 
 
+def test_additional_read_counts_workflow_registration_in_unit_budget(project, monkeypatch):
+    from demiflow.forge import review_evidence
+    workflow = project / 'workflows' / 'more.json'
+    workflow.parent.mkdir()
+    workflow.write_text('{"nodes":[]}')
+    target = 'operators/normalize.py'
+    monkeypatch.setattr(review_evidence, 'UNIT_BYTES', (project / target).stat().st_size + workflow.stat().st_size)
+    calls = []
+
+    def reviewer(prompt):
+        calls.append(prompt)
+        return dict(response(), report={'request_files': ['workflows/more.json']})
+
+    report = review_project(project, goal='Review the helper', paths=[target], reviewer=reviewer)
+    assert len(calls) == 1
+    assert report['status'] == 'incomplete' and report['diagnostics'][0]['code'] == 'resource_limit'
+
+
 def test_cli_json_and_human_output(project, monkeypatch):
     from demiflow.forge import review_deepseek
     monkeypatch.setattr(review_deepseek, 'run_reviewer', lambda prompt, **options: response())

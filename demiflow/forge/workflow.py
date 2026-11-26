@@ -234,7 +234,7 @@ def load_workflow(root: Path | str, path: str) -> tuple[Path, dict, str]:
     digest = sha256(raw).hexdigest()
     try:
         doc = json.loads(raw.decode('utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeError, ValueError, RecursionError) as exc:
         raise ForgeError(f'Workflow JSON syntax error in {path}: {exc}', code='invalid_request') from exc
     if type(doc) is not dict:
         raise ForgeError(f'Workflow document must be a JSON object: {path}', code='invalid_request')
@@ -260,6 +260,31 @@ def _validate_params_syntax(params: str) -> bool:
     if p.suffix != '.json' or any(part.startswith('.') or part == '..' for part in p.parts):
         return False
     return True
+
+
+def local_workflow_bindings(document, entries):
+    """Identify local node sources and their explicit or uniquely bound parameter file."""
+    if not isinstance(document, dict) or not isinstance(document.get('nodes'), list):
+        return
+    for node in document['nodes'][:MAX_WORKFLOW_NODES]:
+        if not isinstance(node, dict) or node.get('project', 'self') != 'self':
+            continue
+        entry, params = node.get('entry'), node.get('params')
+        if not _validate_entry_syntax(entry):
+            continue
+        if params is None and len(entries.get(entry, ())) == 1:
+            params = entries[entry][0]
+        yield entry, params if _validate_params_syntax(params) else None
+
+
+def external_workflow_bindings(spec):
+    """Project only well-formed external node selectors; WF diagnostics retain malformed fields."""
+    return [
+        dict(project=spec['projects'][node['project']], entry=node['entry'], params=node['params'])
+        for node in spec['nodes']
+        if node['project'] in spec['projects'] and _validate_entry_syntax(node['entry'])
+        and (node['params'] is None or _validate_params_syntax(node['params']))
+    ]
 
 
 def validate_workflow(root: Path | str, path: str, *, control: dict | None = None,
@@ -300,6 +325,7 @@ def validate_workflow(root: Path | str, path: str, *, control: dict | None = Non
             'edges': [],
             'topo_order': [],
             'cross_project': False,
+            'unverified_projects': [],
             'involved_projects': ['self'],
             'diagnostics': [diagnostic(code, str(path), str(exc))],
         }
@@ -419,7 +445,7 @@ def validate_workflow(root: Path | str, path: str, *, control: dict | None = Non
                 policy['max_parallel'] = mp
         if 'on_failure' in raw_policy:
             of = raw_policy['on_failure']
-            if of not in _FAILURE_POLICIES:
+            if not isinstance(of, str) or of not in _FAILURE_POLICIES:
                 diagnostics.append(diagnostic('WF-01', rel_path, 'policy.on_failure 仅支持 "fail_fast" 或 "continue_independent"。'))
             else:
                 policy['on_failure'] = of
@@ -467,7 +493,10 @@ def validate_workflow(root: Path | str, path: str, *, control: dict | None = Non
             node_desc = ''
 
         proj_alias = item.get('project', 'self')
-        if type(proj_alias) is not str or (proj_alias != 'self' and proj_alias not in projects):
+        if not isinstance(proj_alias, str):
+            diagnostics.append(diagnostic('WF-01', rel_path, f'节点 {node_id} 的 project 必须为项目别名字符串。'))
+            proj_alias = ''
+        elif proj_alias != 'self' and proj_alias not in projects:
             diagnostics.append(diagnostic('WF-03', rel_path, f'节点 {node_id} 引用了未在 projects 中声明的项目别名：{proj_alias!r}。'))
 
         entry = item.get('entry')
@@ -659,34 +688,25 @@ def validate_workflow(root: Path | str, path: str, *, control: dict | None = Non
         'edges': edges,
         'topo_order': topo_order,
         'cross_project': cross_project,
+        'unverified_projects': [p for p in involved_projects if p in projects and p not in resolved_projects],
         'involved_projects': involved_projects,
         'diagnostics': diagnostics,
     }
 
 
 def discover_workflows(root: Path | str, *, control: dict | None = None,
-                       project_resolver=None) -> list[dict]:
-    """List workflows declared in ``workspace.json['workflows']`` plus discovered ``workflows/*.json``."""
+                       project_resolver=None, paths=None, exclude=()) -> list[dict]:
+    """Summarize registered declarations and visible drafts, within discovery limits."""
+    from .project import discover_project_sources
     root_path = Path(root).absolute()
-    if control is None and no_symlinks(root_path / 'workspace.json').exists():
-        try:
-            _, control = load_project(root_path)
-        except ForgeError:
-            control = None
+    if paths is None:
+        view = discover_project_sources(root_path, exclude=exclude, role_names=('workflows',))
+        paths = view['roles']['workflows']
+        if control is None:
+            control = view['control']
     registered = list((control or {}).get('workflows') or ())
-    discovered: list[str] = []
-    wf_dir = root_path / 'workflows'
-    if wf_dir.is_dir() and not wf_dir.is_symlink():
-        for child in sorted(wf_dir.rglob('*.json')):
-            if child.is_symlink() or not child.is_file():
-                continue
-            rel = child.relative_to(root_path).as_posix()
-            if any(part.startswith('.') for part in Path(rel).parts):
-                continue
-            discovered.append(rel)
-            if len(discovered) >= MAX_WORKFLOWS_PER_PROJECT:
-                break
-    ordered_paths = list(dict.fromkeys([*registered, *discovered]))[:MAX_WORKFLOWS_PER_PROJECT]
+    ordered_paths = [p for p in dict.fromkeys([*registered, *paths])
+                     if not any(p == x or p.startswith(x + '/') for x in exclude)][:MAX_WORKFLOWS_PER_PROJECT]
     registered_set = set(registered)
     items: list[dict] = []
     for rel in ordered_paths:
@@ -701,6 +721,7 @@ def discover_workflows(root: Path | str, *, control: dict | None = None,
             'node_count': len(spec['nodes']),
             'edge_count': len(spec['edges']),
             'cross_project': spec['cross_project'],
+            'unverified_projects': spec['unverified_projects'],
             'involved_projects': spec['involved_projects'],
             'projects': spec['projects'],
             'diagnostic_count': len(spec['diagnostics']),

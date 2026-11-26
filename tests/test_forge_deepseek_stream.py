@@ -279,3 +279,15 @@ def test_transport_backpressure_does_not_relax_original_limits(tmp_path,limits,f
                 while transport.events:transport.pop()
     finally:
         process.kill();process.wait();transport.close()
+
+
+def test_closed_acp_session_can_rebind_its_original_identity_and_restart_frame_revisions():
+    first, resumed = Frames(), Frames('resumed:1')
+    result = run([dict(prompt='session'), first.start(), first.end([]),
+                  dict(rawInput=json.dumps(dict(method='session/close', params=dict(sessionId='session'))) + '\n'),
+                  dict(registry='replacement'), dict(prompt='session'),
+                  dict(agent='replacement', **resumed.start()),
+                  dict(agent='replacement', **resumed.end([]))])
+    assert [e['params']['phase'] for e in result['output'] if 'phase' in e['params']] == [
+        'start', 'settled', 'start', 'settled']
+    assert not result['cancellations']

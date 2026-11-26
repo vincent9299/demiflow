@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from demiflow.forge.context import flow_summary
+from demiflow.forge.project_io import read_control, relative_path
+from demiflow.forge.schema import canonical
+
 from demiflow.forge.project import load_project
 from demiflow.forge.project_rules import diagnostic
 from demiflow.forge.schema import ForgeError
@@ -33,6 +37,103 @@ def _find_in_inventory(inventory: dict, logical_ref: str) -> tuple[str, dict] | 
             code='conflict',
         )
     return None
+
+
+def registered_project_catalog(authority, workspace, root, arguments):
+    """Project the current registry and one page of public Flow bindings for an author."""
+    if type(arguments) is not dict or set(arguments) - {'project', 'entry', 'params', 'offset', 'limit'}:
+        raise ForgeError('Invalid project catalog query', code='invalid_request')
+    offset, limit = arguments.get('offset', 0), arguments.get('limit', 8)
+    project = arguments.get('project')
+    if (type(offset) is not int or not 0 <= offset <= 16384 or type(limit) is not int or not 1 <= limit <= 16
+            or ('project' in arguments and (not isinstance(project, str) or not 0 < len(project) <= 256))):
+        raise ForgeError('Invalid project selector or page', code='invalid_request')
+    if any(not project or not isinstance(arguments[k], str) or not 0 < len(arguments[k]) <= 1024
+           for k in ('entry', 'params') if k in arguments):
+        raise ForgeError('A binding selector requires a registered project', code='invalid_request')
+    try:
+        inventory = console.load_registry(authority['path'])
+        member = inventory['projects'].get(workspace)
+        if member is None or Path(member['root']) != Path(root) or ws.workspace_id(root, load_project(root)[1]) != workspace:
+            raise ForgeError('Project membership changed')
+    except (ValueError, OSError) as exc:
+        raise ForgeError('Current project is unavailable in the registry', code='operation_rejected') from exc
+
+    def summary(key, item):
+        return dict(workspace_id=key, name=item['name'],
+                    run_submit=bool(authority['run_submit'] and console.permissions(item)['run_submit']))
+
+    if project is None:
+        members = sorted(inventory['projects'].items())
+        return dict(projects=[summary(key, item) for key, item in members[offset:offset + limit]],
+                    next_offset=offset + limit if offset + limit < len(members) else None)
+    found = _find_in_inventory(inventory, project)
+    if found is None:
+        raise ForgeError('Project is unavailable in the registry', code='not_found')
+    key, item = found
+    try:
+        target = ws.no_symlinks(Path(item['root']))
+        # Slim projects initialized elsewhere must already have an identity. Discovery is read-only.
+        from demiflow.forge.project import STATE_PATH, is_slim_manifest
+        if is_slim_manifest(read_control(target / 'workspace.json')) and not (target / STATE_PATH).exists():
+            raise ForgeError('Project identity unavailable')
+        _, control = load_project(target)
+        if ws.workspace_id(target, control) != key:
+            raise ForgeError('Project identity changed')
+    except (ValueError, OSError) as exc:
+        raise ForgeError('Registered project is unavailable', code='not_found') from exc
+    # Page bindings before opening any Flow or parameter file. A heavily bound entry stays pageable.
+    bindings = [(entry, path) for entry, paths in sorted(control.get('entries', {}).items())
+                if arguments.get('entry', entry) == entry for path in sorted(paths) if arguments.get('params', path) == path]
+    rows, titles = [], {}
+    budget = 40 * 1024
+    for entry, path in bindings[offset:offset + limit]:
+        if entry not in titles:
+            titles[entry] = flow_summary(target, entry, ()).get('title', '')
+        try:
+            config = read_control(relative_path(target, path), 64 * 1024)
+            keys = sorted(config) if isinstance(config, dict) else []
+            bounded_keys = [k for k in keys if len(k.encode('utf-8')) <= 128][:32]
+        except (ValueError, OSError, RecursionError):
+            keys, bounded_keys = None, []
+        row = dict(entry=entry, title=titles[entry], params=path, keys=bounded_keys,
+                   keys_complete=keys is not None and len(bounded_keys) == len(keys))
+        size = len(canonical(row))
+        if size > budget:
+            if rows:
+                break
+            raise ForgeError('Flow binding exceeds catalog response budget', code='resource_limit')
+        budget -= size
+        rows.append(row)
+    end = offset + len(rows)
+    return dict(**summary(key, item), flows=rows, next_offset=end if end < len(bindings) else None)
+
+
+def workflow_review_observations(catalog, definitions):
+    """Refresh the public binding facts for the reviewed external nodes, including repair rounds."""
+    facts, seen = [], set()
+    for definition in definitions:
+        for binding in definition.get('external_bindings', ()):
+            key = binding['project'], binding['entry'], binding['params']
+            if key in seen:
+                continue
+            if len(seen) == 8:
+                return [*facts, dict(source='workbench_registered_binding', detail='超过 8 个外部绑定，其余待核对。')]
+            seen.add(key)
+            selector = {k:v for k,v in binding.items() if v is not None}
+            try:
+                result = catalog(dict(selector, limit=2))
+                rows = result['flows']
+                fact = dict(**selector, workspace_id=result['workspace_id'], match_count_in_page=len(rows))
+                if len(rows) == 1:
+                    fact.update({k:rows[0][k] for k in ('params', 'keys', 'keys_complete')})
+            except (ValueError, OSError):
+                fact = dict(**selector, unavailable=True)
+            detail = canonical(fact).decode()
+            if len(detail.encode()) > 2048:
+                detail = '外部绑定摘要超出评审预算，待核对。'
+            facts.append(dict(source='workbench_registered_binding', detail=detail))
+    return facts
 
 
 def _host_inventory_entry(inventory: dict | None, host_root: Path, host_ws_id: str) -> tuple[str | None, dict | None]:

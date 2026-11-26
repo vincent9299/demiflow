@@ -7,6 +7,7 @@ import re
 import uuid
 
 from .api_reference import MODULES
+from .project_guard import publish_project_control
 from .io import directory_handle, ensure_directory, no_symlinks, publish_bytes
 from .platform import bounded_json, content_digest, module_scope
 from .platform_environment import read_bounded
@@ -196,7 +197,6 @@ def load_project(root):
 
 def save_project(root, value, *, expected=None, create=False):
     """Persist workspace declaration, splitting Forge internal state to .forge/state.json for slim projects."""
-    from .project_guard import publish_project_control
     root = Path(root).absolute()
     manifest = root / "workspace.json"
     state_file = root / STATE_PATH
@@ -322,8 +322,8 @@ def slim_project_manifest(root):
             )
         removed_fields = sorted(set(raw_ws) - set(ws_doc))
         ensure_directory(root / ".forge")
-        publish_bytes(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=False)
-        publish_bytes(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=False)
+        publish_project_control(no_symlinks(state_file), bounded_json(state_doc, 8 * 1024**2), create=False)
+        publish_project_control(no_symlinks(manifest), bounded_json(ws_doc, 8 * 1024**2), create=False)
         return dict(
             status='slimmed',
             manifest_path='workspace.json',
@@ -354,7 +354,7 @@ _LEGACY_EMPTY_PARAMS = {'format': 'demiflow_forge_flow_parameters_v2', 'argument
 _PROMPT_BYTES = 1024**2
 
 
-def discover_project_sources(root, *, exclude=(), include_roles=True):
+def discover_project_sources(root, *, exclude=(), include_roles=True, role_names=ROLE_DIRS):
     """List published entries separately from standard source files, without importing project code."""
     root = no_symlinks(Path(root).absolute())
     protected = set(exclude)
@@ -370,7 +370,9 @@ def discover_project_sources(root, *, exclude=(), include_roles=True):
     entries = {entry: [p for p in params if visible(p)]
                for entry, params in (control or {}).get('entries', {}).items()
                if visible(entry.partition(':')[0])}
-    roles = {role: [] for role in ROLE_DIRS}
+    if not set(role_names) <= set(ROLE_DIRS):
+        raise ForgeError('Unknown project source role', code='invalid_request')
+    roles = {role: [] for role in role_names}
     if not include_roles:
         return dict(control=control, roles=roles, entries=entries)
     seen = 0
@@ -630,7 +632,7 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
 
 def register_workflow(root, path, *, authorize=None):
     """Validate and register a workflows/*.json file in workspace.json['workflows']."""
-    from .workflow import MAX_WORKFLOWS_PER_PROJECT, validate_workflow, validate_workflow_path
+    from .workflow import MAX_WORKFLOW_BYTES, MAX_WORKFLOWS_PER_PROJECT, validate_workflow, validate_workflow_path
     root, value = load_project(root)
     if value['format'] != FORMAT_V3:
         raise ForgeError('Workflow registration requires a v3 project', code='invalid_request')
@@ -646,8 +648,12 @@ def register_workflow(root, path, *, authorize=None):
         if authorize is not None:
             authorize()
         _, current = load_project(root)
-        if current != value:
-            raise ForgeError('Project declaration changed before workflow registration', code='inputs_changed')
+        try:
+            raw = read_bounded(validate_workflow_path(root, rel), MAX_WORKFLOW_BYTES)
+        except (OSError, ValueError) as exc:
+            raise ForgeError('Workflow changed before registration', code='inputs_changed') from exc
+        if current != value or sha256(raw).hexdigest() != spec['digest']:
+            raise ForgeError('Project declaration or workflow changed before registration', code='inputs_changed')
         existing = list(current.get('workflows') or ())
         already = rel in existing
         if not already:

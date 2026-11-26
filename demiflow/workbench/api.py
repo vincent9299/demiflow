@@ -276,9 +276,8 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.token = _session_token(token_file)
         self.requests = threading.BoundedSemaphore(10)
         self.workers = threading.BoundedSemaphore(1)
-        # Bounded author metadata/parameter I/O must remain usable while the
-        # native reader compiles a plan. This slot never executes candidate code
-        # and does not consume the reserved stop/control slot.
+        # Project writes and workflow admission remain available during graph compilation.
+        # The detached orchestrator owns node execution. Stops have a separate slot.
         self.project_workers = threading.BoundedSemaphore(1)
         from demiflow.workbench.reader import Reader
         self.native_reader = Reader(owner_loop=True)
@@ -318,6 +317,8 @@ class WorkspaceServer(ThreadingHTTPServer):
                 raise
         try:
             if self.development is not None and not self.development.remote:
+                if self.registry is not None:
+                    self.development.workflow_registry = dict(path=str(self.registry), run_submit=self.enable_runs)
                 from demiflow.workbench.conversations.global_settings import GlobalSettings
                 self.development_settings = GlobalSettings(self.development, self.inventory)
                 self.development.settings = self.development_settings
@@ -1135,7 +1136,7 @@ class Handler(BaseHTTPRequestHandler):
                 # it does not occupy the separate source/compilation worker.
                 self._send(self.server.plan_snapshots.read(root, **request))
                 return
-            with self._work(control=name=='run-cancel', project=name in {'flow-arguments-save', 'project-file-save', 'project-file-create'}):
+            with self._work(control=name in {'run-cancel', 'workflow-cancel'}, project=name in {'flow-arguments-save', 'project-file-save', 'project-file-create', 'workflow-start'}):
                 if name in {'flow-register', 'flow-arguments-save', 'parameter-preview', 'parameters-update', 'project-file-save', 'project-file-create'}:
                     def authorize():
                         _, current_root, current_permissions = self.server.resolve(self.path)

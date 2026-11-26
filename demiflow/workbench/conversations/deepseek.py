@@ -147,6 +147,7 @@ class DeepSeek:
         # Inject Skill only on a fresh session; resumed sessions already carry it.
         self.prompt = '' if self.thread else prompt
         self.prompt_sent = bool(self.thread)
+        self.acknowledged = False
         params=dict(cwd=self.project['root'],mcpServers=self.mcp_servers)
         if self.thread:params['sessionId']=self.thread
         return self.transport.request('session/resume' if self.thread else 'session/new',params)

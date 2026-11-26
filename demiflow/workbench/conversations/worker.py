@@ -4,6 +4,7 @@ from __future__ import annotations
 import array
 import ctypes
 import fcntl
+from functools import partial
 import json
 import os
 from pathlib import Path
@@ -361,6 +362,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     store = Store(deployment.state, deployment.limits)
     limits = deployment.limits
     denied_extra = json.loads(os.environ.pop('DEMIFLOW_INPUT_DENIED_PATHS', '[]'))
+    workflow_registry = json.loads(os.environ.pop('DEMIFLOW_WORKFLOW_REGISTRY', 'null'))
     parent_is_sock = stat.S_ISSOCK(os.fstat(parent_fd).st_mode)
     parent_sock = socket.socket(fileno=parent_fd) if parent_is_sock else None
     if parent_sock is not None:
@@ -457,7 +459,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             if st_cell_cli:
                 from demiflow.workbench.notebooks.cell_commands import CellCommands
                 control_bridge = CellCommands(store, None, 0.0)
-            elif acp and st_guided:
+            elif st_guided:
                 control_bridge = BridgeServer(None)
             st_manifest = dict(sources=[] if st_notebook else [
                 dict(origin='authoritative_file', canonical_path=str(p))
@@ -643,6 +645,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 history_boundary = db.execute('SELECT min(sequence)-1 FROM events WHERE turn=?', (tid,)).fetchone()[0] or 0
             project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
             guided = not (compact or notebook) and project['kind'] == 'pipeline'
+            catalog = None
+            catalog_observations = None
+            if guided and workflow_registry is not None:
+                from demiflow.workbench.workflows.resolver import registered_project_catalog, workflow_review_observations
+                catalog = partial(registered_project_catalog, workflow_registry, session['workspace'], project['root'])
+                catalog_observations = partial(workflow_review_observations, catalog)
             delivery_review = None
             if guided and project['phase'] == 'implementation':
                 from demiflow.workbench.conversations.pipeline_review import DeliveryReview
@@ -713,7 +721,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     peaks['rss_bytes'] = max(peaks['rss_bytes'], rss); peaks['processes'] = max(peaks['processes'], len(rows))
                     if rss > limits.rss_bytes or len(rows) > limits.processes:
                         reject('Development process tree exceeded sampled budget', 'resource_limit')
-                    used = directory_bytes(home)
+                    used = directory_bytes(home, codex_executable=deployment.providers.get('codex', {}).get('executable'))
                     peaks['private_bytes'] = max(peaks['private_bytes'], used)
                     if used > limits.provider_bytes: reject('Provider private directory exceeded sampled budget', 'resource_limit')
                 return current
@@ -849,6 +857,19 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     warm_ready = False
                     provider_opened = False
 
+                if warm_ready and provider_opened and guided and acp:
+                    try:
+                        wait(provider.close_request())
+                    except (ValueError, OSError, TimeoutError):
+                        # A failed control rebind precedes prompt dispatch. Drain the old owner
+                        # before restoring this same saved ACP session on a fresh connection.
+                        drained, detail = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                        if not drained:
+                            reject(detail or 'Previous author cleanup is unknown', 'inspection_incomplete')
+                        process = transport = provider = model_broker = control_bridge = shims = None
+                        effective_bound = standby_spec = None
+                        warm_ready = provider_opened = False
+
                 if warm_ready and not provider_opened:
                     proj_py = effective_project_python(project)
                     shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py
@@ -883,26 +904,27 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         control_bridge.set_turn(turn, deadline)
                     elif control_bridge is not None and input_access is not None:
                         layout_root = Path(project['root']) if (
-                            not compact and not notebook
-                            and (project.get('writes') or (project.get('kind') == 'pipeline' and project.get('phase') == 'implementation'))
+                            guided and project['phase'] == 'implementation'
                         ) else None
-                        control_bridge.set_turn(input_access, delivery_review=delivery_review, project_root=layout_root)
+                        control_bridge.set_turn(input_access, delivery_review=delivery_review, project_root=layout_root,
+                            protected_snapshot=protected_snapshot, catalog=catalog)
                     transport.frame_count = 0
                     transport.output_bytes = 0
                     provider.items.clear()
                     provider.turn = None
-                    if not provider_opened:
+                    if not provider_opened or guided:
                         saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
                         provider.thread = saved_session
-                        if acp and guided:
-                            provider.mcp_servers = [dict(name='development-protocol', command=sys.executable,
-                                args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect', str(control_bridge.path),
-                                      control_bridge.token, tid, turn['epoch']], env=[])]
+                        if guided:
+                            provider.mcp_servers = [control_bridge.mcp_server(tid, turn['epoch'])]
                         store.event(tid, 'provider.bound', dict(effective_bound or {}, warm_reused=True, standby_prewarmed=True))
                         store.update(tid, delivery='sent')
                         send_parent('notify')
                         open_key = provider.open(prompt) if acp else provider.open(prompt, tools=(INPUT_TOOL,) if guided else ())
                         thread = provider.opened(wait(open_key))
+                        if guided and not acp:
+                            provider.bind_control_tools(wait, {tool['name'] for tool in control_bridge.dispatch(
+                                'tools/list', {}, input_access)['tools']} - {'read_input'})
                         store.bind_provider(session['id'], thread)
                         store.update(tid, delivery='prepared' if acp else 'acknowledged')
                         if acp and session['provider_session']:
@@ -921,12 +943,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if cell_cli and control_bridge is None:
                         from demiflow.workbench.notebooks.cell_commands import CellCommands
                         control_bridge = CellCommands(store, turn, deadline)
-                    elif acp and guided:
+                    elif guided:
                         layout_root = Path(project['root']) if (
-                            not compact and not notebook
-                            and (project.get('writes') or (project.get('kind') == 'pipeline' and project.get('phase') == 'implementation'))
+                            guided and project['phase'] == 'implementation'
                         ) else None
-                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review, project_root=layout_root)
+                        control_bridge = BridgeServer(input_access, delivery_review=delivery_review, project_root=layout_root,
+                            protected_snapshot=protected_snapshot, catalog=catalog)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
                     if broker_home is not None:
@@ -972,10 +994,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     transport = Transport(process, limits, acp=acp)
                     saved_session = session['provider_session'] if acp or store.has_dispatched(session['id']) else None
                     provider = adapter(transport, config, dict(project, root=provider_cwd) if notebook else project, saved_session)
-                    if acp and guided:
-                        provider.mcp_servers = [dict(name='development-protocol', command=sys.executable,
-                            args=['-I', '-B', str(Path(__file__).with_name('mcp_bridge.py')), '--connect', str(control_bridge.path),
-                                  control_bridge.token, tid, turn['epoch']], env=[])]
+                    if guided:
+                        provider.mcp_servers = [control_bridge.mcp_server(tid, turn['epoch'])]
                     handshake = wait(provider.initialize(), timeout=40)
                     configuration_key = provider.initialized(handshake)
                     effective = provider.verify_config(wait(configuration_key) if configuration_key else {})
@@ -986,6 +1006,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     send_parent('notify')
                     open_key = provider.open(prompt) if acp else provider.open(prompt, tools=(INPUT_TOOL,) if guided else ())
                     thread = provider.opened(wait(open_key))
+                    if guided and not acp:
+                        provider.bind_control_tools(wait, {tool['name'] for tool in control_bridge.dispatch(
+                                'tools/list', {}, input_access)['tools']} - {'read_input'})
                     store.bind_provider(session['id'], thread)
                     store.update(tid, delivery='not_applicable' if compact else 'prepared' if acp else 'acknowledged')
                     if not compact and acp and session['provider_session']:
@@ -1058,10 +1081,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                                 tick(force=True)
                                 if requested: continue
                                 try:
-                                    if input_access is None or data['tool'] != INPUT_TOOL['name']:
-                                        reject('Input tool is unavailable for this turn')
-                                    answer = input_access.invoke(data['arguments'])
-                                    result = dict(success=True, contentItems=[dict(type='inputText', text=wire(answer, 65536).decode())])
+                                    if not guided or control_bridge is None or data['tool'] != INPUT_TOOL['name']:
+                                        reject('Dynamic input tool is unavailable for this turn')
+                                    answer = control_bridge.dispatch('tools/call', dict(name=data['tool'], arguments=data['arguments']), input_access)
+                                    result = dict(success=True, contentItems=[dict(type='inputText', text=answer['content'][0]['text'])])
                                 except Exception as exc:
                                     result = dict(success=False, contentItems=[dict(type='inputText', text=str(exc)[:2048])])
                                 transport.send(dict(id=data['rpc_id'], result=result))
@@ -1141,8 +1164,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             if cell_cli and control_bridge is not None:
                 control_bridge.park_idle()
             elif guided and control_bridge is not None:
-                host_layout_paths = control_bridge.take_layout_paths()
-                control_bridge.set_turn(None)
+                host_layout_paths = control_bridge.finish_turn()
             review_requested = delivery_review is not None and delivery_review.selection is not None
             keep_warm = (
                 parent_sock is not None
@@ -1246,7 +1268,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
 
                 if guided and not compact and not notebook:
                     from dataclasses import replace
-                    from functools import partial
                     from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
                     review_author_spec = (replace(confined, runtime_paths=tuple(p for p in confined.runtime_paths
                                                 if Path(p).exists())) if confined is not None else None)
@@ -1272,7 +1293,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                                 budget=forge_opts.get('budget') or dict(calls=34, seconds=float(limits.review_seconds)), reference=coding, exclude=excluded, reviewer=reviewer,
                                 check_cancel=check_forge_cancel, source_current=source_current,
                                 protected_violations=protected_violations, project_python=effective_project_python(project),
-                                on_review=started_review, inspect=coding is not None)
+                                on_review=started_review, inspect=coding is not None, observations=catalog_observations)
                         if receipt['checks'] is not None:
                             result['pipeline_checks'] = receipt['checks']
                         report = receipt['review']
