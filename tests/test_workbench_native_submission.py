@@ -296,9 +296,14 @@ def test_project_dependency_preview_and_native_run_use_the_locked_package(root, 
     assert outcome['state']['cleanup'] == 'complete'
     upstream = outcome['outputs'][0]
     selector = f"run:{outcome['run_id']}:{upstream['name']}:1"
-    (root / 'flows/continued.py').write_text('from demiflow import data\n'
-        'def run(*, source, target):\n'
-        '    return data.read_lance(source["uri"], version=source["version"]).write_lance(target, mode="create", return_receipt=True)\n')
+    (root / 'flows/continued.py').write_text('''from demiflow import data
+import pyarrow as pa
+
+def run(*, source, target):
+    schema = pa.schema([('x', pa.int64())])
+    return data.read_lance(source['uri'], version=source['version']).write_lance(
+        target, schema=schema, mode='create', return_receipt=True)
+''')
     params = 'flows/continued.json'
     (root / params).write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments={
         'source': {'kind': 'table', 'alias': selector}, 'target': str(root / 'continued.lance'),
