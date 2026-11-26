@@ -115,23 +115,3 @@ def test_stuck_parser_is_killed_and_reaped(monkeypatch):
     with pytest.raises(DocumentError,match='pdf_wall_time_limit'):
         extract_pdf(pdf(['text']),{'timeout_s':1})
     assert children[0].poll() is not None
-
-
-async def test_opt_in_reparses_saved_pdf_without_downloading_or_mutating_html(tmp_path):
-    from demiflow.collect.acquisition import ParseDocument
-    from demiflow.objects import LocalObjectStore
-    objects=LocalObjectStore(tmp_path/'raw');parsed=LocalObjectStore(tmp_path/'documents')
-    def request(body,kind):
-        return dict(raw_ref=objects.put(body).to_dict(),url='https://example.test/'+kind,
-            final_url='https://example.test/'+kind,content_type=kind,retrieved_at='fixed')
-    pdf_request=request(pdf(['knowledge from a retained PDF']),'application/pdf')
-    html_request=request(b'<p>unchanged HTML evidence</p>','text/html')
-    first=ParseDocument(store=parsed)
-    old_pdf=await first(pdf_request);old_html=await first(html_request)
-    assert old_pdf['reason']=='unsupported_media_type:application/pdf' and old_pdf['raw_ref']
-    second=ParseDocument(store=parsed,pdf_parser={})
-    new_pdf=await second(pdf_request);new_html=await second(html_request)
-    assert new_pdf['status']=='ok' and new_pdf['raw_ref']==old_pdf['raw_ref']
-    assert new_html['document_ref']==old_html['document_ref']
-    assert read_document(new_pdf['document_ref'])['blocks'][0]['text']=='knowledge from a retained PDF'
-    assert (await first(pdf_request))==old_pdf

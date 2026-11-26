@@ -13,11 +13,11 @@ from demiflow.objects import LocalObjectStore
 raw = data.from_items([{'id': 'page-1', 'request': {'uri': 'https://example.org/page'}}]).fetch(
     store=LocalObjectStore('/local/raw-documents'),
     policy=FetchPolicy(max_object_bytes=8*1024**2), concurrency=4)
-# 用物化或持久 sink 完成原始获取。对成功回执显式调用 ParseDocument，
-# 传 raw_ref、稳定 url、final_url、content_type、retrieved_at；解析不再 GET。
+# 用物化或持久 sink 完成原始获取。对成功回执，业务在普通 map 中调用
+# demiflow.collect.documents.parse_document 解析已保存的原始对象；解析不再 GET。
 ```
 
-`ParseDocument` 的严格输入、隔离和输出界限见 [文档原语](document-acquisition.md)。
+文档解析的界限见 [文档原语](document-acquisition.md)。
 `read_documents` 只验证并读取已经保存的规范文档，按显式 PromptContext 对完整渲染
 prompt 计量和选择整块，不调用模型。原始对象、规范文档和业务输出保持独立引用。
 Agent 使用同一单行读取实现，不创建子 Dataset。
@@ -182,9 +182,9 @@ The retained lower-level parser/library/reading tests cover their independent co
 
 ### 独立 PDF 文字解析
 
-`ParseDocument(..., pdf_parser={...})` 显式开启 PDF，默认关闭；
+`parse_document(..., pdf_parser={...})` 显式开启 PDF，默认关闭；
 有限页数/输入/文本/内存/CPU/时间限制沿用 `pdf_policy`。
-同一已有 raw_ref 可用不同配置再次解析，原获取回执和已有 HTML 不重写、不重下。
+同一已保存的原始对象可用不同配置再次解析，原获取回执和已有 HTML 不重写、不重下。
 详见 [文档获取边界](document-acquisition.md)。
 
 ### Explicit recovery of failed primary search selections

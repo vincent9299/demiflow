@@ -4,7 +4,7 @@
 获取、图片解码、文档解析、业务筛选分别执行。`Dataset.fetch_images`、
 `Dataset.fetch_documents`、`Download`、`WebSession.fetch/fetch_image`、
 `WebClient.fetch`、`ImageClient/ImageFetchPolicy` 及其专属下载池已移除；历史对象及独立的解析、读取、
-ImageLibrary、DocumentLibrary 能力保留。迁移正在运行的程序时使用新版本入口，
+DocumentLibrary 能力保留。迁移正在运行的程序时使用新版本入口，
 原冻结程序及其历史回执继续按原版本读取。
 
 ## 单机获取
