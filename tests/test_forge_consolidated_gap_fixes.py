@@ -47,7 +47,7 @@ def test_hook_guards_data_tools_and_workspace_json(tmp_path):
     assert not (proj / 'data_tools' / 'pkg').exists()
     assert (proj / 'workspace.json').read_text(encoding='utf-8') == ws_before
     prompt = build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
-    assert 'data_tools/' in prompt and 'manage_project_layout' in prompt
+    assert 'data_tools/' in prompt and 'demiflow forge add flow' in prompt
 
 
 def test_hook_keeps_host_layout_writes(tmp_path):

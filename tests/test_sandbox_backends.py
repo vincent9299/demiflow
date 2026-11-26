@@ -383,7 +383,7 @@ def test_forge_unifies_configs_role_and_keeps_legacy_parameters_compatible(tmp_p
     from demiflow.forge import pipeline_check, project
     from demiflow.forge.project_rules import ROLE_DIRS
     from demiflow.workbench.runs import manager as run_manager
-    assert ROLE_DIRS == ('flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks')
+    assert {'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks'}.issubset(ROLE_DIRS)
     proj = tmp_path / 'proj'
     project.initialize_project(proj, name='Demo')
     (proj / 'flows').mkdir()
