@@ -58,10 +58,11 @@ def test_the_minimum_holds_one_call_whatever_the_declared_concurrency(build, kin
     assert 'call_output_min_bytes' not in one.configuration
     assert many.configuration['call_input_min_bytes'] == row
     assert many.configuration['call_output_min_bytes'] == row
-    # One input in flight, its output and one row waiting for admission, in place
-    # of the single call's batch + row. State and fixed costs are the same.
+    # One input in flight and its reserved output, beside the batch window that
+    # waiting input and an emitted output's encoding share, in place of the
+    # single call's batch + row. State and fixed costs are the same.
     assert (many.configuration['codec_min_bytes'] - one.configuration['codec_min_bytes']
-            == 3 * row - (batch + row))
+            == (2 * row + batch) - (batch + row))
     assert many.profile.requests['memory_bytes'] > many.configuration['codec_min_bytes']
 
 
@@ -90,9 +91,9 @@ def test_default_budget_runs_concurrent_model_calls_in_one_resident_layout(serve
     from demiflow.data.api import DataAPI
     dataset = prompt(DataAPI().from_items([{'item': i} for i in range(8)]), concurrency=calls)
     kernel, graph, policy, bounds = _compiled(dataset, 'prompt')
-    row = bounds.max_row_bytes
+    row, batch = bounds.max_row_bytes, bounds.max_batch_bytes
     assert kernel.configuration['concurrency'] == calls
-    assert kernel.configuration['codec_min_bytes'] == 3 * row
+    assert kernel.configuration['codec_min_bytes'] == 2 * row + batch
     selected = physical(graph, policy, bounds)
     # Every memory edge stays in memory: no stage is parked and restarted.
     assert {exchange.mode for exchange in selected.exchanges} == {'memory_incremental'}
@@ -292,7 +293,8 @@ def test_local_stats_carry_the_same_concurrency_facts(tmp_path):
 
 def test_a_concurrency_that_does_not_fit_as_slots_runs_with_fewer_calls(tmp_path):
     from demiflow.execution.pipeline.run_context import RunContext
-    # Four slots of 32 KiB rows never fit 128 KiB; one call (3 rows) does. The
+    # Four slots of 32 KiB rows never fit 128 KiB; one call (an input, its
+    # reserved output and one batch window) does. The
     # plan used to be refused before starting; it now runs with fewer calls.
     with RunContext.start(tmp_path / 'run', limits={'max_row_bytes': 32 * 1024, 'max_batch_bytes': 32 * 1024}), \
             data.local_execution(workers=1, memory_bytes=128 * 1024) as local:
@@ -300,3 +302,19 @@ def test_a_concurrency_that_does_not_fit_as_slots_runs_with_fewer_calls(tmp_path
     assert sorted(row['n'] for row in rows) == list(range(5))
     entry, = [item for item in local.stats['call_concurrency'] if item['capacity'] == 4]
     assert 1 <= entry['peak'] < 4
+
+
+async def _enrich(row):
+    return {'i': row['i'], 'payload': list(range(100))}
+
+
+@pytest.mark.parametrize('mode', ['thread', 'process'])
+def test_waiting_input_and_output_encoding_keep_a_batch_window(tmp_path, mode):
+    from demiflow.execution.pipeline.run_context import RunContext
+    # A batch four times the row. The 600-byte output's typed codec tree is
+    # larger than one 8 KiB row; with only a row left beside the call window,
+    # its encoding overran the grant by a few dozen bytes (found in review).
+    limits = dict(memory_bytes=160 * 1024, max_row_bytes=8192, max_batch_bytes=32768, max_state_bytes=16384)
+    with RunContext.start(tmp_path / 'run', limits=limits), data.local_execution(workers=2, worker_mode=mode):
+        rows = data.from_items([{'i': i} for i in range(6)]).map_async(_enrich, concurrency=2).take_all()
+    assert sorted(rows, key=lambda r: r['i']) == [{'i': i, 'payload': list(range(100))} for i in range(6)]
