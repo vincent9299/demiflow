@@ -484,34 +484,41 @@
         form.append(inBox);
       }
 
-      // Optional reuse_run selectors per node (fetched lazily from each target project's succeeded runs).
+      // Optional reuse_run selectors per node (populated lazily only when expanded, never blocking modal open).
       const reuseDetails = el('details', undefined, 'wf-dialog-section wf-reuse-details');
       reuseDetails.append(el('summary', '可选：复用已有成功运行（跳过已跑完的节点）'));
       const reuseHost = el('div', undefined, 'wf-reuse-list');
       reuseDetails.append(reuseHost);
       const reuseSelects = {};
-      const runsByProject = new Map();
-      await Promise.all(projects.filter(p => p.resolved && (p.workspace_id || p.is_self)).map(async p => {
-        const wsId = p.is_self ? workspaceId : p.workspace_id;
-        try {
-          const res = await api('runs', {limit: 30}, undefined, wsId);
-          runsByProject.set(p.alias, (res.runs || []).filter(r => r.status === 'succeeded'));
-        } catch { runsByProject.set(p.alias, []); }
-      }));
       for (const n of spec.nodes || []) {
         const row = el('label', undefined, 'wf-reuse-row');
         row.append(el('span', `${n.title || n.id} (${n.entry})`, 'wf-input-label'));
         const sel = el('select');
         sel.dataset.reuseNode = n.id;
         sel.append(new Option('重新执行此节点', ''));
-        const candidates = (runsByProject.get(n.project) || []).filter(r => r.entry === n.entry);
-        for (const r of candidates) {
-          sel.append(new Option(`复用 ${r.run_id.slice(0, 10)} · ${fmtTime(r.created_at)}`, r.run_id));
-        }
         reuseSelects[n.id] = sel;
         row.append(sel);
         reuseHost.append(row);
       }
+      let reuseLoaded = false;
+      reuseDetails.addEventListener('toggle', () => {
+        if (!reuseDetails.open || reuseLoaded || !dialog.isConnected) return;
+        reuseLoaded = true;
+        for (const p of projects.filter(item => item.resolved && (item.workspace_id || item.is_self))) {
+          const wsId = p.is_self ? workspaceId : p.workspace_id;
+          api('runs', {limit: 30}, undefined, wsId).then(res => {
+            if (!dialog.isConnected) return;
+            const succeeded = (res.runs || []).filter(r => r.status === 'succeeded');
+            for (const n of (spec.nodes || []).filter(item => item.project === p.alias)) {
+              const sel = reuseSelects[n.id];
+              if (!sel) continue;
+              for (const r of succeeded.filter(item => item.entry === n.entry)) {
+                sel.append(new Option(`复用 ${r.run_id.slice(0, 10)} · ${fmtTime(r.created_at)}`, r.run_id));
+              }
+            }
+          }).catch(() => { /* optional reuse dropdown stays at default */ });
+        }
+      });
       form.append(reuseDetails);
 
       const errBox = el('div', '', 'wf-banner wf-banner-error'); errBox.hidden = true;
