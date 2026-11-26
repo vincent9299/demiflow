@@ -25,7 +25,7 @@ def query(root, run_id, *, attempt=None, logs=False, offset=0, max_bytes=MAX_BYT
         raise ForgeError('Invalid context budget or log selector', code='invalid_request')
     from demiflow.workbench.runs import view as run_view
     from demiflow.workbench.runs import manager as run_manager
-    from demiflow.workbench.runs import tools
+    from demiflow.forge.bridge import run_tools as tools
     from demiflow.forge import operation_budget
     root = Path(root).absolute()
     authority = authority if authority is not None else LocalAuthority(str(root))

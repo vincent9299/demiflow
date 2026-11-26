@@ -291,7 +291,7 @@ def test_sandbox_landlock_live_local_ref_and_bridge_vendor_remove(tmp_path):
     if sys.platform != 'linux' or landlock_abi() < 1 or not backend_readiness()['available']:
         pytest.skip('Linux Landlock sandbox required')
 
-    from demiflow.workbench.conversations.context import BridgeServer
+    from demiflow.forge.bridge.server import BridgeServer
     from demiflow.workbench.conversations.execution import runtime_paths
     from demiflow.workbench.conversations.worker import sandbox_spec
 

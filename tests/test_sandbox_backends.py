@@ -440,7 +440,7 @@ def test_manage_project_layout_bridge_tool(tmp_path):
     import pytest
     from demiflow.forge.project import initialize_project
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.conversations.context import _run_project_layout
+    from demiflow.forge.bridge.tools import run_project_layout as _run_project_layout
 
     root = tmp_path / 'demo_proj'
     initialize_project(root)
@@ -761,7 +761,7 @@ def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
     from demiflow.forge.project import initialize_project
     from demiflow.forge.project_bindings import bind_table
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.conversations.context import PROJECT_LAYOUT_TOOL, _run_project_layout
+    from demiflow.forge.bridge.tools import PROJECT_LAYOUT_TOOL, run_project_layout as _run_project_layout
 
     ext = tmp_path / 'external_inputs'
     ext.mkdir()

@@ -6,9 +6,9 @@ import time
 import pytest
 
 from demiflow.workbench.conversations.common import root_identity, wire
-from demiflow.workbench.conversations.context import BridgeServer
-from demiflow.workbench.conversations.inputs import InputAccess
-from demiflow.workbench.conversations.mcp_bridge import call
+from demiflow.forge.bridge.server import BridgeServer
+from demiflow.forge.bridge.inputs import InputAccess
+from demiflow.forge.bridge.mcp_bridge import call
 from demiflow.workbench.conversations.policy import Limits
 from demiflow.workbench.conversations.store import Store
 

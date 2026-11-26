@@ -1,14 +1,15 @@
 """Task-bound, read-only discovery of ordinary inputs outside the code grant.
 
-The controller exposes fixed filesystem operations, never model-supplied code.
-Native table decoders run in the existing readonly OS boundary. These reads do
-not register a pipeline, change output paths, or provide execution permission.
+Owned by Forge; the host injects turn liveness via either a turn-store object
+or an explicit ``require_active`` callback. Native table decoders run inside
+Forge's readonly OS sandbox.
 """
 from __future__ import annotations
 
 from contextlib import contextmanager
 import fnmatch
 import json
+import math
 import os
 from pathlib import Path
 import select
@@ -20,10 +21,8 @@ import time
 if __package__ in {None, ''}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from demiflow.forge.bridge.common import integer, reject, wire
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.conversations.common import integer, reject, wire
-from demiflow.workbench.conversations.policy import turn_deadline
-
 
 _PRIVATE = {'.ssh', '.codex', '.codex-home', '.config', '.aws', '.azure', '.kube',
             '.git', '.gnupg', '.netrc', '.npmrc', '.pypirc', '.git-credentials',
@@ -42,8 +41,6 @@ def _within(path, root):
 
 
 def _private(path):
-    # .forge/runs can contain ordinary pipeline output, so it is intentionally
-    # not a generic secret directory. Actual authorities are passed by host.
     return any(p in _PRIVATE or p.startswith('.env.') or
         (p.startswith('demiflow-') and '-preview-' in p) for p in path.parts)
 
@@ -79,17 +76,26 @@ def _open_physical(path):
         os.close(parent)
 
 
+def _default_deadline(turn, limits):
+    seconds = getattr(limits, 'turn_seconds', 0) if limits is not None else 0
+    if not seconds or seconds <= 0:
+        return math.inf
+    return float(turn['created']) + float(seconds)
+
+
 class InputAccess:
     """Host-created bridge capability, bound to one active turn and epoch.
 
     ``denied_paths`` must include every controller authority/credential root,
-    deployment configuration and the Web service's private token directory.
-    Runtime paths must be trusted installed code only, not a workspace parent.
-    The model cannot change either set. ``deadline`` is Unix wall-clock time.
+    deployment configuration and private token directory. Runtime paths must
+    be trusted installed code only. ``store`` may be any host object providing
+    ``turn(tid)`` and ``limits``, or ``None`` when ``epoch`` + ``check_active``
+    are supplied directly.
     """
 
     def __init__(self, store, tid, project, scratch, *, denied_paths,
-                 runtime_paths, deadline=None):
+                 runtime_paths, deadline=None, epoch=None, check_active=None,
+                 rss_bytes=768 * 1024**2, processes=24):
         self.store, self.tid = store, tid
         self.root = Path(project['root']).absolute()
         self.project = project
@@ -97,11 +103,26 @@ class InputAccess:
         self.denied = tuple(dict.fromkeys((*_SYSTEM,
             *(q for p in denied_paths for q in (Path(p).absolute(), Path(p).resolve())))))
         self.runtime = tuple(str(p) for p in runtime_paths)
-        turn = store.turn(tid)
-        self.epoch = turn['epoch']
-        self.deadline = deadline if deadline is not None else turn_deadline(turn, store.limits)
+        self._check_active = check_active
+        if store is not None:
+            turn = store.turn(tid)
+            self.epoch = turn['epoch']
+            limits = getattr(store, 'limits', None)
+            self.deadline = deadline if deadline is not None else _default_deadline(turn, limits)
+            self.rss_bytes = min(768 * 1024**2, getattr(limits, 'rss_bytes', rss_bytes))
+            self.processes = min(24, getattr(limits, 'processes', processes))
+        else:
+            self.epoch = epoch
+            self.deadline = math.inf if deadline is None else deadline
+            self.rss_bytes = rss_bytes
+            self.processes = processes
 
     def require_active(self):
+        if self._check_active is not None:
+            self._check_active()
+            if time.time() >= self.deadline:
+                reject('Input access belongs to an inactive development turn', 'conflict')
+            return
         turn = self.store.turn(self.tid)
         if (turn['epoch'] != self.epoch or turn.get('stop_at') or
                 turn['cleanup'] == 'complete' or time.time() >= self.deadline):
@@ -119,8 +140,6 @@ class InputAccess:
             path = Path(value)
             if not path.is_absolute():
                 path = self.root / path
-            # Parent navigation is useful for discovery; normalize lexically,
-            # while actual opening still refuses every symbolic-link component.
             path = Path(os.path.normpath(path))
         if len(path.parts) > 64 or not self._allowed(path):
             reject('This path belongs to a protected host control area', 'operation_rejected')
@@ -161,8 +180,6 @@ class InputAccess:
             raise ForgeError('Text input is not valid UTF-8 at this byte offset; '
                              'use inspect for Lance/Parquet tables', code='operation_rejected') from exc
         except OSError as exc:
-            # Do not expose exception messages from a native parser or host
-            # environment that might contain unrelated control paths/values.
             raise ForgeError('Input cannot be read as an ordinary physical local path',
                              code='operation_rejected') from exc
 
@@ -210,8 +227,6 @@ class InputAccess:
                                 break
                             results.append(dict(path=str(path), kind='directory' if directory else 'file',
                                                 bytes=None if directory else item.st_size))
-                            # Wide filenames should stop a page before transport
-                            # truncates its JSON into a misleading successful read.
                             if len(wire(results)) > 30000:
                                 results.pop()
                                 truncated = True
@@ -240,7 +255,6 @@ class InputAccess:
         actual_offset = offset + skip
         window = raw[skip:]
         visible = window[:maximum]
-        # Omitted trailing UTF-8 continuation bytes belong to the next page.
         import codecs
         decoder = codecs.getincrementaldecoder('utf-8')('strict')
         content = decoder.decode(visible, final=len(window) <= maximum)
@@ -273,23 +287,20 @@ class InputAccess:
     def _native(self, request):
         from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox
         deadline = min(self.deadline, time.time() + _INSPECTION_SECONDS)
-        limits = self.store.limits
-        # Controller state is wholly denied. Temporary decoder caches therefore
-        # use a separate disposable private directory, never the input tree.
         with tempfile.TemporaryDirectory(prefix='demiflow-input-') as private:
             spec = SandboxSpec(read_paths=(request['path'],), write_paths=(),
                 runtime_paths=self.runtime, protected_paths=(request['path'],),
                 denied_paths=tuple(str(p) for p in self.denied), private_home=private,
                 role='readonly', seconds=max(.01, deadline - time.time()),
-                rss_bytes=min(768 * 1024**2, limits.rss_bytes),
-                processes=min(24, limits.processes), file_bytes=8 * 1024**2,
+                rss_bytes=self.rss_bytes,
+                processes=self.processes, file_bytes=8 * 1024**2,
                 private_bytes=8 * 1024**2)
             env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', HOME=private, TMPDIR=private,
                        OPENBLAS_NUM_THREADS='1', OMP_NUM_THREADS='1', MKL_NUM_THREADS='1',
                        NUMEXPR_NUM_THREADS='1', RAYON_NUM_THREADS='2', TOKIO_WORKER_THREADS='2',
                        LANCE_CPU_THREADS='2', CUDA_VISIBLE_DEVICES='')
             process = launch_sandbox([sys.executable, '-I', '-B', str(Path(__file__).resolve())],
-                                    spec=spec, env=env, cwd=private)
+                                     spec=spec, env=env, cwd=private)
             streams = (process.stdin, process.stdout, process.stderr)
             output, errors = bytearray(), bytearray()
             try:
@@ -333,12 +344,7 @@ def _inspect_table(request):
     pa.set_io_thread_count(2)
     path = Path(request['path'])
     if request['format'] == 'lance':
-        # Physical input locations must not consult workspace relocation indices
-        # outside the selected table. Reuse the existing projected row reader.
         import lance
-        # Validate metadata aliases before giving the native reader any bytes.
-        # Only this one metadata directory is enumerated, with a finite cap;
-        # no table content or historical data fragments are scanned/hashed.
         with _open_physical(path / '_versions') as (versions_fd, _):
             with os.scandir(versions_fd) as entries:
                 for index, entry in enumerate(entries):
@@ -427,7 +433,6 @@ def _inspect_table(request):
 
 
 def _limit_native_allocations():
-    """Bound native decoding in this disposable preview without reading proc."""
     import resource
     ceiling = 4 * 1024**3
     for inherited in resource.getrlimit(resource.RLIMIT_AS):
@@ -446,6 +451,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # The interpreter starts isolated; only the trusted installed package is
-    # importable. Never add the selected dataset or the project to sys.path.
     main()

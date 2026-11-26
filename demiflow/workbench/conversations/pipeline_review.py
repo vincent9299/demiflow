@@ -10,16 +10,6 @@ import time
 from .common import plain_path, reject, wire
 
 
-REVIEW_TOOL = dict(name='request_pipeline_review',
-    description='Request an independent read-only delivery review after this author turn finishes. '
-                'By default review the source changes observed in this development session. '
-                'Supply an entry (and optional params) to review a particular flow.',
-    inputSchema=dict(type='object', additionalProperties=False, properties={
-        'entry': dict(type='string', description='Project-relative flow.py:function'),
-        'params': dict(type='string', description='Project-relative parameter file'),
-    }))
-
-
 class DeliveryReview:
     """One idempotent request in the active worker, using its existing execution slot."""
 

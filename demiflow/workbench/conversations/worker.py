@@ -37,9 +37,9 @@ from demiflow.workbench.conversations.policy import Deployment, turn_deadline
 from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.transport import Transport
 from demiflow.workbench.conversations.provider import adapter_for
-from demiflow.workbench.conversations.context import assemble
-from demiflow.workbench.conversations.context import authoritative_source_paths
-from demiflow.workbench.conversations.context import BridgeServer, INPUT_TOOL
+from demiflow.forge.bridge.agent_context import assemble, authoritative_source_paths
+from demiflow.forge.bridge.server import BridgeServer
+from demiflow.forge.bridge.tools import INPUT_TOOL
 from demiflow.forge.development import assess_turn, review_requested as needs_review, candidate_identity
 from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
 from demiflow.forge.source_snapshot import capture
@@ -852,8 +852,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         if not (warm_ready and warm_operation == turn.get('operation', 'message') and control_bridge is not None):
                             from demiflow.workbench.notebooks.cell_commands import CellCommands
                             control_bridge = CellCommands(store, turn, deadline)
-                        skill = Path(__file__).parents[1] / 'notebooks/skills/dataskill/SKILL.md'
-                        prompt = skill.read_text(encoding='utf-8')
+                        from importlib.resources import files as resource_files
+                        prompt = resource_files('demiflow.forge').joinpath('skills', 'dataskill', 'SKILL.md').read_text(encoding='utf-8')
                     else:
                         prompt = ('你是当前 Notebook 的数据助手。根据用户意图和前文生成一格可以直接在当前 Python 内核运行的代码。'
                                   '查阅项目 data_tools 中已声明的函数、类和组件，按真实签名组合。需要交互时使用 ipywidgets，'
@@ -864,7 +864,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     store.update(tid, context=wire(manifest).decode(), delivery='prepared')
                 else:
                     if guided:
-                        from demiflow.workbench.conversations.inputs import InputAccess
+                        from demiflow.forge.bridge.inputs import InputAccess
                         denied_inputs = [deployment.state, Path(config_path).resolve()]
                         denied_inputs.extend(Path(p) for p in denied_extra)
                         if deployment.value.get('runtime_domain'):

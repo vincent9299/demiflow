@@ -19,7 +19,7 @@ CORE = {'workspace', 'checks', 'discovery', 'definitions', 'documents', 'io', 'i
 APPLICATION = {'registry', 'watch', 'flow_arguments'}
 RUN_MODULES = {'admission', 'authority', 'cli', 'context', 'domain', 'facts', 'manager',
     'native_resources', 'native_stages', 'native_submission', 'operations', 'requests',
-    'storage', 'tools', 'view', 'worker'}
+    'storage', 'view', 'worker'}
 FORBIDDEN = {PROJECTS + '.' + name for name in APPLICATION} | {
     'demiflow.workbench.worker', 'demiflow.workbench.api',
     'demiflow.workbench.project_operations', 'demiflow.workbench.directory_operations'}

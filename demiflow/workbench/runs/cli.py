@@ -37,7 +37,7 @@ def register(workspace):
 
     @group.command('tools')
     def tools():
-        from .tools import describe
+        from demiflow.forge.bridge.run_tools import describe
         click.echo(json.dumps(describe(), ensure_ascii=False, indent=2))
 
     @group.command('invoke')
@@ -46,8 +46,8 @@ def register(workspace):
     @click.option('--arguments', required=True, help='Closed JSON input from run tools.')
     @pretty
     def invoke(root, name, arguments, pretty):
-        from .tools import invoke as call
-        emit(lambda: call(name, root, json.loads(arguments)), pretty)
+        from demiflow.forge.bridge.run_tools import invoke as call
+        emit(lambda: call(name, root, json.loads(arguments), perform=run_operations.perform), pretty)
 
     @group.command('prepare')
     @root_arg

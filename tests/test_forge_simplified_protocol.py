@@ -25,7 +25,7 @@ from demiflow.forge.platform_worker import describe_fixed_table
 from demiflow.forge.project_bindings import extract_arguments, resolve_arguments
 from demiflow.forge.project_rules import check_project_hygiene
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.conversations.context import _run_project_layout
+from demiflow.forge.bridge.tools import run_project_layout as _run_project_layout
 from demiflow.workbench.graph import parameters as graph_params
 from demiflow.workbench.projects.definitions import catalog as definitions_catalog
 from demiflow.workbench.projects.discovery import discover
