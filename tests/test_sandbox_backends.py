@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -290,7 +291,7 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
 
     class DummyDeployment:
         mode = 'restricted'
-        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official'}}
+        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official', 'executable': sys.executable}}
 
     monkeypatch.setattr('demiflow.workbench.conversations.model_broker.start_model_broker', lambda *a, **kw: DummyBroker())
     def fake_launch(**kw):
@@ -303,7 +304,7 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
         'prompt', deployment=DummyDeployment(), turn={'id': 't1'},
         session={'id': 's1', 'provider': 'deepseek'}, scratch=scratch,
         broker_home=tmp_path / 'broker', author_spec=author_spec,
-        lease_fd=None, deadline=9999999999.0, check_cancel=lambda: None,
+        lease_fd=None, deadline=time.time()+1800, check_cancel=lambda: None,
     )
     assert out == {'status': 'passed'}
     assert str(existing) in captured['spec'].runtime_paths
@@ -346,7 +347,7 @@ def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path
 
     class DummyDeployment:
         mode = 'restricted'
-        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official'}}
+        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official', 'executable': sys.executable}}
 
     monkeypatch.setattr('demiflow.workbench.conversations.model_broker.start_model_broker', lambda *a, **kw: DummyBroker())
 
@@ -367,7 +368,7 @@ def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path
         'prompt', deployment=DummyDeployment(), turn={'id': 't1'},
         session={'id': 's1', 'provider': 'deepseek'}, scratch=scratch,
         broker_home=tmp_path / 'broker', author_spec=author_spec,
-        lease_fd=None, deadline=9999999999.0, check_cancel=lambda: None,
+        lease_fd=None, deadline=time.time()+1800, check_cancel=lambda: None,
     )
     assert out == {'status': 'passed'}
     spec = captured['spec']

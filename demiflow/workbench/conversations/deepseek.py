@@ -61,14 +61,19 @@ class DeepSeek:
                 reject('DeepSeek account route requires an explicit native credential reference')
             if not boundary: enabled.update({'deepseek-account', 'llm-deepseek-account', 'authorization'})
         overlay=[{'id':name,'disabled':True} for name in DISABLED if name not in enabled]
+        model_time = ({'streamIdleTimeoutMs': config['_request_seconds'] * 1000}
+                      if config.get('_model_broker') and '_request_seconds' in config else {})
         if config.get('native_credentials'):
             overlay.append(dict(id='credentials', config=dict(path=config['native_credentials'], watch=False)))
+        if route == 'deepseek-account' and model_time:
+            overlay.append(dict(id='llm-deepseek-account', config=dict(
+                reasoningEffort=config.get('effort', 'high'), **model_time)))
         overlay += [dict(id='acp',config=dict(provider=route,model=config['model'],sessionListPageSize=20)),
             dict(id='sandbox-policy',config=dict(mode='danger-full-access',workspaceRoot=root)),
             dict(id='approval',config=dict(policy='ask')),
             dict(id='permission',config=dict(defaultPreset='trusted-local',presets={'trusted-local':dict(sandbox='danger-full-access',approval='ask')})),
             dict(id='llm-deepseek',config=dict(reasoningEffort=config.get('effort','high'),apiKeyEnv='DEEPSEEK_API_KEY',
-                **({'baseURL':config['base_url']} if config.get('base_url') else {})))]
+                **model_time, **({'baseURL':config['base_url']} if config.get('base_url') else {})))]
         if config.get('_compaction'):
             overlay = [row for row in overlay if row['id'] != 'acp']
             overlay += [dict(id='acp',disabled=True),dict(insert=[dict(id='demiflow-compaction',

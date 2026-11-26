@@ -89,7 +89,10 @@ def prepare_launch(config, home, *, model_channel=None):
     plugin('agent-default-model', provider=route, model=config['model'])
     env = dict(PATH=str(node.parent) + ':/usr/bin:/bin', HOME=str(home),
                DSH_HOME=str(home), TMPDIR=str(home), LANG='C.UTF-8')
-    options = {'reasoningEffort': config.get('effort', 'high')}
+    seconds = config.get('_request_seconds', REVIEW_SECONDS)
+    if type(seconds) not in (int, float) or not math.isfinite(seconds) or not 0 < seconds <= MAX_REVIEW_SECONDS:
+        raise ForgeError('Invalid DeepSeek review time budget', code='invalid_request')
+    options = {'reasoningEffort': config.get('effort', 'high'), 'streamIdleTimeoutMs': seconds * 1000}
     if route not in ('deepseek-official', 'deepseek-account'):
         raise _unavailable('Unsupported DeepSeek reviewer route')
     boundary = config.get('_boundary')
@@ -102,7 +105,7 @@ def prepare_launch(config, home, *, model_channel=None):
         module = executable.parents[1] / 'node_modules/@deepseek-ai/dsh-llm/lib/index.js'
         rows.append(dict(id='review-model', name=str(model_channel), config=dict(provider=route,
             model=config['model'], token=boundary['token'], reasoningEffort=config.get('effort', 'high'),
-            requestSeconds=config.get('_request_seconds', REVIEW_SECONDS),
+            requestSeconds=seconds,
             llmModule=str(module))))
     elif boundary is not None:
         raise _unavailable('The host model channel must be attached before starting review')
@@ -334,7 +337,7 @@ def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=No
         config = _local_config()
     with tempfile.TemporaryDirectory(prefix='demiflow-forge-review-') as directory:
         home = Path(directory)
-        command, env = prepare_launch(config, home)
+        command, env = prepare_launch(dict(config, _request_seconds=timeout), home)
         try:
             from .native_exec import launch_command
             proc = subprocess.Popen(launch_command(command), cwd=home, env=env, stdin=subprocess.PIPE,

@@ -275,7 +275,7 @@
       parameterChoice.replaceChildren();
       for(const path of ['',...parameters]){const option=$('option',path||'选择参数配置');option.value=path;parameterChoice.append(option);}
       parameterChoice.value=run?.params||working?.params||'';
-      parameterChoice.disabled=!!run||busy||previewBusy;
+      parameterChoice.disabled=!!run||busy||previewBusy||graphHost.hasAttribute('aria-busy');
       parameterChoice.parentElement.hidden=!!run||parameters.length<2;
       paintFlowNavigation();
       updateActions();
@@ -306,7 +306,7 @@
     }
     function updateActions(){
       if(!root.isConnected)return;
-      parameterChoice.disabled=!!run||busy||previewBusy;
+      parameterChoice.disabled=!!run||busy||previewBusy||graphHost.hasAttribute('aria-busy');
       const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks';
       const monitoring=activePage==='monitor',hasRun=!!run;
       const activeEntry=monitoring?(runFlowFilter||run?.entry||working?.entry):(working?.entry||run?.entry);
@@ -2139,7 +2139,7 @@
     else if(view.kind==='inspection')await useWorking(firstEntry,firstParams,view.report_digest,'checks');
     else if(view.kind==='run_compare'){await useWorking(firstEntry,firstParams);await compare(view.left,view.right);}
     else await useWorking(firstEntry,firstParams,null,view.kind==='checks'?'checks':'config');
-    if(activePage==='flows'&&!run&&['flows','run',undefined].includes(view.kind)){
+    if(activePage==='flows'&&!run&&working?.entry===firstEntry&&working?.params===firstParams&&['flows','run',undefined].includes(view.kind)){
       const saved=storedPreviews()[project];
       if(saved&&saved.entry===working?.entry&&saved.params===working?.params){
         try{await compilePlanPreview({restore:saved});

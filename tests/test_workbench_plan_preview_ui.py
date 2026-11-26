@@ -160,7 +160,9 @@ def test_registered_multivariant_flow_selects_and_restores_explicit_parameters(o
         expect(page.locator('.wb-node')).to_have_count(5)
         page.reload()
         expect(page.get_by_label('参数配置', exact=True)).to_have_value('settings/combined.json')
-        with page.expect_response(lambda response: response.url.endswith('/plan-preview') and response.request.post_data_json['params']=='settings/small.json') as pending:
+        # Reload restores and compiles the current selection before the picker
+        # accepts another one. Allow both native graph reads and compilations.
+        with page.expect_response(lambda response: response.url.endswith('/plan-preview') and response.request.post_data_json['params']=='settings/small.json', timeout=45000) as pending:
             page.get_by_label('参数配置', exact=True).select_option('settings/small.json')
         assert pending.value.json()['basis']['params'] == 'settings/small.json'
         expect(page.locator('.wb-node')).to_have_count(3)

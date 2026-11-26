@@ -30,6 +30,7 @@ from demiflow.workbench.conversations.store import Store
 from demiflow.workbench.conversations.store import StorageUnavailable
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.resources.process_observation import unit_stopped
+from demiflow.forge.schema import ForgeError
 
 
 class _WarmWorker:
@@ -673,7 +674,15 @@ class Service:
                     ownership['forge_writer'] = writer_key(str(self.root) + ':' + tid)
                 self.store.update(tid, process=wire(ownership).decode())
                 if ownership.get('forge_writer'):
-                    claim_writer(root_path, str(self.root) + ':' + tid, lease, ownership['unit_identity'])
+                    try:
+                        claim_writer(root_path, str(self.root) + ':' + tid, lease, ownership['unit_identity'])
+                    except ForgeError as exc:
+                        if exc.code != 'busy':
+                            raise
+                        # A terminal is visible just before the worker retires
+                        # its claim, or retirement may have failed after commit.
+                        self.store.retire_completed_writers(root_path)
+                        claim_writer(root_path, str(self.root) + ':' + tid, lease, ownership['unit_identity'])
 
                 # Try reusing a matching idle or standby warm worker for message / notebook turns
                 # (strictly matching operation so readonly notebook workers and developer workers never mix).

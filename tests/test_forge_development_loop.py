@@ -65,6 +65,35 @@ def test_malformed_finding_keeps_verified_blocker_and_cannot_pass(tmp_path):
     assert result['budget']['calls'] == 32 and result['diagnostics']
 
 
+def test_shared_flow_dependency_findings_are_deduplicated_across_units(tmp_path):
+    from demiflow.forge.project import initialize_project, register_flow
+    root = tmp_path/'project'
+    initialize_project(root, name='shared-review')
+    (root/'flows').mkdir(exist_ok=True)
+    (root/'operators').mkdir(exist_ok=True)
+    shared = 'operators/shared.py'
+    (root/shared).write_text('def normalize(row):\n    return dict(row, value=0)\n' + '# shared context\n'*2000)
+    paths = [shared]
+    for i in range(14):
+        name = f'flows/flow_{i}.py'
+        (root/name).write_text('from demiflow.data import from_items\nfrom operators.shared import normalize\ndef run():\n    return from_items([{\"id\": 1}]).map(normalize).materialize()\n')
+        register_flow(root, name+':run')
+        paths.append(name)
+    repeated = []
+    def reviewer(prompt):
+        response = response_for(prompt)
+        cited = next((check for check in response['report']['checks'] if check['path'] == shared), None)
+        if cited:
+            repeated.append(cited)
+            response['report']['findings'] = [dict(cited, severity='blocking', trigger='input row',
+                impact='Incorrect value', suggestion='Fix the shared mapping; review unit '+str(len(repeated)))]
+        return response
+    result = review_project(root, goal='All flows preserve the correct value', paths=paths, reviewer=reviewer)
+    assert result['status'] == 'invalid' and result['complete'] and result['current']
+    assert len(repeated) >= 2 and len(result['findings']) == 1
+    assert set(paths) <= {check['path'] for check in result['checks']}
+
+
 def test_explanatory_json_fence_is_unambiguous_and_multiple_objects_are_rejected():
     assert extract_report('评审结果如下：\r\n```json\r\n{"checks": []}\r\n```\n结束') == {'checks': []}
     with pytest.raises(ForgeError):
@@ -255,6 +284,27 @@ def test_manual_verified_blocker_carries_scope_to_recheck_even_with_auto_review_
     second = assess_turn(tmp_path, **next_options, **arguments)
     assert second['status'] == 'invalid' and second['feedback'] is None
     assert len(calls) == 2 and second['budget']['calls'] == 32
+
+
+def test_guard_only_cli_repair_keeps_static_check_policy(cli_project, tmp_path):
+    from demiflow.forge.development import run_development
+    from demiflow.forge.development_state import DevelopmentState
+    root, _, _ = cli_project
+    calls = []
+    def author(root, prompt, **options):
+        calls.append(prompt)
+        options['notify'](dict(session='same-author', delivery='acknowledged'))
+        if len(calls) == 1:
+            (root/'workspace.json').write_text('{"name":"unauthorized"}')
+        return dict(provider='codex', session='same-author', completed=True, acknowledged=True, cleanup='complete')
+    def reviewer(*args, **kwargs):
+        pytest.fail('A guard-only repair must not introduce a paid review')
+    state = DevelopmentState(tmp_path/'guard-state', root)
+    result = run_development(state, goal='Preserve the project configuration', binding=dict(provider='codex'),
+        author=author, reviewer=reviewer, auto_review=True)
+    assert len(calls) == 2 and result['status'] == 'checked'
+    assert 'demiflow forge add flow' in calls[1] and 'manage_project_layout' not in calls[1]
+    assert all(item['options']['selection'] is None and item['review'] is None for item in result['history'])
 
 
 def test_repair_allowance_is_shared_across_review_invocations(tmp_path):

@@ -129,15 +129,17 @@ for row in [
 '''
     def launch(config, home, *, model_channel):
         assert model_channel is None
+        assert 1790 < config['_request_seconds'] <= 1800
+        assert config['effort'] == 'high'
         return [sys.executable,'-c',script,UNIT_ENV], dict(HOME=str(home))
     monkeypatch.setattr(review_deepseek, 'prepare_launch', launch)
     deployment = SimpleNamespace(mode='trusted_local', providers={'deepseek':{'model':'fixture',
-                                     'model_provider':'deepseek-account'}})
+                                     'model_provider':'deepseek-account', 'effort':'high'}})
     scratch = tmp_path/'turn'; scratch.mkdir()
     with (tmp_path/'lease').open('wb') as lease:
         result = run_deployment_reviewer('test', deployment=deployment, session={'provider':'deepseek'}, turn={},
             scratch=scratch, broker_home=None, author_spec=None, lease_fd=lease.fileno(),
-            deadline=time.time()+10, check_cancel=lambda:None)
+            deadline=time.time()+1800, check_cancel=lambda:None)
         assert result['report'] == dict(inode=os.fstat(lease.fileno()).st_ino, sig=9)
 
 

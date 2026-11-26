@@ -56,7 +56,7 @@ def build_rework_prompt(pipeline_checks, review_report, *, project_root=None, pr
     """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
     issues = []
     for rel in (protected_violations or ()):
-        issues.append(f"- [受保护文件钩子] `{rel}` 属于 Forge 受保护范围（`.env*` / `.forge/state.json` / `workspace.json` / `AGENTS.md` / `PIPELINE_SPEC.md` / `data_tools/`），开发助手不能直接修改，钩子已自动还原；登记入口、整理目录请调用 `manage_project_layout`，`data_tools/` 由数据页 Cell 助手维护。")
+        issues.append(f"- [受保护文件钩子] `{rel}` 属于 Forge 受保护范围（`.env*` / `.forge/state.json` / `workspace.json` / `AGENTS.md` / `PIPELINE_SPEC.md` / `data_tools/`），开发助手不能直接修改，钩子已自动还原；登记入口请使用 `demiflow forge add flow --root DIR --register --entry FILE:FUNCTION`，其他目录操作查询 `demiflow forge add --help`。保留未获授权的项目规范、环境及数据工具内容。")
     if isinstance(pipeline_checks, dict):
         for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
             item = pipeline_checks.get(key)
@@ -376,12 +376,13 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 if remaining <= 0:
                     raise ForgeError('Independent review budget exhausted', code='resource_limit')
                 return reviewer(prompt, timeout=remaining)
+            options = state['feedback']['options'] if state['round'] else dict(auto_review=state['auto_review'], selection=None)
             receipt = assess_turn(root, submission=state['id'] + '-' + str(state['round']),
                 author=state['author'], goal=state['goal'], changes=changes, prior_sources=prior or None,
                 # A requested code review continues on the same original scope
                 # even when a repair turn changes no additional files.
-                selection={} if state['round'] and state['auto_review'] else None,
-                auto_review=state['auto_review'], round=state['round'], budget=state['budget'],
+                selection=options['selection'],
+                auto_review=options['auto_review'], round=state['round'], budget=state['budget'],
                 reviewer=review_once, source_current=current, protected_violations=state.get('protected_violations', ()),
                 on_budget=save_budget)
             state['budget'] = dict(receipt['budget'])

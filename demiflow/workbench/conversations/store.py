@@ -524,10 +524,13 @@ class Store:
             row = db.execute('SELECT * FROM followups WHERE session=? AND submission=?', (sid, submission)).fetchone()
             if not row or json.loads(row['forge_options']).get('origin') != 'forge':
                 reject('Not a pending Forge feedback', 'conflict')
-            turn = db.execute('SELECT epoch FROM turns WHERE id=?', (row['origin_turn'],)).fetchone()
-            self._event(db, sid, row['origin_turn'], turn['epoch'], 'forge.feedback_status',
-                        dict(id=submission, status=status), control=True)
-            db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission))
+            self._discard_feedback(db, row, status)
+
+    def _discard_feedback(self, db, row, status):
+        turn = db.execute('SELECT epoch FROM turns WHERE id=?', (row['origin_turn'],)).fetchone()
+        self._event(db, row['session'], row['origin_turn'], turn['epoch'], 'forge.feedback_status',
+                    dict(id=row['submission'], status=status), control=True)
+        db.execute('DELETE FROM followups WHERE session=? AND submission=?', (row['session'], row['submission']))
 
     def hold_queue(self, sid, reason):
         with self.connect(write=True) as db:
@@ -538,7 +541,11 @@ class Store:
         with self.connect(write=True) as db:
             self._session(db, workspace, sid)
             if action == 'remove':
-                db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission))
+                row = db.execute('SELECT * FROM followups WHERE session=? AND submission=?', (sid, submission)).fetchone()
+                if row and json.loads(row['forge_options']).get('origin') == 'forge':
+                    self._discard_feedback(db, row, 'cancelled')
+                else:
+                    db.execute('DELETE FROM followups WHERE session=? AND submission=?', (sid, submission))
             elif action == 'resume':
                 head = db.execute('SELECT submission FROM followups WHERE session=? ORDER BY rowid LIMIT 1',
                                   (sid,)).fetchone()
@@ -783,6 +790,20 @@ class Store:
                 return retire_writer(key, terminal=True, cleanup='complete')
             except (OSError, ValueError):
                 return False  # The committed receipt remains authoritative; startup retries retirement.
+
+    def retire_completed_writers(self, root):
+        """Recover this host's committed cleanup before retrying a conflicting admission."""
+        root = Path(root)
+        # Stream the bounded host history; unknown and live intervals never
+        # qualify, including claims owned by another host or a standalone CLI.
+        with self.connect() as db:
+            rows = db.execute("""SELECT t.id,s.root FROM turns t JOIN sessions s ON s.id=t.session
+                WHERE t.cleanup='complete' AND t.state IN ('completed','failed','cancelled','interrupted')
+                AND json_extract(t.process,'$.forge_writer') IS NOT NULL""")
+            for tid, identity in rows:
+                previous = Path(json.loads(identity)['path'])
+                if root == previous or root in previous.parents or previous in root.parents:
+                    self.retire_writer(tid)
 
     def interrupt_unresolved(self, tid):
         with self.connect(write=True) as db:

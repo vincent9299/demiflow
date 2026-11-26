@@ -9,6 +9,7 @@ import hashlib
 import os
 from pathlib import Path
 import stat
+import time
 
 from .io import ensure_directory, no_symlinks, publish_bytes
 from .platform import content_digest, bounded_json
@@ -38,16 +39,22 @@ def writer_domain():
 
 
 @contextmanager
-def _locked(directory, name):
+def _locked(directory, name, *, wait_seconds=0):
     fd = os.open(directory / name, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
             raise ForgeError('Invalid engineering lock', code='conflict')
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise ForgeError('Engineering operation is busy', code='busy') from exc
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError as exc:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ForgeError('Engineering operation is busy', code='busy') from exc
+                time.sleep(min(.01, remaining))
         yield
     finally:
         os.close(fd)
@@ -56,7 +63,7 @@ def _locked(directory, name):
 @contextmanager
 def _writers():
     directory = writer_domain()
-    with _locked(directory, 'admission.lock'):
+    with _locked(directory, 'admission.lock', wait_seconds=1):
         index = directory / 'writers.json'
         rows = read_control(index, 2 * 1024**2) if index.exists() else {}
         if not isinstance(rows, dict) or len(rows) > 512:
