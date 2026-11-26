@@ -55,7 +55,7 @@ def train_model(request, context):
 | `EngineManaged` | 引擎按 action 资源上限和设备池分配整组资源。单元就绪后，持有原 run 写入权的 driver 才能授权项目运行。内置实现支持单机 CPU 或一机多卡。部署提供每作业 CPU、内存、解释器和子进程模块白名单；数值拓扑另由 recipe 声明。 |
 | `ProviderManaged` | 部署提供具固定 scope、实现摘要及每次调用 deadline 的 `submit / lookup / inspect / result / cancel`。第三方负责设备与进程。提交回执不明时以原请求键查询。同键重送需有该服务的幂等承诺、原请求确未受理的证据以及有效期。付费部署还须具备可执行的费用上限。 |
 
-Python 可将 `TrainingDeployment(project_id, binding, provider)` 传入 `RunContext.start(..., training=...)`。工作台通过环境变量 `DEMIFLOW_TRAINING_DEPLOYMENT` 读取部署 JSON 的绝对路径，配置声明 `project_root`、`project_id` 和 `binding`，第三方可以指定受信的 `provider_factory`。项目索引使用同一控制主机上的 SQLite，当前模型导入使用本机可访问的项目持久目录。引擎托管作业的 allocated_gpu_seconds 来自原设备池的实际分配至确认释放时间，包含同一实例历次训练启动的占卡时间。详见[部署配置](../demiflow/execution/training/deployment.py)。
+Python 可将 `TrainingDeployment(project_id, binding, provider)` 传入 `RunContext.start(..., training=...)`。工作台通过环境变量 `DEMIFLOW_TRAINING_DEPLOYMENT` 读取部署 JSON 的绝对路径，配置声明 `project_root`、`project_id` 和 `binding`，第三方可以指定受信的 `provider_factory`。项目索引使用同一控制主机上的 SQLite，当前模型导入使用本机可访问的项目持久目录。引擎托管作业的 allocated_gpu_seconds 来自原设备池的实际分配至确认释放时间，包含同一实例历次训练启动的占卡时间。详见[部署配置](../demiflow/execution/pipeline/training_deployment.py)。
 
 ## 模型配额用满后
 
@@ -70,7 +70,7 @@ Python 可将 `TrainingDeployment(project_id, binding, provider)` 传入 `RunCon
 管理员保留原受信部署文件，另存一份提高额度的新部署，给后续 run 使用。首次使用该部署的新 run 会在训练 action 登记时应用额度。管理员也可以提前应用，随后直接恢复符合条件的原 run。
 
 ```python
-from demiflow.execution.training.deployment import load_training_deployment
+from demiflow.execution.pipeline.training_deployment import load_training_deployment
 
 deployment = load_training_deployment(deployment_v2_path, project_root=project_root)
 deployment.apply_project_quotas()

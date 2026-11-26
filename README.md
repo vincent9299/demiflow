@@ -172,7 +172,7 @@ scores.write_lance(scores_uri, mode="create")
 ```
 
 You provide the recipe, the trainer and the predictor. The engine pins the data versions, reuses a finished training run across actions, and supervises engine-managed jobs on local CPUs and GPUs, or tracks jobs run by an external provider.
-See the [training guide](docs/dataset-training.md).
+See the [training guide](docs/en/dataset-training.md).
 
 ## How it works
 
@@ -241,14 +241,14 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 
 | Topic | Guide |
 |---|---|
-| Streaming `map` and concurrency | [docs/streaming-map.md](docs/streaming-map.md) |
+| Streaming `map` and concurrency | [docs/en/streaming-map.md](docs/en/streaming-map.md) |
 | LLM operators and HTTP contract | [docs/prompt_http.md](docs/prompt_http.md) |
 | Multi-turn agent operators | [docs/operator_environment.md](docs/operator_environment.md) |
-| Embeddings and vector search | [docs/embeddings.md](docs/embeddings.md) · [docs/vector_search.md](docs/vector_search.md) |
+| Embeddings and vector search | [docs/embeddings.md](docs/embeddings.md) · [docs/en/vector_search.md](docs/en/vector_search.md) |
 | Fetch, queues and acquisition | [docs/dataset-fetch.md](docs/dataset-fetch.md) |
-| Lance merge semantics | [docs/lance_merge.md](docs/lance_merge.md) |
-| Training and evaluation | [docs/dataset-training.md](docs/dataset-training.md) |
-| Workbench and Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/forge-cli.md](docs/forge-cli.md) |
+| Lance merge semantics | [docs/en/lance_merge.md](docs/en/lance_merge.md) |
+| Training and evaluation | [docs/en/dataset-training.md](docs/en/dataset-training.md) |
+| Workbench and Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/en/forge-cli.md](docs/en/forge-cli.md) |
 | Engine architecture | [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
 
 > Most guides are currently written in Chinese. English versions are on the roadmap, and contributions are welcome.
