@@ -122,6 +122,20 @@ map 的 callable 必须同步。声明时拒绝已知 async 函数及 async `__c
 `BaseException`、取消、KeyboardInterrupt 等不能作为新 map 的 catch 类型。
 异常路径不返回成功的物化句柄；已提交 sink 版本按原回执保存，不回滚旧表。
 
+终止流的异常传给 action 的调用方时，类型按固定名单还原，引擎不会按 worker 传来的
+名字去导入类型。名单内的类型原样返回：`ValueError`、`TypeError`、`KeyError`、
+`IndexError`、`LookupError`、`TimeoutError`、`RuntimeError`、`AssertionError`、
+`OSError`、`FileNotFoundError`、`PermissionError`、`NotImplementedError`、
+`ZeroDivisionError`、`MemoryError`，以及平台自己的错误类型。名单外的类型按它
+最近的、在名单内的内置父类返回，报文不变：回调里抛出的
+`class BadRecord(ValueError)`，或某个库的 `ValueError` 子类（例如读 CSV 时
+pyarrow 的解析错误），调用方得到 `ValueError`；原始类名见异常附带的 worker 栈
+（`__notes__`）。既不在名单内、也没有这样的父类的类型（例如只继承 `Exception`），
+调用方得到 `DataflowError`（`INTERNAL_PROTOCOL`）。
+
+`run_stream(stall_timeout=秒数)`：这段时间内各节点的输入、输出行数都没有变化时抛
+`StallError`，报文给出停滞时长和此前观察到的输入行数，不含任务栈。
+
 本接口不增加单算子 `hard_timeout` 或 operator checkpoint 参数。
 线程无法被安全强杀；有阻塞 I/O 的 callable 必须自行设置有限 deadline。
 STOP、外部取消及其他节点失败会停止后续投喂，并等待已启动线程完成再清理。

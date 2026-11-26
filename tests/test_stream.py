@@ -415,7 +415,7 @@ def test_stall_watchdog_raises():
         await asyncio.sleep(3600)
 
     ds = ctx.from_items(items).map_async(hang, concurrency=2, label="hang")
-    with pytest.raises(StallError, match='no observed progress'):
+    with pytest.raises(StallError, match=r'no observed progress for 0\.6s; \d+ input rows observed'):
         ds.run_stream(stall_timeout=0.6)
 
 

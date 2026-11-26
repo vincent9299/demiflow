@@ -16,6 +16,7 @@ _BUILTINS = {name: getattr(builtins, name) for name in (
     'RuntimeError', 'AssertionError', 'OSError', 'FileNotFoundError', 'PermissionError',
     'NotImplementedError', 'ZeroDivisionError', 'MemoryError')}
 _KNOWN = {cls.__module__ + '.' + cls.__qualname__: cls for cls in _BUILTINS.values()}
+_BUILTIN_BASES = frozenset(_BUILTINS.values())
 _OS_ERRORS = frozenset(cls for cls in _BUILTINS.values() if issubclass(cls, OSError))
 _KNOWN['sqlite3.OperationalError'] = sqlite3.OperationalError
 # Located JSON readers historically expose these parse errors to their callers.
@@ -63,6 +64,11 @@ from demiflow.errors import InvalidLanceRequest
 # with this type, and an exceeded result budget with MemoryError; the caller of
 # the action sees the type the node raised.
 _KNOWN[InvalidLanceRequest.__module__ + '.' + InvalidLanceRequest.__qualname__] = InvalidLanceRequest
+from demiflow.services.contracts import ModelServiceError, ModelServiceConfigurationError
+# A managed service that cannot start (readiness timeout, occupied port, invalid
+# configuration) reports these; the caller of the action sees the type raised.
+_KNOWN.update({cls.__module__ + '.' + cls.__qualname__: cls
+               for cls in (ModelServiceError, ModelServiceConfigurationError)})
 _HTTP_TYPE = 'httpx.HTTPStatusError'
 
 
@@ -131,7 +137,22 @@ def _http_status_fields(value, *, redact=False):
     return {'method': value['method'], 'url': safe, 'status': value['status']}
 
 
-def failure_payload(exc, *, _depth=0, _budget=None):
+def _engine_code(value):
+    return type(value) is str and value in DATAFLOW_ERROR_CODES and value != 'INTERNAL_PROTOCOL'
+
+
+def failure_payload(exc, *, builtin_base=False, _depth=0, _budget=None):
+    """The bounded, data-only description of a failure.
+
+    builtin_base is set by a worker reporting to the caller of its action. A type
+    outside the vocabulary is then named by the nearest built-in base class the
+    vocabulary has: a user's ``class BadRecord(ValueError)`` or a library's
+    ValueError subclass reaches the caller as ValueError with the same message,
+    not as an INTERNAL_PROTOCOL engine error. A failure that carries an engine
+    error code keeps it, and a type with no such base stays an engine error.
+    Replies from the driver to a worker do not set it: there an unknown type must
+    remain an engine failure that a row ``catch`` cannot swallow.
+    """
     _budget = [32] if _budget is None else _budget
     _budget[0] -= 1
     name = next((name for name, cls in _KNOWN.items() if type(exc) is cls),
@@ -165,6 +186,10 @@ def failure_payload(exc, *, _depth=0, _budget=None):
                            message='Invalid execution budget failure', traceback='')
         else:
             payload.update(code='BUDGET_EXCEEDED', budget=budget)
+    if builtin_base and payload['error_type'] is None and not _engine_code(payload['code']):
+        base = next((cls for cls in type(exc).__mro__ if cls in _BUILTIN_BASES), None)
+        if base is not None:
+            payload['error_type'] = base.__module__ + '.' + base.__qualname__
     if _depth:
         payload['traceback'] = payload['traceback'][-2048:]
     if isinstance(exc, BaseExceptionGroup) and _depth < 4 and _budget[0] > 0:
@@ -173,7 +198,7 @@ def failure_payload(exc, *, _depth=0, _budget=None):
         for child in exc.exceptions[:16]:
             if not _budget[0]:
                 break
-            children.append(failure_payload(child, _depth=_depth + 1, _budget=_budget))
+            children.append(failure_payload(child, builtin_base=builtin_base, _depth=_depth + 1, _budget=_budget))
         payload['children'] = children
         def contains_http(value):
             return value.get('error_type') == _HTTP_TYPE or any(

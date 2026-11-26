@@ -403,7 +403,7 @@ class WorkerRuntime:
             return {"error": exc.to_dict(), **self._final_observations(message, executor)}
         except Exception as exc:
             from demiflow.execution.contracts.dataflow_failures import failure_payload
-            return {"error": failure_payload(exc), **self._final_observations(message, executor)}
+            return {"error": failure_payload(exc, builtin_base=True), **self._final_observations(message, executor)}
         if message["kind"] == "Restore":
             self.ready(message["payload"]["assignment_ref"])
         return {"receipt": receipt, **self._final_observations(message, executor)}
@@ -473,7 +473,8 @@ class WorkerRuntime:
             send({"response_to": message.get("operation_id"), "error": error, **self._final_observations(message, executor)})
         except BaseException as exc:
             from demiflow.execution.contracts.dataflow_failures import failure_payload
-            send({"response_to": message.get("operation_id"), "error": failure_payload(exc), **self._final_observations(message, executor)})
+            send({"response_to": message.get("operation_id"), "error": failure_payload(exc, builtin_base=True),
+                  **self._final_observations(message, executor)})
         return False
 
 

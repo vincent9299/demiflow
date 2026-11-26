@@ -80,7 +80,9 @@ def run_stream_action(request, *, on_progress=None, on_drain=None, log_every=0,
                 tick, previous = time.monotonic(), total
             elif stall_timeout is not None and time.monotonic() - tick >= stall_timeout:
                 from demiflow.errors import StallError
-                raise StallError('unified stream made no observed progress')
+                frontier = next(iter(stats.stages.values()), {'in': 0})['in']
+                raise StallError('unified stream made no observed progress for %gs; %d input rows observed before it stalled'
+                                 % (stall_timeout, frontier))
             if on_progress is not None and log_every == 0:
                 callbacks.resolve(on_progress(stats))
             if status.state in ('succeeded', 'failed', 'cancelled'):

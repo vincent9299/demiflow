@@ -21,11 +21,9 @@ class UnsupportedExecutionOptionError(DemiflowError):
 
 
 class StallError(DemiflowError):
-    """流式管线停摆（活性保证层，2026-09-14）：非 EOF 状态下全局进度
-    stall_timeout 秒零产出。message 含停摆时全部挂起任务的栈转储与
-    net 闸门超龄持有诊断。历史上四次夜跑静默凝固（2026-08-21×3 半读
-    连接、2026-09-12 worker 无定时器 Future）皆属此类——本错误的存在
-    使其从"凌晨三点的静默"变为"30 秒内的显式报错"。"""
+    """流式管线停摆：`run_stream(stall_timeout=...)` 给定的秒数内，各节点的输入、
+    输出行数都没有变化。它把"静默凝固"变成显式报错。报文给出停滞时长和此前
+    观察到的输入行数；不含任务栈：业务回调在 worker 中运行，驱动端拿不到它们的栈。"""
     pass
 
 
