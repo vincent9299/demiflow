@@ -473,13 +473,12 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     else:
         if not output_specs or len(output_specs) > 32 or set(metadata) - set(output_specs):
             raise ForgeError('Run requires 1..32 declared outputs with matching metadata')
-        report = ws._inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver())
-        if dependencies is not None and report.get('status') == 'checked':
+        shared = None
+        if dependencies is not None:
             from demiflow.workbench.python_sources import SharedSources
             shared = SharedSources(root, source_modules or {}, dependencies=dependencies).binding()
-            if shared:
-                report['binding']['shared_sources'] = shared
-                report['digest'] = content_digest({k: v for k, v in report.items() if k != 'digest'})
+        report = ws._inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver(),
+                                  shared_sources=shared)
         if report.get('status') != 'checked':
             raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
         if not 1 <= len(report['actions']) <= 32:
@@ -681,8 +680,10 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 native_submission.verify_basis(root, manifest, report)
             else:
                 verify_run_basis(root, manifest)
+                native_submission.verify_shared_sources(report['binding'])
             durable_tree(target)
             with authority.guard(root, 'run_submit'):
+                _verify_dependency_commit(root, manifest, authority)
                 run = RunJournal(target)
                 run.initialize(manifest, attempts=True)
                 run = RunJournal(target, attempt=1)
@@ -828,7 +829,10 @@ def verify_seal(target, manifest, *, environment=True):
         if source_digest(source / name) != digest:
             raise ForgeError('Sealed candidate source differs')
     managed_modules = manifest.get('project_dependencies', {}).get('modules', {})
-    for name, _, relative, digest in bound_files(report['binding']):
+    shared = list(bound_files(report['binding']))
+    if set(managed_modules) - {name for name, _, _, _ in shared}:
+        raise ForgeError('Sealed report omits project dependency modules', code='conflict')
+    for name, _, relative, digest in shared:
         proof = managed_modules.get(name)
         if proof and proof['sha256'] != digest:
             raise ForgeError('Sealed project dependency manifest differs: ' + name, code='conflict')
@@ -914,6 +918,8 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
             # The earlier directory marker is only derived-cache intent.
             # A prepared retry may reuse an unlocked fence left before reservation.
             with authority.guard(root, 'run_submit'):
+                if attempt == 1:
+                    _verify_dependency_commit(root, value['manifest'], authority)
                 marker = index.begin(root, 'run', run_id)
                 interrupted = False
                 try:
@@ -1010,6 +1016,17 @@ def _preflight(root, run_id, *, expected, authority=None):
     return {'status': 'checked'}
 
 
+def _verify_dependency_commit(root, manifest, authority):
+    """Recheck the approval under the existing admission and registry locks."""
+    expected = manifest.get('project_dependencies')
+    if expected is None:
+        return
+    from demiflow.workbench.python_sources import project_dependencies
+    current = project_dependencies(root, authority=authority.bootstrap(), verify_files=False)
+    if current is None or current['digest'] != expected['digest']:
+        raise ForgeError('Project dependency approval changed during admission', code='conflict')
+
+
 def _check_basis(root, target, m, *, phase='preflight', authority=None):
     verify_seal(target, m)
     dependencies = m.get('project_dependencies')
@@ -1026,13 +1043,16 @@ def _check_basis(root, target, m, *, phase='preflight', authority=None):
         path = dependencies['environment']['interpreter']['path']
         config = dict(requirements=dependencies['requirements'], packages={
             name.partition('.')[0] for name in dependencies['modules']})
-        if probe_environment(path, config) != dependencies['environment']:
+        if probe_environment(path, config, expected=dependencies['environment']['interpreter']) != dependencies['environment']:
             raise ForgeError('Sealed project Python environment changed', code='conflict')
     if m.get('native_submission'):
         from demiflow.workbench.runs.native_submission import verify_basis
         verify_basis(root, m, _report(target, m), sealed_packages=historical_modules)
     else:
         verify_run_basis(root, m)
+        if dependencies is not None:
+            from demiflow.workbench.runs.native_submission import verify_shared_sources
+            verify_shared_sources(_report(target, m)['binding'], sealed_packages=historical_modules)
 
 
 def _output_metadata(uri, version):

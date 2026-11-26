@@ -585,7 +585,7 @@ def current_platform_snapshot(snapshot):
                           limits=snapshot['limits'])
 
 
-def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None):
+def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None):
     from demiflow.forge.pipeline_check import inspect_variant
 
     root, value, snapshot = load_workspace(root)
@@ -595,6 +595,8 @@ def _inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None
     report = inspect_variant(root, value, entry, parameters, snapshot['catalog'],
                              table_resolver=table_resolver, limits=limits)
     report['binding']['parameter_path'] = str(path.relative_to(root)) if path else None
+    if shared_sources:
+        report['binding']['shared_sources'] = shared_sources
     return _publish_inspection(root, value, snapshot, report, save=save)
 
 

@@ -1259,16 +1259,18 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         send_parent('notify')
                     try:
                         current_session = store.session(session['id'])
-                        receipt = assess_turn(project['root'], submission=tid,
-                            author=dict(provider=session['provider'], session=current_session['provider_session'],
-                                completed=final == 'completed' and completed, cleanup='complete' if drained else 'unknown',
-                                acknowledged=saved['dispatch'] == saved['delivery'] == 'acknowledged'),
-                            goal=lambda: store.review_inputs(session['id'], include_paths=not selection or auto_review),
-                            changes=changes, selection=selection, auto_review=auto_review, round=rework_depth,
-                            budget=forge_opts.get('budget') or dict(calls=34, seconds=float(limits.review_seconds)), reference=coding, exclude=excluded, reviewer=reviewer,
-                            check_cancel=check_forge_cancel, source_current=source_current,
-                            protected_violations=protected_violations, project_python=effective_project_python(project),
-                            on_review=started_review, inspect=coding is not None)
+                        from demiflow.forge.dependencies import host_approval
+                        with host_approval(project['root'], project.get('dependency_lock'), effective_project_python(project)):
+                            receipt = assess_turn(project['root'], submission=tid,
+                                author=dict(provider=session['provider'], session=current_session['provider_session'],
+                                    completed=final == 'completed' and completed, cleanup='complete' if drained else 'unknown',
+                                    acknowledged=saved['dispatch'] == saved['delivery'] == 'acknowledged'),
+                                goal=lambda: store.review_inputs(session['id'], include_paths=not selection or auto_review),
+                                changes=changes, selection=selection, auto_review=auto_review, round=rework_depth,
+                                budget=forge_opts.get('budget') or dict(calls=34, seconds=float(limits.review_seconds)), reference=coding, exclude=excluded, reviewer=reviewer,
+                                check_cancel=check_forge_cancel, source_current=source_current,
+                                protected_violations=protected_violations, project_python=effective_project_python(project),
+                                on_review=started_review, inspect=coding is not None)
                         if receipt['checks'] is not None:
                             result['pipeline_checks'] = receipt['checks']
                         report = receipt['review']

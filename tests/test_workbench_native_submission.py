@@ -229,9 +229,22 @@ def run(*, directory):
 
 
 def test_project_dependency_preview_and_native_run_use_the_locked_package(root, tmp_path):
+    import site
     import sys
+    import venv
     from demiflow.forge.dependencies import update
     from demiflow.workbench.graph.preview import preview
+
+    venv_path = tmp_path / 'project-python'
+    venv.EnvBuilder(with_pip=False, symlinks=True, system_site_packages=True).create(venv_path)
+    python = venv_path / 'bin/python'
+    installed = venv_path / 'lib' / f'python{sys.version_info.major}.{sys.version_info.minor}' / 'site-packages'
+    (installed / 'platform-test.pth').write_text('\n'.join(site.getsitepackages()) + '\n')
+    (installed / 'project_dependency_fixture.py').write_text('from pathlib import Path\nimport sys\n'
+        f'assert Path(sys.prefix) == Path({str(venv_path)!r})\nVALUE = 1\n')
+    metadata = installed / 'project_dependency_fixture-1.0.dist-info'
+    metadata.mkdir()
+    (metadata / 'METADATA').write_text('Metadata-Version: 2.1\nName: project-dependency-fixture\nVersion: 1.0\n')
 
     package = tmp_path / 'approved'
     package.mkdir()
@@ -240,15 +253,22 @@ def test_project_dependency_preview_and_native_run_use_the_locked_package(root, 
         '    from native_dep_fixture.late import OFFSET\n'
         '    return {"x": row["x"] + OFFSET}\n')
     (package / 'late.py').write_text('OFFSET = 20\n')
-    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+    (root / 'pyproject.toml').write_text('[project]\ndependencies = ["project-dependency-fixture==1.0"]\n'
+        '[tool.demiflow.packages]\n'
         f'native_dep_fixture = {{source = "local_ref", path = "{package}"}}\n')
-    locked = update(root, sys.executable)
-    prepared = native_flow(root, 'from native_dep_fixture.step import adjust\n', '1', transform='.map(adjust)')
+    locked = update(root, python)
+    prepared = native_flow(root, 'from native_dep_fixture.step import adjust\n'
+        'from project_dependency_fixture import VALUE\n', 'VALUE', transform='.map(adjust)')
     result = preview(root, entry='flows/native.py:run', params='flows/native.json')
     assert result['basis']['project_dependencies'] == locked['digest']
     target, value = runs._load(root, prepared['run_id'])
     assert value['manifest']['project_dependencies']['digest'] == locked['digest']
     assert (target / 'source/native_dep_fixture/late.py').read_text() == 'OFFSET = 20\n'
+    late = package / 'late.py'
+    late.write_text('OFFSET = 40\n')
+    with pytest.raises(Exception, match='source differs'):
+        runs.start(root, prepared['run_id'], expected=prepared['digest'])
+    late.write_text('OFFSET = 20\n')
     outcome = execute(root, prepared)
     assert outcome['status'] == 'succeeded', (outcome, runs.logs(root, outcome['run_id']))
     import lance

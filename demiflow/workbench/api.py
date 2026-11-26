@@ -823,7 +823,7 @@ class Handler(BaseHTTPRequestHandler):
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
                     from demiflow.workbench.runs.authority import for_http
-                    authority = for_http(self.server, path, root, 'read')
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
                     authority.require(root, 'read')
                     value = project_ops.project_check_status(root, authority=authority.bootstrap())
                 elif url.path == '/api/dictionary-sources':
@@ -1171,18 +1171,18 @@ class Handler(BaseHTTPRequestHandler):
                     value=reconcile(root,request['request_id'])
                 elif name == 'inspect':
                     from demiflow.workbench.runs.authority import for_http
-                    authority = for_http(self.server, path, root, 'read')
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
                     authority.require(root, 'read')
                     value = project_ops.inspect_flow(root, authority=authority.bootstrap(), **request)
                 elif name == 'plan-preview':
                     from demiflow.workbench.graph.preview import preview
                     from demiflow.workbench.runs.authority import for_http
-                    authority = for_http(self.server, path, root, 'read')
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
                     authority.require(root, 'read')
                     value = self.server.plan_snapshots.put(root, preview(root, _authority=authority.bootstrap(), **request))
                 elif name == 'project-check':
                     from demiflow.workbench.runs.authority import for_http
-                    authority = for_http(self.server, path, root, 'read')
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
                     authority.require(root, 'read')
                     value = project_ops.check_project(root, authority=authority.bootstrap())
                 elif name == 'audit-check':

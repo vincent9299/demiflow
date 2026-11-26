@@ -347,7 +347,7 @@ def install_bound_imports(modules, *, project_roots=(), project_package=()):
     return finder
 
 
-def import_bootstrap(directory, modules, *, project_roots=(), project_package=()):
+def import_bootstrap(directory, modules, *, platform_root, project_roots=(), project_package=()):
     """Write a fixed startup hook for an owned business child process."""
     from demiflow.forge.io import ensure_directory, publish_bytes
     from demiflow.forge.platform import bounded_json
@@ -356,18 +356,26 @@ def import_bootstrap(directory, modules, *, project_roots=(), project_package=()
     ensure_directory(directory)
     binding_path = directory / 'dependencies.json'
     bootstrap_path = directory / 'sitecustomize.py'
-    configuration = dict(modules=modules, project_roots=sorted(project_roots), project_package=list(project_package))
+    configuration = dict(modules=modules, project_roots=sorted(project_roots), project_package=list(project_package),
+                         platform_root=str(platform_root))
     publish_bytes(binding_path, bounded_json(configuration, 512 * 1024), create=not binding_path.exists())
-    body = '''import json
+    body = r'''import json
 import os
 from pathlib import Path
 try:
-    from demiflow.workbench.python_sources import install_bound_imports
+    from importlib.util import find_spec
     with Path(__file__).with_name('dependencies.json').open() as stream:
         binding = json.load(stream)
-    install_bound_imports(**binding)
+    package_root = Path(binding.pop('platform_root')) / 'demiflow'
+    spec = find_spec('demiflow')
+    if spec is None or not spec.origin or Path(spec.origin).resolve() != package_root / '__init__.py':
+        raise RuntimeError('DemiFlow package origin changed')
+    from demiflow.workbench import python_sources
+    if Path(python_sources.__file__).resolve() != package_root / 'workbench/python_sources.py':
+        raise RuntimeError('DemiFlow source loader origin changed')
+    python_sources.install_bound_imports(**binding)
 except BaseException:
-    os.write(2, b'DemiFlow dependency bootstrap failed\x5cn')
+    os.write(2, b'DemiFlow dependency bootstrap failed\n')
     os._exit(78)
 '''
     publish_bytes(bootstrap_path, body.encode(), create=not bootstrap_path.exists())

@@ -76,7 +76,7 @@ class Notebooks:
 
     def get(self, project, *, initialize=True):
         root, permissions = self.authorize(project)
-        kernel_python, _, _ = self._project_kernel_policy(project, root)
+        kernel_python, _, _, _ = self._project_kernel_policy(project, root)
         grants = dict(writable=permissions['analysis_write'], execute=permissions['analysis_execute'],
                       has_python=bool(kernel_python))
         with self.lock:
@@ -267,7 +267,7 @@ class Notebooks:
             instance = self.instances.get(project)
             if instance is not None and instance.process.poll() is None:
                 self._write_kernel_config(project, instance.root, instance.state)
-                kernel_python, _, _ = self._project_kernel_policy(project, instance.root)
+                kernel_python, _, _, _ = self._project_kernel_policy(project, instance.root)
                 updated = {**instance.grants, 'has_python': bool(kernel_python)}
                 if updated != instance.grants:
                     self._grants(instance.state, updated)

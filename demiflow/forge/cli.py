@@ -77,8 +77,8 @@ def register(main: click.Group) -> None:
     @root_option
     @json_option
     def dep_verify(root, as_json):
-        from .dependencies import binding, facts
-        _output(root, as_json, lambda: dict(status='passed', dependencies=facts(binding(root))))
+        from .dependencies import verify
+        _output(root, as_json, lambda: verify(root))
 
     @dep.command('sync')
     @root_option

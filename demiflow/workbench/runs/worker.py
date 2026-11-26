@@ -4,7 +4,13 @@ import os
 import sys
 
 # Invoked by absolute trusted script under Python -I, including sealed copies.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+_PLATFORM_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(_PLATFORM_ROOT))
+if __name__ == '__main__' and sys.argv[1:2] == ['execute']:
+    from importlib.util import find_spec
+    _spec = find_spec('demiflow')
+    if _spec is None or not _spec.origin or Path(_spec.origin).resolve() != _PLATFORM_ROOT / 'demiflow/__init__.py':
+        raise RuntimeError('Execution loaded DemiFlow outside the sealed platform source')
 
 from demiflow.workbench.process import process_identity
 
@@ -105,7 +111,7 @@ def _execute(root, run_id, run, attempt=None):
             bootstrap = import_bootstrap(work / 'project-imports', {
                 name: {**proof, 'path': str(shared[name][0])}
                 for name, proof in dependencies['modules'].items()
-            }, project_roots=project_roots, project_package=package)
+            }, platform_root=_PLATFORM_ROOT, project_roots=project_roots, project_package=package)
             previous = os.environ.get('PYTHONPATH')
             os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, (str(bootstrap), previous)))
         module, function = binding.get('source_entry', manifest['entry']).split(':')
@@ -364,7 +370,10 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         if unit_fds:
             env[UNIT_ENV] = str(unit_fds[0])
         dependencies = manifest.get('project_dependencies')
-        python = dependencies['environment']['interpreter']['path'] if dependencies else sys.executable
+        python = sys.executable
+        if dependencies is not None:
+            from demiflow.forge.dependencies import verify_interpreter
+            python = verify_interpreter(dependencies['environment']['interpreter'])
         command = [python, '-I', '-B', __file__, 'execute', str(root), run_id]
         if attempt is not None:
             command.append(str(attempt))

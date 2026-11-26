@@ -41,13 +41,14 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, expli
     sys.meta_path.insert(0, shared.importer)
     os.chdir(root)
     reads = set()
+    managed_paths = set(shared.paths.values())
     tracking = [False]
     def opened(event, args):
         if tracking[0] and event == 'open' and isinstance(args[0], (str, bytes)):
             path = Path(os.fsdecode(args[0])).absolute()
             # Native libraries own their files; only project Python/config
             # closure is copied. Fixed external inputs remain in place.
-            if path.is_relative_to(root):
+            if path.is_relative_to(root) and path not in managed_paths:
                 if len(reads) >= 512 and path not in reads:
                     raise ForgeError('Native source resource closure exceeds budget')
                 reads.add(path)
@@ -143,9 +144,16 @@ def prepare(root, entry, *, parameters, limits, metadata, explicit_limits=None, 
     return report, outputs
 
 
+def verify_shared_sources(binding, *, sealed_packages=()):
+    from demiflow.workbench.python_sources import bound_files, source_digest
+    for name, origin, _, digest in bound_files(binding):
+        if name not in sealed_packages and source_digest(origin) != digest:
+            raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
+
+
 def verify_basis(root, manifest, report, *, sealed_packages=()):
     from demiflow.forge import audit
-    from demiflow.workbench.python_sources import bound_files, source_digest
+    from demiflow.workbench.python_sources import source_digest
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']
@@ -159,9 +167,7 @@ def verify_basis(root, manifest, report, *, sealed_packages=()):
     for name, digest in binding['sources'].items():
         if source_digest(ws.relative_path(base, name)) != digest:
             raise ForgeError('Native prepared source changed', code='conflict')
-    for name, origin, _, digest in bound_files(binding):
-        if name not in sealed_packages and source_digest(origin) != digest:
-            raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
+    verify_shared_sources(binding, sealed_packages=sealed_packages)
     for resource in binding['resources'].values():
         if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(
                 ws.relative_path(base, resource['path']), resource['max_bytes'])).hexdigest() != resource['sha256']:

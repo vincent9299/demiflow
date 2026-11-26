@@ -203,19 +203,31 @@ def current_environment(config, *, check_conflicts=False):
     descriptor = dict(mode='source', name='project', version='0', extras={},
                       requires=config['requirements'], project_sha256=content_digest(config['requirements']))
     inventory = environment_inventory(descriptor, _ENV_LIMITS)
-    conflicts = [name for name in config['packages'] if check_conflicts
-                 if name in sys.stdlib_module_names or name in sys.modules or PathFinder.find_spec(name) is not None]
-    if conflicts:
-        raise ForgeError('Dependency source shadows an installed or standard module: ' + conflicts[0], code='conflict')
+    if check_conflicts:
+        for name in config['packages']:
+            if name in sys.stdlib_module_names or name in sys.modules or PathFinder.find_spec(name) is not None:
+                raise ForgeError('Dependency source shadows an installed or standard module: ' + name, code='conflict')
     problems = [row for row in inventory['diagnostics'] if row['code'] != 'direct_requirement_not_attested']
     if problems:
         raise ForgeError('Project Python dependency verification failed: ' + problems[0]['name'], code='conflict')
     return dict(interpreter=interpreter_identity(), inventory=inventory)
 
 
-def probe_environment(python, config, *, identity_only=False):
+def verify_interpreter(identity):
+    """Reject a changed approved executable before starting any interpreter code."""
+    actual = _interpreter(identity['path'])
+    if any(identity.get(key) != value for key, value in actual.items()):
+        raise ForgeError('Approved project Python executable changed', code='conflict')
+    return actual['path']
+
+
+def probe_environment(python, config, *, expected=None, identity_only=False):
     """Inspect an explicitly trusted interpreter in a bounded independent process."""
     interpreter = _interpreter(python)
+    if expected is not None:
+        if interpreter['path'] != expected['path']:
+            raise ForgeError('Project Python differs from the approved executable', code='conflict')
+        verify_interpreter(expected)
     script = (
         'import json,sys;data={"prefix":sys.prefix};'
         'print(json.dumps({"format":"dep_probe","data":data}))'
@@ -283,6 +295,17 @@ def binding(root, *, approval=None, python=None, verify_files=True):
     if verify_files and locked['packages'] != _inventory_packages(root, config):
         raise ForgeError('Dependency source differs from its approved bytes', code='conflict')
     return locked
+
+
+def verify(root, *, approval=None, python=None):
+    """Verify the declared source and the actual selected Python environment."""
+    locked = binding(root, approval=approval, python=python)
+    if locked is None:
+        return {'status': 'not_applicable', 'dependencies': None}
+    interpreter = locked['environment']['interpreter']
+    if probe_environment(interpreter['path'], locked, expected=interpreter) != locked['environment']:
+        raise ForgeError('Project Python environment differs from its lock', code='conflict')
+    return dict(status='passed', dependencies=facts(locked))
 
 
 def facts(locked):
@@ -384,6 +407,10 @@ def install(root, python):
         if declaration(root) != config:
             raise ForgeError('Dependency declaration changed before installation', code='inputs_changed')
         if config['requirements']:
-            subprocess.run([str(python), '-I', '-m', 'pip', '--disable-pip-version-check',
-                            'install', '--no-input', '--', *config['requirements']], timeout=300, check=True)
+            try:
+                subprocess.run([str(python), '-I', '-m', 'pip', '--disable-pip-version-check',
+                                'install', '--no-input', '--', *config['requirements']],
+                               timeout=300, check=True, stdout=2)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                raise ForgeError('Project dependency installation failed', code='operation_failed') from error
     return {'status': 'installed'}

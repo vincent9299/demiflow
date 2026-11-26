@@ -56,7 +56,10 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     if value is None:
         from functools import partial
         business = name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None
-        python = _dependencies['environment']['interpreter']['path'] if business else sys.executable
+        python = sys.executable
+        if business:
+            from demiflow.forge.dependencies import verify_interpreter
+            python = verify_interpreter(_dependencies['environment']['interpreter'])
         argv = [python, "-I", "-B", str(Path(__file__).resolve())]
         launcher = None
         if business:
@@ -390,9 +393,16 @@ def dispatch(request):
 
 
 def main():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    from demiflow.forge.platform_worker import bind_parent
+    platform_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(platform_root))
     confined = sys.argv[1:] == ["--confined-project"]
+    if confined:
+        from importlib.util import find_spec
+        expected = platform_root / 'demiflow/__init__.py'
+        spec = find_spec('demiflow')
+        if spec is None or not spec.origin or Path(spec.origin).resolve() != expected:
+            raise RuntimeError('Project Python loaded DemiFlow outside the trusted platform source')
+    from demiflow.forge.platform_worker import bind_parent
     if not confined:
         bind_parent()
     from demiflow.forge.platform import bounded_json

@@ -137,7 +137,7 @@ def _dependency_snapshot(config, root, code_root, python):
     from demiflow.workbench.python_sources import import_bootstrap
 
     locked = binding(root, approval=config['dependency_lock'], python=python)
-    if probe_environment(python, locked) != locked['environment']:
+    if probe_environment(python, locked, expected=locked['environment']['interpreter']) != locked['environment']:
         _fail('The approved project Python environment changed')
     directory = Path(config['runtime_dir']).parent / 'dependency-kernels'
     ensure_directory(directory)
@@ -162,7 +162,7 @@ def _dependency_snapshot(config, root, code_root, python):
             if read_bounded(target, proof['bytes']) != raw:
                 _fail('The Notebook dependency snapshot differs from its lock')
         modules[name] = {**proof, 'path': str(target)}
-    bootstrap = import_bootstrap(snapshot / 'bootstrap', modules)
+    bootstrap = import_bootstrap(snapshot / 'bootstrap', modules, platform_root=code_root)
     return snapshot, bootstrap, locked['environment']['interpreter']['prefix']
 
 
