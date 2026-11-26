@@ -116,6 +116,12 @@ The description has three readers: the next assistant finds and reuses the opera
 
 Assistants write code fast; judging whether the result is right is still up to people. The Workbench is the browser interface for people. It opens the same project directory as Forge, and there is no second copy of the state.
 
+<p align="center">
+  <img src="docs/assets/workbench-demo.gif" alt="DemiFlow Workbench walkthrough: operator DAG from real Python, node dataflow & source inspection, sealed run & outputs, versioned Data tables, Notebook, and semantic data tools" width="100%" />
+  <br />
+  <sub>Live walkthrough on <a href="examples/forge_workspace/README.md"><code>examples/forge_workspace</code></a>: real-code operator DAG → node I/O, example &amp; Python implementation → side-by-side pipeline source → sealed run &amp; versioned outputs → project Notebook &amp; semantic <code>data_tools</code>.</sub>
+</p>
+
 **Understand a pipeline**
 
 - **The operator graph comes from the real code.** It is generated from the Python entry and needs no manual upkeep. Nodes show the business description of their operator.
