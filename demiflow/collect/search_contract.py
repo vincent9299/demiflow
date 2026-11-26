@@ -56,13 +56,18 @@ def search_facts(actor):
                 reserved_bytes=reserved)
 
 
+def response_bytes(max_row_bytes):
+    """Canonical JSON bytes of one committed native search response row: one MiB, within a row."""
+    return min(1024**2, max_row_bytes)
+
+
 class NativeSearchResultSink(Datasink):
     """The native prepared record itself is the immutable response artifact."""
     sink_id='search'
 
     def __init__(self,action):
         self.action=action
-        self.maximum=min(1024**2,action.context.limits['max_row_bytes'])
+        self.maximum=response_bytes(action.context.limits['max_row_bytes'])
 
     def write(self,blocks,context):
         raise RecoveryContractError('Search response facts require native commit')

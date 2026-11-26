@@ -368,7 +368,7 @@ def codec_window(kernel, operation, bounds, *, explicit_limits=frozenset()):
         # A platform actor that bounds what it appends reserves that bound
         # instead of a full output row; the kernel holds every output to it.
         from demiflow.execution.compiler_support.dataflow_native import declared_output_growth
-        growth = declared_output_growth(operation) if operation is not None else None
+        growth = declared_output_growth(operation, row_bytes=bounds.max_row_bytes) if operation is not None else None
         call_input = bounds.max_row_bytes
         call_output = bounds.max_row_bytes if growth is None else min(bounds.max_row_bytes, growth)
         minimum -= calls * (bounds.max_batch_bytes + bounds.max_row_bytes) - (
