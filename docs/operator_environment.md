@@ -62,7 +62,7 @@ options:
 
 未配置 `stream` 或显式设为 `false` 时仍为非流式 JSON。`async` 表示异步执行，本身不启用 SSE。普通 `map_prompt_async` 将这些字段放在节点 `options` 中；`agentmap_async` 将执行配置集中在 agent YAML，节点 `options` 只接日志/回放位置。不要把 `stream` 放在 `request_options` 内，否则校验拒绝。平台在实际 API 请求中设置 `stream: true`，完整接收并校验后才提交该轮；不会将半截 JSON 当作结果或自动降级为非流式。工具调用仍用 agent JSON envelope，不依赖 provider 的原生 function-call 增量。
 
-其余连接、响应字节/事件上限、日志与恢复选项同 [HTTP prompt 传输](prompt_http.md)。改变流式开关会改变实际请求身份，既有非流式响应不会被冒充为流式回放。`runtime: codex` 由 Codex 管理模型传输，不适用这些 HTTP 字段。隔离回归 `test_yaml_stream_survives_tool_turns_repairs_and_replay` 覆盖原生文档读取、输出修正、逐轮 SSE、精确回放和截断流不交付。
+其余连接、响应字节/事件上限、日志与恢复选项同 [调用大模型](llm.md)。改变流式开关会改变实际请求身份，既有非流式响应不会被冒充为流式回放。`runtime: codex` 由 Codex 管理模型传输，不适用这些 HTTP 字段。隔离回归 `test_yaml_stream_survives_tool_turns_repairs_and_replay` 覆盖原生文档读取、输出修正、逐轮 SSE、精确回放和截断流不交付。
 
 两套后端是平台能力，由同一文件的 runtime 选择。HTTP 使用 `runtime: demiflow`，model 为原 HTTP 模型契约（name/transport/base_url 或 base_url_env/api_key_env），options 为 HTTP 请求设置；回调可声明 `operators: [read_documents]`、`resources: document_resources`，budgets 指定 max_turns/max_calls_per_turn 等原行内限制。HTTP/offline 由平台维护 loop，节点 offline_store 可登记同任务的离线请求。Codex 使用自身 loop，model 只接受 name，options.codex_agent 配置原生工具；operators=[] 表示不注入回调。
 

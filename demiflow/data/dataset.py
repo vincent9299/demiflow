@@ -1468,7 +1468,7 @@ class Dataset:
         read_timeout_s (idle gap), write_timeout_s and pool_timeout_s are distinct
         from timeout_s (total HTTP exchange). Truncated streams fail without implicit retries. ``gateway='litellm'`` explicitly
         sends zero-retry/no-fallback controls. Generic endpoints receive none.
-        See docs/prompt_http.md for bounds, logs and recovery semantics.
+        See docs/llm.md for bounds, logs and recovery semantics.
 
         ``request_policy`` declares an operator-owned adaptive gate. Its maximum
         cannot exceed node concurrency.
