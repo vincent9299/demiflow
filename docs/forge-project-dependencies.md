@@ -1,5 +1,7 @@
 # Forge 项目依赖
 
+本文说明当前已发布的命令与限制。依赖声明、Forge 沙箱归属和后续迁移要求见 [DemiFlow 架构规约](demiflow-architecture.md)。
+
 项目用已有的 Python 环境运行。安装的分发包由该环境解析，受控源码包由 Forge 锁定，业务代码沿用普通 Python import。向项目根目录的 pyproject.toml 添加声明时，保留原有的项目包元数据。只使用已安装依赖的项目也可声明空的 packages 表。
 
 ```toml

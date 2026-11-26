@@ -170,7 +170,7 @@ flowchart LR
     DRIVER <--> CKPT["检查点与运行记录<br/>恢复 · 对账 · 审计"]
 ```
 
-- **架构职责单一。** 引擎由 17 个模块组成，每项职责只有一个负责模块；每个公开动作只走一条执行路径，本地和 Ray 共用同一套编译、封存、调度和恢复。见[引擎架构](docs/dataset-engine-architecture.md)。
+- **架构职责单一。** 引擎由 17 个模块组成，每项职责只有一个负责模块；每个公开动作只走一条执行路径，本地和 Ray 共用同一套编译、封存、调度和恢复。见[DemiFlow 架构规约](docs/demiflow-architecture.md)。
 - **资源管理是引擎的职责，不是使用者的运气。** 并发、队列、批大小、内存和临时磁盘都有明确上限，在开始执行之前做准入检查；下游变慢时上游自动等待；超出预算时明确失败，而不是悄悄撑爆机器。
 - **每次运行都被封存。** 执行前固定源码、计划和数据源版本，之后任何时候都能说清这次运行用的是什么。
 - **中断后从断点继续。** 进度和外部调用的结果都记入运行记录。用原来的运行引用恢复时，已确认的批次直接复用，写表与原事务对账，结果不明的外部调用不会被盲目重发。
@@ -399,7 +399,7 @@ demiflow workbench workflow resume ./my_project RUN_ID --from-node eval_candidat
 | 获取、队列与文档 | [docs/fetch.md](docs/fetch.md) |
 | 训练与评测 | [docs/dataset-training.md](docs/dataset-training.md) |
 | Forge 与工作台 | [docs/forge-cli.md](docs/forge-cli.md) |
-| 平台与引擎架构 | [docs/architecture-master-intent-v1.md](docs/architecture-master-intent-v1.md) · [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
+| 平台与引擎架构 | [DemiFlow 架构规约](docs/demiflow-architecture.md) |
 
 ## 项目状态
 
@@ -416,7 +416,7 @@ DemiFlow **0.3** 是第一个公开版本，目前处于 beta 阶段。
 
 - [仓库规范](docs/repository-rules.md)：分支、评审门禁和发版流程；
 - [有限资源约束](AGENTS.md)：所有改动都要守住内存、批大小和落盘上限；
-- [引擎架构规约](docs/dataset-engine-architecture.md)：17 个引擎模块，每项职责只有一个负责模块。
+- [DemiFlow 架构规约](docs/demiflow-architecture.md)涵盖平台边界与 17 个引擎模块。
 
 ## 许可证
 

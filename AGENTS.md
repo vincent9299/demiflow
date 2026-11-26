@@ -2,7 +2,7 @@
 
 **必须遵循 [DemiFlow 发版规范](docs/repository-rules.md)**：隔离开发、integration 合入闸、按影响范围的验收与定期全量四线、main 定版、正式目录落位、推送及归档均按该规范执行。它覆盖下文历史工作位置/发版描述；最新真人指令优先。
 
-Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/dataset-engine-architecture.md)逐项核对受影响的模块职责、调用时序和依赖方向。
+平台与引擎的设计和代码评审以 [DemiFlow 架构规约](docs/demiflow-architecture.md) 为统一入口，逐项核对受影响的职责、调用时序和依赖方向。
 
 **公开 SDK 与引擎算子 docstring 强制规范（2026-11-25 真人确认）**：引擎侧所有对外暴露的公开算子、方法与契约类（覆盖 `demiflow.data`、`demiflow.execution`、`demiflow.operator_llm`、`demiflow.objects`、`demiflow.agent` 公开导出）**必须编写清晰的 docstring**（说明用途、关键参数/字段契约与返回值，严禁空 docstring 或 `@dataclass` 自动生成的签名复读机）。该规范由合入闸 [test_public_sdk_docstrings.py](tests/test_public_sdk_docstrings.py)（`tests/merge_gate.py`）作为前置门禁强制校验，历史遗留项只减不增。
 
@@ -21,7 +21,7 @@ Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/data
 
 ## 架构意图基线
 
-平台架构、Forge边界和实现Review以[架构总意图与职责边界 v1.5](docs/architecture-master-intent-v1.md)为当前已定版基线，原产品root意图保持。Forge负责context/tools与独立工程闭环，统一 CLI 可以脱离工作台驱动原 Agent 完成检查、独立评审、反馈和修正复核；工作台通过可靠回合结束钩子复用同一 Forge 用例，保留授权、传输、对话与队列，不反向耦合。Pipeline运行管理及交互应用保留各自状态。现有包名/命令兼容路径不等于领域归属。SQL当前可随Notebook，当前版交付不等待新引擎；后续适配遵守双方C1–C6/R1–R4约定。定版不表示已重构，历史准入、权限与数据保护继续有效。
+业务项目是用户独立资产。Forge 拥有工程契约、依赖管理、Agent 工具与上下文、开发和评审沙箱，以及可独立运行的工程闭环。Workbench 是可选产品宿主，持有项目授权、产品会话、传输、运行及分析生命周期。两者通过现有公开合同使用计算底座。架构归属和当前实现能力分别核验，历史准入、权限与数据保护继续有效。
 
 ## Forge 开发辅助边界
 

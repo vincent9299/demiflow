@@ -170,7 +170,7 @@ flowchart LR
     DRIVER <--> CKPT["Checkpoints and run records<br/>resume · reconcile · audit"]
 ```
 
-- **One owner per responsibility.** The engine consists of 17 modules, and every responsibility has exactly one owning module; every public action takes one execution path, and Local and Ray share the same compilation, sealing, scheduling and recovery. See the [engine architecture](docs/dataset-engine-architecture.md) (in Chinese).
+- **One owner per responsibility.** The engine consists of 17 modules, and every responsibility has exactly one owning module; every public action takes one execution path, and Local and Ray share the same compilation, sealing, scheduling and recovery. See the [DemiFlow architecture specification](docs/demiflow-architecture.md) (in Chinese).
 - **Resource management is the engine's job, not the user's luck.** Concurrency, queues, batch sizes, memory and temporary disk have explicit limits and are admitted before execution starts; when the downstream slows down, the upstream waits; an exceeded budget fails clearly instead of quietly exhausting the machine.
 - **Every run is sealed.** Source, plan and source versions are pinned before execution, so at any later time you can say exactly what a run used.
 - **Resume where it stopped.** Progress and the outcomes of external calls go into the run record. Resuming with the original run reference reuses confirmed batches, reconciles table writes with the original transaction, and never blindly resends an external call whose outcome is unknown.
@@ -399,7 +399,7 @@ The example uses a local service that returns preset model replies and needs no 
 | Fetching, queues and documents | [docs/en/fetch.md](docs/en/fetch.md) |
 | Training and evaluation | [docs/en/dataset-training.md](docs/en/dataset-training.md) |
 | Forge and the Workbench | [docs/en/forge-cli.md](docs/en/forge-cli.md) |
-| Platform and engine architecture (in Chinese) | [docs/architecture-master-intent-v1.md](docs/architecture-master-intent-v1.md) · [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
+| Platform and engine architecture (in Chinese) | [DemiFlow architecture specification](docs/demiflow-architecture.md) |
 
 > Every guide has a Chinese version under [docs/](docs/) with the same file name.
 
@@ -418,7 +418,7 @@ Issues and pull requests are welcome. Before sending code, please read:
 
 - [Repository rules](docs/repository-rules.md): branches, review gates and release flow (in Chinese);
 - [Finite-resource constraints](AGENTS.md): every change keeps memory, batch and spill bounds;
-- [Engine architecture](docs/dataset-engine-architecture.md): one owner per responsibility across 17 engine modules (in Chinese).
+- [DemiFlow architecture specification](docs/demiflow-architecture.md) covers platform boundaries and the 17 engine modules (in Chinese).
 
 ## License
 
