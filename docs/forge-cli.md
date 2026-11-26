@@ -1,5 +1,7 @@
 # Forge 与工作台
 
+使用独立 Python 环境或受控源码包时，请参阅 [项目依赖](forge-project-dependencies.md)。
+
 - **Forge** 是命令行工具：在一个项目目录里创建标准文件、查询当前 SDK、做静态检查、登记可运行的入口。人和 coding agent 用同一套命令。
 - **工作台（Workbench）** 是浏览器界面：打开同一个项目目录，查看 Flow 的图、数据表和运行记录，并在授权后运行。
 

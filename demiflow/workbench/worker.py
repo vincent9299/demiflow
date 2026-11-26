@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 import sys
 
+if __name__ == '__main__':
+    platform_root = Path(__file__).resolve().parents[2]
+    sys.path.insert(0, str(platform_root))
+    if sys.argv[1:] == ['--confined-project']:
+        from importlib.util import find_spec
+        spec = find_spec('demiflow')
+        if spec is None or not spec.origin or Path(spec.origin).resolve() != platform_root / 'demiflow/__init__.py':
+            raise RuntimeError('Project Python loaded DemiFlow outside the trusted platform source')
+
+from demiflow.forge import operation_budget
+
 FORMAT = "demiflow_forge_workspace_response_v1"
 
 
-def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None, **arguments):
+@operation_budget.controlled
+def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None, _dependencies=None, **arguments):
     from demiflow.forge.platform_worker import capture
     from demiflow.forge.platform import limits_with
     from demiflow.forge.schema import ForgeError
@@ -22,11 +35,20 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     from demiflow.workbench.reader import ALLOWED
     from demiflow.workbench.reader import in_native_dispatch
     request={"operation":name,"root":str(Path(root).absolute()),"arguments":arguments}
+    root = Path(request['root'])
+    inspection_reads = ()
     if _authority is not None:
         request["bootstrap"] = _authority
     if name in {'plan_preview', 'run_prepare'}:
         from demiflow.workbench.python_sources import deployment_modules
         _source_modules = deployment_modules(Path(request['root']))
+    if name == 'plan_preview':
+        from demiflow.workbench.projects.registry import project_dependencies
+        _dependencies = project_dependencies(root, authority=_authority)
+    if name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None:
+        request.pop('bootstrap', None)
+        request['dependencies'] = _dependencies
+        inspection_reads, request['table_inputs'] = _inspection_inputs(root, request)
     if _source_modules is not None:
         request['source_modules'] = _source_modules
     settings=limits_with({"catalog_bytes":9*1024**2,**({"timeout_seconds":20} if name in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"} else {})})
@@ -37,9 +59,8 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         # ceilings; reuse the fixed dispatcher, never create a nested worker.
         # All other operations retain their original isolation and admission.
         value=dispatch(request)
-    elif context is not None:
+    elif context is not None and _dependencies is None:
         reader,consumer_closed=context
-        import os
         reusable=not _pass_fds and not os.environ.get('DEMIFLOW_FORGE_PREPARATION_FD') and name in ALLOWED
         if reusable:
             value=reader.call(request,timeout=min(20,settings['timeout_seconds']),consumer_closed=consumer_closed)
@@ -48,9 +69,21 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
             value=None
     else:value=None
     if value is None:
-        value=capture([sys.executable,"-I","-B",str(Path(__file__).resolve())],request,settings,
-            response_formats={FORMAT},input_limit=1024**2,pass_fds=_pass_fds,
-            tree_rss_limit=PREPARATION_RSS if _pass_fds or name in {"analysis_media_sources","analysis_source_read","table_profile"} else (READONLY_RSS if (location() / 'host-budget.json').exists() else None))
+        from functools import partial
+        business = name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None
+        python = sys.executable
+        if business:
+            from demiflow.forge.dependencies import verify_interpreter
+            python = verify_interpreter(_dependencies['environment']['interpreter'])
+        argv = [python, "-I", "-B", str(Path(__file__).resolve())]
+        launcher = None
+        if business:
+            argv.append('--confined-project')
+            launcher = partial(_launch_project_inspection, root, _dependencies, _source_modules,
+                               inspection_reads, settings['timeout_seconds'])
+        value=capture(argv,request,settings,response_formats={FORMAT},input_limit=1024**2,
+            pass_fds=_pass_fds,inherit_authority=not business,launcher=launcher,
+            tree_rss_limit=PREPARATION_RSS if business or _pass_fds or name in {"analysis_media_sources","analysis_source_read","table_profile"} else (READONLY_RSS if (location() / 'host-budget.json').exists() else None))
     if not value["ok"]:
         code = value.get('code', 'operation_failed')
         if code == 'forbidden':
@@ -61,7 +94,104 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     return value["value"]
 
 
-def prepare_native(*, analysis_read):
+def _launch_project_inspection(root, locked, source_modules, inspection_reads, seconds, command, *, stdin, cwd, env, **_):
+    """Apply OS bounds before the fixed project Python inspection starts."""
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
+    from demiflow.workbench.host_partition import PREPARATION_RSS
+
+    if sys.platform != 'linux':
+        raise ValueError('Confined project inspection requires the Linux sandbox backend')
+    home = Path(cwd) / 'home'
+    home.mkdir(mode=0o700)
+    interpreter = locked['environment']['interpreter']
+    from demiflow.forge.dependencies import module_files
+    files = set(inspection_reads)
+    source_files = {Path(row['path']) for row in module_files(root, locked).values()}
+    source_files.update(map(Path, (source_modules or {}).values()))
+    traversal = {root, *(path.parent for path in source_files)}
+    files.update(source_files)
+    runtime = {Path(__file__).resolve().parents[2], Path(interpreter['prefix']),
+               Path(interpreter['base_prefix']), Path(interpreter['binary'])}
+    runtime.update(path for path in map(Path, ('/usr', '/lib', '/lib64')) if path.exists())
+    if any(root.is_relative_to(path) for path in runtime):
+        raise ValueError('Project Python runtime root must not cover the project directory')
+    spec = SandboxSpec(read_paths=tuple(map(str, sorted(files | {Path(cwd)}))), traversal_paths=tuple(map(str, sorted(traversal))),
+                       write_paths=(), runtime_paths=tuple(sorted(map(str, runtime))),
+                       protected_paths=(), denied_paths=(), private_home=str(home),
+                       role='verifier', seconds=seconds, rss_bytes=PREPARATION_RSS)
+    return launch_sandbox(command, spec=spec, env={**env, 'HOME': str(home), 'TMPDIR': str(home)},
+                          cwd=cwd, stdin=stdin)
+
+
+def _inspection_inputs(root, request):
+    """Grant project source and exact input tables while keeping controls private."""
+    from demiflow.forge.platform_environment import read_bounded
+    from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_table_uri
+    from demiflow.forge.project_rules import ROLE_DIRS
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench.runs import manager as runs
+    from demiflow.workbench.table_bindings import make_resolver
+
+    _, workspace = ws.load_workspace_control(root)
+    supplied = request['arguments']
+    from demiflow.forge.project import STATE_PATH
+    paths = {root / 'workspace.json', root / STATE_PATH, ws.relative_path(root, workspace['platform']['path'])}
+    parameters = supplied.get('parameters', {})
+    if request['operation'] == 'plan_preview' and supplied.get('params') is not None:
+        parameter_file = ws.validate_parameter_path(root, supplied['params'])
+        paths.add(parameter_file)
+        from demiflow.workbench.graph.preview import parameter_document
+        parameters = parameter_document(read_bounded(parameter_file, 65536))
+        if parameters.get('format') is None and set(parameters) <= {'arguments', 'run_directory'}:
+            if isinstance(parameters.get('arguments'), dict):
+                # This historical preview format passes raw arguments to the Flow.
+                parameters = {}
+    fixed_inputs = {}
+    allowed = set(ROLE_DIRS) | {'tables', 'configs', 'parameters', 'lib', 'src', 'data'}
+    with os.scandir(root) as entries:
+        for index, item in enumerate(entries):
+            if index >= 1024:
+                raise ForgeError('Project directory exceeds the inspection path budget', code='resource_limit')
+            if item.name in allowed and item.is_dir(follow_symlinks=False) or (
+                    not item.name.startswith('.') and item.name.endswith('.py') and item.is_file(follow_symlinks=False)):
+                paths.add(Path(item.path))
+    resolver = make_resolver(ws.table_binding, runs.result_table)
+    values, _ = extract_arguments(parameters)
+    pending = [(values, 0)]
+    seen = 0
+    while pending:
+        operation_budget.check()
+        item, depth = pending.pop()
+        seen += 1
+        if seen > 4096 or depth > 16:
+            raise ForgeError('Project inspection path scope exceeds its budget', code='resource_limit')
+        if isinstance(item, dict):
+            if is_direct_table_ref(item):
+                target, _ = resolve_table_uri(root, item['uri'], item.get('version'))
+                paths.add(target)
+            elif item.get('kind') == 'table' and set(item) == {'kind', 'alias'}:
+                alias = item['alias']
+                if isinstance(alias, str) and alias in fixed_inputs:
+                    continue
+                control, _, target = resolver(root, workspace, alias)
+                paths.add(target)
+                if alias.startswith('run:'):
+                    fixed_inputs[alias] = dict(control=control, path=str(target))
+            elif item.get('kind') == 'location' and set(item) == {'kind', 'location_id'}:
+                location = workspace['locations'].get(item['location_id'])
+                if location is not None and location.get('writable') is False:
+                    target = ws.scoped_data_location(root, ws.location_root(root, location))
+                    if target is not None:
+                        paths.add(target)
+            else:
+                pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+    return {path for path in paths if path.exists()}, fixed_inputs
+
+
+def prepare_native(*, analysis_read, confined=False):
     if analysis_read:
         # Trusted export is a new read-only operation; keep the existing
         # inspection/preview paths' thread settings unchanged. Set these before
@@ -81,6 +211,13 @@ def prepare_native(*, analysis_read):
 
     pa.set_cpu_count(1 if analysis_read else 2)
     pa.set_io_thread_count(1 if analysis_read else 2)
+    if confined:
+        # The launcher accounts real RSS outside the sandbox. Lance still
+        # requires a finite virtual memory limit for opening fixed tables.
+        ceiling = min([4 * 1024**3, *(limit for limit in resource.getrlimit(resource.RLIMIT_AS)
+                                       if limit != resource.RLIM_INFINITY)])
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+        return
     with open("/proc/self/statm") as source:
         baseline = int(source.read(128).split()[0]) * os.sysconf("SC_PAGE_SIZE")
     ceiling = min(4 * 1024**3, baseline + 384 * 1024**2)
@@ -107,7 +244,18 @@ def dispatch(request):
     from demiflow.workbench.projects import workspace as ws
     from demiflow.workbench.runs import manager as runs
     from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.workbench.projects.registry import dependency_scope
     table_resolver = make_resolver(ws.table_binding, runs.result_table)
+    if 'dependencies' in request:
+        from demiflow.forge.project_bindings import table_reference
+
+        def table_resolver(root, control, selector):
+            if isinstance(selector, str) and selector.startswith('run:'):
+                fact = request['table_inputs'].get(selector)
+                if fact is None:
+                    raise ForgeError('Missing admitted run output reference', code='conflict')
+                return fact['control'], table_reference(fact['control']), Path(fact['path'])
+            return ws.table_binding(root, control, selector)
     try:
         from demiflow.errors import DemiflowError
         from demiflow.lance import preview
@@ -148,7 +296,8 @@ def dispatch(request):
             from demiflow.workbench.projects import checks as project_check
             if args:
                 raise ForgeError('Project checks accept no rule overrides', code='invalid_request')
-            value = (project_check.check if op == 'project_check' else project_check.status)(root, table_resolver=table_resolver)
+            with dependency_scope(root, authority=request.get('bootstrap')):
+                value = (project_check.check if op == 'project_check' else project_check.status)(root, table_resolver=table_resolver)
         elif op == 'project_table':
             from demiflow.workbench.projects.discovery import table
             from demiflow.workbench.projects.workspace import load_workspace
@@ -157,13 +306,14 @@ def dispatch(request):
         elif op == "inspect":
             from demiflow.workbench.projects.workspace import _inspect_flow
 
-            value = _inspect_flow(root, table_resolver=table_resolver, **args)
+            with dependency_scope(root, authority=request.get('bootstrap')):
+                value = _inspect_flow(root, table_resolver=table_resolver, **args)
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import preview as compile_preview
-            value = compile_preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)
+            value = compile_preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
         elif op == 'native_submission_inspect':
             from demiflow.workbench.runs.native_submission import inspect_submission
-            value = inspect_submission(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), **args)
+            value = inspect_submission(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)
@@ -191,7 +341,8 @@ def dispatch(request):
         elif op == "status":
             from demiflow.workbench.projects.workspace import _report_status
 
-            value = _report_status(root, table_resolver=table_resolver, **args)
+            with dependency_scope(root, authority=request.get('bootstrap')):
+                value = _report_status(root, table_resolver=table_resolver, verify_dependencies=True, **args)
         elif op == 'audit_capture':
             from demiflow.workbench.projects.workspace import _capture_change_baseline
             value = _capture_change_baseline(root, **args)
@@ -202,7 +353,8 @@ def dispatch(request):
             value = _check_change_scope(root)
         elif op == 'audit_check':
             from demiflow.workbench.projects.workspace import _audit_check
-            value = _audit_check(root, table_resolver=table_resolver, **args)
+            with dependency_scope(root, authority=request.get('bootstrap')):
+                value = _audit_check(root, table_resolver=table_resolver, **args)
         elif op == 'audit_hint':
             from demiflow.workbench.projects.workspace import _audit_hint
             value = _audit_hint(root, **args)
@@ -336,9 +488,10 @@ def dispatch(request):
 
 
 def main():
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    confined = sys.argv[1:] == ['--confined-project']
     from demiflow.forge.platform_worker import bind_parent
-    bind_parent()
+    if not confined:
+        bind_parent()
     from demiflow.forge.platform import bounded_json
     if sys.argv[1:]==["--reader"]:
         from demiflow.workbench.reader import serve
@@ -349,12 +502,21 @@ def main():
     request=json.loads(raw)
     required = {"operation", "root", "arguments"}
     if (type(request) is not dict or not required <= request.keys()
-            or request.keys() - required - {"bootstrap", "source_modules"}
+            or request.keys() - required - {"bootstrap", "source_modules", "dependencies", "table_inputs"}
             or "source_modules" in request and (
                 request["operation"] not in {"plan_preview", "run_prepare", "native_submission_inspect"}
                 or type(request["source_modules"]) is not dict)):
         raise ValueError("Invalid workspace request")
-    prepare_native(analysis_read=request["operation"] in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"})
+    if ('dependencies' in request) != confined or ('table_inputs' in request) != confined:
+        raise ValueError("Project dependency inspection requires the confined worker path")
+    if confined:
+        if request['operation'] not in {'plan_preview', 'native_submission_inspect'} or 'bootstrap' in request:
+            raise ValueError('Only fixed business inspection may use the project worker')
+        from demiflow.forge.dependencies import current_environment
+        locked = request['dependencies']
+        if current_environment(locked, check_conflicts=True) != locked['environment']:
+            raise ValueError('Project Python changed after dependency approval')
+    prepare_native(analysis_read=request["operation"] in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"}, confined=confined)
     result=dispatch(request)
     sys.stdout.buffer.write(bounded_json(result,9*1024**2))
 

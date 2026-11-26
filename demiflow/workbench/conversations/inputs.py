@@ -92,6 +92,7 @@ class InputAccess:
                  runtime_paths, deadline=None):
         self.store, self.tid = store, tid
         self.root = Path(project['root']).absolute()
+        self.project = project
         self.scratch = Path(scratch)
         self.denied = tuple(dict.fromkeys((*_SYSTEM,
             *(q for p in denied_paths for q in (Path(p).absolute(), Path(p).resolve())))))

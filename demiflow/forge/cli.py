@@ -62,6 +62,66 @@ def register(main: click.Group) -> None:
     root_option = click.option('--root', required=True, type=click.Path(path_type=Path, file_okay=False))
     json_option = click.option('--json', 'as_json', is_flag=True, help='Return one JSON document.')
 
+    @forge.group()
+    def dep():
+        """Declare and verify dependencies in an explicit project Python."""
+
+    @dep.command('list')
+    @root_option
+    @json_option
+    def dep_list(root, as_json):
+        from .dependencies import binding, facts
+        _output(root, as_json, lambda: dict(status='passed', dependencies=facts(binding(root, verify_files=False))))
+
+    @dep.command('verify')
+    @root_option
+    @json_option
+    def dep_verify(root, as_json):
+        from .dependencies import verify
+        _output(root, as_json, lambda: verify(root))
+
+    @dep.command('sync')
+    @root_option
+    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
+    @json_option
+    def dep_sync(root, python, as_json):
+        from .dependencies import update
+        _output(root, as_json, lambda: update(root, python))
+
+    @dep.command('link')
+    @root_option
+    @click.argument('name')
+    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
+    @json_option
+    def dep_link(root, name, python, as_json):
+        from .dependencies import update
+        _output(root, as_json, lambda: update(root, python, name=name))
+
+    @dep.command('vendor')
+    @root_option
+    @click.argument('name')
+    @click.argument('source', type=click.Path(path_type=Path, file_okay=False))
+    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
+    @json_option
+    def dep_vendor(root, name, source, python, as_json):
+        from .dependencies import update
+        _output(root, as_json, lambda: update(root, python, name=name, vendor=source))
+
+    @dep.command('remove')
+    @root_option
+    @json_option
+    def dep_remove(root, as_json):
+        from .dependencies import remove
+        _output(root, as_json, lambda: remove(root))
+
+    @dep.command('install')
+    @root_option
+    @click.option('--python', required=True, type=click.Path(path_type=Path, dir_okay=False))
+    @json_option
+    def dep_install(root, python, as_json):
+        from .dependencies import install
+        _output(root, as_json, lambda: install(root, python))
+
     @forge.command()
     @root_option
     @click.option('--path', 'paths', multiple=True, help='Project-relative target path.')

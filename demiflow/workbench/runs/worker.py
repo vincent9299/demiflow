@@ -4,7 +4,13 @@ import os
 import sys
 
 # Invoked by absolute trusted script under Python -I, including sealed copies.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+_PLATFORM_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(_PLATFORM_ROOT))
+if __name__ == '__main__' and sys.argv[1:2] == ['execute']:
+    from importlib.util import find_spec
+    _spec = find_spec('demiflow')
+    if _spec is None or not _spec.origin or Path(_spec.origin).resolve() != _PLATFORM_ROOT / 'demiflow/__init__.py':
+        raise RuntimeError('Execution loaded DemiFlow outside the sealed platform source')
 
 from demiflow.workbench.process import process_identity
 
@@ -78,7 +84,10 @@ def _execute(root, run_id, run, attempt=None):
             raise Cancelled('Run cancellation requested')
 
     try:
-        report = runs.verify_seal(target, manifest)
+        dependencies = manifest.get('project_dependencies')
+        report = runs.verify_seal(target, manifest, environment=dependencies is None)
+        if dependencies is not None:
+            _verify_project_environment(dependencies)
         allocation_guard(manifest['limits'], native_execution=manifest.get('native_execution'))
         check_stop()
         run.transition({'starting'}, 'running', worker=process_identity(os.getpid()), running_at=time.time())
@@ -97,6 +106,14 @@ def _execute(root, run_id, run, attempt=None):
                                          read=read_shared, project_roots=project_roots)
             imports.set_project_package(package)
             sys.meta_path.insert(0, imports)
+        if dependencies and dependencies['modules']:
+            from demiflow.workbench.python_sources import import_bootstrap
+            bootstrap = import_bootstrap(work / 'project-imports', {
+                name: {**proof, 'path': str(shared[name][0])}
+                for name, proof in dependencies['modules'].items()
+            }, platform_root=_PLATFORM_ROOT, project_roots=project_roots, project_package=package)
+            previous = os.environ.get('PYTHONPATH')
+            os.environ['PYTHONPATH'] = os.pathsep.join(filter(None, (str(bootstrap), previous)))
         module, function = binding.get('source_entry', manifest['entry']).split(':')
         module_name = binding.get('entry_module', module[:-3].replace('/', '.'))
         entry = getattr(importlib.import_module(module_name), function)
@@ -144,7 +161,9 @@ def _execute(root, run_id, run, attempt=None):
         if errors or any(o['result'] is None for o in outputs):
             registration_failed[0] = True
             raise RuntimeError('Output registration incomplete: ' + '; '.join(errors))
-        runs.verify_seal(target, manifest)
+        runs.verify_seal(target, manifest, environment=dependencies is None)
+        if dependencies is not None:
+            _verify_project_environment(dependencies)
         run.finish(dict(outcome='succeeded', finished_at=time.time()))
     except BaseException as exc:
         import traceback
@@ -162,6 +181,12 @@ def _execute(root, run_id, run, attempt=None):
             error={'type': type(exc).__name__, 'message': str(exc)[:2048]}, finished_at=time.time()))
         return 1
     return 0
+
+
+def _verify_project_environment(binding):
+    from demiflow.forge.dependencies import current_environment
+    if current_environment(binding) != binding['environment']:
+        raise RuntimeError('Sealed project Python environment changed')
 
 
 def _source_imports(source, files, *, package=()):
@@ -344,7 +369,12 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         unit_fds = inherited_unit()
         if unit_fds:
             env[UNIT_ENV] = str(unit_fds[0])
-        command = [sys.executable, '-I', '-B', __file__, 'execute', str(root), run_id]
+        dependencies = manifest.get('project_dependencies')
+        python = sys.executable
+        if dependencies is not None:
+            from demiflow.forge.dependencies import verify_interpreter
+            python = verify_interpreter(dependencies['environment']['interpreter'])
+        command = [python, '-I', '-B', __file__, 'execute', str(root), run_id]
         if attempt is not None:
             command.append(str(attempt))
         started = time.monotonic()
@@ -449,10 +479,17 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         if output_bytes > limits['max_output_bytes']:
             killed_reason = 'output_disk_budget'
         complete = run.execution_view()['completion']
+        verification_error = None
         if killed_reason and killed_reason.endswith('_budget'):
             status = 'failed'
         elif complete and complete['outcome'] == 'succeeded' and process.returncode == 0:
             status = 'succeeded'
+            if dependencies is not None:
+                try:
+                    runs.verify_seal(target, manifest)
+                except (OSError, ValueError) as exc:
+                    status = 'failed'
+                    verification_error = dict(type=type(exc).__name__, message=str(exc)[:2048])
         elif killed_reason == 'cancelled':
             status = 'cancelled'
         elif killed_reason:
@@ -462,7 +499,9 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
         details = dict(finished_at=time.time(), returncode=process.returncode, sampled_peaks=peaks)
         if killed_reason:
             details['reason'] = killed_reason
-        if complete and complete.get('error'):
+        if verification_error is not None:
+            details['error'] = verification_error
+        elif complete and complete.get('error'):
             details['error'] = complete['error']
             details['recoverable'] = not killed_reason and complete.get('recoverable', False)
         final_status, final_details = status, details

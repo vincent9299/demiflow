@@ -12,7 +12,8 @@ import stat
 
 LIBC = ctypes.CDLL(None, use_errno=True)
 SECCOMP = ctypes.CDLL(ctypes.util.find_library('seccomp'), use_errno=True)
-READ = (1 << 2) | (1 << 3)
+READ_DIR = 1 << 3
+READ = (1 << 2) | READ_DIR
 EXEC = 1 << 0
 WRITE = (1 << 1) | (1 << 4) | (1 << 5) | (1 << 7) | (1 << 8)
 TRUNCATE = 1 << 14
@@ -87,7 +88,7 @@ def prctl(option, *args):
     return checked(LIBC.prctl(option, *args), 'prctl failed')
 
 
-def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped'):
+def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped', traversal_paths=()):
     if platform.machine() != 'x86_64':
         raise RuntimeError('The development sandbox requires the qualified x86-64 ABI')
     if read_policy not in {'scoped', 'inherit_os'}:
@@ -119,7 +120,8 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
     else:
         handled = ((1 << 13) - 1) | truncate_bit
         write_rights = READ | WRITE | truncate_bit
-        rule_groups = ((read_paths, READ), (runtime_paths, READ | EXEC), (write_paths, write_rights))
+        rule_groups = ((read_paths, READ), (runtime_paths, READ | EXEC), (write_paths, write_rights),
+                       (traversal_paths, READ_DIR))
         file_mask = EXEC | (1 << 1) | (1 << 2) | truncate_bit
     rules = Rules(handled)
     descriptor = checked(LIBC.syscall(444, ctypes.byref(rules), ctypes.sizeof(rules), 0), 'Landlock ruleset')
@@ -167,7 +169,7 @@ def drop_capabilities():
     prctl(38, 1, 0, 0, 0)
 
 
-def seccomp(*, direct_network=False):
+def seccomp(*, direct_network=False, verifier=False, legacy_truncate_only=False):
     sec = SECCOMP
     sec.seccomp_init.argtypes = [ctypes.c_uint32]
     sec.seccomp_init.restype = ctypes.c_void_p
@@ -184,7 +186,7 @@ def seccomp(*, direct_network=False):
                                          ctypes.c_uint, ctypes.POINTER(Compare)]
     # libseccomp rejects all non-native architectures. x32 syscall numbers are
     # not in this allowlist. Unknown/new interfaces fail with ENOSYS.
-    context = sec.seccomp_init(0x00050000 | errno.ENOSYS)
+    context = sec.seccomp_init(0x7fff0000 if legacy_truncate_only else 0x00050000 | errno.ENOSYS)
     if not context:
         raise RuntimeError('seccomp context unavailable')
 
@@ -196,6 +198,23 @@ def seccomp(*, direct_network=False):
         result = sec.seccomp_rule_add_array(context, action, number, len(conditions), comparisons)
         if result:
             raise RuntimeError('Cannot install seccomp rule: ' + name)
+
+    if legacy_truncate_only:
+        try:
+            # Landlock ABI 1 cannot enforce pathname or descriptor truncation.
+            denied = 0x00050000 | errno.EPERM
+            for name in ('truncate', 'ftruncate'):
+                rule(name, action=denied)
+            for name, position in (('open', 1), ('openat', 2)):
+                mask = os.O_ACCMODE | os.O_TRUNC
+                rule(name, ((position, 7, mask, os.O_RDONLY | os.O_TRUNC),), action=denied)
+            # The flags of openat2 are indirect and cannot be compared in BPF.
+            for name in ('openat2', 'io_uring_setup', 'io_uring_enter', 'io_uring_register'):
+                rule(name, action=0x00050000 | errno.ENOSYS)
+            checked(sec.seccomp_load(context), 'seccomp_load')
+            return
+        finally:
+            sec.seccomp_release(context)
 
     allowed = '''read write readv writev pread64 pwrite64 preadv pwritev preadv2 pwritev2
         close close_range lseek fstat stat lstat newfstatat statx access faccessat faccessat2
@@ -244,6 +263,13 @@ def seccomp(*, direct_network=False):
             rule(name, ((position, 7, os.O_TRUNC, 0),))
             rule(name, ((position, 7, os.O_ACCMODE, os.O_WRONLY),))
             rule(name, ((position, 7, os.O_ACCMODE, os.O_RDWR),))
+        if verifier:
+            # The disposable plan reader stacks a tighter filter after importing native libraries.
+            # libseccomp probes syscall availability with this invalid strict-mode request.
+            rule('seccomp', ((0, 4, 0, 0), (1, 4, 1, 0), (2, 4, 0, 0)))
+            rule('seccomp', ((0, 4, 1, 0), (1, 7, 8, 0)))
+            rule('seccomp', ((0, 4, 2, 0),))
+            rule('prctl', ((0, 4, 38, 0), (1, 4, 1, 0)))
         for option in (1, 2, 3, 15, 16, 21, 39, 0x53564d41):
             rule('prctl', ((0, 4, option, 0),))
         for request in (0x5401, 0x5413, 0x541b, 0x5421, 0x5450, 0x5451):

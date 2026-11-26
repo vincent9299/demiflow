@@ -160,14 +160,28 @@ def test_native_source_drift_rejected_before_worker(root):
     assert not (root / 'native-output.lance').exists()
 
 
-def test_native_stop_resume_keeps_original_run_and_stage_receipts(root):
+@pytest.mark.parametrize('vendored', [False, True], ids=['legacy', 'vendored'])
+def test_native_stop_resume_keeps_original_run_and_stage_receipts(root, tmp_path, vendored):
+    extra = ''
+    if vendored:
+        import sys
+        from demiflow.forge.dependencies import update
+
+        seed = tmp_path / 'vendor-seed'
+        (seed / 'nested').mkdir(parents=True)
+        (seed / '__init__.py').write_text('')
+        (seed / 'nested/__init__.py').write_text('')
+        (seed / 'nested/settings.py').write_text('STEP = 0\n')
+        (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+            'native_dep_recovery = {source = "vendored", path = "packages/native_dep_recovery"}\n')
+        update(root, sys.executable, name='native_dep_recovery', vendor=seed)
+        extra = '    from native_dep_recovery.nested.settings import STEP\n    return {"x": row["x"] + STEP}\n'
     (root / 'flows/native_stop.py').write_text('''from demiflow import data
 import pyarrow as pa
 import time
 def slow(row):
     time.sleep(2)
-    return row
-def run(*, directory):
+''' + (extra or '    return row\n') + '''def run(*, directory):
     schema = pa.schema([('x', pa.int64())])
     rows = data.from_items([{'x': i} for i in range(8)])
     rows = rows.save_lance(directory+'/stage.lance', schema=schema, key='x', stage='rows',
@@ -199,6 +213,9 @@ def run(*, directory):
         old_binding = project_ops.describe_table(root, latest_selector)['binding']['digest']
         from demiflow.workbench.runs.view import snapshot
         assert snapshot(root, identity)['availability'] == 'available'
+        if vendored:
+            path = root / 'packages/native_dep_recovery/nested/settings.py'
+            path.write_text('STEP = 100\n')
         runs.resume(root, identity, expected=prepared['digest'], expected_attempt=1)
         after = wait(root, identity)
         assert after['status'] == 'succeeded', (after, runs.logs(root, identity))
@@ -226,3 +243,112 @@ def run(*, directory):
         if state['status'] in runs.ACTIVE:
             runs.cancel(root, identity, expected_attempt=state['attempt'])
             stopped(root, identity)
+
+
+def test_project_dependency_preview_and_native_run_use_the_locked_package(root, tmp_path):
+    import site
+    import sys
+    import venv
+    from demiflow.forge.dependencies import update
+    from demiflow.workbench.graph.preview import preview
+
+    venv_path = tmp_path / 'project-python'
+    venv.EnvBuilder(with_pip=False, symlinks=True, system_site_packages=True).create(venv_path)
+    python = venv_path / 'bin/python'
+    installed = venv_path / 'lib' / f'python{sys.version_info.major}.{sys.version_info.minor}' / 'site-packages'
+    (installed / 'platform-test.pth').write_text('\n'.join(site.getsitepackages()) + '\n')
+    (installed / 'project_dependency_fixture.py').write_text('from pathlib import Path\nimport sys\n'
+        f'assert Path(sys.prefix) == Path({str(venv_path)!r})\nVALUE = 1\n')
+    metadata = installed / 'project_dependency_fixture-1.0.dist-info'
+    metadata.mkdir()
+    (metadata / 'METADATA').write_text('Metadata-Version: 2.1\nName: project-dependency-fixture\nVersion: 1.0\n')
+
+    package = tmp_path / 'approved'
+    package.mkdir()
+    (package / '__init__.py').write_text('VALUE = 3\n')
+    (package / 'step.py').write_text('def adjust(row):\n'
+        '    from native_dep_fixture.late import OFFSET\n'
+        '    return {"x": row["x"] + OFFSET}\n')
+    (package / 'late.py').write_text('OFFSET = 20\n')
+    (root / 'pyproject.toml').write_text('[project]\ndependencies = ["project-dependency-fixture==1.0"]\n'
+        '[tool.demiflow.packages]\n'
+        f'native_dep_fixture = {{source = "local_ref", path = "{package}"}}\n')
+    locked = update(root, python)
+    prepared = native_flow(root, 'from native_dep_fixture.step import adjust\n'
+        'from project_dependency_fixture import VALUE\n', 'VALUE', transform='.map(adjust)')
+    result = preview(root, entry='flows/native.py:run', params='flows/native.json')
+    assert result['basis']['project_dependencies'] == locked['digest']
+    target, value = runs._load(root, prepared['run_id'])
+    assert value['manifest']['project_dependencies']['digest'] == locked['digest']
+    assert (target / 'source/native_dep_fixture/late.py').read_text() == 'OFFSET = 20\n'
+    late = package / 'late.py'
+    late.write_text('OFFSET = 40\n')
+    with pytest.raises(Exception, match='source differs'):
+        runs.start(root, prepared['run_id'], expected=prepared['digest'])
+    late.write_text('OFFSET = 20\n')
+    outcome = execute(root, prepared)
+    assert outcome['status'] == 'succeeded', (outcome, runs.logs(root, outcome['run_id']))
+    import lance
+    assert all(sorted(lance.dataset(row['uri']).to_table()['x'].to_pylist()) == [21, 22]
+               for row in outcome['outputs'])
+
+    outcome = stopped(root, outcome['run_id'])
+    assert outcome['state']['cleanup'] == 'complete'
+    upstream = outcome['outputs'][0]
+    selector = f"run:{outcome['run_id']}:{upstream['name']}:1"
+    (root / 'flows/continued.py').write_text('''from demiflow import data
+import pyarrow as pa
+
+def run(*, source, target):
+    schema = pa.schema([('x', pa.int64())])
+    return data.read_lance(source['uri'], version=source['version']).write_lance(
+        target, schema=schema, mode='create', return_receipt=True)
+''')
+    params = 'flows/continued.json'
+    (root / params).write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments={
+        'source': {'kind': 'table', 'alias': selector}, 'target': str(root / 'continued.lance'),
+    })))
+    entry = 'flows/continued.py:run'
+    declare_existing_flow(root, entry, params=params)
+    assert preview(root, entry=entry, params=params)['basis']['project_dependencies'] == locked['digest']
+    continued = runs.prepare(root, entry, params=params)
+    assert continued['report']['binding']['tables'][selector]['version'] == upstream['result']['ref']['lance_version']
+    followed = execute(root, continued)
+    assert followed['status'] == 'succeeded', (followed, runs.logs(root, followed['run_id']))
+    assert sorted(lance.dataset(followed['outputs'][0]['uri']).to_table()['x'].to_pylist()) == [21, 22]
+
+
+def test_project_dependency_bootstrap_reaches_real_local_stage_process(tmp_path, monkeypatch):
+    import hashlib
+    import os
+    import sys
+    from demiflow import data
+    from demiflow.workbench.python_sources import import_bootstrap, install_bound_imports
+
+    platform_root = Path(__file__).resolve().parents[1]
+    package = tmp_path / 'run/source/stage_dependency_fixture'
+    package.mkdir(parents=True)
+    modules = {}
+    for name, filename, raw in [
+        ('stage_dependency_fixture', '__init__.py', b''),
+        ('stage_dependency_fixture.callback', 'callback.py',
+         b'def enrich(row):\n    import os\n    from stage_dependency_fixture.later import OFFSET\n'
+         b'    return {"x": row["x"] + OFFSET, "pid": os.getpid()}\n'),
+        ('stage_dependency_fixture.later', 'later.py', b'OFFSET = 7\n'),
+    ]:
+        path = package / filename
+        path.write_bytes(raw)
+        modules[name] = dict(path=str(path), sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
+    install_bound_imports(modules)
+    bootstrap = import_bootstrap(tmp_path / 'run/work/imports', modules, platform_root=platform_root)
+    monkeypatch.setenv('PYTHONPATH', os.pathsep.join((str(bootstrap), str(platform_root))))
+    try:
+        from stage_dependency_fixture.callback import enrich
+        assert 'stage_dependency_fixture.later' not in sys.modules
+        with data.local_execution(worker_mode='process', workers=1, partitions=1):
+            rows = data.from_items([{'x': 3}]).map(enrich).take_all()
+        assert rows[0]['x'] == 10 and rows[0]['pid'] != os.getpid()
+    finally:
+        for name in modules:
+            sys.modules.pop(name, None)

@@ -75,9 +75,9 @@ def read_source_bytes(path):
     return read_bounded(path, path.stat().st_size)
 
 
-def source_digest(path):
+def source_digest(path, maximum=None):
     digest = hashlib.sha256()
-    for chunk in regular_file_chunks(path):
+    for chunk in regular_file_chunks(path, maximum):
         digest.update(chunk)
     return digest.hexdigest()
 
@@ -142,13 +142,18 @@ class SharedSourceImports(importlib.abc.MetaPathFinder):
 
 
 class SharedSources:
-    def __init__(self, root, configured):
+    def __init__(self, root, configured, *, dependencies=None):
+        from demiflow.forge.dependencies import module_files
         if type(configured) is not dict or len(configured) > MAX_MODULES:
             raise ForgeError('Shared Python sources exceed the module budget')
         self.paths = {name: _origin(root, name, value) for name, value in configured.items()}
+        self.managed = module_files(root, dependencies)
+        if {name.partition('.')[0] for name in self.paths} & {name.partition('.')[0] for name in self.managed}:
+            raise ForgeError('Project dependency conflicts with a deployment shared package', code='conflict')
+        self.paths.update((name, Path(row['path'])) for name, row in self.managed.items())
         if len(set(self.paths.values())) != len(self.paths):
             raise ForgeError('A shared Python file must have one module name')
-        self.digests = {}
+        self.digests = {name: row['sha256'] for name, row in self.managed.items()}
         local = set()
         for name in {name.split('.')[0] for name in self.paths}:
             if (root / name).is_dir() or (root / (name + '.py')).is_file():
@@ -156,7 +161,8 @@ class SharedSources:
         self.importer = SharedSourceImports(self.paths, read=self.read, project_roots=local)
 
     def read(self, name):
-        raw = read_source_bytes(self.paths[name])
+        managed = self.managed.get(name)
+        raw = read_bounded(self.paths[name], managed['bytes']) if managed else read_source_bytes(self.paths[name])
         digest = hashlib.sha256(raw).hexdigest()
         if name in self.digests and self.digests[name] != digest:
             raise ForgeError('Shared Python source changed: ' + name, code='conflict')
@@ -167,7 +173,8 @@ class SharedSources:
         # Include declared lazy imports used only by the eventual row callback.
         # This also rechecks every import the compiler actually executed.
         for name in sorted(self.paths):
-            digest = source_digest(self.paths[name])
+            managed = self.managed.get(name)
+            digest = source_digest(self.paths[name], managed['bytes'] if managed else None)
             if name in self.digests and self.digests[name] != digest:
                 raise ForgeError('Shared Python source changed: ' + name, code='conflict')
             self.digests[name] = digest
@@ -303,3 +310,55 @@ class PythonSources(importlib.abc.MetaPathFinder):
         for name, digest in self.digests.items():
             if source_digest(self.root / name) != digest:
                 raise ForgeError('Source changed during plan construction', code='conflict')
+
+
+def install_bound_imports(modules, *, project_roots=(), project_package=()):
+    """Install the existing exact-name loader from a trusted immutable inventory."""
+    paths = {name: Path(row['path']) for name, row in modules.items()}
+
+    def read(name):
+        row = modules[name]
+        raw = read_bounded(paths[name], row['bytes'])
+        if hashlib.sha256(raw).hexdigest() != row['sha256']:
+            raise ForgeError('Bound dependency bytes changed: ' + name, code='conflict')
+        return raw
+
+    finder = SharedSourceImports(paths, read=read, project_roots=project_roots)
+    finder.set_project_package(project_package)
+    sys.meta_path.insert(0, finder)
+    return finder
+
+
+def import_bootstrap(directory, modules, *, platform_root, project_roots=(), project_package=()):
+    """Write a fixed startup hook for an owned business child process."""
+    from demiflow.forge.io import ensure_directory, publish_bytes
+    from demiflow.forge.platform import bounded_json
+
+    directory = Path(directory)
+    ensure_directory(directory)
+    binding_path = directory / 'dependencies.json'
+    bootstrap_path = directory / 'sitecustomize.py'
+    configuration = dict(modules=modules, project_roots=sorted(project_roots), project_package=list(project_package),
+                         platform_root=str(platform_root))
+    publish_bytes(binding_path, bounded_json(configuration, 512 * 1024), create=False)
+    body = r'''import json
+import os
+from pathlib import Path
+try:
+    from importlib.util import find_spec
+    with Path(__file__).with_name('dependencies.json').open() as stream:
+        binding = json.load(stream)
+    package_root = Path(binding.pop('platform_root')) / 'demiflow'
+    spec = find_spec('demiflow')
+    if spec is None or not spec.origin or Path(spec.origin).resolve() != package_root / '__init__.py':
+        raise RuntimeError('DemiFlow package origin changed')
+    from demiflow.workbench import python_sources
+    if Path(python_sources.__file__).resolve() != package_root / 'workbench/python_sources.py':
+        raise RuntimeError('DemiFlow source loader origin changed')
+    python_sources.install_bound_imports(**binding)
+except BaseException:
+    os.write(2, b'DemiFlow dependency bootstrap failed\n')
+    os._exit(78)
+'''
+    publish_bytes(bootstrap_path, body.encode(), create=False)
+    return directory

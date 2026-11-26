@@ -433,3 +433,122 @@ def test_dev_sandbox_and_grant_keep_data_tools_readonly(tmp_path):
     assert str((proj / 'flows').resolve()) in spec.write_paths
     assert str((proj / 'data_tools').resolve()) not in spec.write_paths
     assert str((proj / 'data_tools').resolve()) in spec.protected_paths
+
+
+def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
+    from jupyter_client import BlockingKernelClient
+    from jupyter_client.connect import write_connection_file
+    from demiflow.forge.dependencies import update
+    from demiflow.workbench.conversations.sandbox_native import landlock_abi
+    from demiflow.workbench.notebooks import kernel_launcher
+
+    if sys.platform != 'linux' or landlock_abi() < 1:
+        pytest.skip('approved readonly project kernels require Linux Landlock')
+    root = tmp_path / 'project'
+    (root / '.forge').mkdir(parents=True)
+    source = tmp_path / 'owned-library'
+    source.mkdir()
+    (source / '__init__.py').write_text('')
+    (source / 'later.py').write_text('VALUE = 7\n')
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+        f'notebook_dependency_fixture = {{source = "local_ref", path = "{source}"}}\n')
+    locked = update(root, sys.executable)
+    state = tmp_path / 'state'
+    runtime = state / 'runtime'
+    runtime.mkdir(parents=True)
+    config = state / 'kernel.json'
+    config.write_text(json.dumps(dict(python=sys.executable, root=str(root), code_root=str(Path(demiflow.__file__).parents[1]),
+        runtime_dir=str(runtime), tmp_dir=str(state / 'tmp'), sandbox_mode='readonly', locations=[],
+        write_paths=['data'], dependency_lock=locked['digest'])))
+    connection = str(runtime / 'connection.json')
+    write_connection_file(fname=connection)
+    client = BlockingKernelClient(connection_file=connection)
+    client.load_connection_file()
+    process = subprocess.Popen([sys.executable, '-IB', kernel_launcher.__file__, str(config), connection],
+                               cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        from queue import Empty
+        import time
+        client.start_channels()
+        request = client.kernel_info()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                reply = client.get_shell_msg(timeout=.5)
+            except Empty:
+                continue
+            if reply['parent_header'].get('msg_id') == request:
+                break
+        else:
+            raise AssertionError('The managed project kernel did not answer kernel_info')
+        (source / 'later.py').write_text('VALUE = 99\n')
+        message = client.execute('from pathlib import Path\nfrom notebook_dependency_fixture.later import VALUE\n'
+            f'assert VALUE == 7\ntry:\n    Path({str(root / "pyproject.toml")!r}).write_text("blocked")\n'
+            'except PermissionError:\n    pass\nelse:\n    raise AssertionError("dependency declaration is writable")\n'
+            'import os\ntry:\n    fd = os.open("pyproject.toml", os.O_RDONLY | os.O_TRUNC)\n'
+            'except PermissionError:\n    pass\nelse:\n    os.close(fd)\n    raise AssertionError("dependency declaration was truncated")\n')
+        while True:
+            response = client.get_shell_msg(timeout=10)
+            if response['parent_header'].get('msg_id') == message:
+                assert response['content']['status'] == 'ok', response['content']
+                break
+    finally:
+        client.stop_channels()
+        process.terminate()
+        _, stderr = process.communicate(timeout=7)
+        if process.returncode not in (0, -15):
+            pytest.fail(stderr.decode(errors='replace'))
+
+
+def test_restricted_author_reads_approved_source_and_cannot_rewrite_it(tmp_path):
+    from demiflow.forge.dependencies import update
+    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
+    from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+    from demiflow.workbench.conversations.execution import runtime_paths
+
+    root = tmp_path / 'project'
+    (root / '.forge').mkdir(parents=True)
+    (root / 'flows').mkdir()
+    external = tmp_path / 'vendor-parent'
+    package = external / 'approved'
+    package.mkdir(parents=True)
+    (package / '__init__.py').write_text('VALUE = 7\n')
+    (external / 'sibling.txt').write_text('undisclosed\n')
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
+        f'author_dependency_fixture = {{source = "local_ref", path = "{package}"}}\n')
+    locked = update(root, sys.executable)
+    project = dict(root=str(root), kind='pipeline', writes=['flows'], python=sys.executable, dependency_lock=locked['digest'])
+    shims = SandboxShims(project, execution_mode='restricted', project_python=sys.executable)
+    home = tmp_path / 'home'
+    home.mkdir(mode=0o700)
+    spec = SandboxSpec(read_paths=(str(root), str(package)), write_paths=(str(root / 'flows'),),
+        runtime_paths=(*runtime_paths({'executable': sys.executable}, project_python=sys.executable), str(shims.directory)),
+        protected_paths=(str(root / 'pyproject.toml'), str(package)), private_home=str(home))
+    code = '''from pathlib import Path
+import sys
+from author_dependency_fixture import VALUE
+assert VALUE == 7
+for filename in sys.argv[1:3]:
+    try:
+        Path(filename).write_text('blocked')
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError('protected source was writable')
+try:
+    Path(sys.argv[3]).read_text()
+except PermissionError:
+    pass
+else:
+    raise AssertionError('unapproved sibling was readable')
+Path('flows/created.py').write_text('pass')
+'''
+    try:
+        child = launch_sandbox([str(shims.bin / 'python'), '-B', '-c', code,
+            str(root / 'pyproject.toml'), str(package / '__init__.py'), str(external / 'sibling.txt')],
+            spec=spec, env={'PATH': os.defpath}, cwd=root)
+        stdout, stderr = child.communicate(timeout=30)
+        assert child.returncode == 0, (stdout, stderr)
+        assert (root / 'flows/created.py').read_text() == 'pass'
+    finally:
+        shims.close()

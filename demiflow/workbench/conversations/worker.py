@@ -144,8 +144,11 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
+    from demiflow.workbench.projects.registry import project_dependencies
+    dependencies = None if notebook_op else project_dependencies(root, project=project)
     project_root_write = (
         not readonly
+        and dependencies is None
         and project.get('kind') == 'pipeline'
         and project.get('phase') == 'implementation'
     )
@@ -163,6 +166,13 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
                         protected.append(root / entry.name)
         except OSError:
             pass
+    if dependencies is not None:
+        from demiflow.forge.dependencies import verify_interpreter
+        python = dependencies['environment']['interpreter']
+        verify_interpreter(python)
+        package_files = [root / item['path'] for item in dependencies['packages'].values()]
+        read.extend(package_files)
+        protected.extend((root / 'pyproject.toml', root / 'packages', Path(python['prefix']), *package_files))
     protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
     if not notebook_op:
         protected.extend(root / name for name in project.get('protected', []))
@@ -206,7 +216,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
         private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
         direct_network=direct_network,
-        read_policy='scoped' if readonly else 'inherit_os',
+        read_policy='scoped' if readonly or dependencies is not None else 'inherit_os',
         write_policy='project_root' if project_root_write else 'scoped')
 
 
@@ -841,7 +851,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
 
                 if warm_ready and not provider_opened:
                     proj_py = effective_project_python(project)
-                    shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py))
+                    shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py
+                                  and shims.dependency_lock == project.get('dependency_lock')))
                     compatible = (not compact) and (warm_operation == turn_op) and shims_ok
                     if compatible and deployment.mode == 'restricted':
                         provider_home = home / 'provider'
@@ -1250,16 +1261,18 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         send_parent('notify')
                     try:
                         current_session = store.session(session['id'])
-                        receipt = assess_turn(project['root'], submission=tid,
-                            author=dict(provider=session['provider'], session=current_session['provider_session'],
-                                completed=final == 'completed' and completed, cleanup='complete' if drained else 'unknown',
-                                acknowledged=saved['dispatch'] == saved['delivery'] == 'acknowledged'),
-                            goal=lambda: store.review_inputs(session['id'], include_paths=not selection or auto_review),
-                            changes=changes, selection=selection, auto_review=auto_review, round=rework_depth,
-                            budget=forge_opts.get('budget') or dict(calls=34, seconds=float(limits.review_seconds)), reference=coding, exclude=excluded, reviewer=reviewer,
-                            check_cancel=check_forge_cancel, source_current=source_current,
-                            protected_violations=protected_violations, project_python=effective_project_python(project),
-                            on_review=started_review, inspect=coding is not None)
+                        from demiflow.forge.dependencies import host_approval
+                        with host_approval(project['root'], project.get('dependency_lock'), effective_project_python(project)):
+                            receipt = assess_turn(project['root'], submission=tid,
+                                author=dict(provider=session['provider'], session=current_session['provider_session'],
+                                    completed=final == 'completed' and completed, cleanup='complete' if drained else 'unknown',
+                                    acknowledged=saved['dispatch'] == saved['delivery'] == 'acknowledged'),
+                                goal=lambda: store.review_inputs(session['id'], include_paths=not selection or auto_review),
+                                changes=changes, selection=selection, auto_review=auto_review, round=rework_depth,
+                                budget=forge_opts.get('budget') or dict(calls=34, seconds=float(limits.review_seconds)), reference=coding, exclude=excluded, reviewer=reviewer,
+                                check_cancel=check_forge_cancel, source_current=source_current,
+                                protected_violations=protected_violations, project_python=effective_project_python(project),
+                                on_review=started_review, inspect=coding is not None)
                         if receipt['checks'] is not None:
                             result['pipeline_checks'] = receipt['checks']
                         report = receipt['review']

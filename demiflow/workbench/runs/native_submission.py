@@ -15,7 +15,7 @@ from demiflow.workbench.projects import workspace as ws
 FORMAT = 'demiflow_forge_native_inspection_v1'
 
 
-def inspect_submission(root, *, table_resolver, entry, parameters, limits, explicit_limits=None, source_modules=None):
+def inspect_submission(root, *, table_resolver, entry, parameters, limits, explicit_limits=None, source_modules=None, dependencies=None):
     """Fixed disposable worker: original code construction is read-only."""
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_managed_pipeline, native_submission_view
@@ -29,7 +29,7 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, expli
     if not any(item['entry'] == entry and item['status'] == 'recognized' for item in project['entries']):
         raise ForgeError('Native entry must be declared by this project')
     target, symbol = ws.validate_entry(root, entry)
-    shared = SharedSources(root, {} if source_modules is None else source_modules)
+    shared = SharedSources(root, {} if source_modules is None else source_modules, dependencies=dependencies)
     sources = PythonSources(root, shared_imports=shared.importer)
     module = sources.entry_module(target)
     arguments, tables, targets, _ = resolve_arguments(root, control, parameters, table_resolver=table_resolver)
@@ -41,13 +41,15 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, expli
     sys.meta_path.insert(0, shared.importer)
     os.chdir(root)
     reads = set()
+    managed_paths = set(shared.paths.values())
     tracking = [False]
     def opened(event, args):
         if tracking[0] and event == 'open' and isinstance(args[0], (str, bytes)):
             path = Path(os.fsdecode(args[0])).absolute()
             # Native libraries own their files; only project Python/config
             # closure is copied. Fixed external inputs remain in place.
-            if path.is_relative_to(root):
+            private = dependencies is not None and path.name.startswith('.env')
+            if path.is_relative_to(root) and path not in managed_paths and not private:
                 if len(reads) >= 512 and path not in reads:
                     raise ForgeError('Native source resource closure exceeds budget')
                 reads.add(path)
@@ -105,10 +107,10 @@ def inspect_submission(root, *, table_resolver, entry, parameters, limits, expli
     return result
 
 
-def prepare(root, entry, *, parameters, limits, metadata, explicit_limits=None, source_modules=None):
+def prepare(root, entry, *, parameters, limits, metadata, explicit_limits=None, source_modules=None, dependencies=None):
     from demiflow.workbench.worker import operation
     report = operation('native_submission_inspect', root, entry=entry, parameters=parameters,
-                       limits=limits, explicit_limits=explicit_limits, _source_modules=source_modules)
+                       limits=limits, explicit_limits=explicit_limits, _source_modules=source_modules, _dependencies=dependencies)
     outputs = {}
     for index, output in enumerate(report['native_contract']['outputs']):
         uri = ws.no_symlinks(Path(output['uri']))
@@ -143,9 +145,16 @@ def prepare(root, entry, *, parameters, limits, metadata, explicit_limits=None, 
     return report, outputs
 
 
-def verify_basis(root, manifest, report):
-    from demiflow.forge import audit
+def verify_shared_sources(binding, *, sealed_packages=()):
     from demiflow.workbench.python_sources import bound_files, source_digest
+    for name, origin, _, digest in bound_files(binding):
+        if name not in sealed_packages and source_digest(origin) != digest:
+            raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
+
+
+def verify_basis(root, manifest, report, *, sealed_packages=()):
+    from demiflow.forge import audit
+    from demiflow.workbench.python_sources import source_digest
     root, workspace, platform = ws.load_workspace(root)
     audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
     binding = report['binding']
@@ -159,9 +168,7 @@ def verify_basis(root, manifest, report):
     for name, digest in binding['sources'].items():
         if source_digest(ws.relative_path(base, name)) != digest:
             raise ForgeError('Native prepared source changed', code='conflict')
-    for name, origin, _, digest in bound_files(binding):
-        if source_digest(origin) != digest:
-            raise ForgeError('Native prepared shared source changed: ' + name, code='conflict')
+    verify_shared_sources(binding, sealed_packages=sealed_packages)
     for resource in binding['resources'].values():
         if resource['kind'] in {'config', 'file'} and hashlib.sha256(read_bounded(
                 ws.relative_path(base, resource['path']), resource['max_bytes'])).hexdigest() != resource['sha256']:

@@ -245,7 +245,7 @@ def _join_sealed_observations(root, run_id, attempt, logical_view):
 
 
 def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
-        run_id=None, attempt=None, node_id=None, node_offset=0):
+        run_id=None, attempt=None, node_id=None, node_offset=0, authority=None):
     root, control, _ = ws.load_workspace(root)
     key = ws.workspace_id(root, control)
     if basis_kind not in {'source','report','run'}:
@@ -267,7 +267,7 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         if basis_kind == 'report':
             if not report_digest or run_id is not None or attempt is not None:
                 raise ForgeError('Report graph requires its digest', code='invalid_request')
-            result = project_ops.report_status(root, report_digest)
+            result = project_ops.report_status(root, report_digest, authority=authority)
             report, changes = result['report'], result['changes']
             fresh = result['verification']['complete'] and not changes
             status = result['status']

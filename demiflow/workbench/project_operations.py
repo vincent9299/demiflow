@@ -20,7 +20,7 @@ def begin_change_scope(root, *, writes, expected, watch_roots=None, limits=None)
     return ws._store_scope(root, value, baseline, writes, expected)
 
 
-def audit_check(root, *, kind, report_digest=None, expected_policy, full_interval=300):
+def audit_check(root, *, kind, report_digest=None, expected_policy, full_interval=300, authority=None):
     """Verify one object, then publish only a bounded derived observation."""
     from demiflow.workbench.worker import operation
     import time
@@ -31,7 +31,7 @@ def audit_check(root, *, kind, report_digest=None, expected_policy, full_interva
         raise ForgeError('Invalid audit target or interval', code='invalid_request')
     with ws.audit_lease(root, 'check'):
         try:
-            result = operation('audit_check', root, kind=kind, report_digest=report_digest, expected_policy=expected_policy)
+            result = operation('audit_check', root, kind=kind, report_digest=report_digest, expected_policy=expected_policy, _authority=authority)
         except ForgeError as exc:
             result = dict(status='unverifiable', complete=False, error=dict(code=exc.code, message=str(exc)[:2048]))
         stamp = time.time()
@@ -128,30 +128,40 @@ def set_table_view(root, alias, *, display, provenance, expected):
         display=display, provenance=provenance, expected=expected, fields=description['fields'])
 
 
-def register_flow(root, entry, *, params=None, authorize):
-    """Register an authored flow with this deployment's fixed table references."""
+def register_flow(root, entry, *, params=None, authorize, authority=None):
+    """Register an authored flow using the deployment's current authority."""
     from demiflow.forge.project import register_flow as register
+    from demiflow.workbench.projects.registry import dependency_scope, project_dependencies
     from demiflow.workbench.table_bindings import make_resolver
-    return register(root, entry, params=params, authorize=authorize,
-                    table_resolver=make_resolver(ws.table_binding, runs.result_table))
+
+    authorize()
+    expected = project_dependencies(root, authority=authority, verify_files=False)
+    def check_authority():
+        authorize()
+        if project_dependencies(root, authority=authority, verify_files=False) != expected:
+            raise ForgeError('Project dependency approval changed during registration', code='conflict')
+
+    with dependency_scope(root, authority=authority):
+        return register(root, entry, params=params, authorize=check_authority,
+                        table_resolver=make_resolver(ws.table_binding, runs.result_table))
 
 
-def inspect_flow(root, entry, *, params, save=True, limits=None):
+def inspect_flow(root, entry, *, params, save=True, limits=None, authority=None):
     from demiflow.workbench.worker import operation
 
     return operation(
-        "inspect", root, entry=entry, params=params, save=save, limits=limits
+        "inspect", root, entry=entry, params=params, save=save, limits=limits, _authority=authority
     )
 
 
-def check_project(root):
+def check_project(root, *, authority=None):
     from demiflow.workbench.worker import operation
-    return operation('project_check', root)
+    return operation('project_check', root, _authority=authority)
 
 
-def project_check_status(root):
+def project_check_status(root, *, authority=None):
     from demiflow.workbench.worker import operation
-    return operation('project_status', root)
+    return operation('project_status', root, _authority=authority)
 
 
 def sample_table(
@@ -209,10 +219,10 @@ def table_evidence(root, alias, *, row_id, field_path, expected_binding=None, ve
     return operation('table_evidence', root, **arguments)
 
 
-def report_status(root, digest, *, platform_check=True):
+def report_status(root, digest, *, platform_check=True, authority=None):
     from demiflow.workbench.worker import operation
 
-    return operation("status", root, digest=digest, platform_check=platform_check)
+    return operation("status", root, digest=digest, platform_check=platform_check, _authority=authority)
 
 
 def project_table(root, identity, *, expected, version=None):

@@ -796,7 +796,8 @@ class Handler(BaseHTTPRequestHandler):
                     args=dict(query)
                     for key in ('attempt','node_offset'):
                         if key in args:args[key]=int(args[key])
-                    value=get(root,**args)
+                    authority = run_authority(self.server, urlsplit(self.path).path, root, 'read')
+                    value=get(root,authority=authority.bootstrap(),**args)
                 elif url.path == '/api/pipeline-source':
                     from demiflow.workbench.graph.source_view import pipeline
                     value=pipeline(root,**query)
@@ -822,7 +823,10 @@ class Handler(BaseHTTPRequestHandler):
                     from demiflow.workbench.runs.requests import read
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
-                    value = project_ops.project_check_status(root)
+                    from demiflow.workbench.runs.authority import for_http
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
+                    authority.require(root, 'read')
+                    value = project_ops.project_check_status(root, authority=authority.bootstrap())
                 elif url.path == '/api/dictionary-sources':
                     from .notebooks.dictionary import discover
                     value = discover(root)
@@ -912,7 +916,8 @@ class Handler(BaseHTTPRequestHandler):
                 elif url.path=="/api/project-table-profile":
                     value=project_ops.project_profile(root,query["id"],expected=query["expected"],version=int(query["version"]),binding=query["binding"],columns=query["columns"])
                 elif url.path == "/api/report":
-                    value = project_ops.report_status(root, query["digest"])
+                    authority = run_authority(self.server, urlsplit(self.path).path, root, 'read')
+                    value = project_ops.report_status(root, query["digest"], authority=authority.bootstrap())
                 elif url.path == "/api/sample":
                     match = query["match"] if "match" in query else None
                     value = project_ops.sample_table(
@@ -1138,7 +1143,9 @@ class Handler(BaseHTTPRequestHandler):
                             raise PermissionError('Project membership or config-write grant changed')
 
                     if name == 'flow-register':
-                        value = project_ops.register_flow(root, authorize=authorize, **request)
+                        from demiflow.workbench.runs.authority import for_http
+                        authority = for_http(self.server, self.path, root, 'read')
+                        value = project_ops.register_flow(root, authorize=authorize, authority=authority.bootstrap(), **request)
                     elif name == 'flow-arguments-save':
                         from demiflow.workbench.projects.flow_arguments import save
                         value = save(root, authorize=authorize, **request)
@@ -1167,15 +1174,25 @@ class Handler(BaseHTTPRequestHandler):
                     from demiflow.workbench.runs.requests import reconcile
                     value=reconcile(root,request['request_id'])
                 elif name == 'inspect':
-                    value = project_ops.inspect_flow(root, **request)
+                    from demiflow.workbench.runs.authority import for_http
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
+                    authority.require(root, 'read')
+                    value = project_ops.inspect_flow(root, authority=authority.bootstrap(), **request)
                 elif name == 'plan-preview':
                     from demiflow.workbench.graph.preview import preview
-                    value = self.server.plan_snapshots.put(root, preview(root, **request))
+                    from demiflow.workbench.runs.authority import for_http
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
+                    authority.require(root, 'read')
+                    value = self.server.plan_snapshots.put(root, preview(root, _authority=authority.bootstrap(), **request))
                 elif name == 'project-check':
-                    value = project_ops.check_project(root)
+                    from demiflow.workbench.runs.authority import for_http
+                    authority = for_http(self.server, urlsplit(self.path).path, root, 'read')
+                    authority.require(root, 'read')
+                    value = project_ops.check_project(root, authority=authority.bootstrap())
                 elif name == 'audit-check':
+                    authority = run_authority(self.server, self.path, root, 'read')
                     value = project_ops.audit_check(root, kind=request['kind'], expected_policy=request['expected_policy'],
-                                            report_digest=request.get('digest'))
+                                                    report_digest=request.get('digest'), authority=authority.bootstrap())
                 elif name in {'workflow-start', 'workflow-cancel', 'workflow-resume', 'workflow-reconcile'}:
                     from demiflow.workbench.workflows import manager as wf_mgr
                     inv = self.server.inventory()

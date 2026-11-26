@@ -104,11 +104,15 @@ class Deployment:
             reject('Configure 1..128 explicitly permitted projects')
         for key, project in self.projects.items():
             required = {'root', 'kind', 'phase', 'writes', 'watch', 'sources', 'non_goals', 'authorization'}
-            optional = {'protected', 'python', 'dev_network'}
+            optional = {'protected', 'python', 'dev_network', 'dependency_lock'}
             if type(project) is not dict or not required <= project.keys() or project.keys() - required - optional:
                 reject('Invalid project development grant')
             if 'dev_network' in project and type(project['dev_network']) is not bool:
                 reject('Configured project dev_network must be a boolean')
+            if 'dependency_lock' in project:
+                from re import fullmatch
+                if type(project['dependency_lock']) is not str or not fullmatch('[0-9a-f]{64}', project['dependency_lock']):
+                    reject('Invalid project dependency approval')
             if 'python' in project:
                 py_val = project['python']
                 if py_val != '':

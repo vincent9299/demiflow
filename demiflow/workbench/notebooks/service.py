@@ -76,7 +76,7 @@ class Notebooks:
 
     def get(self, project, *, initialize=True):
         root, permissions = self.authorize(project)
-        kernel_python, _, _ = self._project_kernel_policy(project, root)
+        kernel_python, _, _, _ = self._project_kernel_policy(project, root)
         grants = dict(writable=permissions['analysis_write'], execute=permissions['analysis_execute'],
                       has_python=bool(kernel_python))
         with self.lock:
@@ -238,10 +238,11 @@ class Notebooks:
                 locations.append(str(ws.location_root(root, loc)))
         except Exception:
             pass
-        return kernel_python, sandbox, sorted(set(locations))
+        return kernel_python, sandbox, sorted(set(locations)), item
 
     def _write_kernel_config(self, project, root, state):
-        kernel_python, sandbox, locations = self._project_kernel_policy(project, root)
+        from demiflow.workbench.projects.workspace import scoped_data_location
+        kernel_python, sandbox, locations, item = self._project_kernel_policy(project, root)
         code_root = Path(__file__).resolve().parents[3]
         payload = {
             'python': kernel_python,
@@ -253,6 +254,21 @@ class Notebooks:
             'write_paths': sandbox['write_paths'],
             'locations': locations,
         }
+        from demiflow.workbench.projects.registry import project_dependencies
+        try:
+            dependencies = project_dependencies(root, project=item, verify_files=False)
+        except (OSError, ValueError) as exc:
+            # Existing kernels keep their frozen source. Only a future launch
+            # consumes the new admission result.
+            payload['dependency_error'] = str(exc)[:512]
+        else:
+            if dependencies is not None:
+                private = [self.temp.name]
+                if self.server.registry is not None:
+                    private.append(self.server.registry)
+                payload['locations'] = [str(path) for location in locations
+                                        if (path := scoped_data_location(root, location, private=private)) is not None]
+                payload['dependency_lock'] = dependencies['digest']
         temporary = state / 'kernel-config.tmp'
         temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
         temporary.chmod(0o600)
@@ -263,7 +279,7 @@ class Notebooks:
             instance = self.instances.get(project)
             if instance is not None and instance.process.poll() is None:
                 self._write_kernel_config(project, instance.root, instance.state)
-                kernel_python, _, _ = self._project_kernel_policy(project, instance.root)
+                kernel_python, _, _, _ = self._project_kernel_policy(project, instance.root)
                 updated = {**instance.grants, 'has_python': bool(kernel_python)}
                 if updated != instance.grants:
                     self._grants(instance.state, updated)
