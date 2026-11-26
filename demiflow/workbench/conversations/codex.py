@@ -210,7 +210,10 @@ class Codex:
         method, params = event.get('method'), event.get('params', {})
         if type(method) is not str or type(params) is not dict: reject('Invalid provider event')
         if params.get('threadId') not in {None, self.thread}: reject('Provider thread identity mismatch')
-        if self.turn and params.get('turnId') not in {None, self.turn}: reject('Provider turn identity mismatch')
+        if self.turn and params.get('turnId') not in {None, self.turn}:
+            if 'id' not in event and method == 'thread/tokenUsage/updated' and params.get('threadId') == self.thread:
+                return []  # Native resume can republish usage from the preceding turn.
+            reject('Provider turn identity mismatch: ' + method)
         if 'id' in event:
             if params.get('threadId') != self.thread or not params.get('turnId'):
                 reject('Server request lacks current thread/turn identity')

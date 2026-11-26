@@ -643,7 +643,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     result = registered_project_catalog(workflow_registry, session['workspace'], project['root'], arguments)
                     for row in result.get('flows', ()):
                         detail = json.dumps({key:result[key] for key in ('workspace_id', 'name')} |
-                                            {key:row[key] for key in ('entry', 'params')}, ensure_ascii=False)
+                                            {key:row[key] for key in ('entry', 'params', 'keys', 'keys_complete')}, ensure_ascii=False)
                         fact = dict(source='workbench_registered_binding', detail=detail)
                         if len(catalog_observations) < 8 and len(detail.encode()) <= 2048 and fact not in catalog_observations:
                             catalog_observations.append(fact)
