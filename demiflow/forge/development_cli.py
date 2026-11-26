@@ -92,10 +92,11 @@ def _restricted_command(binding, session, home, channel):
     else:
         from .bridge.model_channel import plugin_path
         from .review_deepseek import _installation
+        from .io import ensure_directory, publish_bytes
         exe, node = _installation(config)
         route = config.get('model_provider', 'deepseek-official')
         profile = Path(home) / 'profiles' / 'forge-author'
-        profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+        ensure_directory(profile)
         manifest = {'name': 'forge-author', 'private': True, 'dsh': {'profile': {
             'bundles': ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless']}}}
         proxy = dict(id='forge-model', name=str(plugin_path('deepseek_model_proxy.cjs')), config=dict(
@@ -103,8 +104,9 @@ def _restricted_command(binding, session, home, channel):
             requestSeconds=config['_request_seconds'], llmModule=str(exe.parents[1] / 'node_modules/@deepseek-ai/dsh-llm/lib/index.js')))
         overlay = [dict(id='llm-deepseek', disabled=True), dict(id='llm-deepseek-account', disabled=True),
                    dict(id='agent-default-model', config=dict(provider=route, model=config['model'])), dict(insert=[proxy])]
-        (profile / 'package.json').write_text(json.dumps(manifest))
-        (profile / 'cordis.patch.yml').write_text(json.dumps(overlay))
+        # The native session owns this home between turns. Publish through a verified directory handle.
+        publish_bytes(profile / 'package.json', json.dumps(manifest).encode(), create=False)
+        publish_bytes(profile / 'cordis.patch.yml', json.dumps(overlay).encode(), create=False)
         command = [str(node), str(exe), *author_command(dict(binding, profile='forge-author'), session)[1:]]
     return command, env
 
