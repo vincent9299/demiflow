@@ -209,7 +209,8 @@ def seccomp(*, direct_network=False, verifier=False, legacy_truncate_only=False)
                 mask = os.O_ACCMODE | os.O_TRUNC
                 rule(name, ((position, 7, mask, os.O_RDONLY | os.O_TRUNC),), action=denied)
             # The flags of openat2 are indirect and cannot be compared in BPF.
-            rule('openat2', action=0x00050000 | errno.ENOSYS)
+            for name in ('openat2', 'io_uring_setup', 'io_uring_enter', 'io_uring_register'):
+                rule(name, action=0x00050000 | errno.ENOSYS)
             checked(sec.seccomp_load(context), 'seccomp_load')
             return
         finally:
