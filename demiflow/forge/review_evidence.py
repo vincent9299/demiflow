@@ -322,7 +322,7 @@ def _local_bindings(source, entries):
     return sorted(bindings, key=lambda pair: (pair[0], pair[1] or ''))
 
 
-def _file_size(item):
+def evidence_file_size(item):
     sources = sum(len(item[side].encode()) for side in ('before', 'after') if item.get(side) is not None)
     return sources + (len(canonical(item['workspace_registration'])) if 'workspace_registration' in item else 0)
 
@@ -517,7 +517,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
                                       params_bound=bound in declared_entries.get(declared, ()) if visible else None))
             item['workspace_registration'] = dict(manifest='workspace.json',
                 registered=name in control.get('workflows', ()), local_bindings=local)
-        remaining -= _file_size(item)
+        remaining -= evidence_file_size(item)
         if remaining < 0:
             raise ForgeError('Evidence exceeds its total byte limit; narrow the review scope', code='resource_limit')
         files[name] = item
@@ -549,7 +549,7 @@ def review_units(captured):
     grouped = {name for group in captured.get('groups', ()) for name in group}
     attachments.update(files.keys() - grouped - targets)
     units, covered = [], set()
-    sizes = {name: _file_size(item) for name, item in files.items()}
+    sizes = {name: evidence_file_size(item) for name, item in files.items()}
 
     def fits(names):
         return len(names) <= UNIT_FILES and sum(sizes[name] for name in names) <= UNIT_BYTES

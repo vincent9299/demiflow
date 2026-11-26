@@ -148,6 +148,7 @@ def test_workflow_review_links_only_local_bindings_and_rechecks_the_candidate(tm
     assert request['workflow_authoring'] and request['files'][PATH]['workspace_registration'] == registration
     checks = {row['source']: json.loads(row['detail']) for row in request['host_observations']}
     assert checks['project_layout']['stage'] == 'author_submission'
+    assert checks['project_layout']['workflow_checks'] == [dict(path=PATH, status='passed')]
     register_workflow(root, PATH)
     assert not verify_evidence(root, evidence)
     evidence = capture_evidence(root, paths=[PATH])
@@ -172,6 +173,7 @@ def test_review_rechecks_manifest_binding_without_a_workflow_edit(tmp_path):
                           reviewer=response_for, auto_review=True)
     checks = {row['source']: json.loads(row['detail']) for row in receipt['review']['observations']}
     assert checks['project_layout']['stage'] == 'recheck_after_feedback'
+    assert checks['project_layout']['workflow_checks'] == [dict(path=PATH, status='failed')]
     assert any(d['rule'] == 'WF-04' and d['path'] == PATH for d in checks['project_layout']['diagnostics'])
 
 

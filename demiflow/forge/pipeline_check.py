@@ -459,7 +459,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
                     wf_spec = validate_workflow(root, path, control=view['control'])
                     layout.extend(wf_spec['diagnostics'])
                     definitions.append(dict(
-                        path=path,
+                        path=path, status=wf_spec['status'],
                         format=wf_spec.get('format') or 'demiflow_workflow_v1',
                         symbols=[n['id'] for n in wf_spec.get('nodes') or ()],
                         scope='definition', unverified_projects=wf_spec['unverified_projects'],

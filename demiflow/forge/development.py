@@ -13,7 +13,7 @@ from .project_rules import diagnostic
 from .platform import content_digest
 from .platform_environment import read_bounded
 from .review import review_project, MAX_REVIEW_CALLS, REVIEW_SECONDS
-from .schema import ForgeError
+from .schema import ForgeError, canonical
 
 def has_code_changes(changes):
     """True when at least one non-documentation business code/config file changed."""
@@ -122,6 +122,24 @@ def feedback_current(root, options, author):
     return candidate_identity(capture(root, basis['watch'], exclude=basis['exclude'])) == basis['digest']
 
 
+def _static_review_observation(source, check, definitions, stage):
+    detail = dict(stage=stage, status=check['status'], diagnostic_count=check.get('diagnostic_count', 0))
+    samples = {'diagnostics': check.get('diagnostics', ())[:4]}
+    if source == 'project_layout':
+        workflows = [dict(path=item['path'], status=item['status']) for item in definitions
+                     if item['path'].startswith('workflows/') and 'status' in item]
+        if workflows:
+            detail['workflow_count'] = len(workflows)
+            samples['workflow_checks'] = workflows[:4]
+    detail.update({field: [] for field in samples})
+    for field, rows in samples.items():
+        for row in rows:
+            detail[field].append(row)
+            if len(canonical(detail)) > 2048:
+                detail[field].pop()
+    return dict(source=source, detail=canonical(detail).decode())
+
+
 def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection=None,
                 auto_review=False, round=0, budget=None, reference=None, exclude=(),
                 reviewer=None, check_cancel=None, source_current=None, protected_violations=(),
@@ -173,19 +191,11 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
             if reviewer is None:
                 raise ForgeError('独立评审模型尚未配置。', code='inspection_incomplete')
             observations = list(observations(definitions)) if observations else []
+            stage = 'recheck_after_feedback' if round else 'author_submission'
             for key in ('native_flow', 'project_layout'):
                 item = (receipt['checks'] or {}).get(key)
                 if item:
-                    detail = dict(status=item['status'], diagnostic_count=item.get('diagnostic_count', 0),
-                                  stage='recheck_after_feedback' if round else 'author_submission', diagnostics=[])
-                    for row in item.get('diagnostics', ())[:4]:
-                        finding = {k: row[k] for k in ('rule', 'path', 'line', 'status', 'detail') if k in row}
-                        if 'detail' in finding:
-                            finding['detail'] = finding['detail'][:160]
-                        detail['diagnostics'].append(finding)
-                        if len(json.dumps(detail, ensure_ascii=False).encode()) > 2048:
-                            detail['diagnostics'].pop()
-                    observations.append(dict(source=key, detail=json.dumps(detail, ensure_ascii=False)))
+                    observations.append(_static_review_observation(key, item, definitions, stage))
             receipt['review'] = review_project(root, goal=text, **selected,
                 paths=() if selected else tuple(prior or paths), prior_sources=None if selected else prior,
                 exclude=exclude, observations=observations, reviewer=reviewer, budget=budget,

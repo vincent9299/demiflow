@@ -315,9 +315,9 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
                 added = {name: expanded['files'][name] for name in requested}
                 unit = dict(unit, files={**unit['files'], **added})
                 # Check the same unit limits before sending any additional material.
-                from .review_evidence import UNIT_FILES, UNIT_BYTES
-                if len(unit['files']) > UNIT_FILES or sum(len(v.encode()) for f in unit['files'].values()
-                        for side in ('before', 'after') if (v := f.get(side)) is not None) > UNIT_BYTES:
+                from .review_evidence import UNIT_FILES, UNIT_BYTES, evidence_file_size
+                if (len(unit['files']) > UNIT_FILES or
+                        sum(evidence_file_size(item) for item in unit['files'].values()) > UNIT_BYTES):
                     raise ForgeError('补读超过本片评审材料预算。', code='resource_limit')
                 captured = expanded
                 report['evidence_id'] = captured['identity']
