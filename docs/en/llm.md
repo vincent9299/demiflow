@@ -187,4 +187,5 @@ In this mode the platform sends the messages as they are: no system instruction 
 
 - `map_prompt_async` currently supports local execution only.
 - Concurrency and queues limit rows. Estimate the memory of large images and long contexts yourself as "concurrency × size of one request".
+- The number of requests in flight is also bounded by a memory window: each request reserves the actual size of its input row plus one full output row. Under the default budget "read → model call → output" runs at most 7 requests at once; further requests queue and nothing fails. The concurrency actually reached is `call_concurrency` in the run statistics; see [streaming map](streaming-map.md#estimating-memory).
 - `max_requests` applies within one process; it is not a global quota across processes.

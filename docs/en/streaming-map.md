@@ -121,6 +121,10 @@ Concurrency and queues limit **rows**, not bytes. The amount resident in one nod
 queue_depth × input row size + concurrency × (input row + output row + temporary objects)
 ```
 
+A per-row node with concurrency above 1 (a `map` with concurrency, `map_async`, model calls and the like) also has a call window counted in bytes. Before a call starts it reserves the actual bytes of its input row plus one full output row (the row limit `max_row_bytes`), and returns them when the call ends. When the window is full, a new call waits for earlier calls to finish; nothing fails. The window always holds at least one call, so any single row within the row limit can be processed. The number of calls in flight is the smaller of `concurrency` and what the window holds.
+
+With the default 256 MB budget and 16 MB row limit, a pipeline of the form "read → one concurrent node → output" runs at most 7 calls at once; the more stages run together, the fewer calls fit. For more, raise `memory_bytes` or lower the row limit `max_row_bytes`. The concurrency actually reached is `call_concurrency` in the statistics below.
+
 When rows are large, lower `concurrency` and `queue_depth`, or project the fields you need first. The platform does not set a hard memory limit for arbitrary Python objects.
 
 ## Reading the statistics
@@ -133,4 +137,5 @@ The object returned by `run_stream()`:
 | `stats.miss` | Rows dropped by `catch`, counted per node and exception type |
 | `stats.emitted` | Output row count of the last node |
 | `stats.metrics['stage_policies']` | The concurrency, queue and execution mode actually in effect for every node |
+| `stats.metrics['call_concurrency']` | For every concurrent node: declared concurrency `capacity`, highest concurrency reached `peak`, admissions that waited for the memory window `byte_waits`, window size `byte_limit` and the output each call reserves `output_reserve`; `limited_by` is `'memory'` when memory held the concurrency down. Actions such as `take_all` report the same in `stats['call_concurrency']` of `local_execution` |
 | `stats.summary()` | A one-line text summary of the counts above |

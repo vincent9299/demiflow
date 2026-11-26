@@ -609,20 +609,26 @@ class OperatorKernel:
                         self._create_instance(slot)
                 if self._concurrency > 1:
                     from demiflow.execution.kernels.concurrent_calls import ConcurrentCalls
-                    input_limit = None
+                    byte_limit = None
                     minimum = self._spec.configuration.get('codec_min_bytes')
                     credit = self._spec.configuration.get('call_input_min_bytes')
+                    reserve = self._spec.configuration.get('call_output_min_bytes')
                     if credit is None and self._spec.kind == 'AsyncMapOp' and minimum is not None:
                         # Sealed before the credit was declared: only async map
                         # had a one-row input credit inside its minimum.
                         credit = self._services.bounds.max_row_bytes
+                    if reserve is not None and credit is None:
+                        raise _err('INVALID_CONTRACT', 'call output reserve has no sealed input credit')
                     if credit is not None:
                         if minimum is None:
                             raise _err('INVALID_CONTRACT', 'call input credit has no sealed minimum')
+                        # A plan sealed with an output reserve kept one output for
+                        # one call in its minimum; earlier plans kept one per slot.
                         grant = self._spec.profile.requests['memory_bytes']
-                        input_limit = credit + grant - minimum
+                        byte_limit = credit + (reserve or 0) + grant - minimum
                     self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop,
-                                                  input_limit=input_limit, clock=self.observations.busy)
+                                                  byte_limit=byte_limit, output_reserve=reserve or 0,
+                                                  clock=self.observations.busy)
             from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS as KINDS
             from demiflow.execution.kernels.batch_membership import NativeBatchMembership
             if self._spec.kind in KINDS:
@@ -768,6 +774,11 @@ class OperatorKernel:
     @property
     def pending_calls(self):
         return self._calls is not None and self._calls.pending
+
+    @property
+    def call_concurrency(self):
+        """Attempt-local concurrency facts of the call slots; None without concurrent calls."""
+        return self._calls.concurrency() if self._calls is not None else None
 
     @property
     def can_snapshot_pending(self):

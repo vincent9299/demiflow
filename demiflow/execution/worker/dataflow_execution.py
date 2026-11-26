@@ -554,7 +554,7 @@ class DataflowWorkerExecutor:
                     payload = runner._metrics_payload(key[0])
                     if any(payload.get(field) is not None for field in (
                             'actor_lifecycle', 'callback_observations', 'output_handoff',
-                            'prompt_usage', 'model_observations')):
+                            'call_concurrency', 'prompt_usage', 'model_observations')):
                         from demiflow.execution.contracts.dataflow_codec import encode_wire
                         import json
                         raw = encode_wire(self._event('progress', payload=payload),
