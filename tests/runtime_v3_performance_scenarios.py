@@ -27,7 +27,7 @@ import time
 import traceback
 
 OWN_TREE = Path(__file__).resolve().parents[1]
-PLAN_PATH = OWN_TREE / 'docs/runtime-v3-review-20261115/PERFORMANCE-PLAN-20261116.json'
+PLAN_PATH = OWN_TREE / 'tests/runtime_v3_package/PERFORMANCE-PLAN-20261116.json'
 MODULUS = 1 << 256
 TIMING_BOUNDARY = {
     'schema': 'demiflow.performance.timing.v1',

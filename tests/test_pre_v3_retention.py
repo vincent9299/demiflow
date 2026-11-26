@@ -1,6 +1,6 @@
 """Why each piece of pre-v3 execution code is still here, and that nothing new leans on it.
 
-``docs/unified-runtime-v3-20261114/MIGRATION.md`` asks for this: retired symbols are deleted
+The runtime v3 migration plan (archived design record unified-runtime-v3-20261114/MIGRATION.md) asks for this: retired symbols are deleted
 card by card, and "仍有真实消费者的旧内部符号必须列出保留依据". ``pre_v3_retention.json`` is that
 list. It names every module of the execution paths that predate ``execute_action`` and, for
 modules that hold both live and old code, every top-level symbol:

@@ -81,7 +81,7 @@ def test_real_legacy_graph_and_sealed_time(owned_fixture, browser):
 
 
 def v3_payload(*, terminal=False):
-    sample = json.loads((TREE / 'docs/workbench-demo-alignment-20261114/samples/runtime-v3-wire.json').read_text())
+    sample = json.loads((TREE / 'tests/fixtures/runtime-v3-wire.json').read_text())
     assert sample['not_runtime_evidence'] is True
     entry, binding = sample['entry'], sample['binding']
     report_digest = 'd' * 64  # A run's manifest digest is a different identity.

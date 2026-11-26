@@ -28,7 +28,7 @@ from typing import Any, Callable, Iterator, Mapping
 
 # The worktree that owns this test file. tests/runtime_v3_support.py -> root.
 WORKTREE = Path(__file__).resolve().parent.parent
-TASK_PACKAGE = WORKTREE / "docs" / "unified-runtime-v3-20261114"
+TASK_PACKAGE = WORKTREE / "tests" / "runtime_v3_package"
 
 PROVIDERS = ("local", "ray_core")
 ENVIRONMENTS = ("local", "ray", "gpu", "two_hosts", "browser")

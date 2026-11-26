@@ -1,4 +1,0 @@
-2026-11-15 12:58:41,598	WARNING authentication_token_setup.py:85 -- Token authentication is enabled for this Ray cluster. Set RAY_AUTH_MODE=disabled to opt out. For more information, see https://docs.ray.io/en/latest/ray-security/token-auth.html
-2026-11-15 12:58:44,890	INFO worker.py:2038 -- Started a local Ray instance.
-{"ray": "2.60.0", "activated": true, "host_count": 1, "full_business_run": false}
-{"cleanup_confirmed": true, "full_business_run": false}

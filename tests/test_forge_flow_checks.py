@@ -23,7 +23,7 @@ def catalog():
 def composition(tmp_path, catalog):
     for directory in ("flows", "operators"):
         (tmp_path / directory).mkdir()
-    doc = Path(__file__).parents[1] / "docs/forge-stage2-contract-design-20261102.md"
+    doc = Path(__file__).parents[1] / "tests/fixtures/forge-stage2-contract-design-20261102.md"
     blocks = re.findall(r"```python\n(.*?)\n```", doc.read_text(), re.S)
     op = tmp_path / "operators/question_rules.py"
     op.write_text(blocks[0] + "\n")
