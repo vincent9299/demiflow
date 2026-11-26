@@ -425,10 +425,15 @@ def install(root, python):
         if declaration(root) != config:
             raise ForgeError('Dependency declaration changed before installation', code='inputs_changed')
         if config['requirements']:
+            index_options = {'PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL', 'PIP_NO_INDEX', 'PIP_FIND_LINKS',
+                             'PIP_TRUSTED_HOST', 'PIP_CERT'}
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith('PIP_') or key in index_options}
+            environment['PIP_CONFIG_FILE'] = os.devnull
             try:
                 subprocess.run([str(python), '-I', '-m', 'pip', '--disable-pip-version-check',
                                 'install', '--no-input', '--', *config['requirements']],
-                               timeout=300, check=True, stdout=2)
+                               env=environment, timeout=300, check=True, stdout=2)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                 raise ForgeError('Project dependency installation failed', code='operation_failed') from error
     return {'status': 'installed'}

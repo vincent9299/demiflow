@@ -467,8 +467,20 @@ def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
     process = subprocess.Popen([sys.executable, '-IB', kernel_launcher.__file__, str(config), connection],
                                cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
+        from queue import Empty
+        import time
         client.start_channels()
-        client.wait_for_ready(timeout=25)
+        request = client.kernel_info()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and process.poll() is None:
+            try:
+                reply = client.get_shell_msg(timeout=.5)
+            except Empty:
+                continue
+            if reply['parent_header'].get('msg_id') == request:
+                break
+        else:
+            raise AssertionError('The managed project kernel did not answer kernel_info')
         (source / 'later.py').write_text('VALUE = 99\n')
         message = client.execute('from pathlib import Path\nfrom notebook_dependency_fixture.later import VALUE\n'
             f'assert VALUE == 7\ntry:\n    Path({str(root / "pyproject.toml")!r}).write_text("blocked")\n'

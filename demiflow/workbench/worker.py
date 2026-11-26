@@ -213,6 +213,11 @@ def prepare_native(*, analysis_read, confined=False):
     pa.set_cpu_count(1 if analysis_read else 2)
     pa.set_io_thread_count(1 if analysis_read else 2)
     if confined:
+        # The launcher accounts real RSS outside the sandbox. Lance still
+        # requires a finite virtual memory limit for opening fixed tables.
+        ceiling = min([4 * 1024**3, *(limit for limit in resource.getrlimit(resource.RLIMIT_AS)
+                                       if limit != resource.RLIM_INFINITY)])
+        resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
         return
     with open("/proc/self/statm") as source:
         baseline = int(source.read(128).split()[0]) * os.sysconf("SC_PAGE_SIZE")
