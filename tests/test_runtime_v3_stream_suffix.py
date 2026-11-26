@@ -34,7 +34,7 @@ def _capture(monkeypatch):
 def _check_budget(physical):
     """Every group of stages resident together, plus the control reservation, fits memory_bytes.
 
-    Memory grants come from the selected layout (docs/dataset-engine-architecture.md),
+    Memory grants come from the selected layout (docs/demiflow-architecture.md),
     so they are checked against the budget rather than re-derived per operator.
     """
     stages = {s.stage_id: s for s in physical.stages}

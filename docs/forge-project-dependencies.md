@@ -1,5 +1,7 @@
 # Forge 项目依赖
 
+本节说明工程操作。模块职责见 [DemiFlow 架构规约](demiflow-architecture.md)。
+
 业务项目以根目录的 `pyproject.toml` 作为唯一依赖声明，直接运行在显式配置的项目 Python 环境中（不创建隐藏 `.forge/venv/`，也不维护独立的 `.forge/deps.lock.json` 锁文件或手工摘要审批）。
 
 - **A 类依赖（`[project].dependencies`）**：安装到项目显式 Python 环境中的标准 PEP 508 分发包。
