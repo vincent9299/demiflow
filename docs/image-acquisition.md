@@ -32,13 +32,10 @@ fetch 只记录原始获取事实。业务通过后续普通 fn/actor 写独立�
 policy 必须提供 `max_bytes`、`max_pixels`、`max_frames`、`decode_memory_bytes`、
 `decode_timeout_s`。调用方用普通 map 的并发或有界 gate 限制同时解码数。
 子进程应用内存/CPU/墙钟限制，失败不改写获取回执，不重新 HTTP。
-`image_filters.ImageFilters`、`header_dimensions`、`ImageHeaderProbe` 与
-`declared_dimensions` 是独立内容选择原语；头部探测至多保留 128 KiB。
-过滤条件不再藏在下载策略中。
+尺寸等过滤条件由业务在解码之后自行判断，不再藏在下载策略中。
 
 ```python
 from demiflow.collect.image_decode import decode_image
-from demiflow.collect.image_filters import ImageFilters
 
 def quality(row):
     result = row['result']
@@ -49,15 +46,13 @@ def quality(row):
         'max_bytes': 20*1024**2, 'max_pixels': 40_000_000, 'max_frames': 1,
         'decode_memory_bytes': 256*1024**2, 'decode_timeout_s': 30,
     })
-    reason = ImageFilters(min_long_side=1024).rejection(info['width'], info['height'])
+    reason = None if max(info['width'], info['height']) >= 1024 else 'min_long_side'
     return {**row, 'quality': {'accepted': reason is None, 'reason': reason, **info}}
 # 对结算后的固定 history Dataset 执行 history.map(quality)。
 ```
 
-## 通用图片库与历史读取
+## 历史读取
 
-`ImageLibrary` 声明本地对象与精确 URL/SHA 索引；保留 `lookup`、`reference`、
-显式 `publish`/导入和有界锁，没有网络、缓存回退、下载重试或自动结算。
 历史对象使用前由 `ObjectRef.read/verify` 或 `decode_image` 核验实际内容。
 旧索引命中不替代内容验证，不重新获取来掩盖对象丢失或损坏。
 

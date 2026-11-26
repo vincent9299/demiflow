@@ -6,20 +6,11 @@
 不解析、不访问文档索引。完整预算、HTTP/COS、恢复与结算见
 [原始对象获取](dataset-fetch.md)。旧 Download 与 Dataset.fetch_documents 已移除。
 
-`ParseDocument(store=..., max_raw_bytes=..., max_document_bytes=...,
-timeout_s=..., pdf_parser=...)` accepts exactly `raw_ref`, `url`, `final_url`,
-`content_type`, `retrieved_at`. It reads and verifies that object, parses generic
-HTML/plain text or explicitly enabled PDF, and writes a normalized document.
-It never fetches the source URL. Parsing runs in a drained, timed child process;
-this wall-time isolation is not an RSS hard limit. Source-specific parsing is
-owned by consumers, using `publish_document` for the common document format.
-Raw and normalized stores may be different. Only local object writes are
-supported here. Object references remain immutable URIs and SHA256 hashes.
-An optional caller-owned `request_gate` with async `enter()` admission bounds
-parsing across multiple actors. It is independent of stores and index access.
-Invalid/oversized normalized content returns a parse-error receipt retaining
-the raw reference; storage errors propagate. No storage or process is created
-by callable construction.
+The `ParseDocument` callable is removed. Callers parse a retained raw object in
+their own map function with `demiflow.collect.documents.parse_document(body,
+url=..., final_url=..., content_type=...)`; it never fetches the source URL.
+Normalized document bytes are decoded in a flow with `Dataset.decode_document`.
+Object references remain immutable URIs and SHA256 hashes.
 
 `Dataset.lookup(source, key='url', output='existing')` is a cardinality-preserving
 KV read. A source implements `get(key) -> {hit: bool, value: JSON}` and owns its

@@ -87,19 +87,6 @@ def test_profile_change_separates_search_cache(tmp_path):
     assert calls[0]['engines']=='wikipedia' and 'categories' not in calls[0]
 
 
-def test_reparse_retained_raw_snapshot(tmp_path,monkeypatch):
-    from demiflow.collect.acquisition import ParseDocument
-    from demiflow.objects import LocalObjectStore
-    from demiflow.collect.documents import read_document
-    raw=LocalObjectStore(tmp_path/'raw').put(b'<main><p>Public text</p></main>')
-    request=dict(raw_ref=raw.to_dict(),url='https://example.org/',final_url='https://example.org/',
-                 content_type='text/html',retrieved_at='fixed')
-    parser=ParseDocument(store=LocalObjectStore(tmp_path/'parsed'))
-    first=asyncio.run(parser(request));second=asyncio.run(parser(request))
-    assert first==second and first['raw_ref']==raw.to_dict() and first['status']=='ok'
-    assert read_document(first['document_ref'])['blocks'][0]['text']=='Public text'
-
-
 def test_public_main_survives_sidebar_login_and_table_rows():
     body=b'<aside><form><input type="password"></form></aside><main><p>Public body</p><table><tr><th>Name</th><th>Size</th></tr><tr><td>A</td><td>10</td></tr></table></main>'
     doc=parse_document(body,url='https://example.org',final_url='https://example.org',content_type='text/html')
