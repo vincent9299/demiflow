@@ -156,13 +156,15 @@ def _changed_files(root, base, excluded):
 
 
 class _ProjectEvidence:
-    def __init__(self, root, excluded, deleted):
+    def __init__(self, root, excluded, deleted, dependency_packages=()):
         self.deleted = deleted
         self.root = root
         self.excluded = excluded
         self.text = {}
         self.edges = {}
         self.gaps = {}
+        self.dependency_packages = dependency_packages
+        self.dependency_imports = {}
         self.scanned = 0
         self.lookups = 0
 
@@ -203,6 +205,9 @@ class _ProjectEvidence:
         if not parts:
             return set()
         first = parts[0]
+        if not relative and first in self.dependency_packages:
+            self.dependency_imports.setdefault(file, set()).add(first)
+            return set()
         path = '/'.join(parts)
         module_file = path + '.py'
         package_file = path + '/__init__.py'
@@ -318,13 +323,19 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         raise ForgeError('Select a project directory and one valid review scope', code='invalid_request')
     if len(paths) + len(evidence) > MAX_FILES or len(exclude) > 256:
         raise ForgeError('Review path list exceeds its limit', code='resource_limit')
-    from .dependencies import binding as dependency_binding, facts as dependency_facts
-    dependencies = dependency_facts(dependency_binding(root))
+    from .dependencies import LOCK, binding as dependency_binding, facts as dependency_facts
+    locked_facts = dependency_facts(dependency_binding(root))
     excluded = tuple(exclude)
-    if dependencies is not None:
-        excluded = (*excluded, 'packages')
+    dependency_paths = {'pyproject.toml', LOCK} if locked_facts else set()
+
+    def is_dependency_path(name):
+        return name in dependency_paths or bool(locked_facts and Path(name).parts[:1] == ('packages',))
+
+    if locked_facts is not None:
+        excluded = (*excluded, 'packages', 'pyproject.toml')
     for name in (*paths, *evidence):
-        _check_path(root, name, excluded)
+        if not is_dependency_path(name):
+            _check_path(root, name, excluded)
     if prior_sources is not None:
         if not paths or base or not isinstance(prior_sources, dict) or set(prior_sources) != set(paths):
             raise ForgeError('Observed changes require a before/after basis for every selected path',
@@ -356,19 +367,36 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
     if not revision and mode == 'paths' and any(not (root / name).exists() for name in paths):
         revision = _revision(root, 'HEAD')
     explicit = [filename] if entry else list(dict.fromkeys(paths))
+    changed_controls = {name for name in explicit if is_dependency_path(name)}
     if mode == 'changes':
         targets, history = _changed_files(root, revision, excluded)
-        if not targets:
+        if locked_facts is not None:
+            controls = sorted((*dependency_paths, 'packages'))
+            changed = _git(root, '--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', '-z', revision, '--', *controls)
+            untracked = _git(root, '--literal-pathspecs', 'ls-files', '-z', '--others', '--exclude-standard', '--', *controls)
+            changed_controls.update(raw.decode() for raw in (changed + untracked).split(b'\0') if raw)
+        if not targets and not changed_controls:
             raise ForgeError('No source changes; select an entry, path or another base', code='invalid_request')
     else:
-        targets = explicit
+        targets = [name for name in explicit if name not in changed_controls]
         history = _baseline(root, revision, excluded, targets) if revision else {}
 
     view = discover_project_sources(root, exclude=excluded, include_roles=False)
     entries = view['entries']
     known_before = history.keys() | (prior_sources or {}).keys()
     deleted = {name for name in targets if name in known_before and not (root / name).exists()}
-    project = _ProjectEvidence(root, excluded, deleted)
+    project = _ProjectEvidence(root, excluded, deleted, locked_facts['packages'] if locked_facts else ())
+    affected_packages = {Path(name).parts[1] for name in changed_controls if len(Path(name).parts) > 1
+                         and Path(name).parts[0] == 'packages'}
+    all_dependencies_changed = bool(changed_controls & dependency_paths)
+    imports_by_entry = {}
+
+    def dependency_imports(name, files):
+        packages = sorted({package for file in files for package in project.dependency_imports.get(file, ())})
+        if packages:
+            imports_by_entry[name] = packages
+        return set(packages)
+
     related = set()
     groups = []
     for name in targets:
@@ -387,6 +415,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
                    for node in tree.body):
             raise ForgeError('Review entry symbol not found: ' + entry, code='invalid_request')
         selected_entries = [entry]
+        dependency_imports(entry, related)
         groups = [sorted(related | set(targets) | ({params} if params else set(entries.get(entry, ()))))]
     else:
         selected_entries = []
@@ -394,11 +423,13 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             flow = declared.partition(':')[0]
             if not (root / flow).is_file():
                 continue
-            dependencies = project.closure([flow])
-            if dependencies.intersection(targets) or set(bindings).intersection(targets):
+            closure = project.closure([flow])
+            imports = dependency_imports(declared, closure)
+            if (closure.intersection(targets) or set(bindings).intersection(targets) or imports & affected_packages
+                    or all_dependencies_changed and (imports or locked_facts['distributions'])):
                 selected_entries.append(declared)
-                related.update(dependencies)
-                groups.insert(0, sorted(dependencies | set(bindings)))
+                related.update(closure)
+                groups.insert(0, sorted(closure | set(bindings)))
     selected_params = {params} if params else {p for key in selected_entries for p in entries.get(key, ())}
     related.update(selected_params)
     for name in targets:
@@ -407,7 +438,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             if _permitted(test, excluded) and relative_path(root, test).is_file():
                 related.add(test)
     roles = dict.fromkeys(sorted(related), 'dependency')
-    roles.update(dict.fromkeys(evidence, 'evidence'))
+    roles.update(dict.fromkeys((name for name in evidence if not is_dependency_path(name)), 'evidence'))
     roles.update(dict.fromkeys(targets, 'target'))
     if params:
         roles[params] = 'target'
@@ -444,8 +475,9 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
                  entries=selected_entries, changed=changed, evidence=list(evidence))
     result = dict(scope=scope, files=files, groups=groups,
                   gaps=[detail for name in files for detail in project.gaps.get(name, ())])
-    if dependencies is not None:
-        result['dependencies'] = dependencies
+    if locked_facts is not None:
+        result['dependencies'] = {**locked_facts, 'changed': bool(changed_controls),
+                                  'entries': {name: imports_by_entry[name] for name in selected_entries if name in imports_by_entry}}
     result['identity'] = digest(result)
     return result
 

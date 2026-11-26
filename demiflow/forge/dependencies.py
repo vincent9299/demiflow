@@ -232,7 +232,9 @@ def probe_environment(python, config, *, expected=None, identity_only=False):
         'import json,sys;data={"prefix":sys.prefix};'
         'print(json.dumps({"format":"dep_probe","data":data}))'
         if identity_only else
-        'import json,sys;sys.path.insert(0,sys.argv[1]);'
+        'import json,sys;from importlib.util import find_spec;from pathlib import Path;'
+        'sys.path.insert(0,sys.argv[1]);spec=find_spec("demiflow");'
+        'assert spec and spec.origin and Path(spec.origin).resolve() == Path(sys.argv[1])/"demiflow/__init__.py";'
         'from demiflow.forge.dependencies import current_environment;'
         'data=current_environment(json.load(sys.stdin),check_conflicts=True);'
         'print(json.dumps({"format":"dep_probe","data":data}))'
@@ -273,7 +275,7 @@ def host_approval(root, digest, python):
         _HOST_APPROVAL.reset(token)
 
 
-def binding(root, *, approval=None, python=None, verify_files=True):
+def binding(root, *, approval=None, python=None, verify_files=True, check_imports=False):
     """Read the dependency binding, checking host approval before external files."""
     scoped = _HOST_APPROVAL.get()
     if scoped is not None:
@@ -292,7 +294,7 @@ def binding(root, *, approval=None, python=None, verify_files=True):
     runtime = locked['environment']['interpreter']
     if python is not None and python != runtime['path']:
         raise ForgeError('Configured project Python differs from the approved dependency lock', code='conflict')
-    if verify_files and locked['packages'] != _inventory_packages(root, config):
+    if verify_files and locked['packages'] != _inventory_packages(root, config, check_imports=check_imports):
         raise ForgeError('Dependency source differs from its approved bytes', code='conflict')
     return locked
 
@@ -363,6 +365,7 @@ def update(root, python, *, name=None, vendor=None):
                     raw = read_bounded(source / rel, FILE_BYTES)
                     if hashlib.sha256(raw).hexdigest() != record['sha256']:
                         raise ForgeError('Vendor source changed during the copy', code='inputs_changed')
+                    ensure_directory((target / rel).parent)
                     publish_bytes(target / rel, raw)
             packages = _inventory_packages(root, config, check_imports=True)
             record = dict(format=FORMAT, project=physical_root(root), declaration=config['sha256'],

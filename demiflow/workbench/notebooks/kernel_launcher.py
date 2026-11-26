@@ -48,10 +48,12 @@ def _python_prefixes(python_path: str) -> list[str]:
     return sorted(set(result))
 
 
-def _check_ipykernel(python_path: str) -> None:
+def _check_ipykernel(python_path: str, *, isolated=False) -> None:
     try:
         probe = subprocess.run(
-            [python_path, '-c', 'import ipykernel'],
+            [python_path, '-I', '-B', '-c', 'from importlib.util import find_spec; assert find_spec("ipykernel")']
+            if isolated else [python_path, '-c', 'import ipykernel'],
+            env={'PATH': os.defpath, 'LANG': 'C.UTF-8'} if isolated else None,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -69,7 +71,7 @@ def _check_ipykernel(python_path: str) -> None:
         )
 
 
-def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths: list[str]) -> None:
+def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths: list[str], require_truncate=False) -> None:
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
         _fail('Notebook 内核只读沙箱需要 Linux x86-64 Landlock 支持。')
     libc = ctypes.CDLL(None, use_errno=True)
@@ -83,6 +85,10 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
     if abi < 1:
         _fail('当前 Linux 内核不支持 Landlock ABI 1，无法启用只读沙箱。')
 
+    if require_truncate and abi < 3:
+        _fail('受控依赖的只读 Notebook 内核需要支持安全截断控制的 Linux Landlock ABI 3。')
+    truncate = 1 << 14 if require_truncate else 0
+
     class Rules(ctypes.Structure):
         _fields_ = [('handled', ctypes.c_uint64)]
 
@@ -90,13 +96,13 @@ def _apply_landlock(*, read_paths: list[str], exec_paths: list[str], write_paths
         _pack_ = 1
         _fields_ = [('access', ctypes.c_uint64), ('fd', ctypes.c_int32)]
 
-    rules = Rules((1 << 13) - 1)
+    rules = Rules(((1 << 13) - 1) | truncate)
     ruleset = checked(libc.syscall(444, ctypes.byref(rules), ctypes.sizeof(rules), 0), 'Landlock ruleset')
     try:
         groups = (
             (read_paths, READ, FILE_READ),
             (exec_paths, READ | EXEC, FILE_READ | FILE_EXEC),
-            (write_paths, READ | WRITE, FILE_READ | FILE_WRITE),
+            (write_paths, READ | WRITE | truncate, FILE_READ | FILE_WRITE | truncate),
         )
         for group_paths, dir_rights, file_rights in groups:
             seen: set[str] = set()
@@ -134,6 +140,7 @@ def _dependency_snapshot(config, root, code_root, python):
     from demiflow.forge.dependencies import binding, module_files, probe_environment
     from demiflow.forge.io import ensure_directory, publish_bytes
     from demiflow.forge.platform_environment import read_bounded
+    from demiflow.forge.schema import ForgeError
     from demiflow.workbench.python_sources import import_bootstrap
 
     locked = binding(root, approval=config['dependency_lock'], python=python)
@@ -156,10 +163,11 @@ def _dependency_snapshot(config, root, code_root, python):
         raw = read_bounded(source, proof['bytes'])
         if hashlib.sha256(raw).hexdigest() != proof['sha256']:
             _fail('The approved Notebook dependency changed during preparation')
+        ensure_directory(target.parent)
         try:
             publish_bytes(target, raw)
-        except FileExistsError:
-            if read_bounded(target, proof['bytes']) != raw:
+        except ForgeError:
+            if not target.exists() or read_bounded(target, proof['bytes']) != raw:
                 _fail('The Notebook dependency snapshot differs from its lock')
         modules[name] = {**proof, 'path': str(target)}
     bootstrap = import_bootstrap(snapshot / 'bootstrap', modules, platform_root=code_root)
@@ -173,6 +181,8 @@ def main() -> None:
     connection_file = sys.argv[2]
     config = json.loads(config_path.read_text(encoding='utf-8'))
 
+    if config.get('dependency_error'):
+        _fail(config['dependency_error'])
     target_python = config.get('python')
     if not target_python:
         _fail('当前项目尚未配置业务 Python 环境（Notebook 内核不继承平台 Python）。请在「项目设置」中指定该项目的独立 Python 解释器（需安装 ipykernel）。')
@@ -183,7 +193,7 @@ def main() -> None:
     root = str(Path(config['root']).resolve(strict=True))
     code_root = str(Path(config['code_root']).resolve(strict=True))
     dependency = _dependency_snapshot(config, root, code_root, target_python) if config.get('dependency_lock') else None
-    _check_ipykernel(target_python)
+    _check_ipykernel(target_python, isolated=dependency is not None)
     tmp_dir = Path(config['tmp_dir'])
     home_dir = tmp_dir / 'home'
     mpl_dir = tmp_dir / 'matplotlib'
@@ -242,11 +252,14 @@ def main() -> None:
             candidate.mkdir(parents=True, exist_ok=True)
             write_paths.append(str(candidate))
         if platform.system() == 'Linux':
-            _apply_landlock(read_paths=read_paths, exec_paths=exec_paths, write_paths=write_paths)
+            _apply_landlock(read_paths=read_paths, exec_paths=exec_paths, write_paths=write_paths,
+                            require_truncate=dependency is not None)
         elif platform.system() != 'Darwin':
             _fail('当前操作系统不支持原生 Notebook 只读内核沙箱（请使用 Linux、macOS 或 WSL2/容器环境）。')
 
-    env = dict(os.environ)
+    env = dict(os.environ) if dependency is None else {
+        key: os.environ[key] for key in ('LANG', 'LC_ALL', 'TZ') if key in os.environ
+    }
     existing_py_path = env.get('PYTHONPATH', '')
     env['PYTHONPATH'] = (os.pathsep.join((str(dependency[1]), code_root)) if dependency
                          else f'{existing_py_path}:{code_root}' if existing_py_path else code_root)

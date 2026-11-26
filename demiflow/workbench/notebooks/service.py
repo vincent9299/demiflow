@@ -238,12 +238,10 @@ class Notebooks:
                 locations.append(str(ws.location_root(root, loc)))
         except Exception:
             pass
-        from demiflow.workbench.python_sources import project_dependencies
-        dependencies = project_dependencies(root, project=item, verify_files=False)
-        return kernel_python, sandbox, sorted(set(locations)), dependencies
+        return kernel_python, sandbox, sorted(set(locations)), item
 
     def _write_kernel_config(self, project, root, state):
-        kernel_python, sandbox, locations, dependencies = self._project_kernel_policy(project, root)
+        kernel_python, sandbox, locations, item = self._project_kernel_policy(project, root)
         code_root = Path(__file__).resolve().parents[3]
         payload = {
             'python': kernel_python,
@@ -255,8 +253,16 @@ class Notebooks:
             'write_paths': sandbox['write_paths'],
             'locations': locations,
         }
-        if dependencies is not None:
-            payload['dependency_lock'] = dependencies['digest']
+        from demiflow.workbench.python_sources import project_dependencies
+        try:
+            dependencies = project_dependencies(root, project=item, verify_files=False)
+        except (OSError, ValueError) as exc:
+            # Existing kernels keep their frozen source. Only a future launch
+            # consumes the new admission result.
+            payload['dependency_error'] = str(exc)[:512]
+        else:
+            if dependencies is not None:
+                payload['dependency_lock'] = dependencies['digest']
         temporary = state / 'kernel-config.tmp'
         temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
         temporary.chmod(0o600)

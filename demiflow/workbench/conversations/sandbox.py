@@ -61,6 +61,7 @@ class SandboxSpec:
     direct_network: bool = False
     read_policy: str = 'scoped'
     write_policy: str = 'scoped'
+    traversal_paths: tuple[str, ...] = ()
 
 
 SPEC_BYTES = 2 * 1024 * 1024
@@ -114,6 +115,9 @@ def specification(spec, command, env, cwd):
         if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= maximum:
             raise ValueError('Sandbox resource limit is invalid')
     read = _paths(spec.read_paths)
+    traversal = _paths(spec.traversal_paths)
+    if traversal and (spec.read_policy != 'scoped' or any(not Path(path).is_dir() for path in traversal)):
+        raise ValueError('Directory-only access requires scoped directory paths')
     write = _paths(spec.write_paths)
     runtime = _paths(spec.runtime_paths)
     protected = _paths(spec.protected_paths, existing=False)
@@ -133,10 +137,10 @@ def specification(spec, command, env, cwd):
     write.append(home)
     denied.extend(['/proc', '/sys', '/run'])
     checked_against_denied = (write + runtime) if spec.read_policy == 'inherit_os' else (read + write + runtime)
-    for allowed in read + write + runtime:
+    for allowed in read + write + runtime + traversal:
         if _contains('/dev', allowed) or _contains(allowed, '/dev'):
             raise ValueError('Device paths cannot be supplied as sandbox scopes')
-    for allowed in checked_against_denied:
+    for allowed in checked_against_denied + traversal:
         if any(_contains(allowed, forbidden) or _contains(forbidden, allowed) for forbidden in denied):
             raise ValueError('Sandbox allowlist overlaps a protected path')
     checked_protected = system_protected if spec.write_policy == 'project_root' else (protected + system_protected)
@@ -205,14 +209,14 @@ def specification(spec, command, env, cwd):
             continue
         if stat.S_ISCHR(dev_info.st_mode) and dev_info.st_rdev == os.makedev(major, minor):
             read.append(dev_path)
-    identities = {path: [os.stat(path).st_dev, os.stat(path).st_ino] for path in read + write + runtime}
+    identities = {path: [os.stat(path).st_dev, os.stat(path).st_ino] for path in read + write + runtime + traversal}
     return dict(read_paths=read, write_paths=write, runtime_paths=runtime, identities=identities,
                 command=list(command), env=environment, cwd=str(Path(cwd).resolve(strict=True)),
                 seconds=spec.seconds, rss_bytes=spec.rss_bytes, processes=spec.processes, file_bytes=spec.file_bytes,
                 private_home=home, private_bytes=spec.private_bytes, source_roots=source_roots,
                 source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files,
                 direct_network=bool(spec.direct_network), read_policy=spec.read_policy,
-                write_policy=spec.write_policy, role=spec.role)
+                write_policy=spec.write_policy, role=spec.role, traversal_paths=traversal)
 
 
 def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None,

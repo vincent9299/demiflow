@@ -80,6 +80,13 @@ def status(root, *, table_resolver):
         raise ForgeError('Invalid project check record')
     result['digest'] = digest
     reasons = []
+    from demiflow.forge.dependencies import binding as dependency_binding
+    try:
+        locked = dependency_binding(root)
+        if (locked['digest'] if locked else None) != result['basis'].get('dependencies'):
+            reasons.append('project_dependencies_changed')
+    except (OSError, ValueError):
+        reasons.append('project_dependencies_unverifiable')
     if result['control_digest'] != content_digest(control):
         reasons.append('project_declarations_changed')
     if result['basis']['rules_id'] != RULES_ID:

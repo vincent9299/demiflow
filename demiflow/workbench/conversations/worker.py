@@ -167,7 +167,9 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         except OSError:
             pass
     if dependencies is not None:
+        from demiflow.forge.dependencies import verify_interpreter
         python = dependencies['environment']['interpreter']
+        verify_interpreter(python)
         package_files = [root / item['path'] for item in dependencies['packages'].values()]
         read.extend(package_files)
         protected.extend((root / 'pyproject.toml', root / 'packages', Path(python['prefix']), *package_files))

@@ -330,6 +330,17 @@ def project_dependencies(root, *, authority=None, project=None, verify_files=Tru
                    verify_files=verify_files)
 
 
+def dependency_scope(root, *, authority=None, project=None):
+    """Give a Forge authoring use case the approval provided by its Workbench host."""
+    from contextlib import nullcontext
+    from demiflow.forge.dependencies import host_approval
+
+    if project is None and (authority is None or authority.get('kind') != 'web'):
+        return nullcontext()
+    locked = project_dependencies(root, authority=authority, project=project, verify_files=False)
+    return host_approval(root, locked['digest'], locked['environment']['interpreter']['path']) if locked else host_approval(root, None, None)
+
+
 def install_bound_imports(modules, *, project_roots=(), project_package=()):
     """Install the existing exact-name loader from a trusted immutable inventory."""
     paths = {name: Path(row['path']) for name, row in modules.items()}

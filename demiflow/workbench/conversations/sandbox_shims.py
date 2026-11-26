@@ -198,12 +198,22 @@ def _install():
         sys.meta_path.append(_ProjectPackageFinder())
 
     managed = cfg.get('project_dependencies') or {}
-    if managed:
+    locked_environment = cfg.get('dependency_environment')
+    if locked_environment:
         sys.path.insert(0, sdk_root)
         try:
+            sdk_pkg = Path(sdk_root) / 'demiflow'
+            spec = importlib.util.find_spec('demiflow')
+            if spec is None or not spec.origin or Path(spec.origin).resolve() != sdk_pkg / '__init__.py':
+                raise RuntimeError('Project Python loaded another DemiFlow package')
+            from demiflow.forge.dependencies import current_environment
+            if current_environment({'requirements': cfg['dependency_requirements']}) != locked_environment:
+                raise RuntimeError('Project Python environment changed')
             from demiflow.workbench.python_sources import install_bound_imports
-            install_bound_imports(managed)
+            if managed:
+                install_bound_imports(managed)
         except BaseException:
+            os.write(2, b'Unable to load the approved project Python dependencies\\n')
             os._exit(78)
 
     # 3. Declared read-only shared Python sources (from shared-sources.json).
@@ -285,8 +295,10 @@ class SandboxShims:
         self.root = Path(project['root']).resolve()
         self.execution_mode = execution_mode
         self.project_python = project_python if (isinstance(project_python, str) and project_python.strip()) else None
-        from demiflow.forge.dependencies import module_files
+        from demiflow.forge.dependencies import module_files, verify_interpreter
         locked = project_dependencies(self.root, project={**project, 'python': self.project_python})
+        if locked is not None:
+            verify_interpreter(locked['environment']['interpreter'])
         self.dependency_lock = project.get('dependency_lock')
         managed = module_files(self.root, locked)
         self.directory = Path(tempfile.mkdtemp(prefix='demiflow-dev-shims-'))
@@ -343,6 +355,8 @@ class SandboxShims:
                 'project_dependencies': managed,
                 'shared_sources': {name: str(path) for name, path in sorted(shared.items())},
             }
+            if locked is not None:
+                binding.update(dependency_environment=locked['environment'], dependency_requirements=locked['requirements'])
             binding_path.write_text(json.dumps(binding, ensure_ascii=False), encoding='utf-8')
             os.chmod(binding_path, 0o600)
 

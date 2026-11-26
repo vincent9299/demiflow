@@ -347,25 +347,35 @@ def set_python(path, workspace_id, *, expected, python):
 
 def approve_dependencies(path, workspace_id, *, expected, digest):
     """Approve the supplied candidate digest for the registered project Python."""
-    from demiflow.forge.dependencies import binding
+    from demiflow.forge.dependencies import binding, probe_environment
     identity(workspace_id)
     value = load_registry(path)
+    if content_digest(value) != expected:
+        raise ForgeError('Registry changed before dependency approval', code='conflict')
     item = value['projects'].get(workspace_id)
-    if not item or not item.get('python'):
-        raise ForgeError('An explicit registered project Python is required')
-    locked = binding(item['root'], approval=digest, python=item['python'])
-    if locked is None:
-        raise ForgeError('The project has no dependency lock to approve')
+    if item is None:
+        raise ForgeError('Workspace is not registered', code='not_found')
+    if digest is not None:
+        if not item.get('python'):
+            raise ForgeError('An explicit registered project Python is required')
+        locked = binding(item['root'], approval=digest, python=item['python'], check_imports=True)
+        if locked is None:
+            raise ForgeError('The project has no dependency lock to approve')
+        runtime = locked['environment']['interpreter']
+        if probe_environment(item['python'], locked, expected=runtime) != locked['environment']:
+            raise ForgeError('Project Python environment differs from its lock', code='conflict')
     with _locked(path) as path:
         value = load_registry(path)
         if content_digest(value) != expected:
             raise ForgeError('Registry changed before dependency approval', code='conflict')
         current = value['projects'][workspace_id]
-        if current['root'] != item['root'] or current.get('python') != item['python']:
-            raise ForgeError('Project dependency authority changed', code='conflict')
-        current['dependency_lock'] = locked['digest']
+        if digest is None:
+            current.pop('dependency_lock', None)
+        else:
+            current['dependency_lock'] = digest
         ws.write_control(path, value, expected=expected)
-    return dict(status='approved', workspace_id=workspace_id, dependency_lock=digest, digest=content_digest(value))
+    return dict(status='approved' if digest is not None else 'revoked', workspace_id=workspace_id,
+                dependency_lock=digest, digest=content_digest(value))
 
 
 def set_notebook_sandbox(path, workspace_id, *, expected, mode, write_paths=()):
@@ -456,9 +466,12 @@ def register(forge):
     @console.command('approve-dependencies')
     @click.argument('workspace_id')
     @click.option('--expected', required=True)
-    @click.option('--digest', required=True)
+    @click.option('--digest')
+    @click.option('--revoke', is_flag=True)
     @click.pass_obj
-    def approve_project_dependencies(registry, workspace_id, expected, digest):
+    def approve_project_dependencies(registry, workspace_id, expected, digest, revoke):
+        if bool(digest) == revoke:
+            raise click.UsageError('Supply one of --digest or --revoke')
         output(lambda: approve_dependencies(registry, workspace_id, expected=expected, digest=digest), True)
 
     @console.command('serve')

@@ -1141,7 +1141,9 @@ class Handler(BaseHTTPRequestHandler):
                             raise PermissionError('Project membership or config-write grant changed')
 
                     if name == 'flow-register':
-                        value = project_ops.register_flow(root, authorize=authorize, **request)
+                        from demiflow.workbench.runs.authority import for_http
+                        authority = for_http(self.server, self.path, root, 'read')
+                        value = project_ops.register_flow(root, authorize=authorize, authority=authority.bootstrap(), **request)
                     elif name == 'flow-arguments-save':
                         from demiflow.workbench.projects.flow_arguments import save
                         value = save(root, authorize=authorize, **request)

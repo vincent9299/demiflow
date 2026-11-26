@@ -12,7 +12,8 @@ import stat
 
 LIBC = ctypes.CDLL(None, use_errno=True)
 SECCOMP = ctypes.CDLL(ctypes.util.find_library('seccomp'), use_errno=True)
-READ = (1 << 2) | (1 << 3)
+READ_DIR = 1 << 3
+READ = (1 << 2) | READ_DIR
 EXEC = 1 << 0
 WRITE = (1 << 1) | (1 << 4) | (1 << 5) | (1 << 7) | (1 << 8)
 TRUNCATE = 1 << 14
@@ -87,7 +88,7 @@ def prctl(option, *args):
     return checked(LIBC.prctl(option, *args), 'prctl failed')
 
 
-def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped'):
+def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped', traversal_paths=()):
     if platform.machine() != 'x86_64':
         raise RuntimeError('The development sandbox requires the qualified x86-64 ABI')
     if read_policy not in {'scoped', 'inherit_os'}:
@@ -119,7 +120,8 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
     else:
         handled = ((1 << 13) - 1) | truncate_bit
         write_rights = READ | WRITE | truncate_bit
-        rule_groups = ((read_paths, READ), (runtime_paths, READ | EXEC), (write_paths, write_rights))
+        rule_groups = ((read_paths, READ), (runtime_paths, READ | EXEC), (write_paths, write_rights),
+                       (traversal_paths, READ_DIR))
         file_mask = EXEC | (1 << 1) | (1 << 2) | truncate_bit
     rules = Rules(handled)
     descriptor = checked(LIBC.syscall(444, ctypes.byref(rules), ctypes.sizeof(rules), 0), 'Landlock ruleset')

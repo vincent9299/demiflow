@@ -82,8 +82,8 @@ def apply_control_writes(root, path, nonce, snapshot):
         if raw is not None:
             snapshot[name] = (raw, item['mode'])
 
-_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'pyproject.toml', '.forge/deps.lock.json')
-_PROTECTED_GUARD_TREES = ('data_tools', 'packages')
+_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', '.forge/deps.lock.json')
+_PROTECTED_GUARD_TREES = ('data_tools',)
 _PROTECTED_GUARD_MAX_BYTES = 512 * 1024
 _PROTECTED_TREE_MAX_ENTRIES = 2048
 _PROTECTED_TREE_MAX_BYTES = 16 * 1024**2
@@ -143,6 +143,8 @@ def _authorized_by_host(rel: str, authorized) -> bool:
 def _protected_guard_paths(root: Path) -> list[str]:
     """Return relative paths of project-internal secret/governance files guarded by Forge hooks."""
     paths = list(_PROTECTED_GUARD_STATIC)
+    if (root / '.forge/deps.lock.json').is_file():
+        paths.append('pyproject.toml')
     try:
         with os.scandir(root) as entries:
             for entry in entries:
@@ -175,7 +177,8 @@ def capture_protected_files(project_root) -> dict[str, tuple[bytes, int]]:
 
     for rel in _protected_guard_paths(root):
         remember(rel)
-    for top in _PROTECTED_GUARD_TREES:
+    guarded_trees = (*_PROTECTED_GUARD_TREES, 'packages') if 'pyproject.toml' in snap else _PROTECTED_GUARD_TREES
+    for top in guarded_trees:
         listing = _tree_listing(root, top)
         if listing is None:
             continue

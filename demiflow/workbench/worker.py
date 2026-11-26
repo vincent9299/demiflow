@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 import sys
@@ -65,7 +66,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         if business:
             argv.append('--confined-project')
             launcher = partial(_launch_project_inspection, Path(root).absolute(), _dependencies, _source_modules,
-                               settings['timeout_seconds'])
+                               request, settings['timeout_seconds'])
         value=capture(argv,request,settings,response_formats={FORMAT},input_limit=1024**2,
             pass_fds=_pass_fds,inherit_authority=not business,launcher=launcher,
             tree_rss_limit=PREPARATION_RSS if business or _pass_fds or name in {"analysis_media_sources","analysis_source_read","table_profile"} else (READONLY_RSS if (location() / 'host-budget.json').exists() else None))
@@ -79,7 +80,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     return value["value"]
 
 
-def _launch_project_inspection(root, locked, source_modules, seconds, command, *, stdin, cwd, env, **_):
+def _launch_project_inspection(root, locked, source_modules, request, seconds, command, *, stdin, cwd, env, **_):
     """Apply OS bounds before the fixed project Python inspection starts."""
     from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
     from demiflow.workbench.host_partition import PREPARATION_RSS
@@ -89,17 +90,70 @@ def _launch_project_inspection(root, locked, source_modules, seconds, command, *
     home = Path(cwd) / 'home'
     home.mkdir(mode=0o700)
     interpreter = locked['environment']['interpreter']
-    files = [str(root / item['path']) for item in locked['packages'].values()]
-    files.extend((source_modules or {}).values())
+    files = _inspection_read_paths(root, request)
+    files.update(root / item['path'] for item in locked['packages'].values())
+    files.update(map(Path, (source_modules or {}).values()))
     runtime = {Path(__file__).resolve().parents[2], Path(interpreter['prefix']),
                Path(interpreter['base_prefix']), Path(interpreter['binary'])}
     runtime.update(path for path in map(Path, ('/usr', '/lib', '/lib64')) if path.exists())
-    spec = SandboxSpec(read_paths=tuple(map(str, (root, Path(cwd), *map(Path, files)))),
+    if any(root.is_relative_to(path) for path in runtime):
+        raise ValueError('Project Python runtime root must not cover the project directory')
+    spec = SandboxSpec(read_paths=tuple(map(str, sorted(files | {Path(cwd)}))), traversal_paths=(str(root),),
                        write_paths=(), runtime_paths=tuple(sorted(map(str, runtime))),
                        protected_paths=(), denied_paths=(), private_home=str(home),
                        role='verifier', seconds=seconds, rss_bytes=PREPARATION_RSS)
     return launch_sandbox(command, spec=spec, env={**env, 'HOME': str(home), 'TMPDIR': str(home)},
                           cwd=cwd, stdin=stdin)
+
+
+def _inspection_read_paths(root, request):
+    """Grant project source and exact input tables while keeping controls private."""
+    from demiflow.forge.platform_environment import read_bounded
+    from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_table_uri
+    from demiflow.forge.project_rules import ROLE_DIRS
+    from demiflow.forge.schema import ForgeError
+    from demiflow.workbench.projects import workspace as ws
+    from demiflow.workbench.runs import manager as runs
+    from demiflow.workbench.table_bindings import make_resolver
+
+    _, workspace = ws.load_workspace_control(root)
+    supplied = request['arguments']
+    if request['operation'] == 'plan_preview':
+        selected = supplied.get('params')
+        parameters = json.loads(read_bounded(ws.validate_parameter_path(root, selected), 65536)) if selected else {}
+    else:
+        parameters = supplied['parameters']
+    from demiflow.forge.project import STATE_PATH
+    paths = {root / 'workspace.json', root / STATE_PATH, ws.relative_path(root, workspace['platform']['path'])}
+    allowed = set(ROLE_DIRS) | {'tables', 'configs', 'parameters', 'lib', 'src', 'data'}
+    with os.scandir(root) as entries:
+        for index, item in enumerate(entries):
+            if index >= 1024:
+                raise ForgeError('Project directory exceeds the inspection path budget', code='resource_limit')
+            if item.name in allowed and item.is_dir(follow_symlinks=False) or (
+                    not item.name.startswith('.') and item.name.endswith('.py') and item.is_file(follow_symlinks=False)):
+                paths.add(Path(item.path))
+    resolver = make_resolver(ws.table_binding, runs.result_table)
+    values, _ = extract_arguments(parameters)
+    pending = [(values, 0)]
+    seen = 0
+    while pending:
+        item, depth = pending.pop()
+        seen += 1
+        if seen > 4096 or depth > 16:
+            raise ForgeError('Project inspection path scope exceeds its budget', code='resource_limit')
+        if isinstance(item, dict):
+            if is_direct_table_ref(item):
+                target, _ = resolve_table_uri(root, item['uri'], item.get('version'))
+                paths.add(target)
+            elif item.get('kind') == 'table' and set(item) == {'kind', 'alias'}:
+                _, _, target = resolver(root, workspace, item['alias'])
+                paths.add(target)
+            else:
+                pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+    return {path for path in paths if path.exists()}
 
 
 def prepare_native(*, analysis_read, confined=False):
@@ -138,18 +192,6 @@ def prepare_native(*, analysis_read, confined=False):
     resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
 
 
-def _project_check_scope(root, request):
-    from contextlib import nullcontext
-    from demiflow.forge.dependencies import host_approval
-    from demiflow.workbench.python_sources import project_dependencies
-
-    authority = request.get('bootstrap')
-    if authority is None or authority.get('kind') != 'web':
-        return nullcontext()
-    locked = project_dependencies(root, authority=authority, verify_files=False)
-    return host_approval(root, locked['digest'], locked['environment']['interpreter']['path']) if locked else host_approval(root, None, None)
-
-
 def dispatch(request):
     from demiflow.forge.schema import ForgeError
     from demiflow.errors import ExecutionConflict
@@ -162,6 +204,7 @@ def dispatch(request):
     from demiflow.workbench.projects import workspace as ws
     from demiflow.workbench.runs import manager as runs
     from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.workbench.python_sources import dependency_scope
     table_resolver = make_resolver(ws.table_binding, runs.result_table)
     try:
         from demiflow.errors import DemiflowError
@@ -203,7 +246,7 @@ def dispatch(request):
             from demiflow.workbench.projects import checks as project_check
             if args:
                 raise ForgeError('Project checks accept no rule overrides', code='invalid_request')
-            with _project_check_scope(root, request):
+            with dependency_scope(root, authority=request.get('bootstrap')):
                 value = (project_check.check if op == 'project_check' else project_check.status)(root, table_resolver=table_resolver)
         elif op == 'project_table':
             from demiflow.workbench.projects.discovery import table
@@ -213,7 +256,7 @@ def dispatch(request):
         elif op == "inspect":
             from demiflow.workbench.projects.workspace import _inspect_flow
 
-            with _project_check_scope(root, request):
+            with dependency_scope(root, authority=request.get('bootstrap')):
                 value = _inspect_flow(root, table_resolver=table_resolver, **args)
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import preview as compile_preview
