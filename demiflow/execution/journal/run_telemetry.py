@@ -565,10 +565,14 @@ def record_execution_metadata(request, execution):
         'worker_details_truncated': getattr(execution, '_observed_worker_count', len(workers)) > len(workers),
         'peak_active_workers': getattr(execution, '_peak_active_workers', 0),
         'action_id': request.action.action_id}
-    from demiflow.execution.journal.dataflow_operator_observations import call_concurrency
+    from demiflow.execution.journal.dataflow_operator_observations import call_concurrency, measured_memory
     concurrency = call_concurrency(execution, {})
     if concurrency:
         diagnostics['call_concurrency'] = concurrency
+    if graph is not None and physical is not None:
+        measured = measured_memory(execution, {})
+        if measured:
+            diagnostics['measured_memory'] = measured
     if failure is not None:
         diagnostics['failure_type'] = type(failure).__module__ + '.' + type(failure).__qualname__
     if physical is not None:

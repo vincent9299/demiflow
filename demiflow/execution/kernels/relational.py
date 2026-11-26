@@ -12,7 +12,8 @@ groups on disk. K007 concatenates inputs in port order preserving multiplicity.
 """
 from __future__ import annotations
 from demiflow.execution.contracts.dataflow import stage_resident_bytes
-from demiflow.execution.contracts.relational_region import reducer_resident_bytes
+from demiflow.execution.contracts.relational_region import (
+    measured_reducer_shares, relational_floor_bytes, relational_full_bytes, reducer_resident_bytes)
 
 from demiflow.operators.relational import merge_join_rows
 import itertools
@@ -139,6 +140,35 @@ def typed_join_pairs(left, right, *, spec, services, retained_key):
     return output()
 
 
+def _names_measured_grant(function):
+    """A row/state that cannot fit a measured join or reducer grant names that grant and the remedies."""
+    import functools
+
+    @functools.wraps(function)
+    def run(*args, spec, services, **kwargs):
+        records = function(*args, spec=spec, services=services, **kwargs)
+        if not getattr(services, 'measured_workspace', False):
+            return records
+        return _with_measured_grant(records, spec, services)
+    return run
+
+
+def _with_measured_grant(records, spec, services):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError, MAX_MESSAGE_CHARS
+    try:
+        yield from records
+    except DataflowError as exc:
+        if exc.code != 'BUDGET_EXCEEDED':
+            raise
+        granted, preferred = services.bounds.max_resident_bytes, relational_full_bytes(spec, services.bounds)
+        hint = (f'; this {spec.kind} runs with measured memory ({granted} of its preferred {preferred} bytes) because '
+                f'the plan did not fit with maximum-size rows: raise memory_bytes, or declare max_row_bytes '
+                f'so the plan is checked before it starts')
+        detail = str(exc).partition(': ')[2][:MAX_MESSAGE_CHARS - len(hint)]
+        raise DataflowError('BUDGET_EXCEEDED', detail + hint, context=exc.context) from exc
+
+
+@_names_measured_grant
 def join_partitions(
     left: Iterator[Record],
     right: Iterator[Record],
@@ -237,6 +267,10 @@ def _ordered_group_rows(
     from demiflow.operators.ordering import reducer_sort_window as sort_window
     from demiflow.execution.contracts.relational_region import reducer_contract as contract
     window = sort_window(services.bounds,key_only=False) if memory is not None or contract(spec) is not None else None
+    if window is not None and getattr(services, 'measured_workspace', False):
+        from demiflow.operators.ordering import measured_reducer_sort_window
+        order, _ = measured_reducer_shares(memory or contract(spec), services.bounds.max_resident_bytes)
+        window = measured_reducer_sort_window(services.bounds, order)
     runs = build_sort_runs(keyed_records(), spec=sort_spec, services=services,window=window)
     for record in merge_sort_runs(runs, spec=sort_spec, services=services,window=window):
         row = _materialize_row(record, store=services.store, bounds=services.bounds, assignment=getattr(services, 'assignment', None))
@@ -247,6 +281,7 @@ def _ordered_group_rows(
 
 
 
+@_names_measured_grant
 def reduce_partition(
     records: Iterator[Record], *, spec: KernelSpec, services: RuntimeServices, retain=None
 ) -> Iterator[Record]:
@@ -257,8 +292,9 @@ def reduce_partition(
                                      spec=spec, services=services, retain=retain)
 
 
-def check_grant(value, bounds, assignment, *, join_depth=None):
-    required = reducer_resident_bytes(value,bounds,join_depth=join_depth)
+def check_grant(value, bounds, assignment, *, join_depth=None, required=None):
+    if required is None:
+        required = reducer_resident_bytes(value,bounds,join_depth=join_depth)
     stages = getattr(assignment,'stages',())
     available = sum(min(stage.resident_bytes,stage.profile.requests['memory_bytes']) for stage in stages)
     if stages and (available < required or required > bounds.max_resident_bytes):
@@ -282,7 +318,10 @@ def admit_reducer(spec, services, *, join_depth=None):
             # transient measurement can only prove that grant sufficient or
             # reject before input/copy/callback/pickle; it never edits the seal.
             memory=declare(initial,services.bounds)
-        check_grant(memory,services.bounds,services.assignment,join_depth=join_depth)
+        # A measured grant needs only its floor; its shares then count actual bytes.
+        floor = (relational_floor_bytes(spec, services.bounds)
+                 if getattr(services, 'measured_workspace', False) else None)
+        check_grant(memory,services.bounds,services.assignment,join_depth=join_depth,required=floor)
         check_initial(initial,memory)
     return memory
 
@@ -290,6 +329,14 @@ def admit_reducer(spec, services, *, join_depth=None):
 def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeServices, memory_join_depth=None, retain=None):
     """One original sequential fold; caller proves complete ordered key groups."""
     memory = admit_reducer(spec,services,join_depth=memory_join_depth)
+    pending_bytes = None
+    if memory is not None and getattr(services, 'measured_workspace', False):
+        # The state share of the measured grant replaces the full state window;
+        # a finished group waits beside the merge readers of the ordering share.
+        from demiflow.operators.ordering import measured_reducer_sort_window
+        order, state = measured_reducer_shares(memory, services.bounds.max_resident_bytes)
+        memory = {**memory, 'state_resident_bytes': max(1, min(memory['state_resident_bytes'], state))}
+        pending_bytes = measured_reducer_sort_window(services.bounds, order).merge_resident_bytes
     on = tuple(_cfg(spec, "on"))
     if not on:
         raise _err("INVALID_CONTRACT", "empty group keys")
@@ -333,7 +380,7 @@ def reduce_ordered_groups(ordered, *, spec: KernelSpec, services: RuntimeService
 
     from demiflow.operators.relational import reduce_ordered_groups as fold
     try:
-        yield from fold(rows(),reducer=reducer,initial=initial,fn_kwargs=fn_kwargs,
+        yield from fold(rows(),reducer=reducer,initial=initial,fn_kwargs=fn_kwargs,pending_bytes=pending_bytes,
                         validation=validation,memory=memory,bounds=services.bounds,
                         output=output,output_roots=output_roots,
                         check_stop=services.check_stop,retain=retain)

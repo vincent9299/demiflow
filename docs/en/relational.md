@@ -132,3 +132,12 @@ Limits to be aware of:
 
 - These limits are safeguards, not a hard guarantee on the memory of the whole process; data with very large single rows can still exceed the budget and fail.
 - A query that fails, times out or is cancelled does not rerun your functions and does not get more memory automatically.
+
+### When memory cannot hold maximum-size rows
+
+The platform first sizes `join` and `reduce_by_key` as if every row were as large as the row limit `max_row_bytes`: about one batch plus 6 rows for a join, and about 12 rows plus two copies of the state limit `max_state_bytes` for a reduce. When `local_execution(memory_bytes=...)` is too small for that:
+
+- If the row and batch limits (and, for a reduce, the state limit) are defaults, the join and reduce run by actual size: they first get one batch plus one row, the remaining memory is given back to them as far as it goes, and each row and group state is counted by its actual bytes. Ordinary rows run as usual; a row or group state that does not fit the memory the step received fails during the run with `BUDGET_EXCEEDED`, naming the memory it received and what maximum-size rows would need.
+- Such a plan logs a warning when it starts, naming the step, the memory it received and roughly the largest row it is sure to hold. `stats['measured_memory']` of `local_execution` and `stats.metrics['measured_memory']` of `run_stream()` carry the same facts.
+- If these limits are set explicitly in the run limits (`RunContext.start(limits=...)`), the platform still checks maximum-size rows and refuses the plan before it starts, without calling any of your functions. To know before spending anything that a run will finish, set `max_row_bytes` and `max_batch_bytes` (plus `max_state_bytes` for a reduce) explicitly.
+- Plans that fit maximum-size rows are not affected.

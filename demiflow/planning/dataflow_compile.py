@@ -553,6 +553,7 @@ class _Capture:
         self.defaults = inputs.defaults
         self.report = inputs.report
         self.source_schema = inputs.source_schema
+        self.explicit_limits = inputs.explicit_limits
         self.jobs = []
         self.value_edges = []
         self.fit_ids = {}
@@ -588,7 +589,8 @@ class _Capture:
                                     codec_workspace=False).requests['memory_bytes']
             config = {**_plain(node.kernel.configuration), 'fixed_worker_min_bytes': floor}
             self.nodes[index] = replace(node, kernel=replace(node.kernel, configuration=config))
-        window = codec_window(self.nodes[index].kernel, operation, self.bounds)
+        window = codec_window(self.nodes[index].kernel, operation, self.bounds,
+                              explicit_limits=self.explicit_limits)
         if window is not None:
             self.codec_windows[index] = window
 

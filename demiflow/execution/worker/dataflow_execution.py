@@ -45,12 +45,14 @@ class _KernelServices:
     Do not rebuild RuntimeServices: its validation copies constants/program
     mappings, whereas this invocation-local view adds only two references.
     """
-    __slots__ = ('_original', 'check_stop', 'bounds', 'measured_workspace')
+    __slots__ = ('_original', 'check_stop', 'bounds', 'measured_workspace', 'sealed_bounds')
 
     def __init__(self, original, check_stop, bounds=None):
         self._original, self.check_stop = original, check_stop
         self.bounds = original.bounds if bounds is None else bounds
         self.measured_workspace = bounds is not None
+        # The action's sealed bounds; a measured view narrows only max_resident_bytes.
+        self.sealed_bounds = getattr(original, 'sealed_bounds', original.bounds)
 
     def __getattr__(self, name):
         return getattr(self._original, name)

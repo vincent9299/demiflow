@@ -118,6 +118,70 @@ def reducer_resident_bytes(value, bounds, *, join_depth=None):
     return initial + value['inspection_bytes'] + max(build, 7 * row + fold)
 
 
+# A join or reducer kernel may run below its maximum-row window; the planner then
+# seals its smallest window as ``codec_min_bytes`` and its grant counts actual bytes.
+MEASURED_KINDS = frozenset({'join', 'reduce'})
+
+
+def join_resident_bytes(bounds):
+    """Full join window: one input batch and six maximum rows."""
+    return bounds.max_batch_bytes + 6 * bounds.max_row_bytes
+
+
+def relational_full_bytes(kernel, bounds):
+    """The preferred (maximum-row) window of a join or reducer kernel."""
+    if kernel.kind == 'reduce':
+        return reducer_resident_bytes(reducer_contract(kernel), bounds)
+    return join_resident_bytes(bounds)
+
+
+def relational_floor_bytes(kernel, bounds):
+    """Smallest measured window: one input batch and one row.
+
+    A reducer also keeps its sealed initial and inspection windows, and its state
+    share (an eighth of the rest, see ``measured_reducer_shares``) must hold a
+    copy of the initial accumulator.
+    """
+    base = bounds.max_batch_bytes + bounds.max_row_bytes
+    if kernel.kind == 'reduce':
+        value = reducer_contract(kernel)
+        return value['initial_bytes'] + value['inspection_bytes'] + max(base, 8 * value['initial_copy_bytes'])
+    return base
+
+
+def measured_reducer_shares(value, grant):
+    """Split a measured reducer grant into its ordering and state windows.
+
+    After the sealed initial and inspection windows, half orders the input. A
+    quarter of the other half is the state: its old and new copies and the
+    encoding of its output fit beside the merge readers (three quarters of the
+    ordering window) that stay live while a finished group waits downstream.
+    """
+    available = grant - value['initial_bytes'] - value['inspection_bytes']
+    order = available // 2
+    return order, (available - order) // 4
+
+
+def owns_member_windows(stage):
+    """A sealed relational region or native relational placement sizes its members itself."""
+    return stage.stage_id.startswith(PREFIX) or stage.stage_id.endswith(
+        (KEY_SQL_SUFFIX, TYPED_JOIN_SUFFIX, KEY_BATCH_ARROW_SUFFIX, JOIN_PROBE_SUFFIX))
+
+
+def measured_relational_windows(graph, physical):
+    """(occurrence, kind, granted, preferred) of each join or reducer granted less than its full window."""
+    kernels = {node.occurrence_id: node.kernel for node in graph.nodes}
+    result = []
+    for stage in physical.stages:
+        for occurrence, granted in sorted((stage.kernel_memory_bytes or {}).items()):
+            kernel = kernels[occurrence]
+            if kernel.kind in MEASURED_KINDS and 'codec_min_bytes' in kernel.configuration:
+                preferred = kernel.profile.requests['memory_bytes']
+                if granted < preferred:
+                    result.append((occurrence, kernel.kind, granted, preferred))
+    return tuple(result)
+
+
 @dataclass(frozen=True)
 class RelationalRegionInput:
     edge_id: str

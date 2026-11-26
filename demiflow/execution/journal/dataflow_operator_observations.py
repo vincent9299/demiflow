@@ -403,6 +403,16 @@ class _ObservedTiming:
                 'method': 'observed_maximum_upper_bound'}
 
 
+def measured_memory(execution, labels):
+    """Join/reducer steps of the sealed plan granted less than their maximum-row window."""
+    from demiflow.execution.contracts.relational_region import measured_relational_windows
+    physical = execution._physical
+    return [{'stage': labels.get(occurrence, occurrence), 'occurrence_id': occurrence, 'kind': kind,
+             'granted_bytes': granted, 'preferred_bytes': preferred,
+             'row_bytes_hint': physical.bounds.max_row_bytes * granted // preferred}
+            for occurrence, kind, granted, preferred in measured_relational_windows(execution._graph, physical)]
+
+
 def stream_observations(execution, stats):
     from demiflow.execution.contracts.recovery_contract import document
     nodes = {node.occurrence_id: node for node in execution._graph.nodes}
@@ -485,6 +495,7 @@ def stream_observations(execution, stats):
         for (occurrence, partition), (_, value)
         in getattr(execution, '_operator_handoffs', {}).items()]
     stats.metrics['call_concurrency'] = call_concurrency(execution, labels)
+    stats.metrics['measured_memory'] = measured_memory(execution, labels)
     stats.metrics['stage_processing_latency'] = {name: {
         'count': v['count'], 'total_s': v['total_ns'] / 1e9,
         'min_s': v['min_ns'] / 1e9, 'max_s': v['max_ns'] / 1e9,

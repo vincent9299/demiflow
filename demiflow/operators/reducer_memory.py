@@ -132,7 +132,7 @@ def measure_tree(value, *, max_bytes, max_nodes, max_copy_bytes=None,
     return TreeSize(retained, copied, 512 * mutable + 256 * deepest, len(seen))
 
 
-def yielded_peers(initial, state, excluded_roots, value, bounds, *, pending=()):
+def yielded_peers(initial, state, excluded_roots, value, bounds, *, pending=(), pending_bytes=None):
     """Known peers at a suspended yield, excluding the codec-owned Record.
 
     There is one shared traversal for initial/current/next row/group keys. The
@@ -143,7 +143,10 @@ def yielded_peers(initial, state, excluded_roots, value, bounds, *, pending=()):
         max_bytes=value['initial_bytes'] + value['state_resident_bytes'] + 3 * bounds.max_row_bytes,
         max_nodes=value['inspection_nodes'], additional_roots=(state, *pending),
         excluded_roots=excluded_roots)
-    return measured.retained + (7 * bounds.max_row_bytes if pending else 0)
+    # The merge readers stay live while a next group is pending: seven maximum
+    # rows in the original window, or the caller's measured merge window.
+    window = 7 * bounds.max_row_bytes if pending_bytes is None else pending_bytes
+    return measured.retained + (window if pending else 0)
 
 
 def declare(initial, bounds):

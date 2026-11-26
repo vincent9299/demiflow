@@ -250,15 +250,21 @@ class _ValidatedFiniteEntry(dict):
 
     def __init__(self, entry, services, spec):
         super().__init__(entry)
-        self._proof = (services.store, services.assignment, services.bounds, spec,
+        # Bound to the sealed decoding bounds: a measured kernel view of the same
+        # assignment narrows only its resident grant, not what the scan proved.
+        self._proof = (services.store, services.assignment, _sealed_bounds(services), spec,
                        tuple(entry[key] for key in _FIELD_ORDER))
 
     def permits(self, services, entry, spec):
         store, assignment, bounds, original_spec, original_entry = self._proof
         return (set(self) == _FIELDS and services.store is store
-                and services.assignment is assignment and services.bounds == bounds
+                and services.assignment is assignment and _sealed_bounds(services) == bounds
                 and spec == original_spec and tuple(self[key] for key in _FIELD_ORDER) == original_entry
                 and tuple(entry[key] for key in _FIELD_ORDER) == original_entry)
+
+
+def _sealed_bounds(services):
+    return getattr(services, 'sealed_bounds', services.bounds)
 
 
 def _validated_entry(services, entry, proof=None):

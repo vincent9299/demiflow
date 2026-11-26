@@ -138,4 +138,5 @@ The object returned by `run_stream()`:
 | `stats.emitted` | Output row count of the last node |
 | `stats.metrics['stage_policies']` | The concurrency, queue and execution mode actually in effect for every node |
 | `stats.metrics['call_concurrency']` | For every concurrent node: declared concurrency `capacity`, highest concurrency reached `peak`, admissions that waited for the memory window `byte_waits`, window size `byte_limit` and the output each call reserves `output_reserve`; `limited_by` is `'memory'` when memory held the concurrency down. Actions such as `take_all` report the same in `stats['call_concurrency']` of `local_execution` |
+| `stats.metrics['measured_memory']` | Join and reduce steps that run by actual size: `granted_bytes` the memory received, `preferred_bytes` what maximum-size rows need, `row_bytes_hint` roughly the largest row it is sure to hold; empty when there is none. See [relational operations](relational.md#when-memory-cannot-hold-maximum-size-rows). `stats['measured_memory']` of `local_execution` is the same (absent when empty) |
 | `stats.summary()` | A one-line text summary of the counts above |

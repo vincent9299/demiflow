@@ -132,3 +132,12 @@ with data.local_execution(native_resources={"memory_bytes": 2 * 1024**3, "thread
 
 - 这些上限是保护措施，不是对整个进程内存的硬保证；单行特别大的数据仍可能超出预算而失败。
 - 查询失败、超时或被取消时不会重跑你的函数，也不会自动加内存。
+
+### 内存放不下最大行时
+
+平台先按“每一行都和行上限 `max_row_bytes` 一样大”给 `join` 和 `reduce_by_key` 留内存：join 约 1 个批次加 6 行，reduce 约 12 行再加两份状态上限 `max_state_bytes`。`local_execution(memory_bytes=...)` 设得较小、这样排不下时：
+
+- 行上限、批次上限（reduce 还有状态上限）都是默认值时，join 和 reduce 改为按实际大小运行：先只给它们一个批次加一行，再把剩下的内存尽量补回给它们，运行时按每一行、每个分组状态的实际字节计算。行不大时照常运行；某一行或某个分组状态在分到的内存里放不下时，运行中报 `BUDGET_EXCEEDED`，报错写明分到多少内存、按最大行需要多少。
+- 这种计划开始时日志里有一条警告，写明是哪个步骤、分到多少内存、单行大约超过多大可能失败。`local_execution` 的 `stats['measured_memory']` 和 `run_stream()` 的 `stats.metrics['measured_memory']` 里有同样的内容。
+- 在运行上限（`RunContext.start(limits=...)`）里显式设置了这些上限时，平台仍按最大行检查，放不下就在开始前拒绝，不调用任何函数。想在花钱之前就确定一定能跑完，就显式设置 `max_row_bytes`、`max_batch_bytes`（reduce 再加 `max_state_bytes`）。
+- 能按最大行排下的计划不受影响。

@@ -138,4 +138,5 @@ queue_depth × 单行输入大小 + concurrency × (单行输入 + 单行输出 
 | `stats.emitted` | 最后一个节点的输出行数 |
 | `stats.metrics['stage_policies']` | 每个节点实际生效的并发、队列和执行方式 |
 | `stats.metrics['call_concurrency']` | 每个并发节点：设定并发 `capacity`、实际最高并发 `peak`、因内存窗口等待的次数 `byte_waits`、窗口字节数 `byte_limit`、每个调用预留的输出 `output_reserve`；`limited_by` 为 `'memory'` 表示并发被内存压低了。`take_all` 等动作在 `local_execution` 的 `stats['call_concurrency']` 里有同样的内容 |
+| `stats.metrics['measured_memory']` | 按实际大小运行的 join、reduce 步骤：`granted_bytes` 分到的内存、`preferred_bytes` 按最大行需要的内存、`row_bytes_hint` 大约能保证的单行大小；没有这种步骤时为空。见 [关系运算](relational.md#内存放不下最大行时)。`local_execution` 的 `stats['measured_memory']` 相同（没有时不出现） |
 | `stats.summary()` | 上述计数的一行文字摘要 |
