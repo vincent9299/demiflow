@@ -50,7 +50,7 @@ from ..execution.contracts.dataflow_kinds import NATIVE, TYPED, kinds_with, trai
 from demiflow.execution.contracts.recovery_contract import identity
 from demiflow.execution.seal.program_identity import describe
 from .dataflow_budget import (
-    codec_window, default_profile, declare_codec_windows, relational_profile, terminal_budget,
+    CodecWindow, codec_window, default_profile, declare_codec_windows, relational_profile, terminal_budget,
 )
 from .dataflow_registry import operator_registry, source_registry, terminal_registry
 from .dataflow_configuration import _NEW, _check_purpose
@@ -572,7 +572,7 @@ class _Capture:
         self.observation_labels = {}
         # Optional codec targets are not independent hard per-node minima.
         # Keep their provenance private until all simultaneous inputs are known.
-        self.codec_windows: dict[int, tuple[int, int]] = {}
+        self.codec_windows: dict[int, CodecWindow] = {}
         self.publication_windows: dict[int, tuple[int, int]] = {}
 
     def _remember_codec_window(self, index, operation=None):

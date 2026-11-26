@@ -175,7 +175,7 @@ PREDICATES = (
      lambda t, kind: kind in t['runtime.kernel_kinds']),
     ('needs_instance', OPERATOR, 'if self._spec.kind in _INSTANCE_KINDS:',
      lambda t, kind: kind in t['runtime.instance_kinds']),
-    ('row_call', OPERATOR, 'if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):',
+    ('row_call', OPERATOR, 'if kind in _RECORD_CALL_KINDS:',   # the kind table's record_call_kinds()
      lambda t, kind: kind in t['runtime.unary_kinds'] or (
          kind in t['runtime.model_kinds'] and kind not in t['runtime.batch_instance_kinds'])),
     ('row_call_uses_slot_instance', OPERATOR, 'instance=self._slot_instance(0) if kind in _INSTANCE_KINDS else self._instance,',

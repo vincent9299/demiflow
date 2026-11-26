@@ -31,12 +31,21 @@ def _error(code: str, message: str) -> DataflowError:
     return DataflowError(code, message, context={})
 
 
+class CodecWindow(NamedTuple):
+    """The proven working range of one kernel grant."""
+    minimum: int
+    target: int
+    # In-flight input bytes that ``minimum`` reserves for concurrent per-record calls; None when the
+    # minimum keeps a full input window for every call slot and needs no runtime input credit.
+    call_input_bytes: int | None = None
+
+
 class TerminalBudget(NamedTuple):
     configuration: dict
     profile: ResourceProfile
     phased_publication: bool
     publication_window: tuple[int, int] | None    # (minimum, target) of the native publication workspace
-    codec_window: tuple[int, int] | None          # (minimum, target) of the terminal's own optional room
+    codec_window: CodecWindow | None              # the terminal's own optional room
 
 
 def payload_workspace(bounds: Bounds, *, metadata_bytes=0) -> int:
@@ -282,18 +291,19 @@ def terminal_budget(request, nodes, producer, *, bounds, semantic):
             bounds.max_batch_bytes + bounds.max_row_bytes,
             payload_workspace(bounds) + bounds.max_batch_bytes)
     minimum = (payload if compact else bounds.max_batch_bytes + bounds.max_row_bytes) + metadata
-    codec = (minimum, payload + metadata) if not bounded_workspace and payload + metadata > minimum else None
+    codec = (CodecWindow(minimum, payload + metadata)
+             if not bounded_workspace and payload + metadata > minimum else None)
     if not native_publication:
         # Both existing contracts are feasible alternatives: fixed payload/index
         # windows can themselves be smaller than the measured codec's minimum.
         floor = MIN_TERMINAL_WORKSPACE if bounded_workspace else min(minimum, MIN_TERMINAL_WORKSPACE)
         if profile.requests['memory_bytes'] > floor:
-            codec = (floor, profile.requests['memory_bytes'])
+            codec = CodecWindow(floor, profile.requests['memory_bytes'])
     return TerminalBudget(configuration, profile, phased_publication, publication_window, codec)
 
 
 def codec_window(kernel, operation, bounds):
-    """The optional codec slack of one node as (minimum, target); None when it has none to share."""
+    """The optional codec slack of one node as a CodecWindow; None when it has none to share."""
     resources = getattr(getattr(operation, 'native_options', None), 'worker_resources', None) or {}
     if 'memory_bytes' in resources:
         return None  # An explicit user grant is never redistributed.
@@ -330,16 +340,20 @@ def codec_window(kernel, operation, bounds):
                 and kernel.configuration.get('concurrency', 1) == 1):
             control = max(1, min(bounds.max_control_bytes, bounds.max_resident_bytes // 8))
             minimum = min(minimum, bounds.max_resident_bytes - control)
-        calls = kernel.configuration.get('concurrency', 1)
-        if kernel.kind == 'AsyncMapOp' and calls > 1:
-            # Unary calls keep one full output per slot. Their input credit
-            # can shrink to a single row; another row may already be in push
-            # waiting for that credit. State and fixed costs still coexist.
-            minimum -= calls * bounds.max_batch_bytes - 2 * bounds.max_row_bytes
+    from ..execution.contracts.dataflow_kinds import record_call_kinds
+    calls = kernel.configuration.get('concurrency', 1)
+    call_input = None
+    if calls > 1 and kernel.kind in record_call_kinds():
+        # Per-record calls keep one full output per slot. Their input credit
+        # can shrink to a single row; another row may already be in push
+        # waiting for that credit. State and fixed costs still coexist. The
+        # kernel enforces the sealed credit plus whatever slack it is granted.
+        call_input = bounds.max_row_bytes
+        minimum -= calls * bounds.max_batch_bytes - 2 * call_input
     if not matches:
         return None  # Native models, reducers and other specialized grants retain their authority.
     target = kernel.profile.requests['memory_bytes']
-    return (minimum, target) if target > minimum else None
+    return CodecWindow(minimum, target, call_input) if target > minimum else None
 
 
 def declare_codec_windows(nodes, codec_windows, publication_windows):
@@ -354,8 +368,10 @@ def declare_codec_windows(nodes, codec_windows, publication_windows):
     for index, node in enumerate(nodes):
         fields = {}
         codec = codec_windows.get(index)
-        if codec and codec[1] == node.kernel.profile.requests['memory_bytes']:
-            fields['codec_min_bytes'] = codec[0]
+        if codec and codec.target == node.kernel.profile.requests['memory_bytes']:
+            fields['codec_min_bytes'] = codec.minimum
+            if codec.call_input_bytes is not None:
+                fields['call_input_min_bytes'] = codec.call_input_bytes
         publication = publication_windows.get(index)
         if publication and FIELD in node.kernel.configuration and workspace_bytes(node.kernel.configuration) == publication[1]:
             fields['publication_min_bytes'] = publication[0]

@@ -192,6 +192,9 @@
    "cache_namespace": [
     "execution/kernels/dataflow.py"
    ],
+   "call_input_min_bytes": [
+    "execution/kernels/operator.py"
+   ],
    "callable_scope": [
     "execution/kernels/operator.py",
     "planning/dataflow_shared.py"
