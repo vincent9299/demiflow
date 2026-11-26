@@ -585,7 +585,6 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         result['dependencies'] = dict(
             digest=dep_info['digest'],
             declaration_sha256=dep_config['sha256'],
-            requirements=list(dep_config['requirements']),
             packages=pkg_summary,
             changed=bool(changed_controls),
             entries={name: imports_by_entry[name] for name in selected_entries if name in imports_by_entry},

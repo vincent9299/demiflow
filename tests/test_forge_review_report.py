@@ -36,6 +36,38 @@ def test_each_review_has_its_own_identity_and_bound_evidence(project):
     assert outcome['review_id'] != invoke(project, response())['review_id']
 
 
+def test_dependency_credentials_stay_out_of_provider_requests_and_still_invalidate_review(project):
+    from hashlib import sha256
+
+    config = project / 'pyproject.toml'
+    req = 'widgets @ https://fixture-user:fixture-pass@packages.example.org/widgets.whl?token=fixture-signature'
+    declared = f'[project]\ndependencies = ["{req}"]\n[tool.demiflow.packages]\n'
+    config.write_text(declared)
+    sent = []
+
+    def reviewer(prompt):
+        sent.append(prompt)
+        return response()
+
+    def review():
+        return review_project(project, goal='Check dependencies', paths=['operators/normalize.py'],
+                              observations=[{'source': 'forge_check', 'detail': f'Missing {req}'}],
+                              reviewer=reviewer)
+
+    first = review()
+    config.write_text(declared.replace('fixture-pass', 'rotated-pass'))
+    second = review()
+    assert first['status'] == second['status'] == 'passed'
+    assert first['evidence_id'] != second['evidence_id']
+    assert len(sent) == 2
+    request = json.loads(sent[0].split('\n')[-1])
+    assert request['project_dependencies']['declaration_sha256'] == sha256(declared.encode()).hexdigest()
+    assert '2 | dependencies' in request['files']['pyproject.toml']['after']
+    for prompt in sent:
+        assert 'packages.example.org/widgets.whl' in prompt
+        assert all(value not in prompt for value in ('fixture-user', 'fixture-pass', 'fixture-signature', 'rotated-pass'))
+
+
 def test_review_must_cite_source_at_the_claimed_location(project):
     cases = (
         ({'line': 1}, '源码不匹配'),

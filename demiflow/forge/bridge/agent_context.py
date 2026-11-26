@@ -29,7 +29,7 @@ def authoritative_source_paths(project):
 
 
 def assemble(project, requirement, limits, *, execution_mode='trusted_local', input_access=False,
-             coding=None, delivery_review=False, previous_review=None):
+             coding=None, delivery_review=False, previous_review=None, allowed_roots=None, denied_paths=()):
     root = Path(project['root'])
     sources, pages, used = [], [], 0
 
@@ -52,7 +52,10 @@ def assemble(project, requirement, limits, *, execution_mode='trusted_local', in
         from importlib.resources import files as resource_files
         from demiflow.forge.context import build_context
 
-        facts = build_context(root, reference=coding, exclude=project.get('protected', ()))
+        if execution_mode == 'restricted' and allowed_roots is None:
+            allowed_roots = ()
+        facts = build_context(root, reference=coding, exclude=project.get('protected', ()),
+                              allowed_roots=allowed_roots, denied_paths=denied_paths)
         if facts['status'] != 'ready':
             reject('Forge coding context incomplete: ' + '; '.join(
                 item['detail'] for item in facts['diagnostics']), 'resource_limit')

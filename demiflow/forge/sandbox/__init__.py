@@ -8,7 +8,7 @@ from .sandbox import (
     launch_sandbox,
     specification,
 )
-from .sandbox_shims import SandboxShims
+from .sandbox_shims import SandboxShims, read_runtime_config
 
 __all__ = [
     'SPEC_BYTES',
@@ -18,5 +18,6 @@ __all__ = [
     'execution_identity',
     'implementation_digest',
     'launch_sandbox',
+    'read_runtime_config',
     'specification',
 ]

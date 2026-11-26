@@ -876,6 +876,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     from demiflow.workbench.conversations.pipeline_review import recent_review
                     manifest, prompt = assemble(project, turn['text'], limits,
                         execution_mode=deployment.mode, input_access=input_access is not None, coding=coding,
+                        allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths,
                         delivery_review=delivery_review is not None,
                         previous_review=recent_review(store, session['id']) if guided else None)
                     store.update(tid, context=wire(manifest).decode(), delivery='prepared')

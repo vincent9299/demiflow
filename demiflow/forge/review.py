@@ -235,6 +235,7 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
     ``budget`` is a mutable delivery-wide remaining allowance. The caller persists
     it across author repair turns; callbacks must also enforce their transport bound.
     """
+    from .dependencies import redact_dependency_urls
     from .review_evidence import capture_evidence, verify_evidence, review_units
 
     root = Path(root).absolute()
@@ -245,6 +246,7 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
                 not all(isinstance(v, str) and 0 < len(v.encode()) <= 2048 for v in row.values())
                 for row in observations)):
         raise ForgeError('评审的检查记录无效或超过预算。', code='invalid_request')
+    observations = [{**row, 'detail': redact_dependency_urls(row['detail'])} for row in observations]
     guide = read_bounded(GUIDE, 32 * 1024).decode()
     report = dict(format='demiflow_forge_pipeline_review_v1', review_id=uuid4().hex,
                   project=root.name, root=str(root), goal=goal.strip(), status='incomplete',

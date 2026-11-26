@@ -44,5 +44,7 @@ demiflow forge dep install --root /project --python /project-env/bin/python [--j
 
 ## 沙箱、评审、运行与 Notebook
 
+受限开发会话生成初始上下文时，Forge 按本回合获准的参考目录核验外部包。沙箱内的 `forge context` 使用同一读范围。独立评审使用脱敏声明和检查摘要，依赖 URL 中的身份凭据、查询参数和片段不会发送给评审模型。轮换凭据也会使旧评审回执失效。
+
 - **开发与评审沙箱**：开发 Agent 可直接新建、编辑和保存 `pyproject.toml`，可正常 `import` 已声明包，OS 拒绝其直接写入 `packages/` 和 `.forge/`。受限会话中的 `demiflow forge dep vendor/remove` 经受控宿主通道执行并同回合生效；在已授权读范围内直接修改 `local_ref` 路径，下一条 `python`/`pytest` 即自动加载新版本。独立评审保持只读，使用脱敏且保留行号的 `pyproject.toml` 及包摘要，不展开大包正文，并将原文哈希与包树哈希纳入 `evidence_id`。
 - **预览、受管运行与 Notebook**：控制服务留在宿主 Python，业务子进程由 `demiflow.forge.runtime` 按显式项目 Python 与单包精确加载器启动（同级目录不可见）。正式运行首次启动核对当前声明与环境，中断后即使外部包升级，恢复也严格读取原封存字节并校验原 Python 环境。Notebook 新内核读取最新核验版本，已打开内核保持启动时固定的快照版本，只读内核写保护继续生效。
