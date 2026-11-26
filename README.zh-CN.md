@@ -258,7 +258,7 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | 获取、队列与文档 | [docs/fetch.md](docs/fetch.md) |
 | 写入 Lance 表与部分列合并 | [docs/lance-write.md](docs/lance-write.md) |
 | 训练与评测 | [docs/dataset-training.md](docs/dataset-training.md) |
-| Workbench 与 Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/forge-cli.md](docs/forge-cli.md) |
+| Forge 与工作台 | [docs/forge-cli.md](docs/forge-cli.md) |
 | 引擎架构 | [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
 
 ## 项目状态

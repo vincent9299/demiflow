@@ -251,10 +251,10 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | Fetching, queues and documents | [docs/en/fetch.md](docs/en/fetch.md) |
 | Writing Lance tables and partial-column merge | [docs/en/lance-write.md](docs/en/lance-write.md) |
 | Training and evaluation | [docs/en/dataset-training.md](docs/en/dataset-training.md) |
-| Workbench and Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/en/forge-cli.md](docs/en/forge-cli.md) |
-| Engine architecture | [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
+| Forge and the Workbench | [docs/en/forge-cli.md](docs/en/forge-cli.md) |
+| Engine architecture (in Chinese) | [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
 
-> Most guides are currently written in Chinese. English versions are on the roadmap, and contributions are welcome.
+> Every guide has a Chinese version under [docs/](docs/) with the same file name. The engine architecture and the repository rules are currently in Chinese only.
 
 ## Project status
 
