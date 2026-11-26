@@ -30,9 +30,9 @@ from demiflow.execution.contracts.dataflow import (
     Record,
     RuntimeServices,
 )
-from demiflow.execution.contracts.dataflow_kinds import kinds_with
+from demiflow.execution.contracts.dataflow_kinds import kinds_with, record_call_kinds
 
-from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _cfg, _check_stop, _err, _MODEL_KINDS, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, _UNARY_KINDS, invoke_batch, invoke_unary
+from demiflow.execution.kernels.dataflow import KERNEL_KINDS, RECORD_MEDIA_TYPE, _AGGREGATE_KINDS, _cfg, _check_stop, _err, _occurrence, _ORDERING_KINDS, _RELATIONAL_KINDS, _STREAM_GROUP_KINDS, invoke_batch, invoke_unary
 from demiflow.execution.contracts.record_codec import input_row_bytes as _input_row_bytes
 from demiflow.execution.contracts.record_codec import canonical_record_json as _canonical, record_identity as _hash_id
 
@@ -43,6 +43,7 @@ _SPOOL_OWNER = "kernel-spool"
 # them whose instance is called with a batch (roles of the kind table).
 _INSTANCE_KINDS = kinds_with("instance")
 _BATCH_INSTANCE_KINDS = kinds_with("batch_instance")
+_RECORD_CALL_KINDS = record_call_kinds()
 
 
 def _segment_rows(services: RuntimeServices) -> int:
@@ -610,9 +611,16 @@ class OperatorKernel:
                     from demiflow.execution.kernels.concurrent_calls import ConcurrentCalls
                     input_limit = None
                     minimum = self._spec.configuration.get('codec_min_bytes')
-                    if self._spec.kind == 'AsyncMapOp' and minimum is not None:
+                    credit = self._spec.configuration.get('call_input_min_bytes')
+                    if credit is None and self._spec.kind == 'AsyncMapOp' and minimum is not None:
+                        # Sealed before the credit was declared: only async map
+                        # had a one-row input credit inside its minimum.
+                        credit = self._services.bounds.max_row_bytes
+                    if credit is not None:
+                        if minimum is None:
+                            raise _err('INVALID_CONTRACT', 'call input credit has no sealed minimum')
                         grant = self._spec.profile.requests['memory_bytes']
-                        input_limit = self._services.bounds.max_row_bytes + grant - minimum
+                        input_limit = credit + grant - minimum
                     self._calls = ConcurrentCalls(self._concurrency, check_stop=self._services.check_stop,
                                                   input_limit=input_limit, clock=self.observations.busy)
             from demiflow.execution.contracts.dataflow_kinds import NATIVE_BATCH_KINDS as KINDS
@@ -935,7 +943,7 @@ class OperatorKernel:
             return iter(())
         if kind == "LimitOp" and self._emitted >= self._spec.configuration["limit"]:
             return
-        if kind in _UNARY_KINDS or (kind in _MODEL_KINDS and kind not in _BATCH_INSTANCE_KINDS):
+        if kind in _RECORD_CALL_KINDS:
             if self._task_rows:
                 record = self._task_record(record)
             if self._calls is None:

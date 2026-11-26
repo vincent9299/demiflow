@@ -190,6 +190,15 @@ def kinds_with(role: str) -> frozenset:
     return frozenset(record.name for record in _RECORDS if role in record.roles)
 
 
+def record_call_kinds() -> frozenset:
+    """Kinds whose kernel makes one call per input record: unary transforms and unary model calls.
+
+    The kernel routes these through its per-record call path, and the planner
+    sizes the in-flight input credit of their concurrent calls. Both read it here.
+    """
+    return kinds_with("unary") | (kinds_with("model") - kinds_with("batch_instance"))
+
+
 def operator_rows() -> tuple:
     """(kind, compiler symbol, kernel symbol, input ports) of every registered operator, in order."""
     return tuple((record.name, *record.operator) for record in _RECORDS if record.operator is not None)
