@@ -24,7 +24,7 @@ def snapshot():
     explicitly instead of silently disappearing from the provenance boundary.
     """
     package = 'tests/runtime_v3_package/'
-    roots = ['demiflow', 'tests', 'examples', 'tools/forge_analysis', 'pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini',
+    roots = ['demiflow', 'tests', 'examples', 'tools/forge_analysis', 'tools/release_gate.py', 'pyproject.toml', 'pytest.ini', 'setup.cfg', 'tox.ini',
              package.rstrip('/')]
     listed = subprocess.check_output(['git', 'ls-files', '-z', '--cached', '--others',
                                       '--exclude-standard', '--', *roots], cwd=ROOT)

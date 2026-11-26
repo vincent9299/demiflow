@@ -46,6 +46,7 @@ include = ["demiflow*"]
 "demiflow.collect.native_search" = ["inventory.json"]
 "demiflow.forge" = ["standards/*.json", "standards/pipeline-authoring.md", "standards/pipeline-review.md", "skills/demiforge/SKILL.md", "skills/dataskill/SKILL.md"]
 "demiflow.workbench" = ["analysis/*.json", "web/*.html", "web/*.js", "web/*.css", "web/*.txt", "web/*.json"]
+"demiflow.forge.bridge" = ["*.cjs"]
 "demiflow.workbench.conversations" = ["*.cjs"]
 
 [tool.pytest.ini_options]

@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 import time
 
+from demiflow.forge.bridge import model_channel
+
 from .common import plain_path, reject, wire
 
 
@@ -101,7 +103,7 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
                                         defer_handshake=True, request_seconds=timeout, deadline=deadline)
             cleanup.callback(broker.close)
             config = broker.child_config
-            channel = Path(__file__).with_name('deepseek_model_proxy.cjs')
+            channel = model_channel.plugin_path('deepseek_model_proxy.cjs')
 
         class Reviewer:
             name = 'deepseek'

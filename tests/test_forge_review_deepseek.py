@@ -163,3 +163,58 @@ def test_review_budget_reaches_native_idle_timeout(tmp_path, monkeypatch, route,
     plugin = next(p['config'] for p in plugins if p['id'] in ('llm-deepseek-api-key', 'llm-deepseek-account'))
     assert plugin['streamIdleTimeoutMs'] == (seconds or 1800) * 1000
     assert plugin['reasoningEffort'] == 'high'
+
+
+def test_installed_restricted_author_and_reviewer_use_the_host_channel(tmp_path, monkeypatch):
+    import time
+    from contextlib import closing
+    from click.testing import CliRunner
+    from demiflow.cli import main
+    from demiflow.forge.bridge.model_channel import local_channel
+    from demiflow.forge.project import initialize_project
+
+    cli = shutil.which('dsh')
+    if not cli or not Path(cli).with_name('node').is_file():
+        pytest.skip('Installed DeepSeek headless npm and Node required')
+    calls = []
+
+    class Model(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            calls.append(bool(body.get('tools')))
+            payload = _model_response()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    root = tmp_path / 'project'
+    initialize_project(root, name='fixture')
+    monkeypatch.setenv('FORGE_TEST_MODEL_KEY', 'fixture')
+    node = Path(cli).with_name('node')
+    with http.server.ThreadingHTTPServer(('127.0.0.1', 0), Model) as server:
+        runner = threading.Thread(target=server.serve_forever, daemon=True)
+        runner.start()
+        config = dict(executable=str(Path(cli).resolve()), node=str(node), version='0.2.1-rc.2',
+                      model='deepseek-v4-flash', credential_env='FORGE_TEST_MODEL_KEY',
+                      base_url=f'http://127.0.0.1:{server.server_port}')
+        host = tmp_path / 'providers.json'
+        host.write_text(json.dumps({'providers': {'deepseek': config}}))
+        try:
+            result = CliRunner().invoke(main, ['forge', 'develop', '--agent', 'deepseek', '--goal', 'Read this project',
+                '--root', str(root), '--state-dir', str(tmp_path / 'state'), '--model-config', str(host),
+                '--no-review', '--timeout', '60', '--json'])
+            assert result.exit_code == 0, result.output
+            with closing(local_channel('deepseek', config, tmp_path, 'review', home=tmp_path / 'model',
+                                       deadline=time.time() + 60, request_seconds=45)) as channel:
+                outcome = backend.run_reviewer('Return one JSON object.', config=config, timeout=45,
+                                               restricted=True, channel=channel)
+            assert outcome['report'] == {'reviewed': True}
+            assert calls[0] and not calls[-1]
+        finally:
+            server.shutdown()
+            runner.join(5)

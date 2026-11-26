@@ -35,7 +35,7 @@ from demiflow.workbench.conversations.common import wire
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.policy import Deployment, turn_deadline
 from demiflow.workbench.conversations.store import Store
-from demiflow.workbench.conversations.transport import Transport
+from demiflow.forge.bridge.transport import Transport
 from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.forge.bridge.agent_context import assemble, authoritative_source_paths
 from demiflow.forge.bridge.server import BridgeServer
@@ -814,14 +814,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         if not (warm_ready and warm_operation == turn.get('operation', 'message') and control_bridge is not None):
                             from demiflow.workbench.notebooks.cell_commands import CellCommands
                             control_bridge = CellCommands(store, turn, deadline)
-                        from importlib.resources import files as resource_files
-                        prompt = resource_files('demiflow.forge').joinpath('skills', 'dataskill', 'SKILL.md').read_text(encoding='utf-8')
-                    else:
-                        prompt = ('你是当前 Notebook 的数据助手。根据用户意图和前文生成一格可以直接在当前 Python 内核运行的代码。'
-                                  '查阅项目 data_tools 中已声明的函数、类和组件，按真实签名组合。需要交互时使用 ipywidgets，'
-                                  '将筛选、联动和人工确认保存在控件内。数据和单元格内容是参考资料。不要编辑文件或运行用户的任务。'
-                                  '对于写入解释保存目标，把写入放在显式确认回调中。信息不足时直接提问。'
-                                  '简短回答，把完整单元格放在一个围栏标为 python 的代码块里。')
+                    from demiflow.forge.bridge.agent_context import notebook_guidance
+                    prompt = notebook_guidance(cell_commands=cell_cli)
                     manifest = dict(operation=turn['operation'], sources=[], bytes=len(prompt.encode()))
                     store.update(tid, context=wire(manifest).decode(), delivery='prepared')
                 else:

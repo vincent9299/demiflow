@@ -3,6 +3,7 @@
 Hosts supply truthful author completion, source observations and authorized I/O.
 This module has no knowledge of a browser, conversation database or provider RPC.
 """
+from contextlib import nullcontext
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -17,7 +18,7 @@ from .schema import ForgeError, canonical
 
 def has_code_changes(changes):
     """True when at least one non-documentation business code/config file changed."""
-    code_dirs = {'flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests', 'src', 'lib'}
+    code_dirs = {'flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests', 'src', 'lib', 'packages'}
     code_exts = {'.py', '.yaml', '.yml', '.json', '.toml', '.js', '.ts'}
     for change in changes or ():
         rel = str(change.get('path') or '').lstrip('/')
@@ -206,7 +207,9 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
     definitions = ()
     if inspect and (paths or want_review or protected_violations):
         try:
-            check = check_project(root, paths=paths if 0 < len(paths) <= 256 else (),
+            # A dependency change can affect every registered entry, even when no Flow file was edited.
+            project_wide = any(p == 'pyproject.toml' or p.startswith('packages/') for p in paths)
+            check = check_project(root, paths=paths if 0 < len(paths) <= 256 and not project_wide else (),
                                   reference=reference, exclude=exclude, include_hygiene=True,
                                   python=project_python, allowed_roots=allowed_roots, denied_paths=denied_paths)
             definitions = check.get('definitions', ())
@@ -285,7 +288,7 @@ def receipt_summary(receipt):
 
 def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                     seconds=3600, review_seconds=REVIEW_SECONDS, resume=False, project_python=None,
-                    allowed_roots=None, denied_paths=()):
+                    allowed_roots=None, denied_paths=(), author_controls=None):
     """Drive the complete CLI engineering loop, persisting before every author send.
 
     The native author callback executes one harness interval. This function owns
@@ -380,7 +383,8 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 before = capture(root, watched, source_dir=source_dir)
                 guarded = capture_protected_files(root)
                 control_path = store.directory / ('controls-' + str(state['round']) + '.json')
-                prepare_control_writes(root, control_path, state['id'] + '-' + str(state['round']))
+                if author_controls is None:
+                    prepare_control_writes(root, control_path, state['id'] + '-' + str(state['round']))
                 state.update(phase='author_sending', before=before, watch=watched, delivery='prepared')
                 state['author']['cleanup'] = 'unknown'
                 store.save(state)
@@ -393,10 +397,14 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                         feedback_status(facts['delivery'])
                     store.save(state)
 
-                result = author(root, prompt, binding=binding, session=state['author'].get('session'),
-                                lease_fd=fd, deadline=state['deadline'], notify=notify, control_path=control_path)
+                controls = author_controls(guarded) if author_controls else nullcontext()
+                with controls as authorized_writes:
+                    result = author(root, prompt, binding=binding, session=state['author'].get('session'),
+                                    lease_fd=fd, deadline=state['deadline'], notify=notify,
+                                    control_path=None if author_controls else control_path)
+                if author_controls is None:
+                    authorized_writes = apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
                 state['author'] = result
-                authorized_writes = apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
                 state['protected_violations'] = enforce_protected_files(root, guarded, authorized=authorized_writes)
                 if not result.get('completed') or result['cleanup'] != 'complete':
                     state.update(phase='unknown' if state.get('delivery') == 'sending' else 'finished',

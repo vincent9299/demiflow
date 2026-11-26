@@ -161,7 +161,18 @@ git -C "$FORMAL" ls-remote origin refs/heads/main "refs/tags/$MAIN_TAG" "refs/ta
 | 发布记录 | `_demiflow/shared-review/releases/<main标签>/`；包含 T/R/上一版、合入提交、合入闸与本次验收范围、已运行各线的差异、例外依据、源码对照、推送核验、预览是否更新、清理与恢复位置 |
 | 原始证据 | 回执、完整命令/环境、文件清单、日志、超时与失败、复跑、校验摘要；从 /tmp 汇总到持久目录，不复制业务数据或凭据 |
 
-发布记录可使用 `REPORT.md` 加 `publication.json`，至少记录 `tested_commit`、`release_commit`、`main_tag`、`known_state`、`gate_receipts`、`lane_receipts`、`differences`、`exceptions`、`remote_verified`、`preview`、`archives`。最终提交号和远端状态写在仓库外，避免为改记录制造无限的新发布提交。
+正式发布使用 `publication.json` 绑定原始证据，另可用 `REPORT.md` 说明裁定。记录包括 `tested_commit`、`release_commit`、`main_tag`、`known_state`、`gate_receipts`、`lane_receipts`、`differences`、`exceptions`、`remote_verified`、`preview`、`archives`。最终提交号和远端状态写在仓库外，避免为改记录制造无限的新发布提交。
+
+正式发布机用同一份判定校验本地分支和标签更新、点名推送及预览换版。安装时传入正式仓库和工作区外的发版记录目录。安装只管理本仓的两个发布钩子，保留其他钩子。`check` 在正式目录快进之前执行一次，Git 和预览入口各自在实际操作前再核验一次。
+
+```bash
+"$PYTHON" -B "$TASK/tools/release_gate.py" --repo "$FORMAL" --records "$RELEASES" install
+"$PYTHON" -B "$TASK/tools/release_gate.py" --repo "$FORMAL" --records "$RELEASES" check "$R" --tag "$MAIN_TAG"
+```
+
+- 评审退回时，在同一入口执行 `review "$CANDIDATE" --block --reviewer "$REVIEWER" --evidence "$REPORT"`，保存返回的编号。修正后复核者用新提交、复核证据和 `--resolve "$BLOCK_ID"` 登记结论。退回可在测试结束后到达，原树仍会被拦截。
+- `publication.json` 的 `review` 记录最终提交、复核人和架构、质量两项裁定。合入闸携带受测 Git 树；`gate_receipts`、评审 `evidence`、每条线的 `collection` 和 `executions` 用 `path` 与 `sha256` 指向原始文件。每条线收集的用例须都有执行结果，逐条核对已知状态和非通过项的处置依据。验收范围仍由发版负责人按第 5.1 节选定。
+- 这套钩子作用于安装它的发布仓库。GitHub 服务端分支保护由远端管理员管理。
 
 ## 7. 预览换版
 
@@ -207,3 +218,5 @@ git -C "$FORMAL" ls-remote origin refs/heads/main "refs/tags/$MAIN_TAG" "refs/ta
 2026-11-24：真人决定“不要每次都全跑，按影响到的范围跑”“每天跑全量”“能明确不是这次改动造成的，可以先不用管，直接上线，等全量重跑时再统一修”。第 5 节由“main 前进之前跑全部四线”改为按影响范围验收（5.1）加每日全量（5.2），逐条比对不变；失败的处理改为：本次改动造成的必须修，能以“改动之前就失败”或“两边各三次复跑全过”证明与本次改动无关的不阻塞定版、不需逐项同意，由每日全量统一处理。historical 与 ray 两条线按改动内容追加。依据：一轮全量约 8700 项、40 分钟，其中工作台与 Forge 测试占约三分之一耗时、historical 与 ray 两条线占约四分之一，对多数引擎改动没有验证价值；同日十余次工作台定版实际只跑了合入闸，其间带入的 3 项失败要到全量才暴露，每日全量即用于发现这类跨范围问题。第 3、6、8 节的相应表述同步调整。兼容影响：已有标签和已知状态清单不受影响；此后按范围验收的标签须写明范围及未运行部分。
 
 2026-11-24（续）：真人要求“只跑受影响的部分”，并决定“去掉工具，直接由合入的人判断”。5.1 的表由“必须运行”改为默认起点；范围由合入的人读过改动内容后判断并负责，可以缩小，也必须在从路径看不出影响时扩大，理由写入发版记录，判断失误由每日全量兜底。曾短暂加入的范围工具、导入记录器和“测试文件 → 模块”对应表在进入 main 之前撤销。
+
+2026-11-27：合入闸记录受测 Git 树。正式发布机在更新引用、推送和预览换版前核验同一份验收证据与未关闭的评审退回。

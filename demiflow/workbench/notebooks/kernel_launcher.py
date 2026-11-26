@@ -48,12 +48,11 @@ def _python_prefixes(python_path: str) -> list[str]:
     return sorted(set(result))
 
 
-def _check_ipykernel(python_path: str, *, isolated=False) -> None:
+def _check_ipykernel(python_path: str, *, env, prefix=()) -> None:
     try:
         probe = subprocess.run(
-            [python_path, '-I', '-B', '-c', 'from importlib.util import find_spec; assert find_spec("ipykernel")']
-            if isolated else [python_path, '-c', 'import ipykernel'],
-            env={'PATH': os.defpath, 'LANG': 'C.UTF-8'} if isolated else None,
+            [*prefix, python_path, '-I', '-B', '-c', 'from importlib.util import find_spec; assert find_spec("ipykernel")'],
+            env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
@@ -153,6 +152,7 @@ def _dependency_snapshot(config, root, code_root, python):
             check_imports=True,
             require_python=True,
             require_environment=True,
+            confined=True if config.get('sandbox_mode') == 'readonly' else None,
         )
     except (OSError, ValueError, ForgeError) as exc:
         _fail(f'项目依赖核验失败：{exc}')
@@ -193,7 +193,6 @@ def main() -> None:
         except Exception as exc:
             _fail(f'项目 pyproject.toml 依赖声明无效：{exc}')
     dependency = _dependency_snapshot(config, root, code_root, target_python) if want_deps else None
-    _check_ipykernel(target_python, isolated=dependency is not None)
     tmp_dir = Path(config['tmp_dir'])
     home_dir = tmp_dir / 'home'
     mpl_dir = tmp_dir / 'matplotlib'
@@ -280,6 +279,7 @@ def main() -> None:
 
     os.chdir(root)
     kernel_cmd = [target_python, '-m', 'ipykernel_launcher', '-f', connection_file]
+    prefix = []
     if sandbox_mode == 'readonly' and platform.system() == 'Darwin':
         if not Path('/usr/bin/sandbox-exec').is_file():
             _fail('macOS Notebook 只读沙箱需要 /usr/bin/sandbox-exec。')
@@ -297,8 +297,10 @@ def main() -> None:
             direct_network=False,
         )
         profile = build_seatbelt_profile(spec)
-        os.execve('/usr/bin/sandbox-exec', ['/usr/bin/sandbox-exec', '-p', profile, *kernel_cmd], env)
-    os.execve(target_python, kernel_cmd, env)
+        prefix = ['/usr/bin/sandbox-exec', '-p', profile]
+    _check_ipykernel(target_python, env=env, prefix=prefix)
+    command = [*prefix, *kernel_cmd]
+    os.execve(command[0], command, env)
 
 
 if __name__ == '__main__':

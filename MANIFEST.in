@@ -9,6 +9,7 @@ recursive-include demiflow/forge/standards *.json *.md
 include demiflow/forge/skills/demiforge/SKILL.md
 recursive-include demiflow/workbench/web *.html *.js *.css *.txt *.json
 recursive-include demiflow/workbench/analysis *.json
+recursive-include demiflow/forge/bridge *.cjs
 recursive-include demiflow/workbench/conversations *.cjs
 global-exclude *.pyc
 global-exclude __pycache__

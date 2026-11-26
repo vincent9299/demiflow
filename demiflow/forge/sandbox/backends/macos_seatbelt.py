@@ -112,7 +112,7 @@ class MacosSeatbeltBackend:
             implementation=file_digest(Path(__file__), Path(__file__).with_name('__init__.py')),
         )
 
-    def launch(self, command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None):
+    def launch(self, command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None, stdin=subprocess.PIPE):
         if platform.system() != 'Darwin':
             raise RuntimeError('macOS Seatbelt sandbox backend requires macOS (Darwin)')
         if not Path(_SANDBOX_EXEC).is_file():
@@ -123,7 +123,7 @@ class MacosSeatbeltBackend:
             [_SANDBOX_EXEC, '-p', profile, *data['command']],
             cwd=data['cwd'],
             env=data['env'],
-            stdin=subprocess.PIPE,
+            stdin=stdin,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             close_fds=True,

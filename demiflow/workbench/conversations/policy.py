@@ -19,15 +19,9 @@ from demiflow.workbench.conversations.common import text
 from demiflow.workbench.conversations.execution import execution_facts
 from demiflow.workbench.conversations.versions import is_qualified
 
-PROXY_ENVIRONMENT = ('HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy')
+from demiflow.forge.bridge.model_channel import proxy_environment
+
 POLICY_BYTES = 1024 * 1024
-
-
-def proxy_environment(config):
-    """Explicit transport opt-in; proxy values never enter persisted policy."""
-    if not config.get('inherit_proxy'):
-        return {}
-    return {name: os.environ[name] for name in PROXY_ENVIRONMENT if name in os.environ}
 
 
 @dataclass(frozen=True)

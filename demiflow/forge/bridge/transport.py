@@ -6,30 +6,7 @@ import os
 import selectors
 import time
 
-from demiflow.agent_transport import strict_json
-from demiflow.workbench.conversations.common import reject
-from demiflow.workbench.conversations.common import wire
-
-
-def decode(raw):
-    # Count lexical structure before JSON allocates containers. String literals
-    # and escapes are skipped; the strict parser handles syntax/duplicates.
-    depth = count = 0; quoted = escaped = False
-    for char in raw:
-        if quoted:
-            if escaped: escaped = False
-            elif char == 92: escaped = True
-            elif char == 34: quoted = False
-        elif char == 34: quoted = True
-        elif char in (91, 123):
-            depth += 1; count += 1
-            if depth > 64: reject('Provider JSON nesting exceeds budget', 'resource_limit')
-        elif char in (93, 125): depth -= 1
-        elif char in (44, 58): count += 1
-        if count > 50000: reject('Provider JSON structure exceeds budget', 'resource_limit')
-    value = strict_json(raw)
-    if type(value) is not dict: reject('Provider frame is not an object')
-    return value
+from .common import decode, reject, wire
 
 
 class Transport:

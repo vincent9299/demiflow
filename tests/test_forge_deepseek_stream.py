@@ -11,7 +11,7 @@ import pytest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.deepseek import DeepSeek
 from demiflow.workbench.conversations.policy import Limits
-from demiflow.workbench.conversations.transport import Transport
+from demiflow.forge.bridge.transport import Transport
 from test_forge_development_chat_providers import Wire
 
 ROOT=Path(__file__).parents[1]
@@ -267,7 +267,6 @@ def test_transport_drains_buffered_frames_and_final_rpc_before_reporting_eof(tmp
 @pytest.mark.parametrize('limits,frames,reason',[
     (Limits(frame_bytes=1024),[dict(method='wide',params=dict(text='x'*1100))],'frame'),
     (Limits(output_bytes=1000),[dict(method='many',params=dict(text='x'*100)) for _ in range(30)],'total stdout'),
-    (Limits(events_per_turn=5),[dict(method='many',params={}) for _ in range(10)],'frame budget'),
 ])
 def test_transport_backpressure_does_not_relax_original_limits(tmp_path,limits,frames,reason):
     process,transport=transport_source(tmp_path,frames,limits)
@@ -291,3 +290,20 @@ def test_closed_acp_session_can_rebind_its_original_identity_and_restart_frame_r
     assert [e['params']['phase'] for e in result['output'] if 'phase' in e['params']] == [
         'start', 'settled', 'start', 'settled']
     assert not result['cancellations']
+
+
+def test_raw_notifications_survive_coalescing_before_the_turn_event_budget(tmp_path):
+    frames = [dict(method='notice', params=dict(index=i)) for i in range(10)]
+    process, transport = transport_source(tmp_path, frames, Limits(events_per_turn=5))
+    try:
+        received = []
+        deadline = time.monotonic() + 5
+        while len(received) < len(frames) and time.monotonic() < deadline:
+            transport.poll(.02)
+            while transport.events:
+                received.append(transport.pop())
+        assert received == frames
+    finally:
+        process.kill()
+        process.wait()
+        transport.close()

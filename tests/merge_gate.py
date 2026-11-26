@@ -43,6 +43,9 @@ GUARDS = (
     'tests/test_public_sdk_docstrings.py',
     'tests/test_engine_known_state.py',
     'tests/test_merge_gate.py',
+    'tests/test_architecture_boundaries.py',
+    'tests/test_forge_release_boundaries.py',
+    'tests/test_release_gate.py',
 )
 
 # The seven files no change may touch without an explicit decision.
@@ -131,9 +134,21 @@ def run_guards(root, python, files, env, scratch):
     return {'returncode': child.returncode, **counts, 'failed': failed, 'summary': tail[0] if tail else ''}
 
 
+def staged_tree(root):
+    """Identify a clean staged candidate without confusing its pre-merge HEAD with the result."""
+    if not (root / '.git').exists():
+        return None
+    if subprocess.run(['git', 'diff-files', '--quiet', '--'], cwd=root).returncode:
+        return None
+    if subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z'], cwd=root):
+        return None
+    return subprocess.check_output(['git', 'write-tree'], cwd=root, text=True).strip()
+
+
 def gate(root=ROOT, python=sys.executable, patterns=GUARDS, frozen=FROZEN, scratch_parent='/tmp'):
     scratch = Path(tempfile.mkdtemp(prefix='demiflow-gate-', dir=scratch_parent))
     try:
+        before = staged_tree(root)
         env = environment(root, scratch)
         files, missing = guard_files(root, patterns)
         origin, reason = imported_from(root, python, env)
@@ -143,9 +158,11 @@ def gate(root=ROOT, python=sys.executable, patterns=GUARDS, frozen=FROZEN, scrat
                   'missing_guards': missing, 'guard_files': files}
         result['tests'] = run_guards(root, python, files, env, scratch) if files and bound else None
         tests = result['tests']
-        result['ok'] = bool(bound and not result['frozen_differences'] and not missing
+        after = staged_tree(root)
+        result['git_tree'] = before if before == after else None
+        result['ok'] = bool((result['git_tree'] or not (root / '.git').exists()) and bound and not result['frozen_differences'] and not missing
                             and tests and tests['returncode'] == 0 and not tests['failed']
-                            and tests['skipped'] == 0)
+                            and tests['skipped'] == 0 and tests['passed'] > 0)
         result['diagnostics'] = {'status': 'not_requested'}
         return result
     finally:
@@ -229,7 +246,7 @@ def run_diagnostics(root, python, base=None, candidate=None, output=None, *, run
 
 
 def describe(result):
-    lines = [f"tree: {result['tree']}"]
+    lines = [f"tree: {result['tree']}", f"staged Git tree: {result.get('git_tree') or 'not verified'}"]
     lines.append('demiflow is imported from this tree' if result['tree_bound']
                  else f"NOT THIS TREE: demiflow comes from {result['imported_from']}")
     for name, recorded, found in result['frozen_differences']:

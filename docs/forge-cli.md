@@ -176,3 +176,15 @@ demiflow workbench run show ./experiment RUN_ID
 - Forge 的检查和登记不提供沙箱：绕过 Forge 直接用 Python 执行的代码不受它约束。
 - 检查报告不是运行许可；运行前平台仍会重新核对源码、配置和数据版本是否与检查时一致。
 - 工作台是单机服务，面向本机或经 SSH 转发访问，不是多租户的对外服务。
+
+## 独立受限开发
+
+`demiflow forge develop --root PROJECT --state-dir STATE --python PYTHON --goal TASK` 默认在 Forge 开发沙箱中启动原生作者。STATE 是项目外的私有回合目录，恢复时继续使用同一目录和配置。使用 `--read-root DIR` 显式开放第三方包来源。
+
+有模型推理时，宿主通过 `--model-config FILE` 或 `DEMIFLOW_FORGE_MODEL_CONFIG` 提供固定模型与认证来源。下面是 Codex 的配置示例。
+
+```json
+{"providers":{"codex":{"model":"MODEL","base_url":"https://provider.example/v1","credential_env":"PROJECT_MODEL_KEY"}}}
+```
+
+DeepSeek 配置还需带上已核验的 `executable`、`node` 和 `version`。作者和独立评审各自使用本回合模型通道，凭据由宿主持有。离线工具可用 `--executable PATH --no-review`。仅在明确授权本地宿主权限时选择 `--mode trusted_local`。

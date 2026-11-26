@@ -225,8 +225,8 @@ def launch_confined_probe(
     """Launch a strictly read-only, network-disabled interpreter probe inside Forge's verifier sandbox."""
     from .sandbox import SandboxSpec, launch_sandbox
 
-    if sys.platform != 'linux':
-        raise ForgeError('Confined project Python probe requires the Linux sandbox backend', code='operation_rejected')
+    if sys.platform not in {'linux', 'darwin'}:
+        raise ForgeError('No confined project Python probe backend on this platform', code='operation_rejected')
     cwd_path = Path(cwd).resolve()
     home = cwd_path / 'home'
     home.mkdir(mode=0o700, exist_ok=True)
@@ -244,7 +244,11 @@ def launch_confined_probe(
         rss_bytes=rss_bytes,
         direct_network=False,
     )
-    return launch_sandbox(
+    launch = launch_sandbox
+    if sys.platform == 'darwin':
+        from .sandbox.backends.macos_seatbelt import MacosSeatbeltBackend
+        launch = MacosSeatbeltBackend().launch
+    return launch(
         command,
         spec=spec,
         env={**env, 'HOME': str(home), 'TMPDIR': str(home)},

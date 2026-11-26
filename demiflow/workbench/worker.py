@@ -103,71 +103,25 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
 
 
 def _inspection_inputs(root, request):
-    """Grant project source and exact input tables while keeping controls private."""
     from demiflow.forge.platform_environment import read_bounded
-    from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_table_uri
-    from demiflow.forge.project_rules import ROLE_DIRS
-    from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.projects import workspace as ws
-    from demiflow.forge.runs import manager as runs
-    from demiflow.forge.table_bindings import make_resolver
+    from demiflow.forge.project import validate_parameter_path
+    from demiflow.forge.runs.inspector import inspection_inputs
 
-    _, workspace = ws.load_workspace_control(root)
     supplied = request['arguments']
-    from demiflow.forge.project import STATE_PATH
-    paths = {root / 'workspace.json', root / STATE_PATH, ws.relative_path(root, workspace['platform']['path'])}
+    parameter_file = None
     parameters = supplied.get('parameters', {})
     if request['operation'] == 'plan_preview' and supplied.get('params') is not None:
-        parameter_file = ws.validate_parameter_path(root, supplied['params'])
-        paths.add(parameter_file)
+        parameter_file = validate_parameter_path(root, supplied['params'])
         from demiflow.workbench.graph.preview import parameter_document
         parameters = parameter_document(read_bounded(parameter_file, 65536))
         if parameters.get('format') is None and set(parameters) <= {'arguments', 'run_directory'}:
             if isinstance(parameters.get('arguments'), dict):
                 # This historical preview format passes raw arguments to the Flow.
                 parameters = {}
-    fixed_inputs = {}
-    allowed = set(ROLE_DIRS) | {'tables', 'configs', 'parameters', 'lib', 'src', 'data'}
-    with os.scandir(root) as entries:
-        for index, item in enumerate(entries):
-            if index >= 1024:
-                raise ForgeError('Project directory exceeds the inspection path budget', code='resource_limit')
-            if item.name in allowed and item.is_dir(follow_symlinks=False) or (
-                    not item.name.startswith('.') and item.name.endswith('.py') and item.is_file(follow_symlinks=False)):
-                paths.add(Path(item.path))
-    resolver = make_resolver(ws.table_binding, runs.result_table)
-    values, _ = extract_arguments(parameters)
-    pending = [(values, 0)]
-    seen = 0
-    while pending:
-        operation_budget.check()
-        item, depth = pending.pop()
-        seen += 1
-        if seen > 4096 or depth > 16:
-            raise ForgeError('Project inspection path scope exceeds its budget', code='resource_limit')
-        if isinstance(item, dict):
-            if is_direct_table_ref(item):
-                target, _ = resolve_table_uri(root, item['uri'], item.get('version'))
-                paths.add(target)
-            elif item.get('kind') == 'table' and set(item) == {'kind', 'alias'}:
-                alias = item['alias']
-                if isinstance(alias, str) and alias in fixed_inputs:
-                    continue
-                control, _, target = resolver(root, workspace, alias)
-                paths.add(target)
-                if alias.startswith('run:'):
-                    fixed_inputs[alias] = dict(control=control, path=str(target))
-            elif item.get('kind') == 'location' and set(item) == {'kind', 'location_id'}:
-                location = workspace['locations'].get(item['location_id'])
-                if location is not None and location.get('writable') is False:
-                    target = ws.scoped_data_location(root, ws.location_root(root, location))
-                    if target is not None:
-                        paths.add(target)
-            else:
-                pending.extend((child, depth + 1) for child in item.values())
-        elif isinstance(item, list):
-            pending.extend((child, depth + 1) for child in item)
-    return {path for path in paths if path.exists()}, fixed_inputs
+    paths, fixed_inputs = inspection_inputs(root, parameters)
+    if parameter_file is not None:
+        paths.add(parameter_file)
+    return paths, fixed_inputs
 
 
 def prepare_native(*, analysis_read, confined=False):

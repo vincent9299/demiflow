@@ -1,4 +1,5 @@
 """Regression tests for multi-turn history preservation and development chat performance."""
+from demiflow.forge.bridge import model_channel as channel_module
 import json
 from pathlib import Path
 import time
@@ -130,7 +131,7 @@ def test_model_broker_deferred_handshake_overlaps_and_propagates_errors(tmp_path
     node = shutil.which('node')
     if not node:
         pytest.skip('Node is needed for deferred handshake test')
-    plugin = Path(broker.__file__).with_name('deepseek_model_broker.cjs')
+    plugin = channel_module.plugin_path('deepseek_model_broker.cjs')
     driver = tmp_path / 'slow_llm.cjs'
     driver.write_text('''
 const plugin=require(process.argv[2]);
@@ -141,7 +142,7 @@ setTimeout(() => {
   }}, {provider:'fixture',model:'fixture-model',reasoningEffort:'high'});
 }, 150);
 ''')
-    monkeypatch.setattr(broker, 'capabilities', lambda *_: dict(available=True))
+    monkeypatch.setattr(channel_module, 'capabilities', lambda *_: dict(available=True))
     monkeypatch.setattr(DeepSeek, 'launch', lambda config, home, root: ([node, str(driver), str(plugin)], dict(PATH='/usr/bin:/bin', HOME=str(home))))
     deployment = SimpleNamespace(limits=Limits(), providers={'deepseek': dict(model='fixture-model', model_provider='fixture', effort='high', native_credentials='/not-exposed')})
     home = tmp_path / 'session/control/turn-defer/model'
@@ -219,7 +220,7 @@ def test_model_broker_coalesces_many_deltas_without_20k_frame_limit(tmp_path, mo
     node = shutil.which('node')
     if not node:
         pytest.skip('Node is required')
-    plugin = Path(broker.__file__).with_name('deepseek_model_broker.cjs')
+    plugin = channel_module.plugin_path('deepseek_model_broker.cjs')
     driver = tmp_path / 'llm_many.cjs'
     driver.write_text('''
 const plugin=require(process.argv[2]);
@@ -231,7 +232,7 @@ plugin.apply({effect(){},llm:{
  }
 }}, {provider:'fixture',model:'fixture-model',reasoningEffort:'high'});
 ''')
-    monkeypatch.setattr(broker, 'capabilities', lambda *_: dict(available=True))
+    monkeypatch.setattr(channel_module, 'capabilities', lambda *_: dict(available=True))
     monkeypatch.setattr(DeepSeek, 'launch', lambda config, home, root: ([node, str(driver), str(plugin)], dict(PATH='/usr/bin:/bin', HOME=str(home))))
     deployment = SimpleNamespace(
         limits=Limits(),

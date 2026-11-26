@@ -64,7 +64,7 @@ def _installation(config):
     return executable, node
 
 
-def prepare_launch(config, home, *, model_channel=None):
+def prepare_launch(config, home, *, model_channel=None, broker=False):
     """Prepare a native dsh command. A confined host supplies only its fixed model channel."""
     home = Path(home)
     executable, node = _installation(config)
@@ -78,15 +78,16 @@ def prepare_launch(config, home, *, model_channel=None):
             row['config'] = settings
         rows.append(row)
 
-    route = config.get('model_provider', 'deepseek-official')
     plugin('llm')
-    plugin('session')
-    plugin('session-projection')
-    plugin('agent')
-    plugin('system-prompt', personaPrefix='You are an independent pipeline reviewer.')
-    plugin('tools', mode='native')
-    plugin('agent-loop', agents=[])
-    plugin('agent-default-model', provider=route, model=config['model'])
+    route = config.get('model_provider', 'deepseek-official')
+    if not broker:
+        plugin('session')
+        plugin('session-projection')
+        plugin('agent')
+        plugin('system-prompt', personaPrefix='You are an independent pipeline reviewer.')
+        plugin('tools', mode='native')
+        plugin('agent-loop', agents=[])
+        plugin('agent-default-model', provider=route, model=config['model'])
     env = dict(PATH=str(node.parent) + ':/usr/bin:/bin', HOME=str(home),
                DSH_HOME=str(home), TMPDIR=str(home), LANG='C.UTF-8')
     seconds = config.get('_request_seconds', REVIEW_SECONDS)
@@ -139,13 +140,22 @@ def prepare_launch(config, home, *, model_channel=None):
                 env[name] = os.environ[name]
         env['NODE_USE_ENV_PROXY'] = '1'
 
-    plugin('headless', task='-', json=True)
-    profile = home / 'profiles' / PROFILE
+    profile_name = PROFILE
+    if broker:
+        from .bridge.model_channel import plugin_path
+        profile_name = 'forge-model'
+        plugin('acp-app')
+        rows.append(dict(id='model-broker', name=str(plugin_path('deepseek_model_broker.cjs')),
+                         config=dict(provider=route, model=config['model'],
+                                     reasoningEffort=config.get('effort', 'high'), requestSeconds=seconds)))
+    else:
+        plugin('headless', task='-', json=True)
+    profile = home / 'profiles' / profile_name
     profile.mkdir(parents=True, mode=0o700)
     manifest = {'name': PROFILE, 'private': True, 'dsh': {'profile': {'bundles': []}}}
     (profile / 'package.json').write_text(json.dumps(manifest))
     (profile / 'cordis.patch.yml').write_text(json.dumps([{'insert': rows}]))
-    return [str(node), str(executable), '--profile', PROFILE], env
+    return [str(node), str(executable), '--profile', profile_name], env
 
 
 def _encoded(prompt, timeout):
@@ -330,7 +340,7 @@ def collect_review(process, prompt, *, cwd, model, timeout=REVIEW_SECONDS, check
 
 
 def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=None,
-                 restricted=False, author_spec=None, denied_paths=()):
+                 restricted=False, author_spec=None, denied_paths=(), channel=None):
     """Start a fresh native headless agent with only its supplied text evidence."""
     if check_cancel is not None:
         check_cancel()
@@ -339,7 +349,11 @@ def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=No
     with tempfile.TemporaryDirectory(prefix='demiflow-forge-review-') as directory:
         home = Path(directory)
         home.chmod(0o700)
-        command, env = prepare_launch(dict(config, _request_seconds=timeout), home)
+        if restricted and channel is None:
+            raise _unavailable('Restricted review requires a host model channel')
+        from .bridge.model_channel import plugin_path
+        command, env = prepare_launch(dict(channel.child_config if channel else config, _request_seconds=timeout),
+                                      home, model_channel=plugin_path('deepseek_model_proxy.cjs') if channel else None)
         try:
             if restricted:
                 from .sandbox import build_review_sandbox_spec, default_runtime_paths, launch_sandbox
@@ -355,9 +369,9 @@ def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=No
                     seconds=max(1.0, float(timeout)),
                     extra_runtime_paths=review_rt,
                     denied_paths=denied_paths,
-                    direct_network=True,
+                    direct_network=False,
                 )
-                proc = launch_sandbox(command, spec=spec, env=env, cwd=str(home), stdin=subprocess.PIPE)
+                proc = launch_sandbox(command, spec=spec, env=env, cwd=str(home), model_socket=channel.socket_path, stdin=subprocess.PIPE)
             else:
                 from .native_exec import launch_command
                 proc = subprocess.Popen(launch_command(command), cwd=home, env=env, stdin=subprocess.PIPE,

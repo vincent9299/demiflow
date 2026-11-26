@@ -202,3 +202,18 @@ def test_diagnostic_timeout_terminates_only_the_owned_process_group(monkeypatch)
         merge_gate.diagnostics_process(['fixture'])
     assert ('killpg', 123456789, merge_gate.signal.SIGTERM) in calls
     assert ('communicate', 2) in calls
+
+
+def test_staged_tree_binds_the_index_and_rejects_unstaged_inputs(tmp_path):
+    root = tmp_path / 'repo'
+    root.mkdir()
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    path = root / 'candidate.py'
+    path.write_text('value = 1\n')
+    subprocess.run(['git', 'add', 'candidate.py'], cwd=root, check=True)
+    assert merge_gate.staged_tree(root) == subprocess.check_output(['git', 'write-tree'], cwd=root, text=True).strip()
+    path.write_text('value = 2\n')
+    assert merge_gate.staged_tree(root) is None
+    subprocess.run(['git', 'add', 'candidate.py'], cwd=root, check=True)
+    (root / 'untracked.py').write_text('value = 3\n')
+    assert merge_gate.staged_tree(root) is None

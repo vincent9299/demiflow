@@ -5,6 +5,8 @@ first correlated activity or its final response, not session/new or a local writ
 """
 from __future__ import annotations
 
+from demiflow.forge.bridge import model_channel
+
 import json
 import hashlib
 import os
@@ -82,7 +84,7 @@ class DeepSeek:
         if config.get('_model_broker'):
             overlay = [row for row in overlay if row['id'] != 'acp']
             overlay += [dict(id='acp',disabled=True),dict(id='llm-retry',disabled=True),dict(insert=[dict(id='demiflow-model-broker',
-                name=str(Path(__file__).with_name('deepseek_model_broker.cjs')),
+                name=str(model_channel.plugin_path('deepseek_model_broker.cjs')),
                 config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high'),
                     requestSeconds=config.get('_request_seconds',180)))])]
         if not any(config.get(key) for key in ('_compaction', '_review', '_model_broker')):
@@ -94,7 +96,7 @@ class DeepSeek:
         if boundary:
             if package is None: reject('Restricted model transport requires the pinned installed Harness')
             overlay += [dict(id='llm-deepseek',disabled=True),dict(insert=[dict(id='demiflow-model-proxy',
-                name=str(Path(__file__).with_name('deepseek_model_proxy.cjs')),
+                name=str(model_channel.plugin_path('deepseek_model_proxy.cjs')),
                 config=dict(provider=route,model=config['model'],token=boundary['token'],
                     llmModule=str(package/'node_modules/@deepseek-ai/dsh-llm/lib/index.js')))])]
         (profile/'cordis.patch.yml').write_bytes(wire(overlay,65536))

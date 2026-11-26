@@ -213,7 +213,7 @@ main()
     if uncertain:
         env['FORGE_TEST_UNCERTAIN'] = '1'
     return subprocess.run([sys.executable, '-I', '-B', '-c', code, str(ROOT), 'forge', 'develop',
-        '--root', str(root), '--state-dir', str(state), '--executable', str(author), '--json', *options],
+        '--root', str(root), '--state-dir', str(state), '--executable', str(author), '--mode', 'trusted_local', '--json', *options],
         env=env, capture_output=True, text=True, timeout=90)
 
 

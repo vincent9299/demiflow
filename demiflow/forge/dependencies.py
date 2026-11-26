@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import fcntl
 import keyword
 import os
 from pathlib import Path
+from contextlib import contextmanager, nullcontext
 import re
 import secrets
 import shutil
+import signal
+import tempfile
 import stat
 import subprocess
 import sys
@@ -141,10 +145,9 @@ def declaration(root) -> dict | None:
         raw = read_bounded(pyproject, MAX_DECLARATION_BYTES)
     except FileNotFoundError:
         return None
-    except ForgeError as error:
-        if error.code == 'resource_limit' or pyproject.is_symlink():
-            if not (root / 'packages').exists():
-                return None
+    except ForgeError:
+        if pyproject.is_symlink() and not (root / 'packages').exists():
+            return None
         raise
     if not raw.strip():
         return None
@@ -483,6 +486,7 @@ def inspect_dependencies(
             declared=True,
             config=None,
             declaration_error=str(exc),
+            declaration_error_code=exc.code if exc.code == 'resource_limit' else 'invalid_declaration',
             packages={},
             missing_packages=[],
             invalid_packages=[],
@@ -770,31 +774,6 @@ def vendor(root, name: str, source, *, allowed_roots=None, denied_paths=()) -> d
         denied_paths=denied_paths,
         is_external=True,
     )
-    # Also ensure total project budget across existing vendored/local_ref packages is respected.
-    existing_files = 0
-    existing_bytes = 0
-    for other_name, other_item in sorted(config['packages'].items()):
-        if other_name == name:
-            continue
-        other_is_ext = other_item['source'] == 'local_ref'
-        other_path = Path(other_item['path']) if other_is_ext else (root / other_item['path'])
-        if not other_path.exists():
-            continue
-        other_scanned = validate_package_source(
-            other_name,
-            other_path,
-            project_root=root,
-            files_left=MAX_FILES - existing_files,
-            bytes_left=MAX_BYTES - existing_bytes,
-            check_imports=False,
-            allowed_roots=allowed_roots,
-            denied_paths=denied_paths,
-            is_external=other_is_ext,
-        )
-        existing_files += other_scanned['file_count']
-        existing_bytes += other_scanned['bytes']
-    if existing_files + scanned['file_count'] > MAX_FILES or existing_bytes + scanned['bytes'] > MAX_BYTES:
-        raise ForgeError('Project dependency packages exceed the project file or byte budget', code='resource_limit')
     # Check module/package basename collisions within this package.
     module_files(root, {name: dict(path=item['path'], files=scanned['files'])})
 
@@ -802,6 +781,31 @@ def vendor(root, name: str, source, *, allowed_roots=None, denied_paths=()) -> d
         current = declaration(root)
         if current is None or current['sha256'] != config['sha256']:
             raise ForgeError('pyproject.toml changed concurrently during vendor; preserving existing content', code='inputs_changed')
+        # Also ensure total project budget across existing vendored/local_ref packages is respected.
+        existing_files = 0
+        existing_bytes = 0
+        for other_name, other_item in sorted(config['packages'].items()):
+            if other_name == name:
+                continue
+            other_is_ext = other_item['source'] == 'local_ref'
+            other_path = Path(other_item['path']) if other_is_ext else (root / other_item['path'])
+            if not other_path.exists():
+                continue
+            other_scanned = validate_package_source(
+                other_name,
+                other_path,
+                project_root=root,
+                files_left=MAX_FILES - existing_files,
+                bytes_left=MAX_BYTES - existing_bytes,
+                check_imports=False,
+                allowed_roots=allowed_roots,
+                denied_paths=denied_paths,
+                is_external=other_is_ext,
+            )
+            existing_files += other_scanned['file_count']
+            existing_bytes += other_scanned['bytes']
+        if existing_files + scanned['file_count'] > MAX_FILES or existing_bytes + scanned['bytes'] > MAX_BYTES:
+            raise ForgeError('Project dependency packages exceed the project file or byte budget', code='resource_limit')
         packages_dir = root / 'packages'
         if packages_dir.is_symlink():
             raise ForgeError('packages/ must be a regular directory, not a symlink', code='operation_rejected')
@@ -1076,24 +1080,87 @@ def _normalize_demiflow_packages_for_compare(doc: dict) -> dict:
     return out
 
 
-def _write_text_preserving_inode(path: Path, text: str) -> None:
-    """Update an existing regular TOML file in place so active Linux Landlock file-inode rules remain valid."""
-    no_symlinks(path)
-    raw = text.encode('utf-8')
-    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise ForgeError('pyproject.toml must be a regular file', code='operation_rejected')
-        os.lseek(fd, 0, os.SEEK_SET)
-        view = memoryview(raw)
+def _write_declaration(path: Path, previous: str, updated: str) -> None:
+    """Commit to the inode writable by the active sandbox, after checking the editor's current bytes."""
+    before = previous.encode('utf-8')
+    after = updated.encode('utf-8')
+    conflict = 'pyproject.toml changed during remove; retry with its current declaration'
+    with open(no_symlinks(path), 'r+b', buffering=0, opener=lambda name, flags: os.open(name, flags | os.O_NOFOLLOW)) as config:
+        fd = config.fileno()
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ForgeError('pyproject.toml must be a regular file')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if hasattr(fcntl, 'F_SETLEASE'):
+                # A Linux write lease covers editors which do not cooperate with flock.
+                # SIGURG's default disposition is ignore. The short commit releases the lease on close.
+                fcntl.fcntl(fd, fcntl.F_SETSIG, signal.SIGURG)
+                fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_WRLCK)
+        except BlockingIOError as error:
+            raise ForgeError(conflict, code='inputs_changed') from error
+        except OSError as error:
+            raise ForgeError('Cannot obtain exclusive write access to pyproject.toml', code='operation_rejected') from error
+        if not os.path.samestat(os.fstat(fd), path.stat(follow_symlinks=False)) or config.read(MAX_DECLARATION_BYTES + 1) != before:
+            raise ForgeError(conflict, code='inputs_changed')
         written = 0
-        while written < len(raw):
-            written += os.write(fd, view[written:])
-        os.ftruncate(fd, len(raw))
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+        truncated = False
+        try:
+            while written < len(after):
+                count = os.pwrite(fd, after[written:], written)
+                if count <= 0:
+                    raise OSError('Short write to pyproject.toml')
+                written += count
+            os.ftruncate(fd, len(after))
+            truncated = True
+            os.fsync(fd)
+            if not os.path.samestat(os.fstat(fd), path.stat(follow_symlinks=False)):
+                raise ForgeError(conflict, code='inputs_changed')
+        except BaseException:
+            # An editor may have replaced the pathname; recover only our own open inode.
+            partial = after if truncated else after[:written] + before[written:]
+            if os.pread(fd, MAX_DECLARATION_BYTES + 1, 0) == partial:
+                config.seek(0)
+                config.write(before)
+                config.truncate(len(before))
+                os.fsync(fd)
+            raise
+
+
+@contextmanager
+def _remove_package_files(root: Path, target: Path):
+    """Keep a full recovery copy until both deletion and declaration commit have succeeded."""
+    nonce = secrets.token_hex(8)
+    staging = target.with_name(f'.remove-{target.name}-{nonce}')
+    private = root / '.forge'
+    # Rollback must be a same-filesystem rename, including on a mounted packages directory.
+    scratch_parent = private if private.stat().st_dev == target.parent.stat().st_dev else target.parent
+    recovery = Path(tempfile.mkdtemp(prefix='.remove-backup-', dir=scratch_parent))
+    original = recovery / 'original'
+    moved = copied = False
+    try:
+        os.replace(target, staging)
+        moved = True
+        if staging.is_dir():
+            shutil.copytree(staging, original, symlinks=True)
+            copied = True
+            shutil.rmtree(staging)
+        else:
+            shutil.copy2(staging, original, follow_symlinks=False)
+            copied = True
+            staging.unlink()
+        yield
+    except BaseException:
+        if moved:
+            if copied:
+                if staging.exists():
+                    os.replace(staging, recovery / 'partially-removed')
+                os.replace(original, target)
+            else:
+                os.replace(staging, target)
+        shutil.rmtree(recovery, ignore_errors=True)
+        raise
+    else:
+        shutil.rmtree(recovery, ignore_errors=True)
 
 
 def _remove_package_from_toml(raw_text: str, name: str) -> tuple[str, bool]:
@@ -1223,9 +1290,6 @@ def remove(root, name: str) -> dict:
                     f'Unable to remove declaration for {name!r} from pyproject.toml; preserving files',
                     code='conflict',
                 )
-            current_raw = read_bounded(pyproject, MAX_DECLARATION_BYTES)
-            if hashlib.sha256(current_raw).hexdigest() != config['sha256']:
-                raise ForgeError('pyproject.toml changed concurrently during remove; preserving existing content', code='inputs_changed')
 
         vendor_dir = root / 'packages'
         target = vendor_dir / name
@@ -1240,45 +1304,20 @@ def remove(root, name: str) -> dict:
         if not removed_declaration and not has_managed_files:
             raise ForgeError(f'Package {name!r} is neither declared nor present under packages/', code='not_found')
 
-        staging = vendor_dir / f'.remove-{name}-{secrets.token_hex(6)}' if has_managed_files else None
-        staged = False
-        toml_written = False
-        removed_files = False
-        try:
-            if has_managed_files and staging is not None:
-                os.replace(target, staging)
-                staged = True
-            if removed_declaration and updated_text is not None:
-                _write_text_preserving_inode(pyproject, updated_text)
-                toml_written = True
-            if staged and staging is not None:
-                if staging.is_dir():
-                    shutil.rmtree(staging)
-                else:
-                    staging.unlink()
-                removed_files = True
-            if removed_files:
-                from .project_guard import record_authorized_tree_write
-                record_authorized_tree_write(root, 'packages')
-                record_authorized_tree_write(root, f'packages/{name}')
-        except BaseException:
-            if toml_written and config is not None:
-                try:
-                    _write_text_preserving_inode(pyproject, config['raw'])
-                except OSError:
-                    pass
-            if staged and staging is not None and staging.exists() and not target.exists():
-                try:
-                    os.replace(staging, target)
-                except OSError:
-                    pass
-            raise
+        removal = _remove_package_files(root, target) if has_managed_files else nullcontext()
+        with removal:
+            if removed_declaration:
+                _write_declaration(pyproject, config['raw'], updated_text)
+        if has_managed_files:
+            from .project_guard import record_authorized_tree_write
+            record_authorized_tree_write(root, 'packages')
+            record_authorized_tree_write(root, f'packages/{name}')
     return dict(
         status='removed',
         package=name,
         source=declared_source,
         removed_declaration=removed_declaration,
-        removed_files=removed_files,
+        removed_files=has_managed_files,
     )
 
 
@@ -1299,7 +1338,7 @@ def list_dependencies(root, *, python=None, allowed_roots=None, denied_paths=())
         return dict(
             status='failed',
             declared=True,
-            diagnostics=[dict(code='invalid_declaration', path='pyproject.toml', detail=inspected['declaration_error'])],
+            diagnostics=[dict(code=inspected['declaration_error_code'], path='pyproject.toml', detail=inspected['declaration_error'])],
         )
     packages = {}
     for name, item in sorted(inspected['packages'].items()):
@@ -1348,7 +1387,7 @@ def verify(root, *, python=None, allowed_roots=None, denied_paths=()) -> dict:
         return dict(status='not_applicable', dependencies=None)
     diagnostics: list[dict] = []
     if inspected['declaration_error']:
-        diagnostics.append(dict(code='invalid_declaration', path='pyproject.toml', detail=inspected['declaration_error']))
+        diagnostics.append(dict(code=inspected['declaration_error_code'], path='pyproject.toml', detail=inspected['declaration_error']))
     for item in inspected['missing_packages']:
         diagnostics.append(dict(code='missing_package', path='pyproject.toml', line=item.get('line'), detail=item['detail']))
     for item in inspected['invalid_packages']:
