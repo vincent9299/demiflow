@@ -12,7 +12,7 @@ import sys
 from types import FunctionType
 import weakref
 
-from demiflow.workbench.python_sources import read_source_bytes
+from demiflow.forge.runtime import read_source_bytes
 from demiflow.workbench.projects import workspace as ws
 from .plan_details import material, safe_json, unavailable
 

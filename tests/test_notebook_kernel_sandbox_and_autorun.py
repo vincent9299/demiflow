@@ -115,8 +115,9 @@ def test_developer_sandbox_includes_declared_readonly_external_locations_only(tm
 
     assert str(ext_ro.resolve()) in dev_spec.read_paths
     assert str(ext_ro.resolve()) not in dev_spec.write_paths
-    assert str(proj.resolve()) in dev_spec.write_paths
-    assert dev_spec.write_policy == 'project_root'
+    assert str((proj / 'flows').resolve()) in dev_spec.write_paths
+    assert str(proj.resolve()) not in dev_spec.write_paths
+    assert dev_spec.write_policy == 'scoped'
     assert str((proj / 'moved_root_script.py').resolve()) not in dev_spec.write_paths
     assert str(ext_rw.resolve()) not in dev_spec.read_paths
     assert str(tmp_path.resolve()) not in dev_spec.read_paths
@@ -438,8 +439,7 @@ def test_dev_sandbox_and_grant_keep_data_tools_readonly(tmp_path):
 def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
     from jupyter_client import BlockingKernelClient
     from jupyter_client.connect import write_connection_file
-    from demiflow.forge.dependencies import update
-    from demiflow.workbench.conversations.sandbox_native import landlock_abi
+    from demiflow.forge.sandbox.sandbox_native import landlock_abi
     from demiflow.workbench.notebooks import kernel_launcher
 
     if sys.platform != 'linux' or landlock_abi() < 1:
@@ -452,14 +452,13 @@ def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
     (source / 'later.py').write_text('VALUE = 7\n')
     (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
         f'notebook_dependency_fixture = {{source = "local_ref", path = "{source}"}}\n')
-    locked = update(root, sys.executable)
     state = tmp_path / 'state'
     runtime = state / 'runtime'
     runtime.mkdir(parents=True)
     config = state / 'kernel.json'
     config.write_text(json.dumps(dict(python=sys.executable, root=str(root), code_root=str(Path(demiflow.__file__).parents[1]),
         runtime_dir=str(runtime), tmp_dir=str(state / 'tmp'), sandbox_mode='readonly', locations=[],
-        write_paths=['data'], dependency_lock=locked['digest'])))
+        write_paths=['data'], dependencies_active=True, allowed_read_roots=[str(source)])))
     connection = str(runtime / 'connection.json')
     write_connection_file(fname=connection)
     client = BlockingKernelClient(connection_file=connection)
@@ -501,14 +500,14 @@ def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):
 
 
 def test_restricted_author_reads_approved_source_and_cannot_rewrite_it(tmp_path):
-    from demiflow.forge.dependencies import update
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
-    from demiflow.workbench.conversations.sandbox_shims import SandboxShims
+    from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox
+    from demiflow.forge.sandbox.sandbox_shims import SandboxShims
     from demiflow.workbench.conversations.execution import runtime_paths
 
     root = tmp_path / 'project'
     (root / '.forge').mkdir(parents=True)
     (root / 'flows').mkdir()
+    (root / 'packages').mkdir()
     external = tmp_path / 'vendor-parent'
     package = external / 'approved'
     package.mkdir(parents=True)
@@ -516,27 +515,28 @@ def test_restricted_author_reads_approved_source_and_cannot_rewrite_it(tmp_path)
     (external / 'sibling.txt').write_text('undisclosed\n')
     (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
         f'author_dependency_fixture = {{source = "local_ref", path = "{package}"}}\n')
-    locked = update(root, sys.executable)
-    project = dict(root=str(root), kind='pipeline', writes=['flows'], python=sys.executable, dependency_lock=locked['digest'])
-    shims = SandboxShims(project, execution_mode='restricted', project_python=sys.executable)
+    project = dict(root=str(root), kind='pipeline', writes=['flows'], python=sys.executable, read_roots=[str(package)])
+    shims = SandboxShims(project, execution_mode='restricted', project_python=sys.executable,
+                         allowed_read_roots=(str(package),))
     home = tmp_path / 'home'
     home.mkdir(mode=0o700)
-    spec = SandboxSpec(read_paths=(str(root), str(package)), write_paths=(str(root / 'flows'),),
+    spec = SandboxSpec(read_paths=(str(root), str(package)),
+        write_paths=(str(root / 'flows'), str(root / 'pyproject.toml')),
         runtime_paths=(*runtime_paths({'executable': sys.executable}, project_python=sys.executable), str(shims.directory)),
-        protected_paths=(str(root / 'pyproject.toml'), str(package)), private_home=str(home))
+        protected_paths=(str(root / 'packages'), str(root / '.forge'), str(package)), private_home=str(home))
     code = '''from pathlib import Path
 import sys
 from author_dependency_fixture import VALUE
 assert VALUE == 7
-for filename in sys.argv[1:3]:
+for filename in sys.argv[1:4]:
     try:
         Path(filename).write_text('blocked')
     except PermissionError:
         pass
     else:
-        raise AssertionError('protected source was writable')
+        raise AssertionError('protected source was writable: ' + filename)
 try:
-    Path(sys.argv[3]).read_text()
+    Path(sys.argv[4]).read_text()
 except PermissionError:
     pass
 else:
@@ -545,7 +545,8 @@ Path('flows/created.py').write_text('pass')
 '''
     try:
         child = launch_sandbox([str(shims.bin / 'python'), '-B', '-c', code,
-            str(root / 'pyproject.toml'), str(package / '__init__.py'), str(external / 'sibling.txt')],
+            str(package / '__init__.py'), str(root / 'packages/evil.py'), str(root / '.forge/evil.json'),
+            str(external / 'sibling.txt')],
             spec=spec, env={'PATH': os.defpath}, cwd=root)
         stdout, stderr = child.communicate(timeout=30)
         assert child.returncode == 0, (stdout, stderr)

@@ -49,7 +49,7 @@ def worker(mode,config,root):
 
 
 def main(context,scenario):
-    from demiflow.workbench.process import process_identity
+    from demiflow.forge.process import process_identity
     from demiflow.workbench.analysis import contracts as c
     from demiflow.workbench.analysis import media_captures
     from demiflow.workbench.analysis import output_reads

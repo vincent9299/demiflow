@@ -1,6 +1,7 @@
 """Root-review regressions: optional bytes, launch fences and retained capacity."""
 
-from demiflow.workbench import host_partition
+from demiflow.forge import host_partition
+
 import json
 import os
 from pathlib import Path
@@ -14,11 +15,15 @@ import pytest
 
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.execution.journal.run_telemetry import Telemetry, latest, series
-from demiflow.workbench.projects import index
-from demiflow.workbench.runs import domain as run_domain
-from demiflow.workbench.runs import requests as run_requests
+from demiflow.forge import index
+
+from demiflow.forge.runs import domain as run_domain
+
+from demiflow.forge.runs import requests as run_requests
+
 from demiflow.workbench.runs import view as run_view
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from test_forge_runs import base, root, wait
@@ -197,7 +202,7 @@ def test_r2_actual_launch_failure_before_spawn_is_terminal_and_releases_capacity
     manifest, target, journal = control_fixture(root)
     monkeypatch.setenv("DEMIFLOW_FORGE_DOMAIN", str(tmp_path / "domain"))
     monkeypatch.setattr(
-        "demiflow.workbench.worker.operation",
+        "demiflow.forge.runs.inspector.run_operation",
         lambda *a, **k: {"status": "checked"},
     )
     monkeypatch.setattr(
@@ -234,15 +239,17 @@ def test_r2_launcher_hard_exit_has_durable_reconciliation_fence(
     monkeypatch.setenv("DEMIFLOW_FORGE_DOMAIN", str(tmp_path / "domain"))
     code = """import json,os,sys
 from unittest.mock import patch
-from demiflow.workbench.runs import manager as runs
-from demiflow.workbench.projects import index
+from demiflow.forge.runs import manager as runs
+
+from demiflow.forge import index
+
 root,identity,digest,window=sys.argv[1:]
-hook={'reserved':'demiflow.workbench.runs.manager._claim_lease','admitted':'demiflow.workbench.projects.index.publish','spawning':'demiflow.workbench.runs.manager.subprocess.Popen'}[window]
+hook={'reserved':'demiflow.forge.runs.manager._claim_lease','admitted':'demiflow.forge.index.publish','spawning':'demiflow.forge.runs.manager.subprocess.Popen'}[window]
 claim=runs._claim_lease
 def disappear(*a,**k):
  if window=='reserved' and a[1] is None:return claim(*a,**k)
  os._exit(31)
-with patch('demiflow.workbench.worker.operation',return_value={'status':'checked'}),patch(hook,side_effect=disappear):
+with patch('demiflow.forge.runs.inspector.run_operation',return_value={'status':'checked'}),patch(hook,side_effect=disappear):
  runs.start(root,identity,expected=digest)
 """
     result = subprocess.run(
@@ -347,7 +354,7 @@ def test_r2_lost_popen_return_retains_live_unit_and_open_accounting(
     manifest, target, journal = control_fixture(root)
     monkeypatch.setenv("DEMIFLOW_FORGE_DOMAIN", str(tmp_path / "domain"))
     monkeypatch.setattr(
-        "demiflow.workbench.worker.operation",
+        "demiflow.forge.runs.inspector.run_operation",
         lambda *a, **k: {"status": "checked"},
     )
     monkeypatch.setattr(index, "publish", lambda *a: None)

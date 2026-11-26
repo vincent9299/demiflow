@@ -5,7 +5,8 @@ from playwright.sync_api import expect
 
 from demiflow.forge.platform import content_digest
 from demiflow.workbench.projects import registry
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_workbench_run_module import single_flow
 from test_forge_runs import base, root
 from test_forge_markdown_reading import browser

@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.analysis import owned_cgroup
 from demiflow.workbench.analysis.watchdog import ParentWatch
 from demiflow.workbench.analysis.watchdog import JobWatch

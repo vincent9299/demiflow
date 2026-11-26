@@ -6,7 +6,8 @@ from urllib.parse import parse_qs,urlsplit
 
 from playwright.sync_api import expect
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_forge_workspace import demo,isolated
 from test_forge_runs import wait
 from test_forge_markdown_reading import browser

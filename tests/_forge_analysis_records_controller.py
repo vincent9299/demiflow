@@ -66,7 +66,7 @@ def main():
                 if operation in {"metadata_begin", "metadata_reply"}:
                     # Test-only controlled authority responses. Real Unix
                     # exchange framing/parent fences have separate tests.
-                    from demiflow.workbench.process import process_identity
+                    from demiflow.forge.process import process_identity
                     from demiflow.workbench.analysis import deferred_metadata
                     from demiflow.workbench.analysis.deployment import Deployment
                     from demiflow.workbench.analysis.ipc import Peer

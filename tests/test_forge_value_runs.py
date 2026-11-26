@@ -9,7 +9,8 @@ import lance
 
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 
 from test_forge_runs import base, root, custom, execute
 

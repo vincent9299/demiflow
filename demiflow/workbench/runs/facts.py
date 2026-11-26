@@ -192,7 +192,7 @@ def overlay_sealed(root, run_id, declared_view, *, report_digest=None):
     ``report_digest`` is given, each sealed action also reads its identity bridge
     (attempt-independent); observation joining stays attempt-scoped in the caller.
     """
-    from demiflow.workbench.runs import manager
+    from demiflow.forge.runs import manager
     target = manager.directory(root, run_id)
     view = dict(declared_view)
     entries, sealed_any, used = [], False, 0

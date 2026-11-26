@@ -73,7 +73,7 @@ def observed_local_unit(tmp_path):
     # Real status files/startup flock/process identity; the test's own PID is
     # an explicit ownership witness. No worker, admission or cleanup runs.
     from demiflow.workbench.analysis.trusted_local import TrustedLocalBackend
-    from demiflow.workbench.process import process_identity
+    from demiflow.forge.process import process_identity
     identifier='j'+'b'*32;owned=tmp_path/identifier;owned.mkdir()
     path=owned/'startup.lock';path.touch();descriptor=os.open(path,os.O_RDWR)
     fcntl.flock(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB);info=os.fstat(descriptor)

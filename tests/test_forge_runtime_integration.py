@@ -14,9 +14,10 @@ import urllib.error
 
 import pytest
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
 
-from demiflow.workbench.process import process_identity
+
+from demiflow.forge.process import process_identity
 from demiflow.workbench.runs import view as run_view
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.api import WorkspaceServer

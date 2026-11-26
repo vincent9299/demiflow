@@ -8,9 +8,12 @@ import time
 import pytest
 
 from demiflow.workbench.projects import registry as console
-from demiflow.workbench import host_partition
-from demiflow.workbench.runs import domain as run_domain
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge import host_partition
+
+from demiflow.forge.runs import domain as run_domain
+
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.conversations.policy import Deployment
 from demiflow.workbench.conversations.service import Service
 from demiflow.forge.schema import ForgeError

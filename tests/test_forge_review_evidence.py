@@ -189,8 +189,7 @@ def test_git_untracked_link_is_never_opened_as_review_source(tmp_path):
 
 
 def test_vendored_dependencies_can_be_added_one_at_a_time_and_reject_reverse_imports(tmp_path):
-    import sys
-    from demiflow.forge.dependencies import LOCK, binding, update
+    from demiflow.forge.dependencies import inspect_dependencies, vendor
     from demiflow.forge.schema import ForgeError
 
     root = tmp_path / 'project_fixture'
@@ -202,13 +201,19 @@ def test_vendored_dependencies_can_be_added_one_at_a_time_and_reject_reverse_imp
     for source in (first, second):
         source.mkdir()
         (source / '__init__.py').write_text('')
-    staged = update(root, sys.executable, name='first_dep_fixture', vendor=first)
-    assert staged == {'status': 'staged', 'package': 'first_dep_fixture', 'missing': ['second_dep_fixture']}
-    assert not (root / LOCK).exists()
+    staged = vendor(root, 'first_dep_fixture', first)
+    assert staged['status'] == 'vendored'
+    assert staged['package'] == 'first_dep_fixture'
+    assert not (root / '.forge/deps.lock.json').exists()
+    mid = inspect_dependencies(root)
+    assert [m['name'] for m in mid['missing_packages']] == ['second_dep_fixture']
     (second / '__init__.py').write_text('from project_fixture import flows\n')
     with pytest.raises(ForgeError, match='imports a project role'):
-        update(root, sys.executable, name='second_dep_fixture', vendor=second)
+        vendor(root, 'second_dep_fixture', second)
     assert not (root / 'packages/second_dep_fixture').exists()
     (second / '__init__.py').write_text('')
-    final = update(root, sys.executable, name='second_dep_fixture', vendor=second)
-    assert final['digest'] == binding(root)['digest']
+    final = vendor(root, 'second_dep_fixture', second)
+    assert final['status'] == 'vendored'
+    done = inspect_dependencies(root)
+    assert not done['missing_packages'] and not done['invalid_packages']
+    assert done['packages']['second_dep_fixture']['tree_sha256'] == final['tree_sha256']

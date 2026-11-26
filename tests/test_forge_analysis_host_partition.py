@@ -4,8 +4,10 @@ import json
 
 import pytest
 
-from demiflow.workbench import host_partition
-from demiflow.workbench.runs import domain as run_domain
+from demiflow.forge import host_partition
+
+from demiflow.forge.runs import domain as run_domain
+
 from demiflow.workbench.analysis.resource_profile import profile
 from demiflow.forge.schema import ForgeError
 from test_forge_development_runtime import combined_configuration, GiB

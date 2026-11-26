@@ -22,9 +22,12 @@ from .project_io import decode_control, relative_path
 from .project_rules import (
     ROLE_DIRS,
     RULES_ID,
+    _iter_tree_files,
     check_layout,
+    check_project_dependencies,
     check_project_hygiene,
     check_source_import_boundaries,
+    collect_unguarded_third_party_imports,
     diagnostic,
 )
 from .schema import ForgeError
@@ -303,7 +306,8 @@ def _definition(root, path, deadline, exclude, sources, published):
 def check_project(root, *, paths=(), entry=None, params=None, reference=None, table_resolver=None,
                   table_describer=describe_fixed_table,
                   exclude=(), publish=None, max_variants=MAX_VARIANTS, seconds=CHECK_SECONDS,
-                  max_bytes=MAX_SOURCE_BYTES, include_hygiene=False):
+                  max_bytes=MAX_SOURCE_BYTES, include_hygiene=False,
+                  python=None, allowed_roots=None, denied_paths=()):
     """Check without importing candidate code. A product may publish each exact inspected report."""
     if paths and entry is not None or params is not None and entry is None:
         raise ForgeError('Choose paths or one entry and its parameters', code='invalid_request')
@@ -338,12 +342,18 @@ def check_project(root, *, paths=(), entry=None, params=None, reference=None, ta
                     table_cache[key] = table_describer(uri, version)
                 return copy.deepcopy(table_cache[key])
         return _check(root, view, paths, entry, params, reference, table_resolver, describer,
-                      exclude, deadline, publish, max_variants, max_bytes, include_hygiene=include_hygiene)
+                      exclude, deadline, publish, max_variants, max_bytes, include_hygiene=include_hygiene,
+                      python=python, allowed_roots=allowed_roots, denied_paths=denied_paths)
 
 
-def _check(root, view, paths, entry, params, reference, table_resolver, table_describer, exclude, deadline, publish, max_variants, max_bytes, *, include_hygiene=False):
-    from .dependencies import binding as dependency_binding
-    project_dependencies = dependency_binding(root)
+def _check(root, view, paths, entry, params, reference, table_resolver, table_describer, exclude, deadline, publish,
+           max_variants, max_bytes, *, include_hygiene=False, python=None, allowed_roots=None, denied_paths=()):
+    from .dependencies import declaration as dependency_declaration, inspect_dependencies
+    try:
+        initial_decl = dependency_declaration(root)
+    except ForgeError:
+        initial_decl = None
+    declared_packages = set((initial_decl or {}).get('packages', ()))
     native, layout, checked, rows, definitions = [], [], [], [], []
     sources, parameter_digests, table_files = {}, {}, {}
     layout_paths = set()
@@ -423,8 +433,6 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             layout_paths.update(inspected)
             layout.extend({**d, 'entry': candidate, 'params': param} for d in issues)
             report['binding']['parameter_path'] = param
-            if project_dependencies is not None:
-                report['binding']['project_dependencies'] = project_dependencies['digest']
             kept_entry_diags = [d for d in report['diagnostics'] if _keep_diagnostic(d)]
             entry_status = (
                 'invalid' if any(d.get('status') == 'invalid' for d in kept_entry_diags)
@@ -480,26 +488,58 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             invalid = not isinstance(exc, (OSError, RecursionError)) and getattr(exc,'code',None) != 'resource_limit'
             native.append(diagnostic('DF-05' if Path(path).parts[0] == 'prompts' else 'OP-01',
                                      path, str(exc), status='invalid' if invalid else 'incomplete'))
-    pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools']
-    if pipeline_paths and not checked and not definitions and not native:
+    # Gather all code files in scope for live dependency & import checks.
+    dep_code_paths = set(sources)
+    if scope['kind'] == 'project' or include_hygiene:
+        for code_dir in ('flows', 'operators', 'data_tools', 'tests'):
+            dep_code_paths.update(_iter_tree_files(root, code_dir, exclude=exclude))
+    else:
+        dep_code_paths.update(p for p in relevant if Path(p).suffix == '.py')
+    third_party_candidates = collect_unguarded_third_party_imports(
+        root, dep_code_paths, declared_packages=declared_packages,
+    )
+    dep_inspection = inspect_dependencies(
+        root,
+        python=python,
+        allowed_roots=allowed_roots,
+        denied_paths=denied_paths,
+        check_imports=True,
+        check_environment=bool(python),
+        probe_imports=third_party_candidates if python else (),
+        allow_partial=True,
+    )
+    dep_digest = dep_inspection['digest'] if dep_inspection['declared'] and not dep_inspection['declaration_error'] else None
+    if dep_inspection['declared'] or dep_inspection['orphan_packages'] or dep_code_paths:
+        dep_paths, dep_issues = check_project_dependencies(root, dep_code_paths, dep_inspection=dep_inspection)
+        layout_paths.update(dep_paths)
+        layout.extend(dep_issues)
+        if 'pyproject.toml' in relevant and (root / 'pyproject.toml').is_file():
+            layout_paths.add('pyproject.toml')
+
+    pipeline_paths = [p for p in relevant if Path(p).parts[0] != 'data_tools' and p != 'pyproject.toml']
+    if pipeline_paths and not checked and not definitions and not native and not layout:
         native.append(diagnostic('FL-10', '', '未定位到可核对的原生流程或独立定义。', status='incomplete'))
     # Hygiene applies to every declared project, including new ones without registered entries.
     if (scope['kind'] == 'project' or include_hygiene) and view['control'] is not None:
         hygiene_paths, hygiene_issues = check_project_hygiene(
             root, control, checked_sources=sources, parameter_digests=parameter_digests,
             exclude=exclude, structural_only=(scope['kind'] != 'project'),
-            packages_approved=project_dependencies is not None, checked_workflows=checked_workflows)
+            packages_approved=dep_inspection['declared'], checked_workflows=checked_workflows,
+            declared_packages=declared_packages)
         layout_paths.update(hygiene_paths)
         layout.extend(hygiene_issues)
     elif sources:
-        boundary_paths, boundary_issues = check_source_import_boundaries(root, sources)
+        boundary_paths, boundary_issues = check_source_import_boundaries(
+            root, sources, declared_packages=declared_packages,
+        )
         layout_paths.update(boundary_paths)
         layout.extend(boundary_issues)
     basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
                  manifest_sha256=manifest_hash, sources=sources, parameter_digests=parameter_digests, controls=table_files)
-    if project_dependencies is not None:
-        basis['dependencies'] = project_dependencies['digest']
-    verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes)
+    if dep_digest is not None:
+        basis['dependencies'] = dep_digest
+    verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes,
+                        allowed_roots=allowed_roots, denied_paths=denied_paths)
     if sdk_identity(reference['catalog']) != reference['sdk_revision']:
         raise ForgeError('SDK changed during inspection', code='inputs_changed')
     native = [d for d in native if _keep_diagnostic(d)]
@@ -509,24 +549,39 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
     status = next(x for x in ('failed','incomplete','passed','not_applicable') if x in statuses)
     diagnostics = list(native) + list(layout)
     unverified = [d for d in diagnostics if d.get('status') == 'incomplete']
+    skipped_env_checks: list[str] = []
+    if not python and (dep_inspection['declared'] or third_party_candidates):
+        skipped_env_checks.append('未指定 --python，已跳过 A 类依赖版本、已安装模块撞名及三方缺失导入核验。')
     data = dict(status=status, scope=scope, root=str(root), entries=rows, definitions=definitions,
                 native_flow=flow, project_layout=roles, rules_id=RULES_ID, catalog_id=reference['catalog_id'],
                 source_digest=content_digest(sources), source_count=len(sources), basis=basis,
                 diagnostics=diagnostics[:256], diagnostic_count=len(diagnostics),
                 coverage=dict(checked=len(checked), unverified=unverified[:64], requested_variants=len(variants),
+                              skipped_environment_checks=skipped_env_checks,
                               external_projects_pending=sorted({alias for d in definitions
                                                                 for alias in d.get('unverified_projects', ())})))
+    if dep_inspection['declared']:
+        data['project_dependencies'] = dict(
+            digest=dep_digest,
+            environment_checked=bool(python and dep_inspection['environment'] is not None),
+            environment_skipped=not bool(python),
+            packages=sorted((dep_inspection.get('config') or {}).get('packages', ())),
+            requirements=list((dep_inspection.get('config') or {}).get('requirements', ())),
+        )
     data['check_digest'] = content_digest(data)
     return data
 
 
-def verify_check_inputs(root, basis, *, deadline=None, max_bytes=MAX_SOURCE_BYTES):
+def verify_check_inputs(root, basis, *, deadline=None, max_bytes=MAX_SOURCE_BYTES, allowed_roots=None, denied_paths=()):
     """Compare exact project bytes at inspection completion and before registration."""
     root = Path(root)
     if 'dependencies' in basis:
-        from .dependencies import binding as dependency_binding
-        dependencies = dependency_binding(root)
-        if not dependencies or dependencies['digest'] != basis['dependencies']:
+        from .dependencies import inspect_dependencies
+        current = inspect_dependencies(
+            root, allowed_roots=allowed_roots, denied_paths=denied_paths,
+            check_imports=False, check_environment=False, allow_partial=True,
+        )
+        if not current['declared'] or current['digest'] != basis['dependencies']:
             raise ForgeError('Dependency identity changed during inspection', code='inputs_changed')
     expected = {}
     for group in ('sources', 'parameter_digests', 'controls'):

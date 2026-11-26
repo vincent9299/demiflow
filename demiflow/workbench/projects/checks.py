@@ -11,7 +11,7 @@ from demiflow.forge.platform_snapshot import compare_snapshots, snapshot_complet
 FORMAT = 'demiflow_workbench_project_static_check_v3'
 
 
-def check(root, *, table_resolver):
+def check(root, *, table_resolver, python=None, allowed_roots=None):
     from demiflow.workbench.projects import workspace as ws
     from demiflow.forge.api_reference import sdk_identity
     from demiflow.forge.pipeline_check import check_project, verify_check_inputs
@@ -36,7 +36,8 @@ def check(root, *, table_resolver):
 
     # This operation already runs in the memory-limited product inspection worker.
     report = check_project(root, reference=reference, table_resolver=table_resolver, table_describer=None, publish=publish,
-                           max_variants=64, seconds=55, max_bytes=32*1024**2)
+                           max_variants=64, seconds=55, max_bytes=32*1024**2,
+                           python=python, allowed_roots=allowed_roots)
     if ws.current_platform_snapshot(saved_snapshot)['digests']['snapshot'] != snapshot['digests']['snapshot']:
         raise ForgeError('Checker platform changed during project inspection', code='conflict')
     results = [{**item, 'digest': digests.get((item['entry'], item['params']))} for item in report['entries']]
@@ -57,12 +58,12 @@ def check(root, *, table_resolver):
     result['digest'] = content_digest(result)
     bounded_json(result, 2*1024**2)
     with ws.control_lock(root):
-        verify_check_inputs(root, report['basis'], max_bytes=32*1024**2)
+        verify_check_inputs(root, report['basis'], max_bytes=32*1024**2, allowed_roots=allowed_roots)
         ws.write_control(destination, result, expected=previous, create=previous is None)
     return result
 
 
-def status(root, *, table_resolver):
+def status(root, *, table_resolver, python=None, allowed_roots=None):
     from demiflow.workbench.projects import workspace as ws
     from demiflow.forge.project_rules import RULES_ID
     root, control, saved_snapshot = ws.load_workspace(root)
@@ -80,10 +81,13 @@ def status(root, *, table_resolver):
         raise ForgeError('Invalid project check record')
     result['digest'] = digest
     reasons = []
-    from demiflow.forge.dependencies import binding as dependency_binding
+    from demiflow.forge.dependencies import inspect_dependencies
     try:
-        locked = dependency_binding(root)
-        if (locked['digest'] if locked else None) != result['basis'].get('dependencies'):
+        dep_info = inspect_dependencies(
+            root, allowed_roots=allowed_roots, check_imports=False, check_environment=False, allow_partial=True,
+        )
+        cur_digest = dep_info['digest'] if dep_info['declared'] and not dep_info['declaration_error'] else None
+        if cur_digest != result['basis'].get('dependencies'):
             reasons.append('project_dependencies_changed')
     except (OSError, ValueError):
         reasons.append('project_dependencies_unverifiable')

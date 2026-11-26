@@ -309,13 +309,40 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
     env_cfg = _runtime_environment(root)
     if env_cfg is not None:
         result['environment'] = env_cfg
-    from .dependencies import binding as dependency_binding, facts as dependency_facts
+    from .dependencies import inspect_dependencies
     try:
-        locked = dependency_binding(root, verify_files=False)
-        if locked is not None:
-            result['project_dependencies'] = {
-                **dependency_facts(locked), 'python': locked['environment']['interpreter']['path'],
-            }
+        eff_py = env_cfg.get('python') if isinstance(env_cfg, dict) else None
+        allowed_roots = env_cfg.get('allowed_read_roots') if isinstance(env_cfg, dict) else None
+        denied_paths = env_cfg.get('denied_paths') or () if isinstance(env_cfg, dict) else ()
+        dep_info = inspect_dependencies(
+            root,
+            python=eff_py,
+            allowed_roots=allowed_roots,
+            denied_paths=denied_paths,
+            check_imports=False,
+            check_environment=bool(eff_py),
+            allow_partial=True,
+        )
+        if dep_info['declared'] or dep_info['orphan_packages']:
+            if dep_info['declaration_error']:
+                diagnostics.append(dict(code='project_dependencies', path='pyproject.toml', detail=dep_info['declaration_error']))
+            else:
+                cfg = dep_info['config'] or {}
+                result['project_dependencies'] = dict(
+                    digest=dep_info['digest'],
+                    python=eff_py,
+                    requirements=list(cfg.get('requirements', ())),
+                    packages={
+                        name: {k: row[k] for k in ('source', 'file_count', 'bytes', 'tree_sha256')}
+                        for name, row in sorted(dep_info['packages'].items())
+                    },
+                    missing_packages=[dict(name=m['name'], source=m['source'], path=m['path']) for m in dep_info['missing_packages']],
+                    invalid_packages=[dict(name=m['name'], source=m['source'], detail=m['detail']) for m in dep_info['invalid_packages']],
+                    orphan_packages=[m['path'] for m in dep_info['orphan_packages']],
+                    missing_requirements=[dict(spec=m['spec'], code=m['code']) for m in dep_info['missing_requirements']],
+                    shadowed_packages=[m['name'] for m in dep_info['shadowed_packages']],
+                    environment_skipped=dep_info['environment_skipped'],
+                )
     except (OSError, ValueError) as error:
         diagnostics.append(dict(code='project_dependencies', path='pyproject.toml', detail=str(error)))
     if topic == 'sdk' and api is None and reference is not None and result['sdk'].get('apis'):
@@ -362,11 +389,28 @@ def render_context(result):
         rows.append(f"{result['project']['name']} · {result['root']} · {result['project']['state']}")
         dependencies = result.get('project_dependencies')
         if dependencies:
-            rows.append('项目 Python：' + dependencies['python'])
-            if dependencies['packages']:
-                rows.append('已锁定源码包：' + '、'.join(sorted(dependencies['packages'])))
-            if dependencies['distributions']:
-                rows.append('已锁定分发包：' + '、'.join(dependencies['distributions'][:32]))
+            if dependencies.get('python'):
+                rows.append('项目 Python：' + dependencies['python'])
+            if dependencies.get('packages'):
+                rows.append('已就绪外部源码包（packages/ 或 local_ref，可直接 import）：' + '、'.join(sorted(dependencies['packages'])))
+            if dependencies.get('missing_packages'):
+                miss_items = [f"{m['name']}({m['source']})" for m in dependencies['missing_packages']]
+                rows.append('缺失外部源码包：' + '、'.join(miss_items) + '（获取命令：demiflow forge dep vendor <包名> <来源目录> --root .）')
+            if dependencies.get('invalid_packages'):
+                inv_items = [f"{m['name']}: {m['detail']}" for m in dependencies['invalid_packages']]
+                rows.append('异常外部源码包：' + '；'.join(inv_items))
+            if dependencies.get('orphan_packages'):
+                rows.append('packages/ 未声明孤儿条目：' + '、'.join(dependencies['orphan_packages']) + '（清理命令：demiflow forge dep remove <包名> --root .）')
+            if dependencies.get('requirements'):
+                rows.append('声明的 A 类环境包（[project].dependencies）：' + '、'.join(dependencies['requirements'][:32]))
+            if dependencies.get('missing_requirements'):
+                miss_reqs = [m['spec'] for m in dependencies['missing_requirements']]
+                rows.append('缺失或版本不符的 A 类依赖：' + '、'.join(miss_reqs) + '（请由项目所有者在终端运行 demiflow forge dep install --root . --python <项目Python>）')
+            if dependencies.get('shadowed_packages'):
+                rows.append('B 类包名与环境已安装模块冲突：' + '、'.join(dependencies['shadowed_packages']))
+            if dependencies.get('environment_skipped'):
+                rows.append('提示：当前未传入项目 Python，已跳过 A 类环境版本核验。')
+            rows.append('依赖管理说明：pyproject.toml 可直接新建或编辑；packages/ 与 .forge/ 只读，通过 demiflow forge dep vendor/remove/list/verify --root . 操作。')
         locations = result['project'].get('locations')
         if locations:
             loc_parts = [

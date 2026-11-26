@@ -7,7 +7,8 @@ import pytest
 
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.forge.platform import content_digest
 from demiflow.execution.journal.run_journal import RunJournal
 from test_forge_workspace import demo, isolated
@@ -15,7 +16,8 @@ from test_forge_workspace import demo, isolated
 
 def test_change_hints_cover_controls_configs_and_wal_without_content_reads(isolated, monkeypatch):
     root = isolated
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
+
     run_id = 'r' + 'a' * 24
     directory = root / '.forge/runs' / run_id
     directory.mkdir(parents=True)

@@ -13,7 +13,7 @@ from pathlib import Path
 import stat
 
 from demiflow.forge.io import no_symlinks
-from demiflow.workbench import host_partition
+from demiflow.forge import host_partition
 from demiflow.workbench.analysis import contracts as c
 from demiflow.workbench.analysis.oci import FixedPaths
 from demiflow.workbench.analysis.resource_profile import profile

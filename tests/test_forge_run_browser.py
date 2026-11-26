@@ -12,7 +12,8 @@ import threading
 import pytest
 
 from test_forge_runs import base, root, wait
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.api import WorkspaceServer
 
 

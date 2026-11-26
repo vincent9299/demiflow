@@ -143,7 +143,8 @@ def _static_review_observation(source, check, definitions, stage):
 def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection=None,
                 auto_review=False, round=0, budget=None, reference=None, exclude=(),
                 reviewer=None, check_cancel=None, source_current=None, protected_violations=(),
-                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=None):
+                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=None,
+                allowed_roots=None, denied_paths=()):
     """Finish one engineering interval and produce a durable, candidate-bound next action.
 
     ``author`` contains provider/session and completed/acknowledged/cleanup facts.
@@ -172,11 +173,12 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
     if inspect and (paths or want_review or protected_violations):
         try:
             check = check_project(root, paths=paths if 0 < len(paths) <= 256 else (),
-                                  reference=reference, exclude=exclude, include_hygiene=True)
+                                  reference=reference, exclude=exclude, include_hygiene=True,
+                                  python=project_python, allowed_roots=allowed_roots, denied_paths=denied_paths)
             definitions = check.get('definitions', ())
             receipt['checks'] = {key: check[key] for key in (
                 'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id',
-                'source_digest', 'source_count', 'check_digest', 'coverage') if key in check}
+                'source_digest', 'source_count', 'check_digest', 'coverage', 'project_dependencies') if key in check}
         except (OSError, ValueError, KeyError, RecursionError) as exc:
             incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
             receipt['checks'] = dict(status='incomplete', native_flow=incomplete, project_layout=incomplete)
@@ -199,7 +201,8 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
             receipt['review'] = review_project(root, goal=text, **selected,
                 paths=() if selected else tuple(prior or paths), prior_sources=None if selected else prior,
                 exclude=exclude, observations=observations, reviewer=reviewer, budget=budget,
-                check_cancel=check_cancel, on_budget=on_budget)
+                check_cancel=check_cancel, on_budget=on_budget,
+                allowed_roots=allowed_roots, denied_paths=denied_paths)
         except (OSError, ValueError, RecursionError) as exc:
             receipt['review'] = dict(status='incomplete', current=False, complete=False, findings=[],
                                     diagnostics=[dict(code=getattr(exc, 'code', 'inspection_incomplete'), detail=str(exc)[:2048])])
@@ -247,7 +250,7 @@ def receipt_summary(receipt):
 
 
 def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
-                    seconds=3600, review_seconds=REVIEW_SECONDS, resume=False):
+                    seconds=3600, review_seconds=REVIEW_SECONDS, resume=False, project_python=None):
     """Drive the complete CLI engineering loop, persisting before every author send.
 
     The native author callback executes one harness interval. This function owns
@@ -357,8 +360,8 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 result = author(root, prompt, binding=binding, session=state['author'].get('session'),
                                 lease_fd=fd, deadline=state['deadline'], notify=notify, control_path=control_path)
                 state['author'] = result
-                apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
-                state['protected_violations'] = enforce_protected_files(root, guarded)
+                authorized_writes = apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
+                state['protected_violations'] = enforce_protected_files(root, guarded, authorized=authorized_writes)
                 if not result.get('completed') or result['cleanup'] != 'complete':
                     state.update(phase='unknown' if state.get('delivery') == 'sending' else 'finished',
                                  status='incomplete', reason=result.get('reason', '作者回合未完成。'))
@@ -404,7 +407,7 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 selection=options['selection'],
                 auto_review=options['auto_review'], round=state['round'], budget=state['budget'],
                 reviewer=review_once, source_current=current, protected_violations=state.get('protected_violations', ()),
-                on_budget=save_budget)
+                project_python=project_python, on_budget=save_budget)
             state['budget'] = dict(receipt['budget'])
             state['history'].append(receipt)
             state['status'] = receipt['status']

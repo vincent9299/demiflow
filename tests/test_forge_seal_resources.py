@@ -8,7 +8,8 @@ import tracemalloc
 
 import pytest
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.forge import platform_environment as environment
 from demiflow.forge.schema import ForgeError
 
@@ -183,7 +184,7 @@ def test_worker_starts_with_allocator_control_and_keeps_allocation_guard(tmp_pat
     code = '''
 import json, os, resource, sys
 sys.path.insert(0, sys.argv[1])
-from demiflow.workbench.runs.worker import allocation_guard
+from demiflow.forge.runs.worker import allocation_guard
 allocation_guard(dict(memory_bytes=64 * 1024**2, max_rss_bytes=1024**3))
 assert os.environ['MALLOC_ARENA_MAX'] == '2'
 assert sys.flags.isolated == 1

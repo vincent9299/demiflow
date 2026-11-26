@@ -11,7 +11,7 @@ from demiflow.forge.project_guard import capture_protected_files, enforce_protec
 from demiflow.forge.review_evidence import capture_evidence, review_units, verify_evidence
 from demiflow.forge.schema import ForgeError
 from demiflow.forge.workflow import discover_workflows, validate_workflow
-from demiflow.workbench.conversations.context import BridgeServer
+from demiflow.forge.bridge.server import BridgeServer
 from demiflow.workbench.projects import registry
 from demiflow.workbench.workflows.resolver import registered_project_catalog, workflow_review_observations
 from test_forge_development_loop import response_for

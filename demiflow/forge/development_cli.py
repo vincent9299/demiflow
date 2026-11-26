@@ -62,7 +62,7 @@ def author_command(binding, session):
     return command
 
 
-def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify, control_path=None):
+def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify, control_path=None, extra_path=None):
     """Run one native interval; session creation is distinct from input acknowledgement."""
     from demiflow.resources.process_observation import UNIT_ENV, descendants, drain_owned, signal_owned
     if len(prompt.encode()) > 128 * 1024:
@@ -73,6 +73,8 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
         raise ForgeError('Cannot establish author descendant ownership', code='operation_rejected')
     env = dict(os.environ)
+    if extra_path:
+        env['PATH'] = str(extra_path) + (os.pathsep + env['PATH'] if env.get('PATH') else '')
     if agent_binding(binding['provider'], binding['executable'], binding['profile'], binding['model']) != binding:
         raise ForgeError('Original author configuration changed before dispatch', code='conflict')
     env['CODEX_HOME' if binding['provider'] == 'codex' else 'DSH_HOME'] = binding['home']
@@ -207,12 +209,14 @@ def register(forge, output):
     @click.option('--profile', help='Existing native author profile; no privilege override is added.')
     @click.option('--model', help='Native Codex author model (DeepSeek uses its configured profile).')
     @click.option('--review/--no-review', default=True, help='Enable independent model review after code changes.')
+    @click.option('--python', 'project_python', default=None, type=click.Path(path_type=Path, dir_okay=False),
+                  help='Explicit project Python interpreter for live B-class package imports and A-class checks.')
     @click.option('--timeout', type=click.IntRange(1, 7200), default=3600, show_default=True)
     @click.option('--review-timeout', type=click.IntRange(1, MAX_REVIEW_SECONDS), default=REVIEW_SECONDS, show_default=True)
     @click.option('--resume', is_flag=True, help='Continue a definitely unsent action from this receipt.')
     @click.option('--status', is_flag=True, help='Read the persisted receipt without invoking an agent.')
     @click.option('--json', 'as_json', is_flag=True)
-    def develop(root, state_dir, goal, agent, executable, profile, model, review, timeout, review_timeout,
+    def develop(root, state_dir, goal, agent, executable, profile, model, review, project_python, timeout, review_timeout,
                 resume, status, as_json):
         """Run check/review/feedback/repair with the same native coding session."""
         from .development import run_development
@@ -225,7 +229,19 @@ def register(forge, output):
                 binding = agent_binding(agent, executable, profile, model)
                 if agent == 'deepseek' and model:
                     raise ForgeError('Select the DeepSeek model in its native profile', code='invalid_request')
-                return run_development(state, goal=goal, binding=binding, author=native_author,
-                    reviewer=run_reviewer, auto_review=review, seconds=timeout,
-                    review_seconds=review_timeout, resume=resume)
+                shims = None
+                py_str = str(project_python.absolute()) if project_python is not None else None
+                try:
+                    author_fn = native_author
+                    if py_str:
+                        from .sandbox import SandboxShims
+                        shims = SandboxShims({'root': str(root)}, execution_mode='trusted_local', project_python=py_str)
+                        def author_fn(*a, **kw):
+                            return native_author(*a, extra_path=shims.bin, **kw)
+                    return run_development(state, goal=goal, binding=binding, author=author_fn,
+                        reviewer=run_reviewer, auto_review=review, seconds=timeout,
+                        review_seconds=review_timeout, resume=resume, project_python=py_str)
+                finally:
+                    if shims is not None:
+                        shims.close()
         output(root, as_json, perform)

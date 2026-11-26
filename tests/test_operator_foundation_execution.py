@@ -13,7 +13,7 @@ from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
-from demiflow.workbench.runs.manager import DEFAULT_LIMITS as RUN_LIMITS
+from demiflow.forge.runs.manager import DEFAULT_LIMITS as RUN_LIMITS
 from test_forge_native_semantics import native
 
 

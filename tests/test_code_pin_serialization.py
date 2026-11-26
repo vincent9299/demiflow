@@ -109,7 +109,8 @@ FORMS = ["default", "kwdefault"]
 # === F9 acceptance 1: REAL workbench unchanged-code first run is NOT rejected ===
 
 def test_f9_workbench_unchanged_first_run_succeeds(root, tmp_path, monkeypatch):
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     # Isolate from any real deployment host-budget.json: a fresh domain has none,
     # so the fixed-host-partition guard does not apply to this owned workspace.
     domain = tmp_path / "domain"

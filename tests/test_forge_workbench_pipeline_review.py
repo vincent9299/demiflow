@@ -76,7 +76,7 @@ def test_author_requests_one_independent_review_and_replays_unavailable_model(tm
 def test_admission_failure_closes_broker_and_preserves_completed_turn_checks(tmp_path, monkeypatch):
     from demiflow.workbench.conversations import execution, model_broker
     from demiflow.workbench.conversations.pipeline_review import DeliveryReview, run_deployment_reviewer
-    from demiflow.workbench.conversations.sandbox import SandboxSpec
+    from demiflow.forge.sandbox.sandbox import SandboxSpec
 
     with app(tmp_path, acp=True, guided=True) as (server, workspace, root):
         service = server.development

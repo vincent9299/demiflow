@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.conversations.inputs import InputAccess
+from demiflow.forge.bridge.inputs import InputAccess
 
 
 @pytest.fixture
@@ -212,7 +212,8 @@ def test_native_lance_rejects_aliases_before_returning_data(access, alias_kind):
 
 @pytest.mark.parametrize('stop', [False, True])
 def test_native_timeout_or_stop_kills_its_owned_process_and_removes_private_home(access, monkeypatch, stop):
-    from demiflow.workbench.conversations import inputs, sandbox
+    from demiflow.forge.bridge import inputs
+    from demiflow.forge.sandbox import sandbox
     api, root, _, _, turn = access
     path = root / 'waiting.parquet'
     path.write_bytes(b'not read by the fixed test sleeper')

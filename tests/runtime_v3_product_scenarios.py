@@ -60,7 +60,9 @@ def read_native_execution(workspace, run_id, *, attempt, owned_root):
     import lance
     from demiflow.execution.journal.run_journal import RunJournal
     from demiflow.execution.seal.sealed_plans import load_sealed_plan
-    from demiflow.workbench.runs import manager as runs, facts
+    from demiflow.forge.runs import manager as runs
+
+    from demiflow.workbench.runs import facts
     from demiflow.execution.journal.publication_facts import inspect_write_receipt
     from demiflow.workbench.graph import model
 
@@ -241,7 +243,8 @@ def _main():
             # Explicit fixture roots only; never search the host/main repository.
             roots = {Path(item.funcargs[key]) for key in ('root','isolated','unregistered')
                      if key in item.funcargs and isinstance(item.funcargs[key], Path)}
-            from demiflow.workbench.runs import manager as runs
+            from demiflow.forge.runs import manager as runs
+
             for workspace in roots:
                 _owned(workspace, owner)
                 parent = workspace/'.forge/runs'

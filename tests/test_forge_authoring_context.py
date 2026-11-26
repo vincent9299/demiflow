@@ -8,7 +8,7 @@ import pytest
 from demiflow.forge.api_reference import build_reference
 from demiflow.forge.context import build_context, render_context
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.conversations.context import assemble
+from demiflow.forge.bridge.agent_context import assemble
 from demiflow.workbench.conversations.policy import Limits
 
 

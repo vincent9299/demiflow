@@ -45,7 +45,7 @@ def automatic_project(root):
     grant = dict(root=str(root), kind='pipeline', phase='implementation', writes=[], watch=[], sources=[],
         non_goals=['修改项目外文件、运行结果、原始数据、Notebook输出和平台控制文件'],
         authorization='工作台全局 AI 开发：仅按当前会话真人要求修改本项目源代码。')
-    scopes = {'README.md', 'tests', 'docs', 'parameters', 'configs', 'src', 'lib'}
+    scopes = {'README.md', 'pyproject.toml', 'tests', 'docs', 'parameters', 'configs', 'src', 'lib'}
     from demiflow.forge.project_rules import ROLE_DIRS
     scopes.update(ROLE_DIRS)
     with os.scandir(root) as entries:
@@ -53,10 +53,10 @@ def automatic_project(root):
             if count >= 4096: reject('项目目录条目过多。', 'resource_limit')
             if not entry.name.startswith('.') and entry.is_file(follow_symlinks=False) and Path(entry.name).suffix in {'.py', '.js', '.ts', '.yaml', '.yml', '.json', '.toml', '.md'}:
                 scopes.add(entry.name)
-    scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'data_tools', 'results', 'outputs'})
+    scopes.difference_update({'AGENTS.md', 'PIPELINE_SPEC.md', 'workspace.json', 'runs', 'datasets', 'data', 'notebooks', 'data_tools', 'packages', 'results', 'outputs'})
     grant['watch'] = sorted(scopes)
     # Landlock write grants are additive. Grant only existing subtrees with no
-    # protected descendants, so logs, notebooks and caches stay read-only.
+    # protected descendants, so logs, notebooks, packages and caches stay read-only.
     protected, existing = [], set()
     pending = list(scopes); seen = 0
     while pending:
@@ -68,7 +68,7 @@ def automatic_project(root):
         # dozens of single-file entries and blocks creating new files).
         if path.name in {'__pycache__', '.pytest_cache', '.mypy_cache'}:
             continue
-        if (path.name.startswith('.') or path.name in {'AGENTS.md','PIPELINE_SPEC.md','workspace.json','data','datasets','runs','results','outputs','notebooks','data_tools','logs','node_modules','.venv'}
+        if (path.name.startswith('.') or path.name in {'AGENTS.md','PIPELINE_SPEC.md','workspace.json','data','datasets','runs','results','outputs','notebooks','data_tools','packages','logs','node_modules','.venv'}
                 or path.suffix in {'.ipynb','.lance','.parquet','.arrow','.db','.sqlite','.sqlite3'}):
             protected.append(name); continue
         if not path.exists():
@@ -209,14 +209,14 @@ class GlobalSettings:
             if configured_python and not (Path(configured_python).is_file() and os.access(configured_python, os.X_OK)):
                 configured_python = ''
             configured_dev_network = bool(row.get('dev_network', False))
-            dependency_lock = row.get('dependency_lock')
-            if (self.value is None and configured_python is None and not configured_dev_network and not dependency_lock
+            configured_read_roots = tuple(row.get('read_roots') or ())
+            if (self.value is None and configured_python is None and not configured_dev_network and not configured_read_roots
                     and workspace in self.service.deployment.projects
                     and explicit is self.service.deployment.projects[workspace]
                     and explicit['identity'] == identity):
                 return self.service.deployment,self.service.policy_hash,self.service.config_path
             effective=self.value or dict(provider=next(iter(self.templates)),config=next(iter(self.templates.values())))
-            cache_key=(workspace,digest(identity),digest(self.value),configured_python,configured_dev_network,dependency_lock)
+            cache_key=(workspace,digest(identity),digest(self.value),configured_python,configured_dev_network,configured_read_roots)
             if cache_key not in self.bindings:
                 if len(self.bindings)>=128: reject('自动项目绑定超过预算。','resource_limit')
                 if explicit and explicit['identity']==identity:
@@ -226,10 +226,11 @@ class GlobalSettings:
                     project['python'] = configured_python
                 else:
                     project.pop('python', None)
-                if dependency_lock:
-                    project['dependency_lock'] = dependency_lock
+                project.pop('dependency_lock', None)
+                if configured_read_roots:
+                    project['read_roots'] = list(configured_read_roots)
                 else:
-                    project.pop('dependency_lock', None)
+                    project.pop('read_roots', None)
                 if configured_dev_network:
                     project['dev_network'] = True
                 else:

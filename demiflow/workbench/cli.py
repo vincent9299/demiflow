@@ -199,7 +199,7 @@ def register(main):
     @click.option('--synchronize', is_flag=True, help='Resolve bounded pending index publications.')
     @pretty_option
     def directory_index(root, rebuild, synchronize, pretty):
-        from demiflow.workbench.projects import index
+        from demiflow.forge import index
         def perform():
             if rebuild and synchronize:
                 raise ValueError('Select either rebuild or synchronize')

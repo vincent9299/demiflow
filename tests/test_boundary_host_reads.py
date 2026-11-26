@@ -7,7 +7,8 @@ import sqlite3
 import pytest
 
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.runs import domain, requests, manager
+from demiflow.forge.runs import domain, requests, manager
+
 from test_forge_history_admission import run_fixture, private_domain  # noqa: F401
 
 

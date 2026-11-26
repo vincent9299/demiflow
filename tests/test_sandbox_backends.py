@@ -13,14 +13,14 @@ import pytest
 
 from demiflow.forge.source_snapshot import capture, differences
 from demiflow.workbench.conversations.execution import execution_facts
-from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
-from demiflow.workbench.conversations.sandbox_backends import (
+from demiflow.forge.sandbox.sandbox import SandboxSpec, backend_readiness, launch_sandbox
+from demiflow.forge.sandbox.backends import (
     select_backend,
     validate_spec_portable,
 )
-from demiflow.workbench.conversations.sandbox_backends.container_oci import build_oci_command
-from demiflow.workbench.conversations.sandbox_backends.macos_seatbelt import build_seatbelt_profile
-from demiflow.workbench.conversations.sandbox_backends.windows_wsl import (
+from demiflow.forge.sandbox.backends.container_oci import build_oci_command
+from demiflow.forge.sandbox.backends.macos_seatbelt import build_seatbelt_profile
+from demiflow.forge.sandbox.backends.windows_wsl import (
     build_wsl_spec_payload,
     windows_to_wsl_path,
 )
@@ -312,8 +312,9 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
 
 
 def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path, monkeypatch):
-    from demiflow.workbench.conversations import pipeline_review, sandbox
-    from demiflow.workbench.conversations.sandbox_backends import validate_spec_portable
+    from demiflow.workbench.conversations import pipeline_review
+    from demiflow.forge.sandbox import sandbox
+    from demiflow.forge.sandbox.backends import validate_spec_portable
 
     project_dir = tmp_path / 'proj'
     project_dir.mkdir()
@@ -382,7 +383,8 @@ def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path
 def test_forge_unifies_configs_role_and_keeps_legacy_parameters_compatible(tmp_path):
     from demiflow.forge import pipeline_check, project
     from demiflow.forge.project_rules import ROLE_DIRS
-    from demiflow.workbench.runs import manager as run_manager
+    from demiflow.forge.runs import manager as run_manager
+
     assert {'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks'}.issubset(ROLE_DIRS)
     proj = tmp_path / 'proj'
     project.initialize_project(proj, name='Demo')
@@ -439,7 +441,7 @@ def test_manage_project_layout_bridge_tool(tmp_path):
     import pytest
     from demiflow.forge.project import initialize_project
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.conversations.context import _run_project_layout
+    from demiflow.forge.bridge.tools import run_project_layout as _run_project_layout
 
     root = tmp_path / 'demo_proj'
     initialize_project(root)
@@ -565,7 +567,7 @@ def test_flow_check_allows_config_expr_and_ancestor_prefixed_imports(tmp_path):
 
 
 def test_tree_usage_tolerates_missing_and_transient_files(tmp_path, monkeypatch):
-    from demiflow.workbench.conversations import sandbox_native
+    from demiflow.forge.sandbox import sandbox_native
 
     root = tmp_path / 'work'
     root.mkdir()
@@ -760,7 +762,7 @@ def test_manage_project_layout_bind_table_and_pow_encode(tmp_path):
     from demiflow.forge.project import initialize_project
     from demiflow.forge.project_bindings import bind_table
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.conversations.context import PROJECT_LAYOUT_TOOL, _run_project_layout
+    from demiflow.forge.bridge.tools import PROJECT_LAYOUT_TOOL, run_project_layout as _run_project_layout
 
     ext = tmp_path / 'external_inputs'
     ext.mkdir()
@@ -1143,8 +1145,8 @@ def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_p
 def test_unlimited_dev_turn_seconds_and_sandbox_seconds_zero(tmp_path):
     import math
     from demiflow.workbench.conversations.policy import Limits, turn_deadline
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
-    from demiflow.workbench.conversations.sandbox_backends import validate_spec_portable
+    from demiflow.forge.sandbox.sandbox import SandboxSpec, backend_readiness, launch_sandbox
+    from demiflow.forge.sandbox.backends import validate_spec_portable
 
     # Default turn_seconds is 0 (no 15-min wall-clock cutoff); explicit positive values still work.
     default_limits = Limits.parse({})
@@ -1210,7 +1212,7 @@ def test_sandbox_sample_ignores_exiting_process_lookup_error(monkeypatch):
     import builtins
     import errno
     import time
-    from demiflow.workbench.conversations import sandbox_child
+    from demiflow.forge.sandbox import sandbox_child
 
     real_open = builtins.open
 

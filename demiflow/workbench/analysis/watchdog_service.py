@@ -194,7 +194,7 @@ class WatchdogService:
         self.poll.unregister(channel.connection); channel.close()
 
     def _owner_control(self, peer, operation, digest, *, record=None):
-        from demiflow.workbench.process import process_identity
+        from demiflow.forge.process import process_identity
         if (not peer.live() or str(peer.pid) not in read_control(self.deployment.paths.delegated_cgroup/"controller", "cgroup.procs").split()):
             c.reject("Priority owner control requires its live controller role", code="operation_rejected")
         value = validate_owner(record) if operation=="bind-owner" else self.owner
@@ -246,7 +246,7 @@ class WatchdogService:
             self._stop_read()
 
     def _read_owner_control(self, peer, operation, digest, *, record=None):
-        from demiflow.workbench.process import process_identity
+        from demiflow.forge.process import process_identity
         if (not peer.live() or str(peer.pid) not in read_control(self.deployment.paths.delegated_cgroup/"controller", "cgroup.procs").split()):
             c.reject("Read owner control requires its live controller role", code="operation_rejected")
         current = self.read_owner
@@ -343,7 +343,7 @@ class WatchdogService:
                 pass  # unresolved disappearance, retain the original watch
 
     def _clean_watch(self, peer, lease):
-        from demiflow.workbench.process import process_identity
+        from demiflow.forge.process import process_identity
         if (not peer.live() or str(peer.pid) not in read_control(self.deployment.paths.delegated_cgroup/"controller","cgroup.procs").split()
                 or peer.identity!=lease["controller"] and process_identity(lease["controller"]["pid"])==lease["controller"]):
             c.reject("Only the original or recovery controller can finish an owned watch",code="operation_rejected")
@@ -403,7 +403,7 @@ class WatchdogService:
                                 continue
                             if request.get("operation") == "status":
                                 c.fields(request, {"operation"}, label="watchdog status")
-                                from demiflow.workbench.process import process_identity
+                                from demiflow.forge.process import process_identity
                                 if str(os.getpid()) not in read_control(self.deployment.paths.delegated_cgroup/"watchdog", "cgroup.procs").split():
                                     c.reject("Watchdog resource role changed", code="conflict")
                                 channel.queue("json", dict(format="demiflow_analysis_watchdog_status_v1", identity=process_identity(os.getpid()), profile_sha256=self.profile_sha256, active=True))

@@ -17,7 +17,8 @@ import pyarrow as pa
 from demiflow import data
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.data.plan import CallableSpec, StandardCallable
 from demiflow.data.runtime_contract import RuntimeContractError
@@ -119,7 +120,7 @@ def test_prepare_does_not_execute_and_rejects_changed_basis(root):
 
 
 def test_run_log_rotation_preserves_tail_and_reports_expired_cursor(root):
-    from demiflow.workbench.runs.worker import RunLog
+    from demiflow.forge.runs.worker import RunLog
     value = prepared(root)
     path = runs.attempt_directory(runs.directory(root, value['run_id']), 'logs', value['attempt'])
     path.mkdir(parents=True)

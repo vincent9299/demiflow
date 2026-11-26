@@ -5,7 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from demiflow.workbench.python_sources import read_source_bytes
+from demiflow.forge.runtime import read_source_bytes
 from demiflow.workbench.projects import workspace as ws
 
 KINDS = ('callsite', 'configuration', 'schema', 'implementation', 'prompt')
@@ -157,7 +157,7 @@ def _configuration_detail(projected, callsite=None):
 
 def build_plan_details(compiled, *, sources, root, callsites=None, bounds=None, shared_sources=None):
     root = Path(root)
-    from demiflow.workbench.python_sources import bound_files
+    from demiflow.forge.runtime import bound_files
     shared = {origin: (path.as_posix(), digest)
               for _, origin, path, digest in bound_files({'shared_sources': shared_sources or {}})}
     if callsites is not None:

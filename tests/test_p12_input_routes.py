@@ -9,7 +9,8 @@ from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs import manager as runs, admission
+from demiflow.forge.runs import manager as runs, admission
+
 from demiflow.workbench.graph import model, parameters, preview
 from demiflow.workbench.analysis import web_sources
 from demiflow.workbench.worker import operation

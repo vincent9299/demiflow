@@ -13,7 +13,8 @@ import pytest
 from playwright.sync_api import expect
 
 from demiflow.workbench.projects import registry as console
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
 from _forge_project_fixtures import grant_config_write

@@ -68,8 +68,9 @@ def run(*, source, target):
 '''
     prepared = custom(root, flow, operators=operator)
     if family in {'flat_batch', 'flat_batch_bounded'}:
-        from demiflow.workbench.runs import manager as runs
-        from demiflow.workbench.pipeline_policy import limits_with
+        from demiflow.forge.runs import manager as runs
+
+        from demiflow.forge.pipeline_policy import limits_with
         _, sealed = runs._load(root, prepared['run_id'])
         caps = sealed['manifest']['limits']
         if family == 'flat_batch':
@@ -124,7 +125,8 @@ from test_operator_foundation_models import model_files
 
 
 def test_managed_model_results_evidence_and_read_only_access(root, server):
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from demiflow.workbench.projects import workspace as ws
     _, workspace, _ = ws.load_workspace(root)
     ws.bind_platform(root, expected=workspace['platform']['digest'], extras=['llm'])
@@ -152,7 +154,8 @@ def test_managed_model_cancel_stops_dispatch_and_preserves_request(root, server,
     import sqlite3
     import threading
     import time
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from demiflow.workbench.projects import workspace as ws
     _, workspace, _ = ws.load_workspace(root)
     ws.bind_platform(root, expected=workspace['platform']['digest'], extras=['llm'])

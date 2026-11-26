@@ -94,7 +94,7 @@ def test_explicit_metadata_callback_and_recording_are_separate_from_projection(t
 
 
 def test_preparation_keeps_empty_manifest_distinct_and_formed_state_precedence(tmp_path):
-    from demiflow.workbench.runs.requests import _incomplete_seal
+    from demiflow.forge.runs.requests import _incomplete_seal
     from demiflow.forge.schema import ForgeError
     path=tmp_path/'run.sqlite'
     with sqlite3.connect(path) as db:

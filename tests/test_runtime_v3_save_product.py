@@ -9,7 +9,8 @@ import pyarrow as pa
 import pytest
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.execution.journal.run_journal import RunJournal
 from test_forge_runs import base, root, execute
 
@@ -290,7 +291,8 @@ from pathlib import Path
 mode,root,run_id=sys.argv[1:4]
 target=Path(root)/'.forge/runs'/run_id
 sys.path.insert(0,str(target/'runtime'))
-from demiflow.workbench.runs import worker
+from demiflow.forge.runs import worker
+
 if mode=='supervise':
     original=subprocess.Popen
     def launch(command,*args,**kwargs):

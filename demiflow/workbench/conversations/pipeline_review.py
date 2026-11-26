@@ -10,16 +10,6 @@ import time
 from .common import plain_path, reject, wire
 
 
-REVIEW_TOOL = dict(name='request_pipeline_review',
-    description='Request an independent read-only delivery review after this author turn finishes. '
-                'By default review the source changes observed in this development session. '
-                'Supply an entry (and optional params) to review a particular flow.',
-    inputSchema=dict(type='object', additionalProperties=False, properties={
-        'entry': dict(type='string', description='Project-relative flow.py:function'),
-        'params': dict(type='string', description='Project-relative parameter file'),
-    }))
-
-
 class DeliveryReview:
     """One idempotent request in the active worker, using its existing execution slot."""
 
@@ -66,11 +56,11 @@ class DeliveryReview:
                         'turn_id': self.turn['id'], 'status': item.get('status'),
                         'diagnostic_count': item.get('diagnostic_count')}).decode()})
         check_cancel()
-        from demiflow.forge.dependencies import host_approval
-        with host_approval(self.project['root'], self.project.get('dependency_lock'), self.project.get('python')):
-            review = review_project(self.project['root'], goal=goal, **self.selection,
-                paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
-                observations=observations, reviewer=reviewer)
+        from demiflow.workbench.projects.registry import project_python_and_scope
+        _, allowed_roots = project_python_and_scope(self.project['root'], project=self.project)
+        review = review_project(self.project['root'], goal=goal, **self.selection,
+            paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
+            observations=observations, reviewer=reviewer, allowed_roots=allowed_roots)
         check_cancel()
         return review
 

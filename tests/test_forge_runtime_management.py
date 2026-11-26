@@ -1,6 +1,7 @@
 """Runtime control invariants: owned fixtures, bounded probes, no model/network."""
 
-from demiflow.workbench import host_partition
+from demiflow.forge import host_partition
+
 from contextlib import closing
 import fcntl
 import json
@@ -14,9 +15,12 @@ import time
 
 import pytest
 
-from demiflow.workbench.runs import manager as runs
-from demiflow.workbench.runs import domain as run_domain
-from demiflow.workbench.runs import requests as run_requests
+from demiflow.forge.runs import manager as runs
+
+from demiflow.forge.runs import domain as run_domain
+
+from demiflow.forge.runs import requests as run_requests
+
 from demiflow.workbench.runs import view as run_view
 from demiflow.forge.schema import ForgeError
 from demiflow.resources.process_observation import unit_stopped, require_pidfds
@@ -188,9 +192,9 @@ def test_rm05_default_capacity_and_per_device_totals(tmp_path):
 def test_rm05_domain_does_not_follow_process_tmpdir(tmp_path):
     (tmp_path / "root").mkdir()
     code = """from pathlib import Path
-from demiflow.workbench.runs.domain import lock,reserve
-from demiflow.workbench.host_partition import location
-from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
+from demiflow.forge.runs.domain import lock,reserve
+from demiflow.forge.host_partition import location
+from demiflow.forge.pipeline_policy import DEFAULT_LIMITS
 import sys,json
 print(location(),flush=True)
 with lock() as (domain,capacity):
@@ -241,7 +245,7 @@ def test_rm08_cross_session_descendants_and_unrelated_canary(tmp_path):
         start_new_session=True,
     )
     code = """import os,sys,subprocess,time,json
-from demiflow.workbench.runs.worker import _adopt_descendants
+from demiflow.forge.runs.worker import _adopt_descendants
 from demiflow.resources.process_observation import drain_owned,descendants
 _adopt_descendants()
 # The leader exits before its separate-session child; subreaper owns the latter.

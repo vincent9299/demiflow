@@ -29,7 +29,7 @@ from demiflow.workbench.conversations.common import strict_json
 from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.policy import Deployment
 from demiflow.workbench.conversations.policy import POLICY_BYTES
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 
 FORMAT = 'demiflow_development_existing_http_v1'
 REQUEST_BYTES = 65536

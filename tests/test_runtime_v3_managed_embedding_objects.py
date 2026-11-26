@@ -25,7 +25,7 @@ from demiflow.objects import LocalObjectStore
 from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
-from demiflow.workbench.runs.manager import DEFAULT_LIMITS
+from demiflow.forge.runs.manager import DEFAULT_LIMITS
 from runtime_v3_recovery_scenarios import _native_calls
 from test_document_embeddings import fixture_input
 from test_embeddings import server
@@ -186,7 +186,8 @@ def test_managed_object_access_is_rejected_before_http(tmp_path, catalog, server
 def test_workbench_prepare_start_uses_registered_objects_and_sealed_native_plan(
         tmp_path, catalog, server, modality, corrupt, monkeypatch, record_property):
     from urllib.parse import urlsplit, unquote
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from test_forge_runs import execute
     from runtime_v3_product_scenarios import read_native_execution
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))

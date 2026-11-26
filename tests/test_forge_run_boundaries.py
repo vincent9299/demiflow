@@ -9,7 +9,7 @@ from demiflow.data.plan import CallableSpec, BoundMapOp, BoundCallable, Standard
 from demiflow.data.runtime_contract import check_size, check_value, RuntimeContractError
 from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.execution.pipeline.local_kernel import local_execution
-from demiflow.workbench.runs.manager import DEFAULT_LIMITS
+from demiflow.forge.runs.manager import DEFAULT_LIMITS
 from demiflow.lance.model import LanceWriteSpec
 from demiflow.lance.write import write_lance
 

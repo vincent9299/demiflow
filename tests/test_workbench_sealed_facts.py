@@ -33,7 +33,9 @@ from demiflow.planning.dag import (
     validate_logical_dag, validate_physical_execution_plan,
 )
 from demiflow.workbench.graph import logical, model
-from demiflow.workbench.runs import facts, manager as runs
+from demiflow.forge.runs import manager as runs
+
+from demiflow.workbench.runs import facts
 
 ENTRY = 'flows/questions.py:select'
 PARAMS = 'flows/select_a.json'

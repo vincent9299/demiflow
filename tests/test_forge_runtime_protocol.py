@@ -8,9 +8,12 @@ import time
 
 import pytest
 
-from demiflow.workbench.runs import manager as runs
-from demiflow.workbench.runs import domain as run_domain
-from demiflow.workbench.runs import admission as run_admission
+from demiflow.forge.runs import manager as runs
+
+from demiflow.forge.runs import domain as run_domain
+
+from demiflow.forge.runs import admission as run_admission
+
 from demiflow.forge.schema import ForgeError
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.resources.process_observation import signal_owned

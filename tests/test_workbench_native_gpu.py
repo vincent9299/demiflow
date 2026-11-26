@@ -11,7 +11,8 @@ from demiflow.data.native_options import parse_native_options, resource_only_opt
 from demiflow.planning.traits import check_call
 from demiflow.execution.seal.plan_facts import operation_facts
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.runs import manager as runs, native_resources
+from demiflow.forge.runs import manager as runs, native_resources
+
 from test_forge_runs import base, root, custom, execute
 from test_forge_markdown_reading import browser
 
@@ -76,7 +77,7 @@ def test_sealed_inventory_shared_domain_and_cpu_environment(tmp_path, monkeypatc
     path.chmod(0o600); path.write_text('{}')
     with pytest.raises(ForgeError,match='inventory differs'):
         runs.worker_environment(targets[0],native_execution=value)
-    from demiflow.workbench.runs.operations import OPERATIONS, worker_arguments
+    from demiflow.forge.runs.operations import OPERATIONS, worker_arguments
     args={'entry':'flows/a.py:run','params':'flows/a.json','native_deployment':value}
     with pytest.raises(ForgeError,match='unknown'):
         OPERATIONS['prepare'].validate(args)  # HTTP/public cannot choose a pool.

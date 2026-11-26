@@ -244,7 +244,9 @@ def test_r_c_existing_native_commit_recovers_without_republication(tmp_path):
 @pytest.fixture
 def stopped_workbench(tmp_path, monkeypatch):
     import test_upgrade_business_acceptance as acc
-    from demiflow.workbench.runs import manager as runs, facts
+    from demiflow.forge.runs import manager as runs
+
+    from demiflow.workbench.runs import facts
     from demiflow.resources.process_observation import require_pidfds
     require_pidfds()
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
@@ -282,7 +284,8 @@ def stopped_workbench(tmp_path, monkeypatch):
 
 
 def _wait_workbench(root, run_id):
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     deadline = time.monotonic() + 120
     while True:
         value = runs.show(root, run_id)
@@ -296,7 +299,8 @@ def _wait_workbench(root, run_id):
 def _registration_child(root, rid):
     from demiflow.workbench.worker import prepare_native
     prepare_native(analysis_read=False)
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     errors = runs.register_results(Path(root), rid, recover=True)
     target, value = runs._load(Path(root), rid)
     journal = RunJournal(target)
@@ -308,7 +312,8 @@ def _registration_child(root, rid):
 
 def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
     """Real stopped worker, native reconciliation/inspection and journal writes."""
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from demiflow.lance.write import write_lance
     f = stopped_workbench
     rid, aid = f['prepared']['run_id'], f['action_id']
@@ -377,7 +382,9 @@ def test_workbench_producer_requires_confirmed_absence(stopped_workbench):
 
 
 def test_workbench_cancel_resume_golden(stopped_workbench):
-    from demiflow.workbench.runs import manager as runs, facts
+    from demiflow.forge.runs import manager as runs
+
+    from demiflow.workbench.runs import facts
     from demiflow.workbench.projects import workspace as ws
     from demiflow.workbench import project_operations as project_ops
     import test_upgrade_business_acceptance as acc

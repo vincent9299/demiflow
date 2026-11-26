@@ -27,9 +27,9 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     from demiflow.forge.platform_worker import capture
     from demiflow.forge.platform import limits_with
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.host_partition import PREPARATION_RSS
-    from demiflow.workbench.host_partition import location
-    from demiflow.workbench.host_partition import READONLY_RSS
+    from demiflow.forge.host_partition import PREPARATION_RSS
+    from demiflow.forge.host_partition import location
+    from demiflow.forge.host_partition import READONLY_RSS
 
     from demiflow.workbench.reader import current
     from demiflow.workbench.reader import ALLOWED
@@ -40,11 +40,11 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     if _authority is not None:
         request["bootstrap"] = _authority
     if name in {'plan_preview', 'run_prepare'}:
-        from demiflow.workbench.python_sources import deployment_modules
+        from demiflow.forge.runtime import deployment_modules
         _source_modules = deployment_modules(Path(request['root']))
     if name == 'plan_preview':
         from demiflow.workbench.projects.registry import project_dependencies
-        _dependencies = project_dependencies(root, authority=_authority)
+        _dependencies = project_dependencies(root, authority=_authority, verify_files=True, require_environment=True)
     if name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None:
         request.pop('bootstrap', None)
         request['dependencies'] = _dependencies
@@ -73,14 +73,19 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         business = name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None
         python = sys.executable
         if business:
-            from demiflow.forge.dependencies import verify_interpreter
-            python = verify_interpreter(_dependencies['environment']['interpreter'])
+            from demiflow.forge.runtime import launch_confined_python, verify_interpreter
+            interpreter = _dependencies['environment']['interpreter']
+            python = verify_interpreter(interpreter)
         argv = [python, "-I", "-B", str(Path(__file__).resolve())]
         launcher = None
         if business:
             argv.append('--confined-project')
-            launcher = partial(_launch_project_inspection, root, _dependencies, _source_modules,
-                               inspection_reads, settings['timeout_seconds'])
+            launcher = lambda command, *, stdin, cwd, env, **_: launch_confined_python(
+                root, command, interpreter=interpreter, dependencies=_dependencies,
+                source_modules=_source_modules, read_paths=inspection_reads,
+                seconds=settings['timeout_seconds'], rss_bytes=PREPARATION_RSS,
+                cwd=cwd, env=env, stdin=stdin,
+            )
         value=capture(argv,request,settings,response_formats={FORMAT},input_limit=1024**2,
             pass_fds=_pass_fds,inherit_authority=not business,launcher=launcher,
             tree_rss_limit=PREPARATION_RSS if business or _pass_fds or name in {"analysis_media_sources","analysis_source_read","table_profile"} else (READONLY_RSS if (location() / 'host-budget.json').exists() else None))
@@ -94,35 +99,6 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     return value["value"]
 
 
-def _launch_project_inspection(root, locked, source_modules, inspection_reads, seconds, command, *, stdin, cwd, env, **_):
-    """Apply OS bounds before the fixed project Python inspection starts."""
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
-    from demiflow.workbench.host_partition import PREPARATION_RSS
-
-    if sys.platform != 'linux':
-        raise ValueError('Confined project inspection requires the Linux sandbox backend')
-    home = Path(cwd) / 'home'
-    home.mkdir(mode=0o700)
-    interpreter = locked['environment']['interpreter']
-    from demiflow.forge.dependencies import module_files
-    files = set(inspection_reads)
-    source_files = {Path(row['path']) for row in module_files(root, locked).values()}
-    source_files.update(map(Path, (source_modules or {}).values()))
-    traversal = {root, *(path.parent for path in source_files)}
-    files.update(source_files)
-    runtime = {Path(__file__).resolve().parents[2], Path(interpreter['prefix']),
-               Path(interpreter['base_prefix']), Path(interpreter['binary'])}
-    runtime.update(path for path in map(Path, ('/usr', '/lib', '/lib64')) if path.exists())
-    if any(root.is_relative_to(path) for path in runtime):
-        raise ValueError('Project Python runtime root must not cover the project directory')
-    spec = SandboxSpec(read_paths=tuple(map(str, sorted(files | {Path(cwd)}))), traversal_paths=tuple(map(str, sorted(traversal))),
-                       write_paths=(), runtime_paths=tuple(sorted(map(str, runtime))),
-                       protected_paths=(), denied_paths=(), private_home=str(home),
-                       role='verifier', seconds=seconds, rss_bytes=PREPARATION_RSS)
-    return launch_sandbox(command, spec=spec, env={**env, 'HOME': str(home), 'TMPDIR': str(home)},
-                          cwd=cwd, stdin=stdin)
-
-
 def _inspection_inputs(root, request):
     """Grant project source and exact input tables while keeping controls private."""
     from demiflow.forge.platform_environment import read_bounded
@@ -130,8 +106,8 @@ def _inspection_inputs(root, request):
     from demiflow.forge.project_rules import ROLE_DIRS
     from demiflow.forge.schema import ForgeError
     from demiflow.workbench.projects import workspace as ws
-    from demiflow.workbench.runs import manager as runs
-    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.forge.runs import manager as runs
+    from demiflow.forge.table_bindings import make_resolver
 
     _, workspace = ws.load_workspace_control(root)
     supplied = request['arguments']
@@ -242,9 +218,9 @@ def dispatch(request):
 
     no_symlinks(root)
     from demiflow.workbench.projects import workspace as ws
-    from demiflow.workbench.runs import manager as runs
-    from demiflow.workbench.table_bindings import make_resolver
-    from demiflow.workbench.projects.registry import dependency_scope
+    from demiflow.forge.runs import manager as runs
+    from demiflow.forge.table_bindings import make_resolver
+    from demiflow.workbench.projects.registry import project_python_and_scope
     table_resolver = make_resolver(ws.table_binding, runs.result_table)
     if 'dependencies' in request:
         from demiflow.forge.project_bindings import table_reference
@@ -296,8 +272,10 @@ def dispatch(request):
             from demiflow.workbench.projects import checks as project_check
             if args:
                 raise ForgeError('Project checks accept no rule overrides', code='invalid_request')
-            with dependency_scope(root, authority=request.get('bootstrap')):
-                value = (project_check.check if op == 'project_check' else project_check.status)(root, table_resolver=table_resolver)
+            proj_py, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = (project_check.check if op == 'project_check' else project_check.status)(
+                root, table_resolver=table_resolver, python=proj_py, allowed_roots=allowed_roots,
+            )
         elif op == 'project_table':
             from demiflow.workbench.projects.discovery import table
             from demiflow.workbench.projects.workspace import load_workspace
@@ -306,14 +284,37 @@ def dispatch(request):
         elif op == "inspect":
             from demiflow.workbench.projects.workspace import _inspect_flow
 
-            with dependency_scope(root, authority=request.get('bootstrap')):
-                value = _inspect_flow(root, table_resolver=table_resolver, **args)
+            _, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = _inspect_flow(root, table_resolver=table_resolver, allowed_roots=allowed_roots, **args)
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import preview as compile_preview
             value = compile_preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
         elif op == 'native_submission_inspect':
-            from demiflow.workbench.runs.native_submission import inspect_submission
-            value = inspect_submission(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
+            from demiflow.forge.runs.inspector import register_material_observer
+            from demiflow.forge.runs.native_submission import inspect_submission
+            from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
+            from demiflow.workbench.graph.plan_details import build_plan_details
+
+            def _wb_material_observer(root_path, target_path, source_digests, shared, capture_fn):
+                with PlanCallsites(root_path, source_digests) as callsites:
+                    captured = capture_fn(callsites.bind_compilation)
+                shared_binding = shared.binding()
+                details = build_plan_details(
+                    captured.compiled, sources=source_digests, root=root_path,
+                    callsites=callsites, bounds=captured.bounds, shared_sources=shared_binding,
+                )
+                pipeline = pipeline_material(root_path, target_path, source_digests)
+                return captured, shared_binding, details, pipeline
+
+            register_material_observer(_wb_material_observer)
+            try:
+                value = inspect_submission(
+                    root, table_resolver=table_resolver,
+                    source_modules=request.get('source_modules'),
+                    dependencies=request.get('dependencies'), **args,
+                )
+            finally:
+                register_material_observer(None)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)
@@ -321,28 +322,28 @@ def dispatch(request):
             from demiflow.workbench.graph.parameters import _entry_arguments
             value=_entry_arguments(root,**args)
         elif op == 'run_prepare_reconcile':
-            from demiflow.workbench.runs.requests import _reconcile
-            value=_reconcile(root,**args)
+            from demiflow.forge.runs.requests import reconcile_in_worker
+            value=reconcile_in_worker(root,**args)
         elif op == 'run_admission':
-            from demiflow.workbench.runs.admission import _describe
-            value=_describe(root,table_resolver=table_resolver, **args)
+            from demiflow.forge.runs.admission import describe_in_worker
+            value=describe_in_worker(root,table_resolver=table_resolver, **args)
         elif op in {"run_prepare", "run_preflight", "run_resume"}:
-            from demiflow.workbench.runs import manager as run_manager
+            from demiflow.forge.runs import manager as run_manager
             from demiflow.workbench.runs.authority import from_bootstrap
-            from demiflow.workbench.runs.operations import worker_arguments
+            from demiflow.forge.runs.operations import worker_arguments
             authority = from_bootstrap(request.get('bootstrap'), root)
             handler = {'run_prepare': run_manager._prepare, 'run_preflight': run_manager._preflight,
                        'run_resume': run_manager._resume}[op]
             trusted = {'source_modules': request.get('source_modules')} if op == 'run_prepare' else {}
             value = handler(root, **worker_arguments(op, args), authority=authority, **trusted)
         elif op == 'run_reconcile':
-            from demiflow.workbench.runs import manager as runs
-            value = runs._reconcile(root, **args)
+            from demiflow.forge.runs import manager as runs
+            value = runs.reconcile_in_worker(root, **args)
         elif op == "status":
             from demiflow.workbench.projects.workspace import _report_status
 
-            with dependency_scope(root, authority=request.get('bootstrap')):
-                value = _report_status(root, table_resolver=table_resolver, verify_dependencies=True, **args)
+            _, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = _report_status(root, table_resolver=table_resolver, verify_dependencies=True, allowed_roots=allowed_roots, **args)
         elif op == 'audit_capture':
             from demiflow.workbench.projects.workspace import _capture_change_baseline
             value = _capture_change_baseline(root, **args)
@@ -353,8 +354,8 @@ def dispatch(request):
             value = _check_change_scope(root)
         elif op == 'audit_check':
             from demiflow.workbench.projects.workspace import _audit_check
-            with dependency_scope(root, authority=request.get('bootstrap')):
-                value = _audit_check(root, table_resolver=table_resolver, **args)
+            _, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = _audit_check(root, table_resolver=table_resolver, allowed_roots=allowed_roots, **args)
         elif op == 'audit_hint':
             from demiflow.workbench.projects.workspace import _audit_hint
             value = _audit_hint(root, **args)
@@ -512,10 +513,10 @@ def main():
     if confined:
         if request['operation'] not in {'plan_preview', 'native_submission_inspect'} or 'bootstrap' in request:
             raise ValueError('Only fixed business inspection may use the project worker')
-        from demiflow.forge.dependencies import current_environment
+        from demiflow.forge.runtime import current_environment
         locked = request['dependencies']
-        if current_environment(locked, check_conflicts=True) != locked['environment']:
-            raise ValueError('Project Python changed after dependency approval')
+        if current_environment(locked, check_conflicts=True, strict=True) != locked['environment']:
+            raise ValueError('Project Python changed after dependency verification')
     prepare_native(analysis_read=request["operation"] in {"analysis_export","analysis_media_export","analysis_media_sources","analysis_source_read","table_profile"}, confined=confined)
     result=dispatch(request)
     sys.stdout.buffer.write(bounded_json(result,9*1024**2))

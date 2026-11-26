@@ -144,7 +144,7 @@ def test_json_depth_duplicate_and_capacity(tmp_path):
 
 def test_source_bytes_notebook_symlink_and_context_overflow(tmp_path):
     from demiflow.workbench.conversations.common import snapshot
-    from demiflow.workbench.conversations.context import assemble
+    from demiflow.forge.bridge.agent_context import assemble
     root,path,value=configuration(tmp_path)
     notebook=root/'large.ipynb';notebook.write_text(json.dumps({'cells':[{'outputs':[{'text':'x'*200000}]}]}))
     before=notebook.read_bytes();first=snapshot(root,['large.ipynb'])

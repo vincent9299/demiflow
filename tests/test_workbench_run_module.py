@@ -6,7 +6,8 @@ from pathlib import Path
 
 from playwright.sync_api import expect
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
 from test_forge_runs import base, root, wait, custom

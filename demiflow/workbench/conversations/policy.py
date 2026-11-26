@@ -104,15 +104,22 @@ class Deployment:
             reject('Configure 1..128 explicitly permitted projects')
         for key, project in self.projects.items():
             required = {'root', 'kind', 'phase', 'writes', 'watch', 'sources', 'non_goals', 'authorization'}
-            optional = {'protected', 'python', 'dev_network', 'dependency_lock'}
+            optional = {'protected', 'python', 'dev_network', 'read_roots', 'dependency_lock'}
             if type(project) is not dict or not required <= project.keys() or project.keys() - required - optional:
                 reject('Invalid project development grant')
             if 'dev_network' in project and type(project['dev_network']) is not bool:
                 reject('Configured project dev_network must be a boolean')
+            if 'read_roots' in project:
+                if type(project['read_roots']) not in (list, tuple) or len(project['read_roots']) > 32:
+                    reject('Invalid project read_roots configuration')
+                for raw_root in project['read_roots']:
+                    p = Path(text(raw_root, 2048))
+                    if not p.is_absolute() or '..' in p.parts or p == Path('/'):
+                        reject('Configured project read_roots must be specific absolute paths')
             if 'dependency_lock' in project:
                 from re import fullmatch
                 if type(project['dependency_lock']) is not str or not fullmatch('[0-9a-f]{64}', project['dependency_lock']):
-                    reject('Invalid project dependency approval')
+                    reject('Invalid legacy project dependency lock')
             if 'python' in project:
                 py_val = project['python']
                 if py_val != '':
@@ -219,7 +226,7 @@ class Deployment:
         if domain is None:
             if required: reject('Combined service requires an explicit runtime_domain and shared host partition')
             return None
-        from demiflow.workbench import host_partition
+        from demiflow.forge import host_partition
         path = Path(text(domain, 2048))
         if not path.is_absolute() or path != path.resolve(): reject('Runtime domain must be a physical absolute path')
         partition = host_partition.load(path, host_partition.policy(path), required=True, admit=admit)

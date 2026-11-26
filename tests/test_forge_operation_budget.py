@@ -15,9 +15,12 @@ from test_forge_runs import base, root
 from demiflow.execution.journal.run_journal import RunJournal
 from demiflow.forge import operation_budget as budget
 from demiflow.forge import platform_worker
-from demiflow.workbench.runs import domain as run_domain
-from demiflow.workbench.runs import requests as run_requests
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import domain as run_domain
+
+from demiflow.forge.runs import requests as run_requests
+
+from demiflow.forge.runs import manager as runs
+
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 
@@ -355,7 +358,8 @@ def test_request_receipt_keeps_late_ready_or_unknown_seal(tmp_path, monkeypatch,
 
 def minimal_run(root, monkeypatch, status='prepared'):
     """Real SQLite/unit/lease state; omit unrelated inspection and seal copies."""
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
+
     from demiflow.workbench import worker as workspace_worker
     run_id = 'r' + 'a' * 24
     target = runs.directory(root, run_id)
@@ -461,7 +465,8 @@ def test_resume_attempt_commit_survives_expiry_before_nested_start(root):
 
 
 def _expired_after_actual_resume_commit(root, value, monkeypatch):
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
+
     target = runs.directory(root, value['run_id'])
     previous = []
     original = RunJournal.begin_attempt

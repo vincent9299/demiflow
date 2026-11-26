@@ -14,7 +14,7 @@ from demiflow.forge.workflow import (
     validate_workflow,
     validate_workflow_inputs,
 )
-from demiflow.workbench.conversations.context import _run_project_layout
+from demiflow.forge.bridge.tools import run_project_layout as _run_project_layout
 
 
 def _make_project(root, name='demo_proj'):

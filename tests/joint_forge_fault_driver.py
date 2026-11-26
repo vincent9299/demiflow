@@ -18,7 +18,8 @@ runtime_script, mode, root, run_id, *tail = sys.argv[1:]
 # between forge/run_worker.py and workbench/runs/worker.py.
 runtime = next(p for p in Path(runtime_script).resolve().parents if p.name == 'runtime')
 sys.path.insert(0, str(runtime))
-from demiflow.workbench.runs import worker as run_worker
+from demiflow.forge.runs import worker as run_worker
+
 
 window_path = Path(root) / 'joint_fault.json'
 window = json.loads(window_path.read_text())

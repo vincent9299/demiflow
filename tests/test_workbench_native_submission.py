@@ -6,14 +6,15 @@ import pytest
 import time
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench import project_operations as project_ops
 from test_forge_runs import base, root, execute
 from test_forge_resume import stopped
 from test_forge_runs import wait
 
 
-def native_flow(root, imports='', value='1', transform='', *, limits=None):
+def native_flow(root, imports='', value='1', transform='', *, limits=None, python=None):
     (root / 'flows/native.py').write_text('''from demiflow import data
 import pyarrow as pa
 ''' + imports + f'''
@@ -26,7 +27,7 @@ def run(*, target, stage):
     arguments = dict(target=str(root / 'native-output.lance'), stage=str(root / 'native-stage.lance'))
     (root / 'flows/native.json').write_text(json.dumps(dict(format='demiflow_forge_flow_parameters_v1', arguments=arguments)))
     declare_existing_flow(root, 'flows/native.py:run', params='flows/native.json')
-    return runs.prepare(root, 'flows/native.py:run', params='flows/native.json', limits=limits)
+    return runs.prepare(root, 'flows/native.py:run', params='flows/native.json', limits=limits, python=python)
 
 
 def test_native_submit_seal_monitor_and_fixed_results(root):
@@ -86,7 +87,7 @@ def test_nested_package_preview_and_managed_run_use_same_sources(root):
 
 def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
     from demiflow.workbench.graph.preview import preview
-    from demiflow.workbench.python_sources import ENVIRONMENT, FORMAT
+    from demiflow.forge.runtime import ENVIRONMENT, FORMAT
 
     namespace = root.parent.name
     project_package = namespace + '.' + root.name
@@ -134,7 +135,7 @@ def test_shared_source_preview_and_run_pin_explicit_modules(root, monkeypatch):
 def test_shared_source_missing_grant_does_not_search_other_files(root, monkeypatch):
     from demiflow.forge.schema import ForgeError
     from demiflow.workbench.graph.preview import preview
-    from demiflow.workbench.python_sources import ENVIRONMENT, FORMAT
+    from demiflow.forge.runtime import ENVIRONMENT, FORMAT
 
     external = root.parent / 'shared'
     external.mkdir()
@@ -163,9 +164,10 @@ def test_native_source_drift_rejected_before_worker(root):
 @pytest.mark.parametrize('vendored', [False, True], ids=['legacy', 'vendored'])
 def test_native_stop_resume_keeps_original_run_and_stage_receipts(root, tmp_path, vendored):
     extra = ''
+    prepare_python = None
     if vendored:
         import sys
-        from demiflow.forge.dependencies import update
+        from demiflow.forge.dependencies import vendor
 
         seed = tmp_path / 'vendor-seed'
         (seed / 'nested').mkdir(parents=True)
@@ -174,7 +176,8 @@ def test_native_stop_resume_keeps_original_run_and_stage_receipts(root, tmp_path
         (seed / 'nested/settings.py').write_text('STEP = 0\n')
         (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n'
             'native_dep_recovery = {source = "vendored", path = "packages/native_dep_recovery"}\n')
-        update(root, sys.executable, name='native_dep_recovery', vendor=seed)
+        vendor(root, 'native_dep_recovery', seed)
+        prepare_python = sys.executable
         extra = '    from native_dep_recovery.nested.settings import STEP\n    return {"x": row["x"] + STEP}\n'
     (root / 'flows/native_stop.py').write_text('''from demiflow import data
 import pyarrow as pa
@@ -192,7 +195,7 @@ def slow(row):
     (root / 'flows/native_stop.json').write_text(json.dumps(params))
     declare_existing_flow(root, 'flows/native_stop.py:run', params='flows/native_stop.json')
     prepared = runs.prepare(root, 'flows/native_stop.py:run', params='flows/native_stop.json',
-                            limits={'cancel_grace_s': 1, 'timeout_s': 180})
+                            limits={'cancel_grace_s': 1, 'timeout_s': 180}, python=prepare_python)
     identity = prepared['run_id']
     runs.start(root, identity, expected=prepared['digest'], expected_attempt=1)
     try:
@@ -249,7 +252,7 @@ def test_project_dependency_preview_and_native_run_use_the_locked_package(root, 
     import site
     import sys
     import venv
-    from demiflow.forge.dependencies import update
+    from demiflow.forge.dependencies import binding
     from demiflow.workbench.graph.preview import preview
 
     venv_path = tmp_path / 'project-python'
@@ -273,18 +276,18 @@ def test_project_dependency_preview_and_native_run_use_the_locked_package(root, 
     (root / 'pyproject.toml').write_text('[project]\ndependencies = ["project-dependency-fixture==1.0"]\n'
         '[tool.demiflow.packages]\n'
         f'native_dep_fixture = {{source = "local_ref", path = "{package}"}}\n')
-    locked = update(root, python)
+    bound = binding(root, python=python, require_python=True, require_environment=True)
     prepared = native_flow(root, 'from native_dep_fixture.step import adjust\n'
-        'from project_dependency_fixture import VALUE\n', 'VALUE', transform='.map(adjust)')
-    result = preview(root, entry='flows/native.py:run', params='flows/native.json')
-    assert result['basis']['project_dependencies'] == locked['digest']
+        'from project_dependency_fixture import VALUE\n', 'VALUE', transform='.map(adjust)', python=python)
+    result = preview(root, entry='flows/native.py:run', params='flows/native.json', python=python)
+    assert result['basis']['project_dependencies'] == bound['digest']
     target, value = runs._load(root, prepared['run_id'])
-    assert value['manifest']['project_dependencies']['digest'] == locked['digest']
+    assert value['manifest']['project_dependencies']['digest'] == bound['digest']
     assert (target / 'source/native_dep_fixture/late.py').read_text() == 'OFFSET = 20\n'
     late = package / 'late.py'
     late.write_text('OFFSET = 40\n')
-    with pytest.raises(Exception, match='source differs'):
-        runs.start(root, prepared['run_id'], expected=prepared['digest'])
+    with pytest.raises(Exception, match='changed|differs'):
+        runs.start(root, prepared['run_id'], expected=prepared['digest'], python=python)
     late.write_text('OFFSET = 20\n')
     outcome = execute(root, prepared)
     assert outcome['status'] == 'succeeded', (outcome, runs.logs(root, outcome['run_id']))
@@ -310,8 +313,8 @@ def run(*, source, target):
     })))
     entry = 'flows/continued.py:run'
     declare_existing_flow(root, entry, params=params)
-    assert preview(root, entry=entry, params=params)['basis']['project_dependencies'] == locked['digest']
-    continued = runs.prepare(root, entry, params=params)
+    assert preview(root, entry=entry, params=params, python=python)['basis']['project_dependencies'] == bound['digest']
+    continued = runs.prepare(root, entry, params=params, python=python)
     assert continued['report']['binding']['tables'][selector]['version'] == upstream['result']['ref']['lance_version']
     followed = execute(root, continued)
     assert followed['status'] == 'succeeded', (followed, runs.logs(root, followed['run_id']))
@@ -323,7 +326,7 @@ def test_project_dependency_bootstrap_reaches_real_local_stage_process(tmp_path,
     import os
     import sys
     from demiflow import data
-    from demiflow.workbench.python_sources import import_bootstrap, install_bound_imports
+    from demiflow.forge.runtime import import_bootstrap, install_bound_imports
 
     platform_root = Path(__file__).resolve().parents[1]
     package = tmp_path / 'run/source/stage_dependency_fixture'

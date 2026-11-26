@@ -12,7 +12,8 @@ from urllib.parse import parse_qs,urlparse
 import pytest
 from playwright.sync_api import expect
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest
 from test_forge_workspace import demo,isolated

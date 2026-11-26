@@ -34,7 +34,7 @@ def test_unavailable_mode_rejects_before_adapter_preparation_or_spawn(tmp_path, 
 
 
 def test_capability_projection_cannot_enable_restricted_execution(monkeypatch):
-    from demiflow.workbench.conversations import sandbox
+    from demiflow.forge.sandbox import sandbox
     monkeypatch.setattr(sandbox, 'backend_readiness', lambda: dict(available=False, reason='Unavailable',
         backend='fixture', implementation='fixture', identity_model='fixture'))
     facts = execution.execution_facts('restricted')
