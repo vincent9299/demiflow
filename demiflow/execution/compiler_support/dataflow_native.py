@@ -155,7 +155,7 @@ TYPED_ROW_EXPANSION = 10
 OUTPUT_FIELD_BYTES = 4096
 
 
-def declared_output_growth(operation):
+def declared_output_growth(operation, *, row_bytes):
     """Bytes a per-record call of an exact platform actor can add to its input row, or None.
 
     Only actors whose own code bounds what they append supply it, from their
@@ -176,6 +176,12 @@ def declared_output_growth(operation):
         policy = next(resource['policy'] for resource in raw_fetch_facts(actor)['resources']
                       if resource['kind'] == 'network')
         return TYPED_ROW_EXPANSION * policy['max_receipt_bytes'] + OUTPUT_FIELD_BYTES
+    from demiflow.collect.operators import SearchWeb
+    if type(actor) is SearchWeb:
+        # The whole returned row is the response committed through the native
+        # search sink, which checks it with document(row, response_bytes(...)).
+        from demiflow.collect.search_contract import response_bytes
+        return TYPED_ROW_EXPANSION * response_bytes(row_bytes) + OUTPUT_FIELD_BYTES
     return None
 
 

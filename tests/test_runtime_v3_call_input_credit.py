@@ -374,3 +374,19 @@ def test_default_budget_window_holds_every_declared_fetch_call(tmp_path):
     assert entry['output_reserve'] < 1024 ** 2
     assert entry['byte_limit'] >= 16 * (entry['output_reserve'] + 4096)
     assert entry['limited_by'] is None
+
+
+def test_a_search_call_reserves_its_committed_response_row(tmp_path):
+    from demiflow.collect import SearchConfig
+    from demiflow.collect.session import WebSession
+    from demiflow.collect.search_contract import response_bytes
+    from demiflow.execution.compiler_support.dataflow_native import OUTPUT_FIELD_BYTES, TYPED_ROW_EXPANSION
+    session = WebSession(cache_path=tmp_path / 'web-cache.sqlite', object_directory=tmp_path / 'web-objects',
+                         search=SearchConfig(engines=({'name': 'g', 'engine': 'google'},), host_interval_s=0))
+    dataset = data.from_items([{'queries': [{'query': 'oak'}]}]).search_web(requests='queries', output='found',
+                                                                           session=session, concurrency=8)
+    kernel, *_, bounds = _compiled(dataset, 'SearchWebOp')
+    # The whole row a search returns is the response committed through the native
+    # search sink, checked against response_bytes before it is returned.
+    expected = TYPED_ROW_EXPANSION * response_bytes(bounds.max_row_bytes) + OUTPUT_FIELD_BYTES
+    assert kernel.configuration['call_output_min_bytes'] == min(bounds.max_row_bytes, expected) < bounds.max_row_bytes
