@@ -245,19 +245,48 @@ def lazy_absolute_graph(tmp_path, monkeypatch):
             sys.modules.pop(name, None)
 
 
-def test_absolute_import_in_a_function_body_is_not_a_static_dependency(lazy_absolute_graph):
+def test_lazy_project_import_is_pinned_independently_of_preload(lazy_absolute_graph):
     """Whether the sealing process happens to have loaded a module that a row function
     imports inside its body must not change the pin: a fresh worker has not loaded it."""
     names, entry, _ = lazy_absolute_graph
     plan = data.from_items([{'x': 1}]).map(entry.transform)._plan
     unloaded = business_sources.plan_code_pin(plan)
-    # The import that runs when the module is imported is a dependency; the lazy one is not.
-    assert set(unloaded['dependencies']) == {names['entry'], names['top']}
+    assert set(unloaded['dependencies']) == set(names.values())
+    assert names['helper'] not in sys.modules
     importlib.import_module(names['helper'])
     assert business_sources.plan_code_pin(plan) == unloaded
-    # Seals written before this rule counted the loaded helper; that discovery stays readable.
-    earlier = business_sources.plan_code_pin(plan, lazy_absolute=True)
-    assert set(earlier['dependencies']) == {names['entry'], names['top'], names['helper']}
+
+
+def test_cold_package_import_pins_initializers_and_transitive_modules(lazy_absolute_graph):
+    names, entry, folder = lazy_absolute_graph
+    package = names['helper'] + '_package'
+    marker = folder / 'imported'
+    pkg = folder / package
+    pkg.mkdir()
+    (pkg / '__init__.py').write_text(f'from pathlib import Path\nPath({str(marker)!r}).touch()\n')
+    (pkg / 'ops.py').write_text(f'from {package}.settings import SCALE\n')
+    (pkg / 'settings.py').write_text('SCALE = 10\n')
+    (folder / (names['helper'] + '.py')).write_text(
+        f'def scale(value):\n    from {package} import ops\n    return value * ops.SCALE\n')
+    plan = data.from_items([{'x': 1}]).map(entry.transform)._plan
+    pin = business_sources.plan_code_pin(plan)
+    assert set(pin['dependencies']) == {*names.values(), package, package + '.ops', package + '.settings'}
+    assert not marker.exists()
+    (pkg / 'settings.py').write_text('SCALE = 99\n')
+    assert business_sources.plan_code_pin(plan) != pin
+
+
+def test_conflicting_import_root_does_not_silently_change_the_row_function(
+        lazy_absolute_graph, tmp_path, monkeypatch):
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+    names, entry, _ = lazy_absolute_graph
+    shadow = tmp_path / 'other'
+    shadow.mkdir()
+    (shadow / (names['helper'] + '.py')).write_text('def scale(value):\n    return value * 99\n')
+    monkeypatch.syspath_prepend(str(shadow))
+    plan = data.from_items([{'x': 1}]).map(entry.transform)._plan
+    with pytest.raises(DataflowError, match='Ambiguous business import'):
+        business_sources.plan_code_pin(plan)
 
 
 def test_seal_that_counted_a_loaded_lazy_import_still_authenticates(lazy_absolute_graph):
@@ -266,14 +295,20 @@ def test_seal_that_counted_a_loaded_lazy_import_still_authenticates(lazy_absolut
     names, entry, folder = lazy_absolute_graph
     importlib.import_module(names['helper'])
     spec = CallableSpec.create(entry.transform)
-    earlier = _code_identity_from_value('callable', spec, lazy_absolute=True)
+    earlier = _code_identity_from_value('callable', spec, discovery=business_sources.LOADED_IMPORTS)
+    eager = _code_identity_from_value('callable', spec, discovery=business_sources.EAGER_IMPORTS)
     current = _code_identity_from_value('callable', spec)
-    assert names['helper'] in earlier['dependencies'] and names['helper'] not in current['dependencies']
+    assert names['helper'] in earlier['dependencies'] and names['helper'] not in eager['dependencies']
     assert _matches_original_program('callable', spec, current)
+    assert _matches_original_program('callable', spec, earlier)
+    assert _matches_original_program('callable', spec, eager)
+    sys.modules.pop(names['helper'])
     assert _matches_original_program('callable', spec, earlier)
     # The earlier seal pinned the helper it lists: editing it is still refused.
     (folder / (names['helper'] + '.py')).write_text('def scale(value):\n    return value * 99\n')
     assert not _matches_original_program('callable', spec, earlier)
+    assert not _matches_original_program('callable', spec, current)
+    assert _matches_original_program('callable', spec, eager)
     # Editing the sealed module itself is refused under either discovery.
     (folder / (names['entry'] + '.py')).write_text((folder / (names['entry'] + '.py')).read_text() + '# edited\n')
     assert not _matches_original_program('callable', spec, current)

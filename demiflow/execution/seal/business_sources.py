@@ -12,6 +12,9 @@ from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 SOURCE_MEDIA = 'text/x-python'
 MAX_SOURCES = 64
+PROJECT_IMPORTS = 'project-python-v1'
+EAGER_IMPORTS = 'legacy-eager'
+LOADED_IMPORTS = 'legacy-loaded'
 
 
 def source_media(name):
@@ -129,13 +132,13 @@ def _add_declared_members(target, sources):
             sources[name] = source
 
 
-def business_sources(kind, value, *, lazy_absolute=False):
+def business_sources(kind, value, *, discovery=PROJECT_IMPORTS):
     from ...data.plan import LogicalPlan, MapOp
     if kind == 'callable':
-        sources = business_dependency_modules(LogicalPlan((MapOp(callable=value),)), lazy_absolute=lazy_absolute)
+        sources = business_dependency_modules(LogicalPlan((MapOp(callable=value),)), discovery=discovery)
         _add_declared_members(value.target, sources)
     elif kind == 'source':
-        sources = business_dependency_modules(LogicalPlan(()), source=value, lazy_absolute=lazy_absolute)
+        sources = business_dependency_modules(LogicalPlan(()), source=value, discovery=discovery)
     else:
         sources = {}
     # A package initializer executes before its member; pin it as actual code.
@@ -737,7 +740,7 @@ def source_callable_roots(source):
     return tuple(roots)
 
 
-def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=False):
+def _ast_import_dependencies(module_name: str, path: Path, *, discovery=PROJECT_IMPORTS):
     """Passively discover business module imports from a module's AST.
 
     Runtime object traversal misses two common valid patterns:
@@ -746,17 +749,8 @@ def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=Fals
     2. Function-body lazy relative imports (`from . import _codex`) not yet executed
        at seal time.
 
-    Never imports or executes code. Resolves relative imports directly against the
-    module's own filesystem directory (so driver and worker see identical results
-    after `mount_sources`), and checks already-loaded `sys.modules` for absolute
-    imports that run when the module itself is imported.
-
-    An absolute import inside a function body is not a static dependency: it runs
-    later, in whichever process calls the function, so whether the sealing process
-    happens to have loaded that module says nothing about a worker and must not
-    change the pin. ``lazy_absolute=True`` reproduces the discovery of seals
-    written from eafb549a until this rule, which did count such an import when it
-    was already loaded; it serves only to authenticate one of those seals.
+    Resolve named Python files in the declaring module's import root without
+    loading them. Legacy policies reproduce the two unversioned pin formats.
     """
     import ast
     try:
@@ -768,10 +762,16 @@ def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=Fals
     pkg_parts = module_name.split('.') if is_pkg_init else module_name.split('.')[:-1]
     base_dir = path.parent
 
+    # Derive the import root only when the module name actually maps to
+    # this file. Synthetic modules need not have that directory structure.
+    member = Path(*module_name.split('.'))
+    member = member / '__init__.py' if is_pkg_init else member.with_suffix('.py')
+    project_root = path.parents[len(member.parts) - 1] if path.parts[-len(member.parts):] == member.parts else None
+
     discovered = []
     seen = set()
 
-    def add_rel(target_parts, target_dir):
+    def add_rel(target_parts, target_dir, *, absolute=False):
         if not target_parts or not all(p.isidentifier() for p in target_parts):
             return
         cand_name = '.'.join(target_parts)
@@ -779,8 +779,11 @@ def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=Fals
             return
         py_file = target_dir.with_suffix('.py')
         init_file = target_dir / '__init__.py'
-        chosen = py_file if py_file.is_file() else (init_file if init_file.is_file() else None)
+        choices = (init_file, py_file) if discovery == PROJECT_IMPORTS else (py_file, init_file)
+        chosen = next((file for file in choices if file.is_file()), None)
         if chosen is not None:
+            if absolute:
+                check_shadow(target_parts, chosen)
             seen.add(cand_name)
             discovered.append((cand_name, chosen))
 
@@ -793,11 +796,44 @@ def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=Fals
             discovered.append((cand_name, mod))
 
     deferred = set()
-    if not lazy_absolute:
+    if discovery != LOADED_IMPORTS:
         for scope in ast.walk(tree):
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                 deferred.update(id(inner) for inner in ast.walk(scope)
                                 if isinstance(inner, (ast.Import, ast.ImportFrom)))
+
+    def check_shadow(parts, local):
+        # Only inspect a concrete same-project import. Do not silently change
+        # which source a thread/worker would use when import roots overlap.
+        for entry in sys.path:
+            if not isinstance(entry, str):
+                continue
+            root = Path(entry).absolute()
+            if root == project_root:
+                break
+            top = root / parts[0]
+            target = root.joinpath(*parts)
+            alternatives = (target / '__init__.py', target.with_suffix('.py'))
+            other = next((file for file in alternatives if file.is_file()), None)
+            if other is not None:
+                if other != local and SourceFile.capture(other).digest != SourceFile.capture(local).digest:
+                    raise DataflowError('CODE_MISMATCH', 'Ambiguous business import: ' + '.'.join(parts))
+                break
+            if (top / '__init__.py').is_file() or top.with_suffix('.py').is_file():
+                raise DataflowError('INVALID_CONTRACT', 'Project import is shadowed: ' + '.'.join(parts))
+
+    def add_absolute(name, delayed):
+        parts = name.split('.')
+        if discovery == PROJECT_IMPORTS and project_root is not None:
+            if parts[0] == 'demiflow' or parts[0] in sys.stdlib_module_names:
+                return
+            for length in range(1, len(parts) + 1):
+                prefix = parts[:length]
+                add_rel(prefix, project_root.joinpath(*prefix), absolute=True)
+            if name in seen:
+                return
+        if not delayed:
+            add_loaded(name)
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -820,18 +856,18 @@ def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=Fals
                     for alias in node.names:
                         if alias.name != '*':
                             add_rel([*anchor_parts, alias.name], anchor_dir / alias.name)
-            elif node.module and id(node) not in deferred:
-                add_loaded(node.module)
+            elif node.module:
+                add_absolute(node.module, id(node) in deferred)
                 for alias in node.names:
                     if alias.name != '*':
-                        add_loaded(f'{node.module}.{alias.name}')
-        elif isinstance(node, ast.Import) and id(node) not in deferred:
+                        add_absolute(f'{node.module}.{alias.name}', id(node) in deferred)
+        elif isinstance(node, ast.Import):
             for alias in node.names:
-                add_loaded(alias.name)
+                add_absolute(alias.name, id(node) in deferred)
     return tuple(discovered)
 
 
-def business_dependency_modules(plan, *, source=None, lazy_absolute=False):
+def business_dependency_modules(plan, *, source=None, discovery=PROJECT_IMPORTS):
     """Transitive closure of business modules a plan's pure UDF maps import.
 
     ``describe`` binds a UDF's own source/bytecode/closure but never ``__globals__``,
@@ -918,7 +954,16 @@ def business_dependency_modules(plan, *, source=None, lazy_absolute=False):
                 continue
             visited.add(name)
             loaded = sys.modules.get(name)
-            if loaded is not None:
+            if discovery == PROJECT_IMPORTS:
+                # A static edge has the same transitive source closure in a
+                # fresh worker and a driver that already imported the helper.
+                path, module = raw_path, None
+                if loaded is not None:
+                    actual = _classify_dependency_module(loaded)
+                    if actual != path and (actual is None or
+                            SourceFile.capture(actual).digest != SourceFile.capture(path).digest):
+                        raise DataflowError('CODE_MISMATCH', 'Loaded business source differs from the sealed pin: ' + name)
+            elif loaded is not None:
                 path = _classify_dependency_module(loaded)
                 module = loaded
             else:
@@ -939,7 +984,7 @@ def business_dependency_modules(plan, *, source=None, lazy_absolute=False):
         found[name] = SourceFile.capture(path)
         if module is not None:
             pending.extend(candidates(vars(module)))
-        for dep_name, dep_target in _ast_import_dependencies(name, path, lazy_absolute=lazy_absolute):
+        for dep_name, dep_target in _ast_import_dependencies(name, path, discovery=discovery):
             if dep_name in visited:
                 continue
             if isinstance(dep_target, Path):
@@ -949,17 +994,17 @@ def business_dependency_modules(plan, *, source=None, lazy_absolute=False):
     return {name: found[name] for name in sorted(found)}
 
 
-def _business_dependency_manifest(plan, *, source=None, lazy_absolute=False):
+def _business_dependency_manifest(plan, *, source=None, discovery=PROJECT_IMPORTS):
     """Code-pin dependency digest: business module source identities, no paths.
 
     Paths are excluded so the driver-sealed and worker-recomputed manifests are
     identical for unedited code regardless of how each side resolved the module.
     """
     return {name: {"sha256": file.digest, "bytes": file.size}
-            for name, file in business_dependency_modules(plan, source=source, lazy_absolute=lazy_absolute).items()}
+            for name, file in business_dependency_modules(plan, source=source, discovery=discovery).items()}
 
 
-def plan_code_pin(plan, *, source=None, lazy_absolute=False):
+def plan_code_pin(plan, *, source=None, discovery=PROJECT_IMPORTS):
     """Code-sensitive identity of the plan's actually-executed operations.
 
     Mirrors ``plan_identity``'s operation identity: native domain facts for native
@@ -977,4 +1022,4 @@ def plan_code_pin(plan, *, source=None, lazy_absolute=False):
     from demiflow.execution.seal.program_identity import operation_identity
     operations = [operation_identity(operation) for operation in plan.operations]
     return {"operations": stable_code_identity(operations),
-            "dependencies": _business_dependency_manifest(plan, source=source, lazy_absolute=lazy_absolute)}
+            "dependencies": _business_dependency_manifest(plan, source=source, discovery=discovery)}

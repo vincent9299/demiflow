@@ -321,6 +321,8 @@ with RunContext.resume(run_ref):
 
 One measurement: a 2,000-row pipeline was killed with `kill -9` at about row 900 and resumed from the original run. The two processes together ran the row function 2,010 times (only the 10 rows in flight at the kill ran again), and the output table has 2,000 rows in a single Lance version. The count is of Python row-function calls. The recovery boundary of model calls is described in [Calling LLMs](docs/en/llm.md): confirmed batches are not called again, and a batch that was not confirmed at the interruption may be.
 
+New runs bundle Python modules imported by name from the same project source root, including imports inside row functions. If an older run omitted a required local module, already committed output remains readable. Continuing computation requires a new run because the original source version cannot be verified.
+
 ### Train and evaluate in one pipeline
 
 ```python
