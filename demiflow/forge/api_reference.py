@@ -108,7 +108,39 @@ def build_reference():
     return dict(catalog=catalog, catalog_id=content_digest(catalog), sdk_revision=sdk_identity(catalog))
 
 
-def select_apis(reference, api=None, *, maximum=20 * 1024):
+def _first_doc_line(text, limit=120):
+    for line in (text or '').splitlines():
+        clean = line.strip()
+        if clean:
+            return clean[:limit]
+    return ''
+
+
+def _is_inherited_duplicate(item, mod, sym, by_id):
+    if '.' not in sym:
+        return False
+    defined = item.get('defined_name')
+    return bool(defined and defined != sym and f'{mod}:{defined}' in by_id)
+
+
+def _format_api_row(symbol, item, *, detailed=False, doc_limit=720):
+    origin = item['origin']
+    source = str(SDK_ROOT / origin['path']) if origin['kind'] == 'platform' else origin['module']
+    documentation = item['documentation']['text'].encode()
+    excerpt = documentation[:doc_limit].decode('utf8', 'ignore')
+    row = dict(id=symbol, signature=item['signature']['text'], source=source,
+               documentation=excerpt, documentation_truncated=len(documentation) > doc_limit,
+               native_semantics=(item['native_semantics'] if detailed else
+                                 {k: v for k, v in item['native_semantics'].items() if k == 'role'}))
+    if detailed:
+        src_excerpt, src_trunc = _symbol_source_excerpt(origin, symbol, item['documentation']['text'])
+        if src_excerpt:
+            row['source_excerpt'] = src_excerpt
+            row['source_excerpt_truncated'] = src_trunc
+    return row
+
+
+def select_apis(reference, api=None, *, extra_apis=(), maximum=20 * 1024):
     """Project complete signatures and bounded documentation from one public catalogue."""
     from .schema import canonical
 
@@ -121,30 +153,35 @@ def select_apis(reference, api=None, *, maximum=20 * 1024):
             raise ForgeError('SDK symbol outside inspected modules: ' + api, code='invalid_request')
         if api not in by_id:
             raise ForgeError('Unknown SDK symbol: ' + api, code='invalid_request')
-    rows, remaining = [], maximum
+    rows, seen, remaining = [], set(), maximum
     for symbol in ((api,) if api is not None else ESSENTIAL):
         item = by_id.get(symbol)
         if item is None or item['signature']['status'] != 'available':
             raise ForgeError('SDK signature unavailable: ' + symbol, code='resource_limit')
-        origin = item['origin']
-        source = str(SDK_ROOT / origin['path']) if origin['kind'] == 'platform' else origin['module']
-        documentation = item['documentation']['text'].encode()
-        doc_limit = maximum // 2 if api is not None else 720
-        excerpt = documentation[:doc_limit].decode('utf8', 'ignore')
-        row = dict(id=symbol, signature=item['signature']['text'], source=source,
-                   documentation=excerpt, documentation_truncated=len(documentation) > doc_limit,
-                   native_semantics=(item['native_semantics'] if api is not None else
-                                     {k: v for k, v in item['native_semantics'].items() if k == 'role'}))
-        if api is not None:
-            src_excerpt, src_trunc = _symbol_source_excerpt(origin, symbol, item['documentation']['text'])
-            if src_excerpt:
-                row['source_excerpt'] = src_excerpt
-                row['source_excerpt_truncated'] = src_trunc
+        row = _format_api_row(symbol, item, detailed=(api is not None),
+                              doc_limit=(maximum // 2 if api is not None else 720))
         size = len(canonical(row)) + 1
         if size > remaining:
             raise ForgeError('Selected SDK signatures exceed context budget', code='resource_limit')
         remaining -= size
+        seen.add(symbol)
         rows.append(row)
+    if api is None and extra_apis:
+        extra_doc_limit = min(max(maximum // 4, 2048), 2800)
+        allowed_modules = set(catalog.get('modules', ()))
+        for symbol in extra_apis:
+            if symbol in seen or symbol.partition(':')[0] not in allowed_modules:
+                continue
+            item = by_id.get(symbol)
+            if item is None or item['signature']['status'] != 'available':
+                continue
+            row = _format_api_row(symbol, item, detailed=False, doc_limit=extra_doc_limit)
+            size = len(canonical(row)) + 1
+            if size > remaining:
+                continue
+            remaining -= size
+            seen.add(symbol)
+            rows.append(row)
     return rows
 
 
@@ -169,12 +206,19 @@ def api_markdown(apis):
     return '\n\n'.join(rows)
 
 
+_CORE_MEMBER_OWNERS = frozenset({'Dataset', 'RunContext', 'LocalObjectStore', 'ObjectRef'})
+_PROJECT_SCAN_DIRS = ('flows', 'operators')
+_PROJECT_SCAN_MAX_FILES = 64
+_PROJECT_SCAN_MAX_BYTES = 512 * 1024
+
+
 def module_symbol_index(reference):
     """Build a compact, live-discovered public symbol directory grouped by module."""
     catalog = reference['catalog']
     if not catalog.get('inspection_complete'):
         return {}
     essential = set(ESSENTIAL)
+    by_id = {item['id']: item for item in catalog['objects']}
     grouped = {mod: [] for mod in MODULES if mod in catalog.get('modules', ())}
     for item in catalog['objects']:
         if item.get('origin', {}).get('kind') != 'platform':
@@ -186,14 +230,165 @@ def module_symbol_index(reference):
             continue
         if '.' in sym:
             owner, _, member = sym.partition('.')
-            if owner not in {'Dataset', 'FitRef', 'RunContext', 'LocalObjectStore', 'ObjectRef'}:
+            if member.startswith('_') or _is_inherited_duplicate(item, mod, sym, by_id):
                 continue
-            if member.startswith('_'):
+            has_flow_semantics = bool(item.get('native_semantics', {}).get('role'))
+            if not has_flow_semantics and owner not in _CORE_MEMBER_OWNERS:
                 continue
         elif sym.endswith('Error') or sym.endswith('Warning'):
             continue
         grouped[mod].append(sym)
     return {mod: sorted(set(syms)) for mod, syms in grouped.items() if syms}
+
+
+def flow_api_summaries(reference, *, exclude_ids=(), maximum=8 * 1024):
+    """Return bounded live 1-line summaries for all non-duplicate @flow_api public symbols."""
+    from .schema import canonical
+
+    catalog = reference['catalog']
+    if not catalog.get('inspection_complete') or maximum <= 0:
+        return []
+    excluded = set(exclude_ids)
+    by_id = {item['id']: item for item in catalog['objects']}
+    allowed_modules = set(MODULES)
+    rows, remaining = [], maximum
+    for item in sorted(catalog['objects'], key=lambda entry: entry['id']):
+        if item.get('origin', {}).get('kind') != 'platform':
+            continue
+        if item.get('signature', {}).get('status') != 'available':
+            continue
+        role = item.get('native_semantics', {}).get('role')
+        if not role:
+            continue
+        sym_id = item['id']
+        mod, _, sym = sym_id.partition(':')
+        if mod not in allowed_modules or sym_id in excluded:
+            continue
+        if _is_inherited_duplicate(item, mod, sym, by_id):
+            continue
+        row = dict(id=sym_id, role=role, summary=_first_doc_line(item['documentation']['text'], limit=120))
+        size = len(canonical(row)) + 1
+        if size > remaining:
+            break
+        remaining -= size
+        rows.append(row)
+    return rows
+
+
+def discover_project_sdk_symbols(root, reference, *, exclude=()):
+    """Dynamically detect non-essential public SDK symbols referenced in a project's code."""
+    catalog = reference.get('catalog') if isinstance(reference, dict) else None
+    if not catalog or not catalog.get('inspection_complete'):
+        return ()
+    root = Path(root)
+    if not root.is_dir():
+        return ()
+    essential = set(ESSENTIAL)
+    allowed_modules = {mod for mod in MODULES if mod in catalog.get('modules', ())}
+    by_id = {item['id']: item for item in catalog['objects']}
+    valid_ids = set()
+    method_candidates = {}
+    for item in catalog['objects']:
+        if item.get('origin', {}).get('kind') != 'platform':
+            continue
+        if item.get('signature', {}).get('status') != 'available':
+            continue
+        sym_id = item['id']
+        mod, _, sym = sym_id.partition(':')
+        if mod not in allowed_modules or not sym or _is_inherited_duplicate(item, mod, sym, by_id):
+            continue
+        valid_ids.add(sym_id)
+        if '.' in sym and sym_id not in essential and item.get('native_semantics', {}).get('role'):
+            method = sym.rsplit('.', 1)[1]
+            if not method.startswith('_'):
+                method_candidates.setdefault(method, set()).add(sym_id)
+    unique_flow_methods = {
+        method: next(iter(ids))
+        for method, ids in method_candidates.items()
+        if len(ids) == 1
+    }
+
+    def is_hidden(rel):
+        parts = Path(rel).parts
+        return (any(part.startswith('.') or part == '__pycache__' for part in parts)
+                or any(rel == item or rel.startswith(item + '/') for item in exclude))
+
+    found = set()
+    scanned_files = 0
+    remaining_bytes = _PROJECT_SCAN_MAX_BYTES
+    for role_dir in _PROJECT_SCAN_DIRS:
+        base = root / role_dir
+        if not base.is_dir() or base.is_symlink():
+            continue
+        for path in sorted(base.rglob('*.py')):
+            if scanned_files >= _PROJECT_SCAN_MAX_FILES or remaining_bytes <= 0:
+                break
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                rel = path.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if is_hidden(rel):
+                continue
+            scanned_files += 1
+            try:
+                raw = read_bounded(path, min(remaining_bytes, 128 * 1024))
+                remaining_bytes -= len(raw)
+                tree = ast.parse(raw.decode('utf-8', 'replace'), filename=rel)
+            except (OSError, ValueError, SyntaxError, RecursionError, ForgeError):
+                continue
+            module_aliases = {}
+            demiflow_root_aliases = set()
+            uses_demiflow = False
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        name = alias.name
+                        local = alias.asname or name.split('.')[0]
+                        if name == 'demiflow' or name.startswith('demiflow.'):
+                            uses_demiflow = True
+                        if name == 'demiflow':
+                            demiflow_root_aliases.add(local)
+                        elif name in allowed_modules:
+                            if alias.asname:
+                                module_aliases[alias.asname] = name
+                            else:
+                                demiflow_root_aliases.add('demiflow')
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    mod = node.module
+                    if mod == 'demiflow' or mod.startswith('demiflow.'):
+                        uses_demiflow = True
+                    if mod == 'demiflow':
+                        for alias in node.names:
+                            sub = f'demiflow.{alias.name}'
+                            if sub in allowed_modules:
+                                module_aliases[alias.asname or alias.name] = sub
+                    elif mod in allowed_modules:
+                        for alias in node.names:
+                            cand = f'{mod}:{alias.name}'
+                            if cand in valid_ids and cand not in essential:
+                                found.add(cand)
+            if not uses_demiflow:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute):
+                    if isinstance(node.value, ast.Name) and node.value.id in module_aliases:
+                        cand = f'{module_aliases[node.value.id]}:{node.attr}'
+                        if cand in valid_ids and cand not in essential:
+                            found.add(cand)
+                    elif (isinstance(node.value, ast.Attribute)
+                          and isinstance(node.value.value, ast.Name)
+                          and node.value.value.id in demiflow_root_aliases):
+                        mod = f'demiflow.{node.value.attr}'
+                        cand = f'{mod}:{node.attr}'
+                        if mod in allowed_modules and cand in valid_ids and cand not in essential:
+                            found.add(cand)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                    mapped = unique_flow_methods.get(node.func.attr)
+                    if mapped is not None:
+                        found.add(mapped)
+    return tuple(sorted(found))
 
 
 def render_reference(reference, *, maximum=20 * 1024):

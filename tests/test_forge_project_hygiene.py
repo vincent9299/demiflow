@@ -371,3 +371,59 @@ def test_hygiene_flags_internal_demiflow_and_cross_project_imports(tmp_path):
     assert 'operators/cross_op.py' in flagged and 'other_domain.sub.operators.helper' in flagged['operators/cross_op.py']
     assert 'data_tools/cross_tool.py' in flagged and 'pipelines.sibling_proj.operators' in flagged['data_tools/cross_tool.py']
     assert 'operators/clean_sdk.py' not in flagged
+
+
+def test_single_entry_and_path_checks_enforce_df02_import_boundaries(tmp_path):
+    root = tmp_path / 'entry_boundary_proj'
+    initialize_project(root, name='entry_boundary_proj')
+    (root / 'flows').mkdir(exist_ok=True)
+    (root / 'operators').mkdir(exist_ok=True)
+    (root / 'configs').mkdir(exist_ok=True)
+    (root / 'operators' / 'bad_op.py').write_text(
+        '__demiflow_operators__ = ["transform"]\n'
+        'def transform(row):\n'
+        '    """转换单行并测试内部导入拦截。\n\n'
+        '    Example:\n'
+        '        输入: {"v": 1}\n'
+        '        输出: {"v": 2}\n'
+        '    """\n'
+        '    from demiflow.execution.contracts.training import FitResult\n'
+        '    return {"v": row["v"] + 1, "_t": bool(FitResult)}\n',
+        encoding='utf-8',
+    )
+    (root / 'flows' / 'main.py').write_text(
+        'from demiflow import data\n'
+        'from operators.bad_op import transform\n'
+        'def run():\n'
+        '    return data.from_items([{"v": 1}]).map(transform).count()\n',
+        encoding='utf-8',
+    )
+    (root / 'configs' / 'main.json').write_text('{}\n', encoding='utf-8')
+
+    # Single-entry check must catch DF-02 internal imports in traced operators (and hint --api).
+    entry_report = check_project(root, entry='flows/main.py:run', params='configs/main.json')
+    assert entry_report['status'] == 'failed'
+    df02 = [d for d in entry_report['diagnostics'] if d['rule'] == 'DF-02' and d['path'] == 'operators/bad_op.py']
+    assert len(df02) == 1
+    assert 'demiflow.execution.contracts.training' in df02[0]['detail']
+    assert '--api' in df02[0]['detail']
+
+    # Path-scoped check must also catch DF-02 on the target operator.
+    path_report = check_project(root, paths=['operators/bad_op.py'])
+    assert path_report['status'] == 'failed'
+    assert any(d['rule'] == 'DF-02' and d['path'] == 'operators/bad_op.py' for d in path_report['diagnostics'])
+
+    # Removing the internal import clears single-entry check cleanly.
+    (root / 'operators' / 'bad_op.py').write_text(
+        '__demiflow_operators__ = ["transform"]\n'
+        'def transform(row):\n'
+        '    """转换单行且零内部导入。\n\n'
+        '    Example:\n'
+        '        输入: {"v": 1}\n'
+        '        输出: {"v": 2}\n'
+        '    """\n'
+        '    return {"v": row["v"] + 1}\n',
+        encoding='utf-8',
+    )
+    clean_report = check_project(root, entry='flows/main.py:run', params='configs/main.json')
+    assert clean_report['status'] == 'passed'

@@ -7,7 +7,15 @@ import os
 from hashlib import sha256
 from pathlib import Path
 
-from .api_reference import api_markdown, build_reference, module_symbol_index, select_apis, sdk_identity
+from .api_reference import (
+    api_markdown,
+    build_reference,
+    discover_project_sdk_symbols,
+    flow_api_summaries,
+    module_symbol_index,
+    sdk_identity,
+    select_apis,
+)
 from .io import no_symlinks
 from .platform import content_digest
 from .platform_environment import read_bounded
@@ -293,6 +301,28 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
     env_cfg = _runtime_environment(root)
     if env_cfg is not None:
         result['environment'] = env_cfg
+    if topic == 'sdk' and api is None and reference is not None and result['sdk'].get('apis'):
+        headroom = CONTEXT_BYTES - len(canonical(result)) - 2048
+        if headroom > 1024:
+            used_symbols = discover_project_sdk_symbols(root, reference, exclude=excluded)
+            if used_symbols:
+                base_bytes = len(canonical(result['sdk']['apis']))
+                extra_budget = min(max(headroom - 6 * 1024, headroom // 2), 14 * 1024)
+                if extra_budget > 512:
+                    result['sdk']['apis'] = select_apis(
+                        reference, api=None, extra_apis=used_symbols,
+                        maximum=max(20 * 1024, base_bytes + extra_budget),
+                    )
+                    headroom = CONTEXT_BYTES - len(canonical(result)) - 1024
+            summary_budget = min(max(headroom, 0), 8 * 1024)
+            if summary_budget > 256:
+                summaries = flow_api_summaries(
+                    reference,
+                    exclude_ids={item['id'] for item in result['sdk']['apis']},
+                    maximum=summary_budget,
+                )
+                if summaries:
+                    result['sdk']['flow_api_summaries'] = summaries
     if diagnostics:
         result['status'] = 'incomplete'
     if len(canonical(result)) > CONTEXT_BYTES:
@@ -377,14 +407,21 @@ def render_context(result):
     def append_sdk(full=False):
         if full:
             rows.append('\n' + api_markdown(sdk['apis']))
+            flow_summaries = sdk.get('flow_api_summaries') or []
+            if flow_summaries:
+                rows.append('\n### 其余实时发现的原生流程 API 速览（按需执行 `demiflow forge context --root . --api <模块>:<符号>` 查完整契约、参数/返回值说明与源码文档）')
+                for item in flow_summaries:
+                    role = f" ({item['role']})" if item.get('role') else ''
+                    summary = f"：{item['summary']}" if item.get('summary') else ''
+                    rows.append(f"- `{item['id']}`{role}{summary}")
             sym_index = sdk.get('symbol_index') or {}
             if sym_index:
-                rows.append('\n### 其余已实时发现的公开 SDK 符号（按需执行 `demiflow forge context --root . --api <模块>:<符号>` 查完整签名与文档）')
+                rows.append('\n### 其余已实时发现的公开 SDK 符号（按需执行 `demiflow forge context --root . --api <模块>:<符号>` 查完整契约、参数/返回值说明与源码文档）')
                 for mod, syms in sym_index.items():
                     rows.append(f"- `{mod}`：" + '、'.join(syms))
         else:
             names = [item['id'] for item in sdk.get('apis') or ()]
-            rows.append('\n## SDK 索引（完整签名与全部公开符号目录请用 `--topic sdk` 或 `--api <模块>:<符号>`）')
+            rows.append('\n## SDK 索引（完整契约、实时原生流程速览与全部公开符号请用 `--topic sdk` 或 `--api <模块>:<符号>`）')
             if names:
                 rows.append('、'.join(names))
         rows.append(f"SDK 版本依据 {sdk['sdk_revision']} · API 目录 {sdk['catalog_id']}")

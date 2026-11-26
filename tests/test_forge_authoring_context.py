@@ -153,3 +153,75 @@ def test_progressive_disclosure_topics_and_flow_titles(tmp_path, reference):
 
     with pytest.raises(ForgeError, match='Unknown context topic'):
         build_context(tmp_path, topic='unknown_topic', reference=reference)
+
+
+def test_sdk_topic_dynamically_discovers_flow_apis_and_expands_project_used_symbols(tmp_path, reference):
+    # 1. Even in an empty project, --topic sdk surfaces live-discovered @flow_api summaries
+    #    and own methods of every @flow_api class (without inherited MaterializedDataset duplicates).
+    empty_proj = tmp_path / 'empty_proj'
+    empty_proj.mkdir()
+    empty_ctx = build_context(empty_proj, topic='sdk', reference=reference)
+    data_syms = empty_ctx['sdk']['symbol_index']['demiflow.data']
+    assert 'ModelSelection.predict' in data_syms
+    assert 'FitRef.select' in data_syms
+    assert not any(s.startswith('MaterializedDataset.') for s in data_syms)
+
+    summaries = {row['id']: row for row in empty_ctx['sdk'].get('flow_api_summaries', ())}
+    for expected in (
+        'demiflow.data:Dataset.fit',
+        'demiflow.data:TrainingRecipe',
+        'demiflow.data:ModelSelection.predict',
+        'demiflow.data:Dataset.map_embeddings',
+        'demiflow.data:read_queue',
+    ):
+        assert expected in summaries
+        assert summaries[expected]['summary']
+    assert not any('MaterializedDataset.' in sid for sid in summaries)
+    empty_text = render_context(empty_ctx)
+    assert '其余实时发现的原生流程 API 速览' in empty_text
+    assert 'demiflow.data:ModelSelection.predict' in empty_text
+
+    # 2. In a project referencing non-essential public APIs across domains, --topic sdk
+    #    dynamically expands their live docs (while respecting exclude boundaries).
+    proj = tmp_path / 'used_proj'
+    (proj / 'flows').mkdir(parents=True)
+    (proj / 'flows/train.py').write_text(
+        'from demiflow import data\n'
+        'def run(ds):\n'
+        '    recipe = data.TrainingRecipe\n'
+        '    pred = data.PredictorSpec\n'
+        '    return ds.fit(recipe=recipe).select(steps=(1,)).predict(on=ds)\n',
+        encoding='utf-8',
+    )
+    (proj / 'flows/embed.py').write_text(
+        'from demiflow.data import read_queue\n'
+        'def run():\n'
+        '    return read_queue().map_embeddings()\n',
+        encoding='utf-8',
+    )
+    (proj / 'flows/secret.py').write_text(
+        'from demiflow.objects import LocalObjectStore\n',
+        encoding='utf-8',
+    )
+    sdk_ctx = build_context(proj, topic='sdk', reference=reference, exclude=('flows/secret.py',))
+    expanded = {row['id']: row for row in sdk_ctx['sdk']['apis']}
+    for expected in (
+        'demiflow.data:TrainingRecipe',
+        'demiflow.data:PredictorSpec',
+        'demiflow.data:Dataset.fit',
+        'demiflow.data:FitRef.select',
+        'demiflow.data:ModelSelection.predict',
+        'demiflow.data:read_queue',
+        'demiflow.data:Dataset.map_embeddings',
+    ):
+        assert expected in expanded
+        assert len(expanded[expected]['documentation']) >= 40
+        assert 'source_excerpt' not in expanded[expected]
+    # Excluded file must not leak its referenced symbols into expanded APIs.
+    assert 'demiflow.objects:LocalObjectStore' not in expanded
+    # Expanded symbols are omitted from flow_api_summaries to avoid duplicate bloat.
+    summary_ids = {row['id'] for row in sdk_ctx['sdk'].get('flow_api_summaries', ())}
+    assert not (summary_ids & set(expanded))
+    rendered = render_context(sdk_ctx)
+    assert 'context.model_dir' in rendered  # Live updated TrainingRecipe docstring surfaces automatically
+    assert 'demiflow.data:Dataset.map_embeddings' in rendered

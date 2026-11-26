@@ -310,6 +310,74 @@ def test_reviewer_strips_deleted_author_runtime_paths(tmp_path, monkeypatch):
     assert str(stale) not in captured['spec'].runtime_paths
 
 
+def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations import pipeline_review, sandbox
+    from demiflow.workbench.conversations.sandbox_backends import validate_spec_portable
+
+    project_dir = tmp_path / 'proj'
+    project_dir.mkdir()
+    author_home = tmp_path / 'author-home'
+    author_home.mkdir(mode=0o700)
+    scratch = tmp_path / 'scratch' / 'work'
+    scratch.mkdir(parents=True)
+
+    author_spec = SandboxSpec(
+        read_paths=(str(project_dir),),
+        write_paths=(str(project_dir),),
+        runtime_paths=(),
+        protected_paths=(),
+        denied_paths=(),
+        private_home=str(author_home),
+        role='developer',
+        read_policy='inherit_os',
+        write_policy='project_root',
+        direct_network=True,
+        seconds=0,
+    )
+    captured = {}
+
+    class DummyBroker:
+        socket_path = str(tmp_path / 'sock')
+        child_config = {'model': 'deepseek-chat'}
+        failure = None
+
+        def close(self):
+            pass
+
+    class DummyDeployment:
+        mode = 'restricted'
+        providers = {'deepseek': {'model': 'deepseek-chat', 'credential_env': 'KEY', 'model_provider': 'deepseek-official'}}
+
+    monkeypatch.setattr('demiflow.workbench.conversations.model_broker.start_model_broker', lambda *a, **kw: DummyBroker())
+
+    def fake_launch(**kw):
+        import sys
+        spec = kw['sandbox_spec']
+        captured['spec'] = spec
+        # Validate against BOTH Linux sandbox specification and portable backend invariants
+        # while temporary private_home still exists.
+        validate_spec_portable(spec, [sys.executable, '-V'], {}, str(kw['home']))
+        sandbox.specification(spec, [sys.executable, '-V'], {}, str(kw['home']))
+        return object()
+
+    monkeypatch.setattr('demiflow.workbench.conversations.execution.launch_provider', fake_launch)
+    monkeypatch.setattr('demiflow.forge.review_deepseek.collect_review', lambda *a, **kw: {'status': 'passed'})
+
+    out = pipeline_review.run_deployment_reviewer(
+        'prompt', deployment=DummyDeployment(), turn={'id': 't1'},
+        session={'id': 's1', 'provider': 'deepseek'}, scratch=scratch,
+        broker_home=tmp_path / 'broker', author_spec=author_spec,
+        lease_fd=None, deadline=9999999999.0, check_cancel=lambda: None,
+    )
+    assert out == {'status': 'passed'}
+    spec = captured['spec']
+    assert spec.role == 'readonly'
+    assert spec.read_policy == 'scoped'
+    assert spec.write_policy == 'scoped'
+    assert spec.direct_network is False
+    assert spec.write_paths == ()
+
+
 def test_forge_unifies_configs_role_and_keeps_legacy_parameters_compatible(tmp_path):
     from demiflow.forge import pipeline_check, project
     from demiflow.forge.project_rules import ROLE_DIRS
