@@ -39,8 +39,10 @@ from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.workbench.conversations.context import assemble
 from demiflow.workbench.conversations.context import authoritative_source_paths
 from demiflow.workbench.conversations.context import BridgeServer, INPUT_TOOL
-from demiflow.workbench.conversations.changes import capture
-from demiflow.workbench.conversations.changes import differences
+from demiflow.forge.development import assess_turn, review_requested as needs_review, candidate_identity
+from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
+from demiflow.forge.source_snapshot import capture
+from demiflow.forge.source_snapshot import differences
 from demiflow.workbench.conversations.execution import launch_provider, runtime_paths
 
 WARM_IDLE_SECONDS = 600
@@ -53,287 +55,12 @@ def effective_project_python(project):
     return configured.strip() if isinstance(configured, str) and configured.strip() else None
 
 
-def _select_auto_review_target(checked_entries):
-    """Pick the first checked Flow entry/params so auto_review doesn't fail on >16 KiB edits."""
-    for row in checked_entries or ():
-        if isinstance(row, dict) and isinstance(row.get('entry'), str) and row['entry']:
-            target = {'entry': row['entry']}
-            if isinstance(row.get('params'), str) and row['params']:
-                target['params'] = row['params']
-            return target
-    return {}
-
-
-def _has_code_changes(changes):
-    """True when at least one non-documentation business code/config file changed."""
-    code_dirs = {'flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests', 'src', 'lib'}
-    code_exts = {'.py', '.yaml', '.yml', '.json', '.toml', '.js', '.ts'}
-    for change in changes or ():
-        rel = str(change.get('path') or '').lstrip('/')
-        if not rel:
-            continue
-        parts = rel.split('/')
-        if parts[0] in code_dirs:
-            return True
-        if len(parts) == 1 and Path(rel).suffix.lower() in code_exts:
-            return True
-    return False
-
-
-def _project_has_business_python(project_root, *, project_python=None) -> bool | None:
-    """Return True if a business Python is configured in workbench or workspace.json, False if omitted, None if unavailable."""
-    if isinstance(project_python, str) and project_python.strip():
-        return True
-    if not project_root:
-        return None
-    ws_file = Path(project_root) / 'workspace.json'
-    if not ws_file.is_file():
-        return None
-    try:
-        doc = json.loads(ws_file.read_bytes()[:256 * 1024].decode('utf-8'))
-    except (OSError, ValueError):
-        return None
-    if not isinstance(doc, dict):
-        return None
-    env = doc.get('environment') if isinstance(doc.get('environment'), dict) else {}
-    py = doc.get('python') or env.get('python')
-    return isinstance(py, str) and bool(py.strip())
-
-
-_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md')
-_PROTECTED_GUARD_TREES = ('data_tools',)
-_PROTECTED_GUARD_MAX_BYTES = 512 * 1024
-_PROTECTED_TREE_MAX_ENTRIES = 2048
-_PROTECTED_TREE_MAX_BYTES = 16 * 1024**2
-
-
-class _ProtectedSnapshot(dict):
-    """Pre-turn bytes of guarded files plus the exact file/dir listing of guarded trees."""
-
-    def __init__(self):
-        super().__init__()
-        self.trees: dict[str, tuple[frozenset, frozenset]] = {}
-
-
-def _tree_listing(root: Path, top: str):
-    """Return (files, dirs) relative paths under a guarded tree, or None when it exceeds budget."""
-    base = root / top
-    files, dirs = set(), set()
-    try:
-        if base.is_symlink() or not base.is_dir():
-            return frozenset(), frozenset()
-    except OSError:
-        return frozenset(), frozenset()
-    pending = [base]
-    while pending:
-        current = pending.pop()
-        try:
-            with os.scandir(current) as entries:
-                for entry in entries:
-                    rel = Path(entry.path).relative_to(root).as_posix()
-                    if entry.name == '__pycache__':
-                        continue
-                    if len(files) + len(dirs) >= _PROTECTED_TREE_MAX_ENTRIES:
-                        return None
-                    if entry.is_dir(follow_symlinks=False):
-                        dirs.add(rel)
-                        pending.append(Path(entry.path))
-                    else:
-                        files.add(rel)
-        except OSError:
-            continue
-    return frozenset(files), frozenset(dirs)
-
-
-def _authorized_by_host(rel: str, authorized) -> bool:
-    """Host manage_project_layout writes are legitimate; single-segment role dirs authorize only themselves."""
-    for item in authorized or ():
-        if not isinstance(item, str) or not item:
-            continue
-        item = item.strip('/')
-        if rel == item:
-            return True
-        if len(Path(item).parts) >= 2 and rel.startswith(item + '/'):
-            return True
-    return False
-
-
-def _protected_guard_paths(root: Path) -> list[str]:
-    """Return relative paths of project-internal secret/governance files guarded by Forge hooks."""
-    paths = list(_PROTECTED_GUARD_STATIC)
-    try:
-        with os.scandir(root) as entries:
-            for entry in entries:
-                if (entry.name.startswith('.env.')
-                        and entry.name not in {'.env.example', '.env.sample'}
-                        and entry.name not in paths):
-                    paths.append(entry.name)
-    except OSError:
-        pass
-    return paths
-
-
-def _capture_protected_files(project_root) -> dict[str, tuple[bytes, int]]:
-    """Snapshot protected files and guarded trees (data_tools/) before a developer turn (OS-independent Forge hook)."""
-    root = Path(project_root)
-    snap = _ProtectedSnapshot()
-
-    def remember(rel):
-        path = root / rel
-        try:
-            info = path.lstat()
-        except OSError:
-            return
-        if not stat.S_ISREG(info.st_mode) or info.st_size > _PROTECTED_GUARD_MAX_BYTES:
-            return
-        try:
-            snap[rel] = (path.read_bytes(), info.st_mode & 0o777)
-        except OSError:
-            return
-
-    for rel in _protected_guard_paths(root):
-        remember(rel)
-    for top in _PROTECTED_GUARD_TREES:
-        listing = _tree_listing(root, top)
-        if listing is None:
-            continue
-        files, dirs = listing
-        total = 0
-        for rel in sorted(files):
-            try:
-                total += (root / rel).lstat().st_size
-            except OSError:
-                continue
-            if total > _PROTECTED_TREE_MAX_BYTES:
-                break
-            remember(rel)
-        snap.trees[top] = (files, dirs, (root / top).is_dir() and not (root / top).is_symlink())
-    return snap
-
-
-def _enforce_protected_files(project_root, before_snapshot: dict[str, tuple[bytes, int]], authorized=()) -> list[str]:
-    """Detect and restore unauthorized mutation/deletion/creation of protected files after a developer turn.
-
-    Paths written by host ``manage_project_layout`` actions (``authorized``) are legitimate and kept.
-    """
-    trees = getattr(before_snapshot, 'trees', {}) or {}
-    if not before_snapshot and not trees:
-        return []
-    root = Path(project_root)
-    violations: list[str] = []
-    for top, (old_files, old_dirs, existed) in sorted(trees.items()):
-        listing = _tree_listing(root, top)
-        if listing is None:
-            continue
-        files, dirs = listing
-        for rel in sorted(files - old_files):
-            if _authorized_by_host(rel, authorized):
-                continue
-            violations.append(rel)
-            try:
-                (root / rel).unlink()
-            except OSError:
-                pass
-        for rel in sorted(dirs - old_dirs, key=lambda item: -len(Path(item).parts)):
-            if _authorized_by_host(rel, authorized):
-                continue
-            try:
-                (root / rel).rmdir()
-            except OSError:
-                pass
-        if not existed and not _authorized_by_host(top, authorized):
-            try:
-                (root / top).rmdir()
-            except OSError:
-                pass
-    for rel, (orig_bytes, orig_mode) in sorted(before_snapshot.items()):
-        if _authorized_by_host(rel, authorized):
-            continue
-        path = root / rel
-        mutated = False
-        try:
-            info = path.lstat()
-            if not stat.S_ISREG(info.st_mode):
-                mutated = True
-            elif path.read_bytes() != orig_bytes:
-                mutated = True
-        except OSError:
-            mutated = True
-        if not mutated:
-            continue
-        violations.append(rel)
-        try:
-            if path.is_symlink():
-                path.unlink()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_name(f'.{path.name}.forge-restore-{os.getpid()}')
-            tmp.write_bytes(orig_bytes)
-            try:
-                os.chmod(tmp, orig_mode)
-            except OSError:
-                pass
-            os.replace(tmp, path)
-        except OSError:
-            pass
-    return violations
-
-
-def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, project_python=None,
-                         protected_violations=()):
-    """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
-    issues = []
-    for rel in (protected_violations or ()):
-        issues.append(f"- [受保护文件钩子] `{rel}` 属于 Forge 受保护范围（`.env*` / `.forge/state.json` / `workspace.json` / `AGENTS.md` / `PIPELINE_SPEC.md` / `data_tools/`），开发助手不能直接修改，钩子已自动还原；登记入口、整理目录请调用 `manage_project_layout`，`data_tools/` 由数据页 Cell 助手维护。")
-    if isinstance(pipeline_checks, dict):
-        for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
-            item = pipeline_checks.get(key)
-            if isinstance(item, dict) and item.get('status') == 'failed':
-                diags = item.get('diagnostics') or []
-                if diags:
-                    grouped = {}
-                    for d in diags:
-                        loc = (d.get('path') or '') + (f":{d['line']}" if d.get('line') else '')
-                        rule = d.get('rule', 'ERROR')
-                        detail = d.get('detail', '')
-                        line = f"- [{label} · {rule}] {loc} {detail}".strip()
-                        grouped[line] = grouped.get(line, 0) + 1
-                    for line, count in list(grouped.items())[:6]:
-                        issues.append(f"{line}（共 {count} 处）" if count > 1 else line)
-                else:
-                    issues.append(f"- [{label}] 检查未通过，请排查并修复相关改动。")
-    if isinstance(review_report, dict) and review_report.get('status') == 'invalid':
-        seen_findings = set()
-        added_findings = 0
-        for f in (review_report.get('findings') or []):
-            if f.get('severity') != 'blocking':
-                continue
-            loc = (f.get('path') or '') + (f":{f['line']}" if f.get('line') else '')
-            parts = [p for p in (f.get('trigger'), f.get('impact')) if p]
-            sug = f"（建议：{f['suggestion']}）" if f.get('suggestion') else ''
-            line = f"- [独立评审阻断] {loc} {' · '.join(parts)}{sug}".strip()
-            if line in seen_findings:
-                continue
-            seen_findings.add(line)
-            issues.append(line)
-            added_findings += 1
-            if added_findings >= 6:
-                break
-    if not issues:
-        return None
-    has_python = _project_has_business_python(project_root, project_python=project_python)
-    if has_python is False:
-        header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并复跑 demiflow forge check --root . --json 确认清零后直接交付（该项目未配置业务 Python，无需探测宿主机环境或强行运行 pytest）：\n'
-    else:
-        header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并复跑 demiflow forge check 与项目测试验证后交付：\n'
-    return (header + '\n'.join(issues))[:8000]
-
-
 _ROOT_OBSERVE_SKIP = {'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', 'notebooks', 'data_tools'}
 
 
 def _root_entry_names(project_root) -> set[str]:
     """Visible top-level project entries; used to observe newly created root files/directories."""
-    from demiflow.workbench.conversations.changes import IGNORED_DIRS
+    from demiflow.forge.source_snapshot import IGNORED_DIRS
     names = set()
     try:
         with os.scandir(project_root) as entries:
@@ -907,21 +634,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             project = deployment.project(session['workspace'], json.loads(session['root'])['path'])
             guided = not (compact or notebook) and project['kind'] == 'pipeline'
             delivery_review = None
-            if guided and session['provider'] == 'deepseek' and project['phase'] == 'implementation':
+            if guided and project['phase'] == 'implementation':
                 from demiflow.workbench.conversations.pipeline_review import DeliveryReview
                 delivery_review = DeliveryReview(store, turn, project)
             watched = [] if notebook else project['watch']
             excluded = project.get('protected', ()) if guided else ()
             home = deployment.state / session['id']; scratch = home / turn['id']; scratch.mkdir(mode=0o700, exist_ok=True)
-            forge_opts = {}
-            try:
-                opts_file = scratch / 'forge_options.json'
-                if opts_file.is_file():
-                    forge_opts = json.loads(opts_file.read_bytes())
-            except (OSError, ValueError):
-                forge_opts = {}
+            forge_opts = json.loads(turn.get('forge_options') or '{}')
             auto_review = bool(forge_opts.get('auto_review'))
-            rework_depth = int(forge_opts.get('rework_depth') or 0)
+            rework_depth = int(forge_opts.get('round', forge_opts.get('rework_depth')) or 0)
             broker_home = (home / 'control' / (tid + '-' + turn['epoch']) / 'model'
                            if deployment.mode == 'restricted' else None)
             final, reason, completed = 'failed', None, False
@@ -1053,9 +774,9 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         coding = json.loads(raw)
                     if sdk_identity(coding['catalog']) != coding['sdk_revision']:
                         reject('Native SDK changed before context delivery', 'conflict')
-                baseline = capture(project['root'], watched, exclude=excluded)
+                baseline = capture(project['root'], watched, exclude=excluded, source_dir=scratch / 'sources')
                 root_names_before = _root_entry_names(project['root']) if guided else None
-                protected_snapshot = _capture_protected_files(project['root']) if (not compact and not notebook) else {}
+                protected_snapshot = capture_protected_files(project['root']) if (not compact and not notebook) else {}
                 store.update(tid, baseline=wire(baseline).decode())
                 if compact:
                     prompt = ''
@@ -1101,6 +822,13 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     send_parent('notify')
                 tick()
                 if requested: raise InterruptedError(reason)
+
+                if forge_opts.get('origin') == 'forge':
+                    from demiflow.forge.development import feedback_current
+                    original = store.session(session['id'])
+                    if not feedback_current(project['root'], forge_opts,
+                            dict(provider=original['provider'], session=original['provider_session'])):
+                        reject('自动修正候选或原作者已变化，输入未发送。', 'inputs_changed')
 
                 turn_op = turn.get('operation', 'message')
                 if warm_ready and warm_operation != turn_op:
@@ -1256,7 +984,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     provider_opened = True
 
                 # Compare again after context preparation and handshake; no baseline reset.
-                if watched and capture(project['root'], watched, exclude=excluded) != baseline:
+                if watched and capture(project['root'], watched, exclude=excluded, source_dir=scratch / 'sources') != baseline:
                     reject('Watched sources changed during preparation; no model turn sent', 'conflict')
                 tick(force=True)
                 if requested: raise InterruptedError(reason)
@@ -1422,14 +1150,14 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 process = transport = provider = model_broker = control_bridge = shims = None
             protected_violations = []
             try:
-                protected_violations = _enforce_protected_files(project['root'], protected_snapshot,
+                protected_violations = enforce_protected_files(project['root'], protected_snapshot,
                                                                 authorized=host_layout_paths)
                 if protected_violations:
                     store.event(tid, 'protected.violation', dict(paths=protected_violations, restored=True))
             except BaseException:
                 pass
             try:
-                changes = []; revision = None; watched_after = list(watched); new_root_entries = []
+                changes = []; after = {}; revision = None; watched_after = list(watched); new_root_entries = []
                 saved = store.turn(tid)
                 if saved['baseline'] and watched:
                     # New top-level entries created this turn (e.g. tables/, scripts/, debug.py) are
@@ -1439,11 +1167,11 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                                                   - set(watched) - set(excluded))
                     before = json.loads(saved['baseline'])
                     try:
-                        after = capture(project['root'], [*watched, *new_root_entries], exclude=excluded)
+                        after = capture(project['root'], [*watched, *new_root_entries], exclude=excluded, source_dir=scratch / 'sources')
                         watched_after = [*watched, *new_root_entries]
                     except ForgeError:
                         # An oversized new tree is still reported to DF-02 below without hashing it.
-                        after = capture(project['root'], watched, exclude=excluded)
+                        after = capture(project['root'], watched, exclude=excluded, source_dir=scratch / 'sources')
                     if project.get('kind') == 'pipeline' and project.get('phase') == 'implementation' and not compact and not notebook:
                         authorized_writes = list(dict.fromkeys([*project['writes'], *watched_after, *host_layout_paths]))
                     else:
@@ -1473,28 +1201,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 if protected_violations:
                     result['protected_violations'] = protected_violations
                 result['execution_assurance'] = assurance
-                checked_entries = []
-                if (coding is not None and (changes or new_root_entries) and drained and completed and final == 'completed'
-                        and not saved['stop_at'] and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
-                    from demiflow.forge.pipeline_check import check_project, result as check_result
-                    from demiflow.forge.project_rules import diagnostic
-                    try:
-                        changed_paths = [change['path'] for change in changes]
-                        # Large cleanup/reorganization turns (>256 changed paths), or new top-level
-                        # entries without hashable sources, fall back to full-project inspection.
-                        check_paths = () if (len(changed_paths) > 256 or not changed_paths) else changed_paths
-                        report = check_project(project['root'], paths=check_paths,
-                                               reference=coding, exclude=excluded, include_hygiene=True)
-                        if (sdk_identity(coding['catalog']) != coding['sdk_revision']
-                                or capture(project['root'], watched_after, exclude=excluded) != after):
-                            reject('SDK or project source changed before checks could be reported', 'conflict')
-                        checked_entries = report.get('entries') or []
-                        result['pipeline_checks'] = {key: report[key] for key in (
-                            'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id', 'source_digest',
-                            'source_count', 'check_digest')}
-                    except (ValueError, OSError, KeyError, RecursionError) as exc:
-                        incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
-                        result['pipeline_checks'] = dict(native_flow=incomplete, project_layout=incomplete)
                 if revision: result['revision'] = revision
                 if compact and completed and final == 'completed':
                     metadata = compaction_metadata
@@ -1503,77 +1209,81 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     else:
                         result['compaction'] = dict(metadata, history_through_sequence=history_boundary)
                         store.event(tid, 'compaction.completed', result['compaction'])
-                report = None
-                if (auto_review and not review_requested and delivery_review is not None and _has_code_changes(changes)
-                        and final == 'completed' and completed and not requested and not saved['stop_at']
-                        and saved['dispatch'] == saved['delivery'] == 'acknowledged'):
-                    if keep_warm:
-                        keep_warm = False
-                        drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
-                        if cleanup_err and not reason:
-                            reason = cleanup_err
-                        process = transport = provider = model_broker = control_bridge = shims = None
+                report = receipt = None
+                selection = delivery_review.selection if delivery_review is not None else None
+                if selection is None and forge_opts.get('selection') is not None:
+                    selection = forge_opts['selection']
+                if selection is None and forge_opts.get('purpose') == 'review':
+                    selection = {}
+                want_review = guided and needs_review(changes=changes, auto_review=auto_review, selection=selection)
+                if want_review and keep_warm:
+                    keep_warm = False
+                    drained, cleanup_err = _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
+                    if cleanup_err and not reason:
+                        reason = cleanup_err
+                    process = transport = provider = model_broker = control_bridge = shims = None
+
+                def check_forge_cancel():
+                    tick(force=True)
+                    if requested or store.turn(tid)['stop_at']:
+                        raise InterruptedError(reason or '工程检查已取消。')
+
+                def source_current():
+                    return (not coding or sdk_identity(coding['catalog']) == coding['sdk_revision']) and (
+                        not watched or capture(project['root'], watched_after, exclude=excluded,
+                            source_dir=scratch / 'sources') == after)
+
+                if guided and not compact and not notebook:
+                    from dataclasses import replace
+                    from functools import partial
+                    from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
+                    review_author_spec = (replace(confined, runtime_paths=tuple(p for p in confined.runtime_paths
+                                                if Path(p).exists())) if confined is not None else None)
+                    reviewer = partial(run_deployment_reviewer, deployment=deployment, turn=turn,
+                        session=session, scratch=scratch, broker_home=broker_home, author_spec=review_author_spec,
+                        lease_fd=lease_fd, deadline=min(deadline, time.time() + float(
+                            forge_opts.get('budget', {}).get('seconds', limits.review_seconds))), check_cancel=check_forge_cancel)
+                    def started_review():
+                        if delivery_review is not None and delivery_review.selection is None:
+                            delivery_review.request({})
+                        store.event(tid, 'review.started', {'request_id': tid})
+                        send_parent('notify')
                     try:
-                        delivery_review.request(_select_auto_review_target(checked_entries))
-                        review_requested = True
-                    except ValueError:
-                        pass
-                if review_requested:
-                    if drained and final == 'completed' and saved['dispatch'] == saved['delivery'] == 'acknowledged':
-                        # The author's process and model connection have drained. The
-                        # reviewer can use the same host slot even on single-slot hosts.
-                        def check_review_cancel():
-                            tick(force=True)
-                            if requested:
-                                raise InterruptedError(reason)
-                        try:
-                            from dataclasses import replace
-                            from functools import partial
-                            from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
-                            review_author_spec = (
-                                replace(confined, runtime_paths=tuple(p for p in confined.runtime_paths if Path(p).exists()))
-                                if confined is not None else None
-                            )
-                            reviewer = partial(run_deployment_reviewer, deployment=deployment, turn=turn,
-                                session=session, scratch=scratch, broker_home=broker_home, author_spec=review_author_spec, lease_fd=lease_fd,
-                                deadline=min(deadline, time.time()+180), check_cancel=check_review_cancel)
-                            store.event(tid, 'review.started', {'request_id': tid})
-                            send_parent('notify')
-                            report = delivery_review.run(reviewer, result.get('pipeline_checks'), check_review_cancel)
-                        except (ValueError, OSError, TimeoutError) as exc:
-                            report = dict(status='incomplete', diagnostics=[dict(detail=str(exc)[:2048])])
-                        finally:
-                            if descendants(os.getpid()):
-                                signal_owned(os.getpid(), signal.SIGKILL)
-                                drained = drain_owned(author_process, timeout_s=5)
-                                if not drained:
-                                    report = dict(status='incomplete', diagnostics=[dict(detail='评审进程尚未清理。')])
-                            if requested:
-                                final = 'cancelled'
-                    else:
-                        report = dict(status='incomplete', diagnostics=[dict(detail='开发回合未完成，评审尚未执行。')])
+                        current_session = store.session(session['id'])
+                        receipt = assess_turn(project['root'], submission=tid,
+                            author=dict(provider=session['provider'], session=current_session['provider_session'],
+                                completed=final == 'completed' and completed, cleanup='complete' if drained else 'unknown',
+                                acknowledged=saved['dispatch'] == saved['delivery'] == 'acknowledged'),
+                            goal=lambda: store.review_inputs(session['id'], include_paths=not selection or auto_review),
+                            changes=changes, selection=selection, auto_review=auto_review, round=rework_depth,
+                            budget=forge_opts.get('budget') or dict(calls=34, seconds=float(limits.review_seconds)), reference=coding, exclude=excluded, reviewer=reviewer,
+                            check_cancel=check_forge_cancel, source_current=source_current,
+                            protected_violations=protected_violations, project_python=effective_project_python(project),
+                            on_review=started_review, inspect=coding is not None)
+                        if receipt['checks'] is not None:
+                            result['pipeline_checks'] = receipt['checks']
+                        report = receipt['review']
+                        # The host's candidate fingerprint is rechecked again before transport.
+                        if receipt.get('feedback'):
+                            receipt['feedback']['candidate'] = dict(watch=watched_after, exclude=list(excluded),
+                                digest=candidate_identity(after))
+                    except InterruptedError:
+                        final = 'cancelled'
+                        report = dict(status='incomplete', diagnostics=[dict(detail='评审已停止。')])
+                    except (OSError, ValueError, TimeoutError) as exc:
+                        report = dict(status='incomplete', diagnostics=[dict(detail=str(exc)[:2048])])
+                    finally:
+                        if want_review and descendants(os.getpid()):
+                            signal_owned(os.getpid(), signal.SIGKILL)
+                            drained = drain_owned(author_process, timeout_s=5)
+                            if not drained:
+                                report = dict(status='incomplete', diagnostics=[dict(detail='评审进程尚未清理。')])
+                                if receipt:
+                                    receipt['feedback'] = None
+                                    receipt['status'] = 'incomplete'
                 result['cleanup'] = 'complete' if drained else 'unknown'
-                # Free static checks and the protected-file hook always drive one rework round when
-                # they fail; the composer "自动评审" toggle only controls the paid LLM review.
-                if (rework_depth == 0 and final == 'completed' and drained
-                        and not saved['stop_at'] and not requested and turn.get('operation') == 'message'):
-                    rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report,
-                                                         project_root=project['root'],
-                                                         project_python=effective_project_python(project),
-                                                         protected_violations=protected_violations)
-                    if rework_prompt:
-                        try:
-                            existing_queue = store.show(session['workspace'], session['id']).get('queued_messages') or []
-                            if not existing_queue:
-                                # 'forge-rework-r-' keeps the paid LLM review on for the rework turn only
-                                # when the user had it enabled; free checks always run.
-                                prefix = 'forge-rework-r-' if auto_review else 'forge-rework-'
-                                store.enqueue(session['workspace'], session['id'], tid, prefix + tid, rework_prompt)
-                                result['auto_rework'] = dict(scheduled=True, round=1, max_rounds=1)
-                        except (OSError, ValueError):
-                            pass
                 store.finish_provider(tid, state=final if drained else 'stopping', cleanup=result['cleanup'],
-                                      result=result, review=report)
+                                      result=result, review=report, forge=receipt)
                 send_parent('notify')
             except BaseException:
                 try: store.update(tid, state='stopping', cleanup='unknown')

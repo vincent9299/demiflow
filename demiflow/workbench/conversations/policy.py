@@ -46,6 +46,7 @@ class Limits:
     provider_bytes: int = 256 * 1024**2
     private_total_bytes: int = 512 * 1024**2
     turn_seconds: int = 0
+    review_seconds: int = 1800
     input_seconds: int = 600
     rss_bytes: int = 2 * 1024**3
     processes: int = 32
@@ -63,7 +64,7 @@ class Limits:
         # larger bounded prompt or RSS ceiling for real projects (e.g. ML/PyTorch tests).
         # turn_seconds=0 disables the wall-clock turn cutoff (per-LLM-call timeouts,
         # memory/disk/process limits, idle recycling, and manual stop remain enforced).
-        ceilings = {**defaults, 'context_bytes': 512 * 1024, 'rss_bytes': 8 * 1024**3, 'turn_seconds': 86400}
+        ceilings = {**defaults, 'context_bytes': 512 * 1024, 'rss_bytes': 8 * 1024**3, 'turn_seconds': 86400, 'review_seconds': 3600}
         for key, number in value.items():
             integer(number, 0 if key == 'turn_seconds' else 1, ceilings[key])
         result = cls(**value)

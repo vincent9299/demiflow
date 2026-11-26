@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.conversations.changes import capture, differences
+from demiflow.forge.source_snapshot import capture, differences
 from demiflow.workbench.conversations.common import root_identity
 from demiflow.workbench.conversations.pipeline_review import recent_review
 from test_forge_development_chat import wait_turn
@@ -93,7 +93,8 @@ def test_admission_failure_closes_broker_and_preserves_completed_turn_checks(tmp
             assert kwargs['sandbox_spec'].role == 'readonly'
             raise RuntimeError('Sandbox admission timed out')
         monkeypatch.setattr(execution,'launch_provider',deny)
-        deployment = SimpleNamespace(mode='restricted',providers={'deepseek':dict(model_provider='deepseek-account')})
+        deployment = SimpleNamespace(mode='restricted',providers={'deepseek':dict(
+            model_provider='deepseek-account', executable=sys.executable)})
         spec = SandboxSpec((),(),(),(),str(tmp_path/'author'))
         def invoke(prompt):
             return run_deployment_reviewer(prompt, deployment=deployment, turn=turn, session={'provider':'deepseek'},
@@ -174,15 +175,16 @@ def test_real_observations_across_turns_and_only_whole_delivery_closes_scope(tmp
         finish(tid, 'passed', 'observed_changes')
         tid = begin(3, 'Remove old flow')
         edit(tid, None)
-        assert store.review_inputs(session, include_paths=True) == ('Remove old flow',
+        assert store.review_inputs(session, include_paths=True) == ('Add a flow\n\nChange output\n\nDeliver\n\nRemove old flow',
                                                                       {name:dict(before='def run(): return 2',after_sha256=None)})
         finish(tid, 'incomplete', 'observed_changes')
         tid = begin(4, 'a'*8192)
         finish(tid, 'incomplete', 'observed_changes')
         begin(5, 'Review selected entry now')
-        with pytest.raises(ForgeError, match='交付目标'):
-            store.review_inputs(session, include_paths=True)
-        assert store.review_inputs(session, include_paths=False) == ('Review selected entry now', {})
+        full_goal, sources = store.review_inputs(session, include_paths=True)
+        assert len(full_goal) > 8192 and full_goal.startswith('Add a flow\n\nChange output')
+        assert full_goal.endswith('Review selected entry now')
+        assert store.review_inputs(session, include_paths=False) == (full_goal, {})
 
 
 @pytest.mark.parametrize('cancel',[False, True])
@@ -215,19 +217,19 @@ def test_browser_restores_terminal_review_from_parent_receipt():
 
 
 def test_forge_auto_review_and_rework_helpers():
-    from demiflow.workbench.conversations.worker import _has_code_changes, _build_rework_prompt
-    assert _has_code_changes([{'path': 'flows/main.py'}]) is True
-    assert _has_code_changes([{'path': 'deployment.json'}]) is True
-    assert _has_code_changes([{'path': 'parameters/default.json'}]) is True
-    assert _has_code_changes([{'path': 'README.md'}]) is False
-    assert _has_code_changes([{'path': 'docs/notes.md'}]) is False
+    from demiflow.forge.development import has_code_changes, build_rework_prompt
+    assert has_code_changes([{'path': 'flows/main.py'}]) is True
+    assert has_code_changes([{'path': 'deployment.json'}]) is True
+    assert has_code_changes([{'path': 'parameters/default.json'}]) is True
+    assert has_code_changes([{'path': 'README.md'}]) is False
+    assert has_code_changes([{'path': 'docs/notes.md'}]) is False
     # Passed checks & suggestion-only review produce no automatic rework.
-    assert _build_rework_prompt(
+    assert build_rework_prompt(
         {'native_flow': {'status': 'passed'}, 'project_layout': {'status': 'passed'}},
         {'status': 'passed', 'findings': [{'severity': 'suggestion', 'path': 'flows/a.py', 'line': 1, 'impact': 'style'}]},
     ) is None
     # Hard static failure or blocking review finding produces structured rework prompt.
-    prompt = _build_rework_prompt(
+    prompt = build_rework_prompt(
         {'native_flow': {'status': 'failed', 'diagnostics': [{'rule': 'FL-03', 'path': 'flows/a.py', 'line': 12, 'detail': 'bad arg'}]}},
         {'status': 'invalid', 'findings': [{'severity': 'blocking', 'path': 'operators/b.py', 'line': 8,
                                             'trigger': 'empty input', 'impact': 'crashes', 'suggestion': 'guard None'}]},
@@ -239,7 +241,7 @@ def test_forge_auto_review_and_rework_helpers():
 
 
 def test_forge_auto_rework_deduplicates_and_respects_python_config(tmp_path):
-    from demiflow.workbench.conversations.worker import _build_rework_prompt
+    from demiflow.forge.development import build_rework_prompt
     proj = tmp_path / 'proj_no_py'
     proj.mkdir()
     (proj / 'workspace.json').write_text('{"entries": {}}\n')
@@ -255,7 +257,7 @@ def test_forge_auto_rework_deduplicates_and_respects_python_config(tmp_path):
         {'rule': 'FL-07', 'path': 'operators/bindings.py', 'line': 47, 'detail': 'With'},
         {'rule': 'FL-07', 'path': 'operators/other.py', 'line': 9, 'detail': 'distinct issue'},
     ]
-    prompt = _build_rework_prompt(
+    prompt = build_rework_prompt(
         {'native_flow': {'status': 'failed', 'diagnostics': repeated}},
         None,
         project_root=proj,
@@ -268,7 +270,7 @@ def test_forge_auto_rework_deduplicates_and_respects_python_config(tmp_path):
 
     # With a configured business Python, prompt asks to run project tests.
     (proj / 'workspace.json').write_text('{"entries": {}, "python": "/opt/venv/bin/python"}\n')
-    prompt_with_py = _build_rework_prompt(
+    prompt_with_py = build_rework_prompt(
         {'native_flow': {'status': 'failed', 'diagnostics': repeated[:1]}},
         None,
         project_root=proj,
@@ -278,7 +280,7 @@ def test_forge_auto_rework_deduplicates_and_respects_python_config(tmp_path):
 
     # Slimmed workspace.json without "python" still honors workbench-configured project_python.
     (proj / 'workspace.json').write_text('{"entries": {}}\n')
-    prompt_with_registry_py = _build_rework_prompt(
+    prompt_with_registry_py = build_rework_prompt(
         {'native_flow': {'status': 'failed', 'diagnostics': repeated[:1]}},
         None,
         project_root=proj,

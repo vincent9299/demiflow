@@ -320,7 +320,11 @@
           jump.onclick=e=>{e.preventDefault();e.stopPropagation();onOpenFile(firstPath,'diff');};
         }
       }
-      else if(event.type==='check.reference')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);
+      else if(event.type==='check.reference'||event.type==='check.detail')system(event,'Checks',JSON.stringify(data.result||data,null,2),'check:'+event.sequence);
+      else if(event.type==='forge.feedback'||event.type==='forge.feedback_status'){
+        const labels={pending:'等待发送',queued:'已排队',deferred:'人工消息优先，修正反馈已保留',superseded:'新需求已接续，将按当前候选重新检查',stale:'候选或作者已变化，旧反馈未发送',cancelled:'已取消',acknowledged:'原作者已接收',unknown:'接收结果未知，未自动重发',not_sent:'尚未发送'};
+        system(event,'Forge 修正反馈',labels[data.status]||data.status,'feedback:'+data.id);
+      }
 
       else if(event.type==='questions.observed')system(event,'Questions',JSON.stringify(data,null,2));
       else if(event.type==='provider.error')system(event,'Provider error',JSON.stringify(data,null,2));

@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from demiflow.workbench.conversations.changes import capture, differences
+from demiflow.forge.source_snapshot import capture, differences
 from demiflow.workbench.conversations.execution import execution_facts
 from demiflow.workbench.conversations.sandbox import SandboxSpec, backend_readiness, launch_sandbox
 from demiflow.workbench.conversations.sandbox_backends import (
@@ -473,7 +473,7 @@ def test_manage_project_layout_bridge_tool(tmp_path):
 
 
 def test_changes_capture_ignores_lance_and_runtime_artifacts(tmp_path):
-    from demiflow.workbench.conversations.changes import capture
+    from demiflow.forge.source_snapshot import capture
 
     root = tmp_path / 'proj'
     root.mkdir()
@@ -1038,11 +1038,8 @@ def test_linux_landlock_inherit_os_reads_external_and_urandom_while_blocking_wri
 
 
 def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_path):
-    from demiflow.workbench.conversations.worker import (
-        _build_rework_prompt,
-        _capture_protected_files,
-        _enforce_protected_files,
-    )
+    from demiflow.forge.development import build_rework_prompt
+    from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
 
     proj = tmp_path / 'empty_proj'
     (proj / '.forge').mkdir(parents=True)
@@ -1126,19 +1123,19 @@ def test_project_root_write_policy_cross_platform_and_forge_protected_hook(tmp_p
         assert not (ext_dir / 'escape.txt').exists()
 
     # Forge post-turn protected-file hook detects & restores mutated/deleted protected files across all OSes.
-    snap = _capture_protected_files(proj)
+    snap = capture_protected_files(proj)
     assert {'.env', '.forge/state.json', 'AGENTS.md'} <= set(snap)
     (proj / '.env').write_text('WIPED\n', encoding='utf-8')
     (proj / 'AGENTS.md').unlink()
     (proj / '.forge' / 'state.json').write_text('{"id":"tampered"}\n', encoding='utf-8')
     (proj / '.env.example').write_text('CONCEPT_EVAL_API_KEY=\n', encoding='utf-8')
-    violations = _enforce_protected_files(proj, snap)
+    violations = enforce_protected_files(proj, snap)
     assert violations == ['.env', '.forge/state.json', 'AGENTS.md']
     assert (proj / '.env').read_text(encoding='utf-8') == 'CONCEPT_EVAL_API_KEY=real-secret\n'
     assert (proj / '.forge' / 'state.json').read_text(encoding='utf-8') == '{"id":"w1"}\n'
     assert (proj / 'AGENTS.md').read_text(encoding='utf-8') == '# Rules\n'
     assert (proj / '.env.example').is_file()
-    rework = _build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
+    rework = build_rework_prompt(None, None, project_root=proj, protected_violations=violations)
     assert rework is not None and '.env' in rework and '受保护文件钩子' in rework
 
 

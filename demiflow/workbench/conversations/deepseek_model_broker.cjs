@@ -70,7 +70,7 @@ exports.apply=function(ctx,config) {
     if(message.method==='model/cancel'){active?.abort();return;}
     if(typeof message.id!=='string'||busy){closing=true;active?.abort();process.stdin.pause();return;}
     busy=true;active=new AbortController();
-    const timer=setTimeout(()=>active?.abort(),180000);
+    const timer=setTimeout(()=>active?.abort(),(Math.max(1,Math.min(3600,Number(config.requestSeconds)||180))*1000));
     dispatch(message.id,message.method,message.params||{}).then(result=>send({id:message.id,result}),
       err=>send({id:message.id,error:{code:-32000,message:safeError(err)}}))
       .finally(()=>{clearTimeout(timer);active=null;busy=false;});

@@ -4,6 +4,12 @@ import os
 import resource
 import signal
 import sys
+from pathlib import Path
+
+
+def launch_command(command):
+    """Bind a native child to this parent before exec, without threaded preexec_fn."""
+    return [sys.executable, '-I', '-B', str(Path(__file__).resolve()), str(os.getpid()), *command]
 
 
 def main():

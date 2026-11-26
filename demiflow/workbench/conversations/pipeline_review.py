@@ -1,6 +1,5 @@
 """Submit delivery reviews from an author turn and run them after the author drains."""
 from contextlib import ExitStack
-import copy
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -79,8 +78,11 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
     """The host owns model transport, reviewer credentials and the turn's one slot."""
     from demiflow.forge.review_deepseek import prepare_launch, collect_review
     from .execution import launch_provider
-    config = deployment.providers[session['provider']]
-    timeout = min(180, deadline - time.time())
+    session = dict(session, provider='deepseek')
+    config = deployment.providers.get('deepseek')
+    if config is None:
+        reject('工作台未配置独立 DeepSeek 评审器。', 'inspection_incomplete')
+    timeout = deadline - time.time()
     check_cancel()
     if config.get('model_provider', 'deepseek-official') == 'deepseek-official' and not config.get('credential_env'):
         reject('工作台未提供独立评审所需的 DeepSeek API 凭证配置。')
@@ -94,22 +96,16 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
             from .model_broker import start_model_broker
             from .policy import Deployment
             review_deployment = deployment
-            if hasattr(deployment, 'value') and session['provider'] == 'deepseek' and config.get('effort', 'high') in ('high', 'max'):
-                # Single-shot JSON review over large dependency closures times out at
-                # upstream proxies under high reasoning effort; cap reviewer to low.
-                cloned = copy.deepcopy(deployment.value)
-                for p in cloned['projects'].values():
-                    p.pop('identity', None)
-                cloned['providers']['deepseek']['effort'] = 'low'
-                review_deployment = Deployment(cloned)
+            from .execution import runtime_paths
+            review_runtime = tuple(dict.fromkeys((*author_spec.runtime_paths, *runtime_paths(config))))
             spec = replace(author_spec, role='readonly', read_policy='scoped', write_policy='scoped',
                 direct_network=False, seconds=timeout, private_home=temporary, write_paths=(),
-                runtime_paths=tuple(path for path in author_spec.runtime_paths if Path(path).exists()),
+                runtime_paths=tuple(path for path in review_runtime if Path(path).exists()),
                 denied_paths=(*author_spec.denied_paths, author_spec.private_home),
                 read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))
             # Both brokers debit the existing turn quota under this control directory.
             broker = start_model_broker(review_deployment, turn, session, broker_home.with_name('review-model'),
-                                        defer_handshake=True)
+                                        defer_handshake=True, request_seconds=timeout, deadline=deadline)
             cleanup.callback(broker.close)
             config = broker.child_config
             channel = Path(__file__).with_name('deepseek_model_proxy.cjs')
@@ -141,9 +137,21 @@ def report_events(report):
     for field in ('findings', 'gaps', 'diagnostics', 'checks'):
         for item in report.get(field, ()):
             yield 'review.detail', {'field': field, 'item': item}
-    yield 'review.completed', {key: report[key] for key in (
+    completed = {key: report[key] for key in (
         'status', 'reviewer', 'review_id', 'scope', 'evidence_id', 'goal', 'rules_id',
-        'guide_digest', 'sources', 'observations', 'additional_read') if key in report}
+        'guide_digest', 'sources', 'observations', 'additional_read', 'current', 'complete', 'budget', 'units') if key in report}
+    for field in ('goal', 'sources', 'units', 'scope'):
+        value = completed.get(field)
+        if value is None or len(wire(value)) <= 8192:
+            continue
+        encoded = json.dumps(value, ensure_ascii=False)
+        parts = [encoded[offset:offset + 4096] for offset in range(0, len(encoded), 4096)]
+        for index, part in enumerate(parts):
+            yield 'review.material', dict(field=field, index=index, count=len(parts), json_part=part)
+        # Keep the scope discriminator for the existing delivery boundary query.
+        completed[field] = dict(details_in_events=True, parts=len(parts), **(
+            {k:v for k,v in value.items() if k in ('mode', 'entry', 'params', 'base')} if field == 'scope' else {}))
+    yield 'review.completed', completed
 
 
 def recent_review(store, session):

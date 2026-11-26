@@ -43,9 +43,10 @@ plugin.apply({effect(){},llm:{
         return [node,str(driver),str(plugin)], dict(PATH='/usr/bin:/bin',HOME=str(home))
     monkeypatch.setattr(DeepSeek, 'launch', launch)
     deployment = SimpleNamespace(limits=Limits(), providers={'deepseek':dict(model='fixture-model',model_provider='fixture',effort='high',native_credentials='/not-exposed')})
-    def start(epoch='first'):
+    def start(epoch='first', turn_id='turn', quota_turn=None):
         home=tmp_path/'session/control'/('turn-'+epoch)/'model'
-        return broker.ModelBroker(deployment,dict(id='turn',created=time.time()),dict(provider='deepseek'),home)
+        return broker.ModelBroker(deployment,dict(id=turn_id,created=time.time(),
+            forge_options=json.dumps(dict(quota_turn=quota_turn)) if quota_turn else '{}'),dict(provider='deepseek'),home)
     return start
 
 
@@ -116,6 +117,25 @@ def test_repair_epoch_cannot_reset_root_turn_request_allowance(native, monkeypat
         assert exchange(second,'stream',options())[-1].get('error')
         assert second.quota.value['requests'] == 1
     finally: second.close()
+
+
+def test_new_feedback_turn_and_warm_handoff_keep_original_quota(native, monkeypatch):
+    monkeypatch.setattr(broker, 'REQUESTS', 1)
+    first = native('author', turn_id='original')
+    try:
+        assert exchange(first, 'stream', options())[-1] == {'done': True}
+    finally:
+        first.close()
+    second = native('feedback', turn_id='repair', quota_turn='original')
+    try:
+        assert exchange(second, 'stream', options())[-1].get('error')
+        second.park_idle()
+        second.begin_turn(dict(id='warm-repair', created=time.time(),
+            forge_options=json.dumps(dict(quota_turn='original'))), Limits())
+        assert exchange(second, 'stream', options())[-1].get('error')
+        assert second.quota.value['requests'] == 1
+    finally:
+        second.close()
 
 
 def test_quota_rejects_overlapping_owner_corruption_and_alias(tmp_path):

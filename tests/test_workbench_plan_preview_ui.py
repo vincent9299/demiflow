@@ -143,6 +143,29 @@ def test_original_configuration_selector_compiles_through_real_http(original, tm
     assert json.loads((original / 'settings/small.json').read_text())['arguments'] == {'stage': 'combined'}
 
 
+def test_registered_multivariant_flow_selects_and_restores_explicit_parameters(original, tmp_path, browser):
+    registry_path = tmp_path/'registry.json'
+    register_preview_project(original, registry_path)
+    (original/'settings/combined.json').write_text(json.dumps({
+        'format':'demiflow_forge_flow_parameters_v1','arguments':{'stage':'combined'}}))
+    declare_existing_flow(original, 'dispatch.py:run_pipeline', params='settings/combined.json')
+    with service(None, registry=registry_path) as app, opened(browser, app) as (page, requests):
+        page.locator('.function-nav').get_by_role('button', name='管线', exact=True).click()
+        choice = page.get_by_label('参数配置', exact=True)
+        expect(choice).to_be_visible()
+        expect(page.get_by_text('此流程已登记多个参数文件，请选择参数配置。', exact=True)).to_be_visible()
+        with page.expect_response(lambda response: response.url.endswith('/plan-preview')) as pending:
+            choice.select_option('settings/combined.json')
+        assert pending.value.json()['basis']['params'] == 'settings/combined.json'
+        expect(page.locator('.wb-node')).to_have_count(5)
+        page.reload()
+        expect(page.get_by_label('参数配置', exact=True)).to_have_value('settings/combined.json')
+        with page.expect_response(lambda response: response.url.endswith('/plan-preview') and response.request.post_data_json['params']=='settings/small.json') as pending:
+            page.get_by_label('参数配置', exact=True).select_option('settings/small.json')
+        assert pending.value.json()['basis']['params'] == 'settings/small.json'
+        expect(page.locator('.wb-node')).to_have_count(3)
+
+
 def _transform(row):
     raise AssertionError('compile preview must not evaluate rows')
 

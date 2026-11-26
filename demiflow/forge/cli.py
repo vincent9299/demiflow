@@ -6,6 +6,7 @@ import click
 
 from .platform_cli import register as register_platform
 from .schema import ForgeError
+from .review import REVIEW_SECONDS, MAX_REVIEW_SECONDS
 
 
 class _ForgeCommands(click.Group):
@@ -56,6 +57,8 @@ def register(main: click.Group) -> None:
         """Develop a project and inspect the current SDK."""
 
     register_platform(forge)
+    from .development_cli import register as register_development
+    register_development(forge, _output)
     root_option = click.option('--root', required=True, type=click.Path(path_type=Path, file_okay=False))
     json_option = click.option('--json', 'as_json', is_flag=True, help='Return one JSON document.')
 
@@ -115,7 +118,7 @@ def register(main: click.Group) -> None:
     @click.option('--path', 'paths', multiple=True, help='Project-relative source to review.')
     @click.option('--base', help='Compare current project files to this local Git revision.')
     @click.option('--evidence', multiple=True, help='Include a project-relative test or evidence file.')
-    @click.option('--timeout', type=click.IntRange(1, 900), default=180, show_default=True,
+    @click.option('--timeout', type=click.IntRange(1, MAX_REVIEW_SECONDS), default=REVIEW_SECONDS, show_default=True,
                   help='Time budget in seconds for the complete independent model review.')
     @json_option
     def review(root, goal, entry, params, paths, base, evidence, timeout, as_json):
@@ -133,7 +136,7 @@ def register(main: click.Group) -> None:
 
         _output(root, as_json, lambda: review_project(
             root, goal=goal, entry=entry, params=params, paths=paths, base=base, evidence=evidence,
-            reviewer=reviewer),
+            reviewer=reviewer, budget=dict(calls=34, seconds=float(timeout))),
             render_review)
 
     @add.command()

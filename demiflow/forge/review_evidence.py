@@ -18,9 +18,12 @@ from .project_io import relative_path
 from .project_rules import ROLE_DIRS
 from .schema import ForgeError, digest
 
-MAX_FILES = 48
+MAX_FILES = 256
 FILE_BYTES = 96 * 1024
-TOTAL_BYTES = 224 * 1024
+TOTAL_BYTES = 8 * 1024**2
+UNIT_FILES = 48
+UNIT_BYTES = 224 * 1024
+MAX_UNITS = 32
 SCAN_BYTES = 16 * 1024**2
 INDEX_BYTES = 256 * 1024
 TEXT_SUFFIXES = {'.py', '.yaml', '.yml', '.json', '.md', '.txt', '.toml', '.rst'}
@@ -363,9 +366,12 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
     deleted = {name for name in targets if name in known_before and not (root / name).exists()}
     project = _ProjectEvidence(root, excluded, deleted)
     related = set()
+    groups = []
     for name in targets:
         if (root / name).exists():
-            related.update(project.closure([name]))
+            closure = project.closure([name])
+            related.update(closure)
+            groups.append(sorted(closure))
         elif name not in known_before:
             raise ForgeError('Review target not found: ' + name, code='invalid_request')
     if entry:
@@ -377,6 +383,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
                    for node in tree.body):
             raise ForgeError('Review entry symbol not found: ' + entry, code='invalid_request')
         selected_entries = [entry]
+        groups = [sorted(related | set(targets) | ({params} if params else set(entries.get(entry, ()))))]
     else:
         selected_entries = []
         for declared, bindings in entries.items():
@@ -387,6 +394,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             if dependencies.intersection(targets) or set(bindings).intersection(targets):
                 selected_entries.append(declared)
                 related.update(dependencies)
+                groups.insert(0, sorted(dependencies | set(bindings)))
     selected_params = {params} if params else {p for key in selected_entries for p in entries.get(key, ())}
     related.update(selected_params)
     for name in targets:
@@ -430,7 +438,8 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         files[name] = dict(role=role, after=after, before=before)
     scope = dict(mode=mode, base=revision, entry=entry, params=params, paths=list(paths),
                  entries=selected_entries, changed=changed, evidence=list(evidence))
-    result = dict(scope=scope, files=files, gaps=[detail for name in files for detail in project.gaps.get(name, ())])
+    result = dict(scope=scope, files=files, groups=groups,
+                  gaps=[detail for name in files for detail in project.gaps.get(name, ())])
     result['identity'] = digest(result)
     return result
 
@@ -445,3 +454,49 @@ def verify_evidence(root, captured, *, exclude=(), prior_sources=None):
     except (OSError, ValueError, RecursionError):
         return False
     return current['identity'] == captured['identity']
+
+
+def review_units(captured):
+    """Partition a fixed candidate without dropping a target or splitting its dependency closure."""
+    files = captured['files']
+    targets = {name for name, item in files.items() if item['role'] == 'target'}
+    attachments = {name for name, item in files.items() if item['role'] == 'evidence'}
+    grouped = {name for group in captured.get('groups', ()) for name in group}
+    attachments.update(files.keys() - grouped - targets)
+    units, covered = [], set()
+
+    def fits(names):
+        return len(names) <= UNIT_FILES and sum(
+            len(value.encode()) for name in names for side in ('before', 'after')
+            if (value := files[name].get(side)) is not None) <= UNIT_BYTES
+
+    def add(names):
+        names = set(names) & files.keys() | attachments
+        if not fits(names):
+            raise ForgeError('A Flow dependency closure exceeds one review unit; narrow or simplify the source: '
+                             + ', '.join(sorted(names)[:4]), code='resource_limit')
+        units.append(names)
+        covered.update(names & targets)
+
+    # Flow groups precede individual target closures. Shared sources remain in
+    # every affected Flow; unregistered sources and deleted files remain targets.
+    for index, group in enumerate(captured.get('groups', ())):
+        names = set(group) & files.keys()
+        if index >= len(captured['scope']['entries']) and not (names & (targets - covered)):
+            continue
+        add(names)
+    for name in sorted(targets - covered):
+        add({name})
+    # Pack independent tiny groups while retaining every dependency and an
+    # achievable number of cited targets. Large Flow groups stay intact.
+    packed = []
+    for names in units:
+        if packed and fits(packed[-1] | names) and len((packed[-1] | names) & targets) <= 12:
+            packed[-1].update(names)
+        else:
+            packed.append(set(names))
+    if len(packed) > MAX_UNITS:
+        raise ForgeError('Review unit count exceeds the delivery budget', code='resource_limit')
+    for names in packed:
+        yield dict(scope=captured['scope'], files={name: files[name] for name in sorted(names)},
+                   gaps=captured['gaps'], identity=captured['identity'])

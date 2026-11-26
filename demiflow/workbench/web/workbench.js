@@ -73,6 +73,7 @@
     function raw(label,value,parent){const n=details(label,parent);n.append($('pre',json(value),'wb-code'));return n;}
     const toolbar=$('div',undefined,'wb-toolbar'),selectors=$('div',undefined,'wb-selectors'),actions=$('div',undefined,'wb-actions');
     const entryChoice=select('流程',[],null);
+    const parameterChoice=select('参数配置',[],null);
     // The original select remains the single selection binding; the directory
     // below is its visible control, including keyboard access.
     field('流程',entryChoice,selectors);selectors.hidden=true;
@@ -102,6 +103,7 @@
     const basisLabel=$('span',undefined,'wb-basis');
     const planContext=$('div',undefined,'wb-plan-context'),graphTitle=$('strong','执行计划'),graphHost=$('div',undefined,'wb-graph');
     planContext.append(graphTitle,basisLabel);
+    field('参数配置',parameterChoice,planContext);
     headerTitleRow.append(pipelineTitle,historyBadge);
     headerTitleGroup.append(headerTitleRow,planContext);
     const runsContextButton=button('运行记录',()=>{if(activePage!=='monitor')return showPage('monitor');},actions,{cls:'wb-history-toggle'});
@@ -269,6 +271,12 @@
       const selectedEntry=run?.entry||working?.entry;
       entryChoice.replaceChildren();for(const item of choices()){const option=$('option',item.label);option.value=item.value;entryChoice.append(option);}entryChoice.value=selectedEntry||'';
       entryChoice.disabled=!!run||!entryChoice.options.length;entryChoice.parentElement.hidden=true;entryChoice.title=selectedEntry||'';
+      const parameters=ctx.flows.find(f=>f.entry===selectedEntry)?.parameters||[];
+      parameterChoice.replaceChildren();
+      for(const path of ['',...parameters]){const option=$('option',path||'选择参数配置');option.value=path;parameterChoice.append(option);}
+      parameterChoice.value=run?.params||working?.params||'';
+      parameterChoice.disabled=!!run||busy||previewBusy;
+      parameterChoice.parentElement.hidden=!!run||parameters.length<2;
       paintFlowNavigation();
       updateActions();
     }
@@ -298,6 +306,7 @@
     }
     function updateActions(){
       if(!root.isConnected)return;
+      parameterChoice.disabled=!!run||busy||previewBusy;
       const resultsActive=data().mode==='results',definitionActive=data().mode==='run_definition',checksActive=data().mode==='checks';
       const monitoring=activePage==='monitor',hasRun=!!run;
       const activeEntry=monitoring?(runFlowFilter||run?.entry||working?.entry):(working?.entry||run?.entry);
@@ -358,7 +367,7 @@
       if(scopedCheckButton?.isConnected)scopedCheckButton.disabled=checkDisabled;
       runButton.disabled=busy||previewBusy||!!run||!registered()||!can('run_submit')||dirty||!data().graph?.parameters.available||data().graph?.freshness.current===false;
       runButton.title=run?'返回当前配置后提交新运行':dirty?'先保存当前配置草稿':!can('run_submit')?'项目或服务尚未开放提交权限':!registered()?'先登记原生流程与参数文件':!data().graph?'正在读取图与配置':data().graph.freshness.current===false?'检查依据已变化，请先读取当前配置或重新检查':!data().graph.parameters.available?'登记配置暂不可用':'提交新运行；检查、封存并启动';
-      const needsConfiguration=!(working?.params||'')&&requiredPreviewArguments().length>0;
+      const needsConfiguration=!(working?.params||'')&&(requiredPreviewArguments().length>0||(ctx.flows.find(f=>f.entry===working?.entry)?.parameters||[]).length>1);
       const invalidEntry=declaredEntry()?.status==='invalid';
       runButton.disabled ||= invalidEntry;
       previewButton.disabled=busy||previewBusy||!!run||!!data().run||!working?.entry||invalidEntry||dirty||needsConfiguration||graphHost.hasAttribute('aria-busy');
@@ -367,11 +376,19 @@
       previewButton.title=dirty?'先保存参数配置，解析使用已保存值':previewHelp;
       previewButton.hidden=monitoring||!!run;runButton.hidden=monitoring||!!run;
       accessState.hidden=monitoring||!!run||!working?.entry||(!invalidEntry&&registered()&&can('run_submit'));
-      accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!registered()?'已发现原项目入口，尚未绑定可执行的原生流程与参数。':'当前项目尚未开启管线运行权限，可在右上角「项目设置」中开启。';
+      const hasChoices=(ctx.flows.find(f=>f.entry===working?.entry)?.parameters||[]).length>1;
+      accessState.textContent=invalidEntry?working.entry+' · '+previewHelp:!registered()?(hasChoices?'此流程已登记多个参数文件，请选择参数配置。':'已发现原项目入口，尚未绑定可执行的原生流程与参数。'):'当前项目尚未开启管线运行权限，可在右上角「项目设置」中开启。';
       for(const[key,b]of detailButtons){b.classList.toggle('active',detailKind===key);b.disabled=!run;}
     }
     function uniqueParams(entry){const paths=ctx.flows.find(f=>f.entry===entry)?.parameters||[];return paths.length===1?paths[0]:null;}
     entryChoice.onchange=async()=>{if(disposed)return;const entry=entryChoice.value;try{await useWorking(entry,uniqueParams(entry));if(working?.entry===entry)await compilePlanPreview();}catch(error){if(!disposed&&working?.entry===entry&&error.name!=='AbortError')message('解析未完成：'+error.message,'error-box');}finally{if(!disposed)paintSelectors();}};
+    parameterChoice.onchange=async()=>{
+      if(disposed||run||!working?.entry)return;
+      const entry=working.entry,params=parameterChoice.value||null;
+      try{await useWorking(entry,params);if(params&&working?.entry===entry&&working.params===params)await compilePlanPreview();}
+      catch(error){if(!disposed&&error.name!=='AbortError')message('读取参数配置未完成：'+error.message,'error-box');}
+      finally{if(!disposed)paintSelectors();}
+    };
     function diagnosticTarget(d){return (d.related_nodes||[])[0]||data().graph?.nodes.find(n=>n.source===d.path&&n.line===d.line)?.id;}
     function renderDiagnostics(items,parent,onLocate=null){
       if(!items.length){parent.append($('p','此范围没有诊断；是否通过仍以检查状态和覆盖为准。','wb-caption'));return;}
@@ -428,6 +445,7 @@
     async function compilePlanPreview({restore=null}={}){
       if(previewBusy||busy||run||data().run)return;
       if(!working?.entry)throw new Error('请先选择流程入口。');
+      if(!working.params&&(ctx.flows.find(f=>f.entry===working.entry)?.parameters||[]).length>1){message('请先选择参数配置。');return;}
       if(declaredEntry()?.status==='invalid'){message(working.entry+' · '+entryIssue(),'error-box');return;}
       if(Object.keys(getDraft().values).length)throw new Error('请先保存参数配置；计划解析只使用已保存值。');
       clearPlanPreview(true);
@@ -2114,7 +2132,7 @@
     });
     options.register?.(handle);
     let firstEntry=view.entry||ctx.flows[0]?.entry||choices()[0]?.value||null;
-    let firstParams=uniqueParams(firstEntry);
+    let firstParams=(ctx.flows.find(f=>f.entry===firstEntry)?.parameters||[]).includes(view.params)?view.params:uniqueParams(firstEntry);
     working={entry:firstEntry,params:firstParams};
     if(view.kind==='run'&&view.panel!=='flows')await openRun(view.run_id,view.attempt||null,'monitor');
     else if(view.kind==='runs'||view.kind==='flows'&&view.panel==='monitor')await selectRunFlow(firstEntry||'');

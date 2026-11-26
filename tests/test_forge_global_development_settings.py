@@ -164,7 +164,7 @@ def test_automatic_scope_allows_business_configs_and_blocks_control_and_data(tmp
         assert forbidden not in writes
         assert not any(w.startswith(forbidden + '/') for w in writes)
     # Bytecode caches created during runs/tests must not pollute change observation.
-    from demiflow.workbench.conversations.changes import capture
+    from demiflow.forge.source_snapshot import capture
     cache = root / 'flows/__pycache__'
     cache.mkdir()
     (cache / 'main.cpython-310.pyc').write_bytes(b'pyc')
@@ -253,18 +253,18 @@ def test_per_project_python_configuration_is_readonly_and_configurable(tmp_path)
     assert any(str(venv_bin) in arg and 'DEMIFLOW_PROJECT_PYTHON' in arg for arg in cdx_cmd)
 
     # Unconfigured project must NEVER fall back to workbench sys.executable.
-    from demiflow.workbench.conversations.worker import effective_project_python, _select_auto_review_target
+    from demiflow.workbench.conversations.worker import effective_project_python
     assert effective_project_python({'kind': 'pipeline'}) is None
     assert effective_project_python({'kind': 'pipeline', 'python': None}) is None
     assert effective_project_python({'kind': 'pipeline', 'python': ''}) is None
     assert effective_project_python({'kind': 'pipeline', 'python': str(custom_py)}) == str(custom_py)
 
-    # Auto-review entry selector picks first checked flow entry & params.
-    assert _select_auto_review_target([]) == {}
-    assert _select_auto_review_target([
-        {'entry': 'flows/reference_delivery.py:run', 'params': 'parameters/reference_delivery.json', 'status': 'checked'}
-    ]) == {'entry': 'flows/reference_delivery.py:run', 'params': 'parameters/reference_delivery.json'}
-    assert _select_auto_review_target([{'entry': 'flows/a.py:run', 'params': None}]) == {'entry': 'flows/a.py:run'}
+    # Automatic review admits the complete observed change scope, including
+    # multiple Flow entries. Explicit requests share the same Forge decision.
+    from demiflow.forge.development import review_requested
+    assert review_requested(changes=[{'path':'flows/a.py'}, {'path':'flows/b.py'}], auto_review=True, selection=None)
+    assert review_requested(changes=[], auto_review=False, selection={})
+    assert not review_requested(changes=[{'path':'README.md'}], auto_review=True, selection=None)
 
 
 def test_sandbox_shims_enforce_python_isolation_and_run_forge_cli_and_pytest_in_landlock(tmp_path, monkeypatch):

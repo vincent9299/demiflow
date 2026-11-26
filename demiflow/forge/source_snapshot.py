@@ -6,9 +6,53 @@ from pathlib import Path
 import stat
 import time
 
-from demiflow.workbench.conversations.common import plain_path
-from demiflow.workbench.conversations.common import reject
-from demiflow.workbench.conversations.common import safe_path
+from .project_io import relative_path
+from .platform_environment import read_bounded
+from .io import ensure_directory, publish_bytes
+from .schema import ForgeError
+
+SOURCE_BYTES = 96 * 1024
+SNAPSHOT_BYTES = 8 * 1024**2
+
+
+def reject(message, code='operation_rejected'):
+    raise ForgeError(message, code=code)
+
+
+def plain_path(value):
+    if type(value) is not str or not value or len(value) > 2048:
+        reject('Invalid scoped path')
+    if value.startswith('/') or '\\' in value or any(p in {'', '.', '..'} for p in value.split('/')):
+        reject('Scoped paths must be normalized relative paths')
+    return value
+
+
+def safe_path(root, relative, *, missing=False):
+    path = relative_path(root, relative)
+    if path.exists():
+        info = path.stat()
+        if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)) or (path.is_file() and info.st_nlink != 1):
+            reject('Special or hard-linked files are outside the development scope')
+    elif not missing:
+        raise FileNotFoundError(path)
+    return path
+
+
+def read_source(directory, fact):
+    """Read the exact host-captured bytes; UI previews are not source evidence."""
+    if not fact:
+        return None
+    if fact.get('source') == fact.get('sha256'):
+        raw = read_bounded(Path(directory) / fact['source'], SOURCE_BYTES)
+        if hashlib.sha256(raw).hexdigest() != fact['sha256']:
+            reject('Source snapshot identity changed', 'inputs_changed')
+        return raw.decode('utf-8')
+    if 'preview' in fact:
+        if hashlib.sha256(fact['preview'].encode()).hexdigest() != fact['sha256']:
+            reject('Source preimage preview is not complete', 'inspection_incomplete')
+        return fact['preview']
+    reject('Full source preimage unavailable: ' + fact.get('preview_unavailable', 'not captured'), 'inspection_incomplete')
+
 
 TEXT_SUFFIXES = {'.py', '.md', '.json', '.yaml', '.yml', '.toml', '.js', '.css', '.html', '.txt'}
 IGNORED_DIRS = {'__pycache__', '.pytest_cache', '.mypy_cache', 'logs', 'data', 'runs', 'datasets', 'outputs', 'results'}
@@ -22,10 +66,21 @@ def _ignored(rel):
     return Path(parts[-1]).suffix.lower() in IGNORED_SUFFIXES
 
 
-def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
+def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2, source_dir=None):
     """Hash exact watched bytes and collect bounded text previews in a single read pass."""
     facts, total, visited = {}, 0, 0
     remaining_preview = 128 * 1024
+    remaining_source = SNAPSHOT_BYTES
+    remaining_storage = 2 * SNAPSHOT_BYTES
+    if source_dir is not None:
+        ensure_directory(Path(source_dir))
+        with os.scandir(source_dir) as entries:
+            for index, entry in enumerate(entries):
+                if index >= 8192 or not entry.is_file(follow_symlinks=False):
+                    reject('Invalid source snapshot storage', 'resource_limit')
+                remaining_storage -= entry.stat(follow_symlinks=False).st_size
+        if remaining_storage < 0:
+            reject('Source snapshot storage budget exceeded', 'resource_limit')
     deadline = time.monotonic() + 10
     pending = [plain_path(p) for p in paths]
     excluded = set(exclude)
@@ -54,7 +109,10 @@ def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
                 reject('Source snapshot byte budget exceeded', 'resource_limit')
             want_preview = Path(rel).suffix in TEXT_SUFFIXES and size <= 16384 and size <= remaining_preview
             hashed = hashlib.sha256()
-            buf = bytearray() if want_preview else None
+            want_source = source_dir is not None and Path(rel).suffix in TEXT_SUFFIXES and size <= SOURCE_BYTES
+            if want_source and size > remaining_source:
+                reject('Full source snapshot exceeds total byte budget', 'resource_limit')
+            buf = bytearray() if want_preview or want_source else None
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
             with os.fdopen(fd, 'rb') as stream:
                 before = os.fstat(fd)
@@ -74,6 +132,22 @@ def capture(root, paths, *, exclude=(), max_files=4096, max_bytes=64 * 1024**2):
                     reject('Source changed during snapshot', 'conflict')
             total += size
             fact = dict(bytes=size, sha256=hashed.hexdigest())
+            if want_source:
+                try:
+                    bytes(buf).decode('utf-8')
+                except UnicodeError:
+                    pass
+                else:
+                    target = Path(source_dir) / fact['sha256']
+                    if not target.exists():
+                        if size > remaining_storage:
+                            reject('Source snapshot storage budget exceeded', 'resource_limit')
+                        publish_bytes(target, bytes(buf))
+                        remaining_storage -= size
+                    elif read_bounded(target, SOURCE_BYTES) != bytes(buf):
+                        reject('Source snapshot identity changed', 'inputs_changed')
+                    fact['source'] = fact['sha256']
+                    remaining_source -= size
             if Path(rel).suffix not in TEXT_SUFFIXES:
                 fact['preview_unavailable'] = 'not_plain_source'
             elif not want_preview:
@@ -114,8 +188,8 @@ def differences(before, after, writes, *, root=None):
     for name in sorted(before.keys() | after.keys()):
         old, new = before.get(name), after.get(name)
         if (old or {}).get('sha256') == (new or {}).get('sha256'): continue
-        value = dict(path=name, before={k:v for k,v in (old or {}).items() if k!='preview'} if old else None,
-            after={k:v for k,v in (new or {}).items() if k!='preview'} if new else None,
+        value = dict(path=name, before={k:v for k,v in (old or {}).items() if k not in {'preview', 'source'}} if old else None,
+            after={k:v for k,v in (new or {}).items() if k not in {'preview', 'source'}} if new else None,
             within_scope=any(name==w or name.startswith(w+'/') for w in writes))
         old_preview = '' if old is None else old.get('preview')
         new_preview = '' if new is None else (new.get('preview') if 'preview' in new else _ondemand_preview(root, name, new))

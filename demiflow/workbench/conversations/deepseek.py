@@ -78,7 +78,8 @@ class DeepSeek:
             overlay = [row for row in overlay if row['id'] != 'acp']
             overlay += [dict(id='acp',disabled=True),dict(id='llm-retry',disabled=True),dict(insert=[dict(id='demiflow-model-broker',
                 name=str(Path(__file__).with_name('deepseek_model_broker.cjs')),
-                config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high')))])]
+                config=dict(provider=route,model=config['model'],reasoningEffort=config.get('effort','high'),
+                    requestSeconds=config.get('_request_seconds',180)))])]
         if not any(config.get(key) for key in ('_compaction', '_review', '_model_broker')):
             next(row for row in overlay if row.get('id')=='acp')['inject']=[
                 'acpAppStartup','demiflowAssistantStreamReady']
