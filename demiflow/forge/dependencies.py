@@ -54,7 +54,10 @@ _SYSTEM_DENIED = tuple(Path(p) for p in (
     '/etc/ssh', '/etc/ssl/private', '/etc/sudoers', '/etc/sudoers.d',
 ))
 _NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,63}\Z')
-_CREDENTIAL_URL_RE = re.compile(r'([A-Za-z][A-Za-z0-9+.-]*://)([^/@\s"\']+)@')
+_DEPENDENCY_URL_RE = re.compile(
+    r"""(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*://)"""
+    r"""([^/?#\s"'\\]*)([^?#\s"'\\]*)([?#][^\s"'\\]*)?"""
+)
 
 
 def _is_within(path: Path, root: Path) -> bool:
@@ -245,13 +248,23 @@ def declaration_line_map(raw_text: str) -> dict:
     return result
 
 
+def redact_dependency_urls(text: str) -> str:
+    """Keep a dependency's origin and path while concealing credentials and signed URL parameters."""
+    def public_url(match):
+        scheme, authority, path, parameters = match.groups()
+        host = authority.rsplit('@', 1)[-1]
+        return scheme + host + path + (parameters[0] + '<redacted>' if parameters else '')
+
+    return _DEPENDENCY_URL_RE.sub(public_url, text)
+
+
 def redact_declaration_text(raw_text: str) -> str:
     """Redact credentials and host-private local_ref absolute paths while preserving exact line numbers."""
     out_lines = []
     section = ''
     current_pkg = None
     in_local_ref_table = False
-    for line in raw_text.splitlines(keepends=True):
+    for line in redact_dependency_urls(raw_text).splitlines(keepends=True):
         ending = ''
         body = line
         if body.endswith('\r\n'):
@@ -270,7 +283,7 @@ def redact_declaration_text(raw_text: str) -> str:
                 in_local_ref_table = False
             out_lines.append(body + ending)
             continue
-        redacted = _CREDENTIAL_URL_RE.sub(r'\1<redacted>@', body)
+        redacted = body
         if section == 'tool.demiflow.packages':
             m = re.match(r'^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*\{.*)$', redacted)
             if m and re.search(r'source\s*=\s*["\']local_ref["\']', m.group(3)):

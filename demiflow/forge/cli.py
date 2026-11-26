@@ -5,8 +5,9 @@ from pathlib import Path
 import click
 
 from .platform_cli import register as register_platform
-from .schema import ForgeError
 from .review import REVIEW_SECONDS, MAX_REVIEW_SECONDS
+from .sandbox import read_runtime_config
+from .schema import ForgeError
 
 
 class _ForgeCommands(click.Group):
@@ -51,24 +52,6 @@ def _output(root, as_json, operation, render=None):
         raise click.exceptions.Exit(code)
 
 
-def _sandbox_runtime_cfg(root: Path) -> dict:
-    """Read optional sandbox-injected runtime context (python, allowed_read_roots, denied_paths)."""
-    import os
-    raw = os.environ.get('DEMIFLOW_FORGE_RUNTIME_CONFIG')
-    if not raw:
-        return {}
-    try:
-        cfg = json.loads(Path(raw).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(cfg, dict):
-        return {}
-    cfg_root = cfg.get('root')
-    if cfg_root and Path(cfg_root).resolve() != Path(root).resolve():
-        return {}
-    return cfg
-
-
 def register(main: click.Group) -> None:
     @main.group(cls=_ForgeCommands)
     def forge():
@@ -92,7 +75,7 @@ def register(main: click.Group) -> None:
     def dep_list(root, python, as_json):
         from .dependencies import list_dependencies
         def perform():
-            cfg = _sandbox_runtime_cfg(root)
+            cfg = read_runtime_config(root)
             eff_py = str(python) if python is not None else cfg.get('python')
             return list_dependencies(
                 root, python=eff_py,
@@ -109,7 +92,7 @@ def register(main: click.Group) -> None:
     def dep_verify(root, python, as_json):
         from .dependencies import verify
         def perform():
-            cfg = _sandbox_runtime_cfg(root)
+            cfg = read_runtime_config(root)
             eff_py = str(python) if python is not None else cfg.get('python')
             return verify(
                 root, python=eff_py,
@@ -126,7 +109,7 @@ def register(main: click.Group) -> None:
     def dep_vendor(root, name, source, as_json):
         from .dependencies import vendor
         def perform():
-            cfg = _sandbox_runtime_cfg(root)
+            cfg = read_runtime_config(root)
             return vendor(
                 root, name, source,
                 allowed_roots=cfg.get('allowed_read_roots'),
@@ -287,7 +270,7 @@ def register(main: click.Group) -> None:
         def perform():
             if paths and entry or params and not entry:
                 raise ForgeError('Use --path or --entry [--params].', code='invalid_request')
-            cfg = _sandbox_runtime_cfg(root)
+            cfg = read_runtime_config(root)
             eff_py = str(python) if python is not None else cfg.get('python')
             return check_project(
                 root, paths=paths, entry=entry, params=params, python=eff_py,

@@ -77,6 +77,53 @@ def test_context_and_workbench_read_same_project_and_protect_paths(tmp_path, ref
         build_context(tmp_path, sources=['operators/secret.py'], reference=reference, exclude=protected)
 
 
+def test_restricted_context_uses_only_the_turns_dependency_read_scope(tmp_path, reference, monkeypatch):
+    from click.testing import CliRunner
+    from demiflow.cli import main
+    from demiflow.forge.bridge.common import digest
+
+    root = tmp_path / 'project'
+    root.mkdir()
+    dependencies = tmp_path / 'references'
+    allowed, private = dependencies / 'approved_lib', dependencies / 'private_lib'
+    for package in (allowed, private):
+        package.mkdir(parents=True)
+        (package / '__init__.py').write_text('VALUE = 1\n')
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n' + ''.join(
+        f'{pkg.name} = {{source = "local_ref", path = {json.dumps(str(pkg))}}}\n' for pkg in (allowed, private)))
+    grant = dict(root=str(root), kind='pipeline', phase='implementation', writes=[], watch=[], sources=[],
+                 non_goals=[], authorization='fixture')
+
+    def assembled_version(**scope):
+        manifest, _ = assemble(grant, 'inspect', Limits(), coding=reference, execution_mode='restricted', **scope)
+        skill = next(row for row in manifest['sources'] if row['source_id'] == 'forge-skill')
+        return skill['version']
+
+    no_grants = build_context(root, reference=reference, allowed_roots=())
+    assert no_grants['project_dependencies']['packages'] == {}
+    assert assembled_version() == digest(no_grants)
+    scope = dict(allowed_roots=(dependencies,), denied_paths=(private,))
+    scoped = build_context(root, reference=reference, **scope)
+    assert set(scoped['project_dependencies']['packages']) == {'approved_lib'}
+    assert assembled_version(**scope) == digest(scoped)
+
+    config = tmp_path / 'runtime.json'
+    config.write_text(json.dumps(dict(root=str(root), execution_mode='restricted',
+                                      allowed_read_roots=[str(dependencies)], denied_paths=[str(private)])))
+    monkeypatch.setenv('DEMIFLOW_FORGE_RUNTIME_CONFIG', str(config))
+    result = CliRunner().invoke(main, ['forge', 'context', '--root', str(root), '--json'])
+    assert result.exit_code == 0, result.output
+    facts = json.loads(result.output)
+    assert set(facts['project_dependencies']['packages']) == {'approved_lib'}
+    assert 'denied_paths' not in facts['environment']
+    assert 'allowed_read_roots' not in facts['environment']
+    config.write_text(json.dumps(dict(root=str(root), execution_mode='restricted')))
+    assert build_context(root, reference=reference)['project_dependencies']['packages'] == {}
+    config.write_text(json.dumps(dict(root=str(tmp_path / 'another-project'), execution_mode='restricted')))
+    with pytest.raises(ForgeError, match='another project'):
+        build_context(root, reference=reference)
+
+
 def test_skill_and_guide_are_distinct_installable_resources():
     forge = files('demiflow.forge')
     skill = forge.joinpath('skills', 'demiforge', 'SKILL.md').read_text()

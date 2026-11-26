@@ -340,7 +340,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         raise ForgeError('Select a project directory and one valid review scope', code='invalid_request')
     if len(paths) + len(evidence) > MAX_FILES or len(exclude) > 256:
         raise ForgeError('Review path list exceeds its limit', code='resource_limit')
-    from .dependencies import inspect_dependencies, redact_declaration_text
+    from .dependencies import inspect_dependencies, redact_declaration_text, redact_dependency_urls
     dep_info = inspect_dependencies(
         root, allowed_roots=allowed_roots, denied_paths=denied_paths,
         check_imports=False, check_environment=False, allow_partial=True,
@@ -585,7 +585,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         result['dependencies'] = dict(
             digest=dep_info['digest'],
             declaration_sha256=dep_config['sha256'],
-            requirements=list(dep_config['requirements']),
+            requirements=[redact_dependency_urls(spec) for spec in dep_config['requirements']],
             packages=pkg_summary,
             changed=bool(changed_controls),
             entries={name: imports_by_entry[name] for name in selected_entries if name in imports_by_entry},

@@ -24,7 +24,38 @@ import shutil
 import sys
 import tempfile
 
+from demiflow.forge.io import no_symlinks
+from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.runtime import deployment_modules, validate_python_executable
+from demiflow.forge.schema import ForgeError
+
+
+def read_runtime_config(root):
+    """Read the calling sandbox's bindings for this project."""
+    setting = os.environ.get('DEMIFLOW_FORGE_RUNTIME_CONFIG')
+    if not setting:
+        return {}
+    root = Path(root).resolve()
+    path = Path(setting)
+    if not path.is_absolute() or '..' in path.parts or path.is_relative_to(root):
+        raise ForgeError('Invalid Forge runtime configuration path', code='operation_rejected')
+    try:
+        config = json.loads(read_bounded(no_symlinks(path), 65536))
+    except (OSError, ValueError) as exc:
+        raise ForgeError('Cannot read the Forge runtime configuration', code='operation_rejected') from exc
+    if not isinstance(config, dict) or config.get('root') != str(root):
+        raise ForgeError('Forge runtime configuration belongs to another project', code='operation_rejected')
+    if config.get('execution_mode') != 'trusted_local' and config.get('allowed_read_roots') is None:
+        config['allowed_read_roots'] = []
+    for paths in (config.get('allowed_read_roots', []), config.get('denied_paths', [])):
+        if paths is None:
+            continue
+        if not isinstance(paths, list) or any(
+            not isinstance(item, str) or not Path(item).is_absolute() or '..' in Path(item).parts for item in paths
+        ):
+            raise ForgeError('Invalid Forge runtime read scope', code='operation_rejected')
+    return config
+
 
 _FORGE_SHIM_ENTRY = """\
 import json

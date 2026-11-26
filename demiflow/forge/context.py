@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 import json
-import os
 from hashlib import sha256
 from pathlib import Path
 
@@ -172,22 +171,7 @@ def _project_sources(root, requested, excluded, coverage, diagnostics):
     return rows
 
 
-def _runtime_environment(root):
-    setting = os.environ.get('DEMIFLOW_FORGE_RUNTIME_CONFIG')
-    if not setting:
-        return None
-    path = Path(setting)
-    if not path.is_absolute() or '..' in path.parts or path.is_relative_to(root):
-        return None
-    try:
-        raw = read_bounded(no_symlinks(path), 65536)
-        data = json.loads(raw)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    if data.get('root') and Path(data['root']).resolve() != root.resolve():
-        return None
+def _runtime_environment(data):
     env = {}
     if isinstance(data.get('execution_mode'), str):
         env['execution_mode'] = data['execution_mode']
@@ -205,13 +189,19 @@ def _runtime_environment(root):
     return env
 
 
-def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference=None, exclude=()):
+def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference=None, exclude=(),
+                  allowed_roots=None, denied_paths=()):
     from .project import discover_project_sources
+    from .sandbox import read_runtime_config
 
     root = Path(root).absolute()
     if '..' in root.parts:
         raise ForgeError('Project root must be normalized', code='invalid_request')
     no_symlinks(root)
+    runtime = read_runtime_config(root) if allowed_roots is None else {}
+    if runtime:
+        allowed_roots = runtime.get('allowed_read_roots')
+        denied_paths = (*denied_paths, *(runtime.get('denied_paths') or ()))
     if (root.exists() and not root.is_dir()) or (not root.exists() and not root.parent.is_dir()):
         raise ForgeError('Select a project directory or an existing parent', code='invalid_request')
     if len(paths) + len(sources) > SOURCE_LIMIT - 3:
@@ -306,14 +296,11 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
     requested = tuple(dict.fromkeys([*sources, *(name for name in paths
                                                    if name != 'workspace.json' and (root / name).is_file())]))
     result['sources'].extend(_project_sources(root, requested, excluded, coverage, diagnostics))
-    env_cfg = _runtime_environment(root)
-    if env_cfg is not None:
-        result['environment'] = env_cfg
-    from .dependencies import inspect_dependencies
+    if runtime:
+        result['environment'] = _runtime_environment(runtime)
+    from .dependencies import inspect_dependencies, redact_dependency_urls
     try:
-        eff_py = env_cfg.get('python') if isinstance(env_cfg, dict) else None
-        allowed_roots = env_cfg.get('allowed_read_roots') if isinstance(env_cfg, dict) else None
-        denied_paths = env_cfg.get('denied_paths') or () if isinstance(env_cfg, dict) else ()
+        eff_py = result.get('environment', {}).get('python')
         dep_info = inspect_dependencies(
             root,
             python=eff_py,
@@ -331,7 +318,7 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
                 result['project_dependencies'] = dict(
                     digest=dep_info['digest'],
                     python=eff_py,
-                    requirements=list(cfg.get('requirements', ())),
+                    requirements=[redact_dependency_urls(spec) for spec in cfg.get('requirements', ())],
                     packages={
                         name: {k: row[k] for k in ('source', 'file_count', 'bytes', 'tree_sha256')}
                         for name, row in sorted(dep_info['packages'].items())
@@ -339,7 +326,8 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
                     missing_packages=[dict(name=m['name'], source=m['source'], path=m['path']) for m in dep_info['missing_packages']],
                     invalid_packages=[dict(name=m['name'], source=m['source'], detail=m['detail']) for m in dep_info['invalid_packages']],
                     orphan_packages=[m['path'] for m in dep_info['orphan_packages']],
-                    missing_requirements=[dict(spec=m['spec'], code=m['code']) for m in dep_info['missing_requirements']],
+                    missing_requirements=[dict(spec=redact_dependency_urls(m['spec']), code=m['code'])
+                                          for m in dep_info['missing_requirements']],
                     shadowed_packages=[m['name'] for m in dep_info['shadowed_packages']],
                     environment_skipped=dep_info['environment_skipped'],
                 )
