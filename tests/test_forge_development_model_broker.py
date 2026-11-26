@@ -29,9 +29,9 @@ def native(tmp_path, monkeypatch):
     driver.write_text('''
 const plugin=require(process.argv[2]);
 plugin.apply({effect(){},llm:{
- async resolveModelInfo(provider,id){return {provider,id,name:id,defaultMaxTokens:65536,inputModalities:['text','image']};},
+ async resolveModelInfo(provider,id){return {provider,id,name:id,defaultMaxTokens:131072,inputModalities:['text','image']};},
  async *stream(options){
-  if(options.provider!=='fixture'||options.model!=='fixture-model'||options.maxTokens>16384)throw new Error('route');
+  if(options.provider!=='fixture'||options.model!=='fixture-model'||options.maxTokens>65536)throw new Error('route');
   yield {type:'text-delta',index:0,text:'fixture response'};
   yield {type:'finish',reason:{kind:'stop'}};
  }
@@ -68,7 +68,7 @@ def test_native_metadata_and_stream_are_fixed_and_hide_credentials(native):
         assert channel.child_config['_boundary']['token'] == channel.token
         rows=exchange(channel,'resolve',dict(provider='fixture',model='fixture-model'))
         assert rows[-1] == {'done':True}
-        assert rows[0]['value']['defaultMaxTokens'] == 16384
+        assert rows[0]['value']['defaultMaxTokens'] == 65536
         assert rows[0]['value']['inputModalities'] == ['text']
         assert channel.requests == 0
         rows=exchange(channel,'stream',options())
@@ -82,7 +82,7 @@ def test_native_metadata_and_stream_are_fixed_and_hide_credentials(native):
 @pytest.mark.parametrize('mutation', [
     lambda v:v.update(provider='other'),
     lambda v:v.update(model='other'),
-    lambda v:v.update(maxTokens=16385),
+    lambda v:v.update(maxTokens=65537),
     lambda v:v.update(reasoningEffort='max'),
     lambda v:v.update(base_url='https://elsewhere.invalid'),
     lambda v:v['messages'][0].update(content=[dict(type='image',attachment={'path':'/protected'})]),
@@ -147,7 +147,7 @@ def test_capabilities_do_not_infer_codex_app_auth(monkeypatch):
     {'input':[{'role':'user','content':[{'type':'input_file','file_id':'remote'}]}]},
     {'input':[{'role':'user','content':[{'type':'input_image','image_url':'https://example.invalid'}]}]},
     {'tools':[{'type':'web_search'}]}, {'tools':[{'type':'namespace','tools':[{'type':'computer_use_preview'}]}]},
-    {'max_output_tokens':16385},
+    {'max_output_tokens':65537},
 ])
 def test_responses_rejects_remote_account_content_and_hosted_tools(update):
     with pytest.raises(ForgeError):
@@ -160,7 +160,7 @@ def test_responses_text_tool_history_remains_supported_with_fixed_output_cap():
         {'type':'function_call','call_id':'c','name':'shell','arguments':'{}'},
         {'type':'function_call_output','call_id':'c','output':'bounded fixture output'},
     ],tools=[{'type':'function','name':'shell','parameters':{'type':'object'}}]),{'model':'fixture'})
-    assert value['max_output_tokens']==16384 and value['store'] is False
+    assert value['max_output_tokens']==65536 and value['store'] is False
 
 
 @pytest.mark.parametrize('phase',['headers','body'])
@@ -195,7 +195,7 @@ def test_http_cancel_drains_blocked_upstream_and_releases_quota(tmp_path,monkeyp
         assert time.monotonic()-before<3
         assert not channel.thread.is_alive() and channel.quota.fd is None
         assert helper.poll() is not None
-        assert captured['body']['max_output_tokens']==16384
+        assert captured['body']['max_output_tokens']==65536
         replacement=broker._Quota(channel.home.parent.parent/'turn.model-budget.json','turn',deployment.limits.output_bytes)
         try:assert replacement.value['requests']==1
         finally:replacement.close()

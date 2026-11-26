@@ -32,6 +32,7 @@ from .transport import Transport, decode
 
 FRAME = 4 * 1024 * 1024
 REQUESTS = 10000
+MAX_OUTPUT_TOKENS = 65536
 OPTION_FIELDS = {'provider', 'model', 'reasoningEffort', 'messages', 'system', 'tools',
                  'toolHistory', 'temperature', 'maxTokens', 'stop', 'sessionId', 'purpose'}
 
@@ -70,7 +71,7 @@ def validate_options(value, config, *, resolve=False):
     if 'system' in value and type(value['system']) is not str: reject('Invalid model system input')
     if 'tools' in value and (type(value['tools']) is not list or len(value['tools']) > 128):
         reject('Model tool declaration count exceeds budget')
-    if 'maxTokens' in value and (type(value['maxTokens']) is not int or not 1 <= value['maxTokens'] <= 16384):
+    if 'maxTokens' in value and (type(value['maxTokens']) is not int or not 1 <= value['maxTokens'] <= MAX_OUTPUT_TOKENS):
         reject('Model output token request exceeds budget')
     if value.get('reasoningEffort', config.get('effort', 'high')) != config.get('effort', 'high'):
         reject('Model reasoning effort cannot change within a development task')
@@ -94,7 +95,7 @@ def validate_options(value, config, *, resolve=False):
         for block in message['content']:
             if type(block) is not dict or block.get('type') not in {'text','reasoning','tool-call','tool-addition','tool-removal'}:
                 reject('Unsupported model content block')
-    return dict(value, reasoningEffort=config.get('effort', 'high'), maxTokens=value.get('maxTokens', 16384))
+    return dict(value, reasoningEffort=config.get('effort', 'high'), maxTokens=value.get('maxTokens', MAX_OUTPUT_TOKENS))
 
 
 class _Quota:
@@ -142,7 +143,7 @@ def validate_responses(value, config):
         'metadata','prompt_cache_key','prompt_cache_retention','service_tier','stream_options','safety_identifier','user'}
     if type(value) is not dict or value.keys() - fields or value.get('model') != config['model']:
         reject('Model route or request fields differ')
-    if 'max_output_tokens' in value and (type(value['max_output_tokens']) is not int or not 1 <= value['max_output_tokens'] <= 16384):
+    if 'max_output_tokens' in value and (type(value['max_output_tokens']) is not int or not 1 <= value['max_output_tokens'] <= MAX_OUTPUT_TOKENS):
         reject('Model output token request exceeds budget')
     data = value.get('input')
     if not isinstance(data, (str,list)) or isinstance(data,list) and len(data) > 2048:
@@ -185,7 +186,7 @@ def validate_responses(value, config):
                 reject('Hosted model tools are not enabled')
             local_tools(tool['tools'])
     local_tools(declared)
-    return dict(value, store=False, max_output_tokens=value.get('max_output_tokens',16384))
+    return dict(value, store=False, max_output_tokens=value.get('max_output_tokens', MAX_OUTPUT_TOKENS))
 
 
 class ModelBroker:
@@ -356,7 +357,7 @@ class ModelBroker:
                            lambda chunk: self._send(client, dict(value=chunk)))
         if resolve:
             # The private CLI must plan within this channel's actual capabilities.
-            result = dict(result, inputModalities=['text'], defaultMaxTokens=min(result.get('defaultMaxTokens', 16384), 16384))
+            result = dict(result, inputModalities=['text'], defaultMaxTokens=min(result.get('defaultMaxTokens', MAX_OUTPUT_TOKENS), MAX_OUTPUT_TOKENS))
             self._send(client, dict(value=result))
         elif result != {'complete': True}: reject('Model completion receipt differs')
         self._send(client, dict(done=True))

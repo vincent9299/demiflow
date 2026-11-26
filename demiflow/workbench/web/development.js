@@ -410,15 +410,18 @@ SOFTWARE.
       close.onclick=()=>dialog.close();add.onclick=()=>{if(!field.value.trim())return;input.value+=(input.value?'\n':'')+'引用文件或目录：'+field.value.trim();input.dispatchEvent(new Event('input',{bubbles:true}));dialog.close();input.focus();};
       dialog.append(el('h2','引用文件或目录'),el('p','可以引用项目外的数据，也可以直接在对话中描述；无需预先配置。'),field,add,close);document.body.append(dialog);trackDialog(dialog);dialog.showModal();field.focus();
     }
+    function clearSubmitError(){state.submitError?.remove();state.submitError=null;}
+    function showSubmitError(err){clearSubmitError();state.submitError=error(body,err);}
     const composer=globalThis.ForgeDevelopmentComposer.create({onProviderChange:()=>availability(),onReference:addReference,
       async onQueueAction(submission_id,action){
+        clearSubmitError();
         try {
           if(action==='steer'){
             const message=state.session.queued_messages.find(row=>row.submission===submission_id);
             if(message)await steerQueued([message]);
           }else await api('dev-queue-change',{}, {session_id:state.session.id,submission_id,action});
           await refresh();
-        } catch(err){if(!state.disposed)error(body,err);}
+        } catch(err){if(!state.disposed)showSubmitError(err);}
       }});
     state.composer=composer;
     const {form,input,send,stop,providers}=composer;
@@ -448,7 +451,8 @@ SOFTWARE.
         steerGesture=(e.metaKey||e.ctrlKey)&&running(state.session)&&capabilities.message_steering===true;
         try{
           if(steerGesture&&!input.value.trim()&&state.session.queued_messages?.length&&!input.disabled){
-            steerQueued(state.session.queued_messages).catch(err=>{if(!state.disposed)error(body,err);}).finally(refresh);
+            clearSubmitError();
+            steerQueued(state.session.queued_messages).catch(err=>{if(!state.disposed)showSubmitError(err);}).finally(refresh);
           }else form.requestSubmit();
         }finally{steerGesture=false;}
       }}if(e.key==='Escape'&&!stop.disabled)stop.click();};
@@ -592,9 +596,10 @@ SOFTWARE.
       const queue=running(state.session)||!!state.session?.queued_messages?.length;
       const submission=state.submission||{text:message,id:uid(),after:queue?state.session.turn.id:null,steer:steerGesture};
       if(submission.text!==message){
-        error(body,new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;
+        showSubmitError(new Error('上次发送结果未确认，请先核对记录后再编辑要求。'));return;
       }
       const returnFocus=submission.after && (document.activeElement===input || document.activeElement===send);
+      clearSubmitError();
       state.submission=submission;state.sending=true;availability();
       try{
         if(!state.session){
@@ -608,6 +613,7 @@ SOFTWARE.
         else started=await api('dev-turn-start',{}, {...payload,expected_revision:state.session.revision,
           ...(capabilities.backend!=='existing_http'?{auto_review:composer.autoReview}:{})});
         state.submission=null;
+        clearSubmitError();
         if(drafts.get(draftKey)===message&&(draftRevisions.get(draftKey)||0)===sentDraftRevision){
           drafts.delete(draftKey);draftRevisions.delete(draftKey);saveDrafts(true);
         }
@@ -622,7 +628,7 @@ SOFTWARE.
         else{const inflight=!!state.refreshing;await refresh();if(inflight&&!state.disposed)await refresh();}
       }catch(err){
         if(err.operationStarted===false||['invalid_request','conflict','resource_limit','forbidden'].includes(err.code))state.submission=null;
-        if(!state.disposed){error(body,err);await refresh().catch(()=>{});}
+        if(!state.disposed){showSubmitError(err);await refresh().catch(()=>{});}
       }
       finally{
         state.sending=false;
@@ -632,7 +638,7 @@ SOFTWARE.
         }
       }
     };
-    stop.onclick=async()=>{stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){error(body,e);stop.disabled=false;}};
+    stop.onclick=async()=>{clearSubmitError();stop.disabled=true;try{await api('dev-cancel',{}, {session_id:state.session.id,turn_id:state.session.turn.id,request_id:uid()});status.textContent='已请求停止，等待所属工具清理。';}catch(e){showSubmitError(e);stop.disabled=false;}};
     function clearTimeline(){state.feedEpoch=(state.feedEpoch||0)+1;state.renderedEvents=[];chat.reset();newContent.hidden=true;}
     function recordRenderedEvent(event){
       if(!state.renderedEvents)state.renderedEvents=[];
@@ -717,6 +723,8 @@ SOFTWARE.
       flushDrafts();
       const nav=++state.navigationEpoch;
       clearTimeout(state.timer);
+      clearSubmitError();
+      state.connectionError?.remove();state.connectionError=null;
       pendingHost.replaceChildren();state.pending.clear();
       state.historyOnly=false;state.displaySession=null;latest.hidden=true;earlier.hidden=true;
       state.submission=null;state.creation=null;state.createdHere=false;

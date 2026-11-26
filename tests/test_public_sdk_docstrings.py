@@ -141,6 +141,10 @@ def test_training_contract_docstrings_and_api_source_excerpt():
     assert 'save_steps' in recipe_row['source_excerpt']
     assert '```python' in api_markdown([recipe_row])
 
+    pred_row = select_apis(reference, api='demiflow.data:PredictorSpec')[0]
+    assert 'model["snapshot"]' in pred_row['documentation']
+    assert 'model["step"]' in pred_row['documentation']
+
     legacy_row = select_apis(reference, api='demiflow.objects:ObjectRef')[0]
     assert 'class ObjectRef' in legacy_row.get('source_excerpt', '')
 

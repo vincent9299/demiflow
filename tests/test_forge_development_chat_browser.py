@@ -574,3 +574,57 @@ def test_late_capabilities_disposal_preserves_new_mount_layout(chat_page):
     assert page.evaluate('ForgeDevelopment.activeCount()')==1
     page.evaluate('currentHandle.dispose();lifecycleMain.remove()')
     assert page.evaluate('ForgeDevelopment.activeCount()')==0
+
+
+def test_submit_error_banner_replaces_and_clears_on_subsequent_send(chat_page):
+    from playwright.sync_api import expect
+    page=chat_page
+    page.evaluate('''async () => {
+      window.errMain=document.createElement('main');errMain.id='err-banner-fixture';document.body.append(errMain);
+      const sid='d'+'b'.repeat(32);
+      const session={id:sid,writable:true,provider:'fixture',revision:1,sequence:0,turn:null,pending:[]};
+      window.startAttempts=0;
+      const api=async (name, q, body)=>{
+        if(name==='dev-capabilities')return {enabled:true,start:true,multiple_conversations:true,providers:[{id:'fixture',model:'Fixture',available:true}]};
+        if(name==='dev-conversation')return {session};
+        if(name==='dev-session')return session;
+        if(name==='dev-sessions')return {sessions:[session],next_offset:null,writer_busy:false,active_session_id:null};
+        if(name==='dev-project-turns')return {turns:[],next_offset:null};
+        if(name==='dev-events')return {events:[],next_sequence:0,last_sequence:0};
+        if(name==='dev-turn-start'){
+          window.startAttempts++;
+          if(window.startAttempts<=2){
+            const err=new Error('Private state scan exceeded entry/time budget #'+window.startAttempts);
+            err.code='resource_limit';
+            err.operationStarted=false;
+            throw err;
+          }
+          session.turn={id:'t1',state:'running',cleanup:'pending',operation:'message'};
+          return session.turn;
+        }
+        throw new Error('Unexpected route '+name);
+      };
+      const showErr=(parent, err)=>{
+        const box=document.createElement('div');box.className='error-box';box.setAttribute('role','alert');
+        box.textContent=err.message||String(err);parent.append(box);return box;
+      };
+      window.errHandle=await ForgeDevelopment.mount({main:errMain,workspaceId:'err-proj',view:{kind:'development_session',session_id:sid},
+        api,disposeReaders(){},openSession(){},error:showErr,register(){}});
+    }''')
+    box=page.locator('#err-banner-fixture .dc-input')
+    send=page.locator('#err-banner-fixture .dc-send')
+    alerts=page.locator('#err-banner-fixture .error-box')
+    box.fill('retry message')
+    send.click()
+    expect(alerts).to_have_count(1)
+    expect(alerts).to_contain_text('Private state scan exceeded entry/time budget #1')
+    # Second failure replaces the previous banner instead of stacking duplicates.
+    send.click()
+    expect(alerts).to_have_count(1)
+    expect(alerts).to_contain_text('Private state scan exceeded entry/time budget #2')
+    # Third attempt succeeds: stale red error banner clears immediately.
+    send.click()
+    expect(alerts).to_have_count(0)
+    assert page.evaluate('window.startAttempts')==3
+    page.evaluate('errHandle.dispose();errMain.remove()')
+    assert page.evaluate('ForgeDevelopment.activeCount()')==0

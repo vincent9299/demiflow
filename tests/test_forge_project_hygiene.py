@@ -427,3 +427,33 @@ def test_single_entry_and_path_checks_enforce_df02_import_boundaries(tmp_path):
     )
     clean_report = check_project(root, entry='flows/main.py:run', params='configs/main.json')
     assert clean_report['status'] == 'passed'
+
+
+def test_incremental_paths_check_ignores_filtered_benign_diagnostics_on_unrelated_flows(tmp_path):
+    """Unrelated flows whose only diagnostics are filtered by _keep_diagnostic must not emit false FL-10."""
+    from demiflow.forge import pipeline_check, project
+    root = tmp_path / 'inc_fl10_proj'
+    initialize_project(root, name='inc_fl10_proj')
+    (root / 'flows').mkdir(exist_ok=True)
+    (root / 'configs').mkdir(exist_ok=True)
+    (root / 'flows' / 'changed.py').write_text(
+        'from demiflow import data\n'
+        'def run():\n'
+        '    return data.from_items([{"v": 1}]).count()\n',
+        encoding='utf-8',
+    )
+    (root / 'flows' / 'unrelated.py').write_text(
+        'from demiflow import data\n'
+        'def run(approved: bool = False):\n'
+        '    data.require(approved, "requires approval")\n'
+        '    return data.from_items([{"v": 2}]).count()\n',
+        encoding='utf-8',
+    )
+    (root / 'configs' / 'changed.json').write_text('{}\n', encoding='utf-8')
+    (root / 'configs' / 'unrelated.json').write_text('{"approved": false}\n', encoding='utf-8')
+    project.register_flow(root, 'flows/changed.py:run', params='configs/changed.json')
+    project.register_flow(root, 'flows/unrelated.py:run', params='configs/unrelated.json')
+
+    report = pipeline_check.check_project(root, paths=['flows/changed.py'], include_hygiene=True)
+    assert report['status'] == 'passed', report
+    assert not any(d['rule'] == 'FL-10' and d['path'] == 'flows/unrelated.py' for d in report['diagnostics'])
