@@ -19,7 +19,7 @@ import uuid
 
 from demiflow import data
 from demiflow.collect import FetchPolicy, HttpSource, Secret
-from demiflow.execution.run_context import RunContext
+from demiflow.execution import RunContext
 from demiflow.objects import LocalObjectStore
 from demiflow.queue import QueueChannel, QueueConfig, QueueLimits, QueueResultSink, ProducerSourceSpec, HistoryReadLimits, task_message
 

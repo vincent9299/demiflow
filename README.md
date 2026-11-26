@@ -247,7 +247,8 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | Agent operators: multi-turn tool use within a row | [docs/en/agents.md](docs/en/agents.md) |
 | Joins, grouping and sorting | [docs/en/relational.md](docs/en/relational.md) |
 | Embeddings, vector index and vector search | [docs/en/vectors.md](docs/en/vectors.md) |
-| Fetch, queues and acquisition | [docs/dataset-fetch.md](docs/dataset-fetch.md) |
+| Web search | [docs/en/web-search.md](docs/en/web-search.md) |
+| Fetching, queues and documents | [docs/en/fetch.md](docs/en/fetch.md) |
 | Writing Lance tables and partial-column merge | [docs/en/lance-write.md](docs/en/lance-write.md) |
 | Training and evaluation | [docs/en/dataset-training.md](docs/en/dataset-training.md) |
 | Workbench and Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/en/forge-cli.md](docs/en/forge-cli.md) |

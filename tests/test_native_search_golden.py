@@ -86,7 +86,7 @@ def test_request_building_matches_recorded_reference():
     assert result.returncode == 0, result.stderr
     actual = json.loads(result.stdout)
     def normalize(value):
-        # Error entries compare by message: exception classes were renamed (see native-search.md).
+        # Error entries compare by message: exception classes were renamed (see docs/web-search.md).
         if isinstance(value, dict) and set(value) == {'error'}:
             return {'error': value['error'].split(': ', 1)[-1]}
         return json.loads(re.sub(r'tgp=\d', 'tgp=N', json.dumps(value, sort_keys=True)))

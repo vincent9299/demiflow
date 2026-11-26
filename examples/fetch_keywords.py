@@ -2,7 +2,7 @@
 from demiflow import data
 from demiflow.collect import SearchConfig
 from demiflow.collect.session import WebSession
-from demiflow.execution.run_context import RunContext
+from demiflow.execution import RunContext
 from demiflow.queue import ProducerSourceSpec
 from fetch_source_common import fixture,request_messages,finish,RUN_LIMITS
 

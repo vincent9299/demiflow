@@ -1,6 +1,6 @@
 """Run: python -B examples/fetch_manifest.py [--explicit] [--workdir NEW_DIR]."""
 from demiflow import data
-from demiflow.execution.run_context import RunContext
+from demiflow.execution import RunContext
 from fetch_source_common import fixture,fixed_producer,request_messages,finish,RUN_LIMITS
 
 

@@ -30,7 +30,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).parent / 'native_search_fixtures'
-# Adapter variants whose outcome differs from the previous runtime on purpose (docs/native-search.md).
+# Adapter variants whose outcome differs from the previous runtime on purpose (docs/web-search.md).
 DIFFERENT_BY_DESIGN = {
     'xldicttype': 'only online and offline adapters are supported',
     'xlaboutbad': 'unknown keys in about are accepted',
