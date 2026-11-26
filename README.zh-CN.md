@@ -254,7 +254,8 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | Agent 算子：行内多轮调用工具 | [docs/agents.md](docs/agents.md) |
 | 关联、分组与排序 | [docs/relational.md](docs/relational.md) |
 | 向量编码、建索引与检索 | [docs/vectors.md](docs/vectors.md) |
-| 抓取、队列与数据获取 | [docs/dataset-fetch.md](docs/dataset-fetch.md) |
+| 网页检索 | [docs/web-search.md](docs/web-search.md) |
+| 获取、队列与文档 | [docs/fetch.md](docs/fetch.md) |
 | 写入 Lance 表与部分列合并 | [docs/lance-write.md](docs/lance-write.md) |
 | 训练与评测 | [docs/dataset-training.md](docs/dataset-training.md) |
 | Workbench 与 Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/forge-cli.md](docs/forge-cli.md) |

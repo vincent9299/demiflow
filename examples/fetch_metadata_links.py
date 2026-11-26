@@ -2,7 +2,7 @@
 import json
 from demiflow import data
 from demiflow.collect import FetchPolicy,HttpSource
-from demiflow.execution.run_context import RunContext
+from demiflow.execution import RunContext
 from demiflow.objects import LocalObjectStore,ObjectRef
 from fetch_source_common import fixture,fixed_producer,request_messages,finish,RUN_LIMITS
 
