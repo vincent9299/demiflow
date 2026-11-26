@@ -168,15 +168,6 @@
 - **依据。** 2026-11-25 `tests/test_operator_foundation_runs.py::test_managed_model_results_evidence_and_read_only_access`，打印了引用和清单；至迟 11-22 起失败。同文件的取消测试原先打开 `evidence/calls.sqlite`，已改为读 `run.sqlite`。
 - **建议。** 工作台把运行自己的调用记录作为有界证据读取（按引用核对属于本次运行），或由运行在清单中声明它；修好后该测试应通过。
 
-### T-033 封存指纹取决于进程里已加载的模块：函数体内延迟导入同级模块时，worker 误判"代码已改"
-
-- **现象。** 自 `31c779c6`（main-20261125-20，合入 `eafb549a`）起，封存业务依赖时会读取源码里的绝对 `import`，并且只在该模块已被本进程加载（`sys.modules`）时才计入依赖（`execution/seal/business_sources.py::_ast_import_dependencies`）。驱动进程与 worker 进程加载过的模块不同，两边算出的依赖集合就不同，worker 加载程序时报 `INVALID_CONTRACT: Loaded program code differs from the sealed pin (edited code or wrong module)`，代码并没有改。
-- **依据（不经过 pytest 的用户写法，2026-11-25）。** 业务函数体内 `import biz_extra`，驱动进程此前已导入过 `biz_extra`：进程 worker 下，`40c0034a`（改动前）正常，最新 main `c00afcb3` 失败；驱动进程没有提前导入时，前后都正常。
-- **同一改动修好了更大的真实问题，不要回退。** 使用相对导入的业务包（顶层 `from ._consts import X`、函数体内 `from . import _lazy`）在 `40c0034a` 上用进程 worker 运行 map、map+reduce、运行内 materialize 全部以 `CORRUPT_ARTIFACT` 加载失败，改动后全部通过。
-- **对测试的影响。** `tests/test_runtime_v3_graph_adapter.py` 与 `tests/test_runtime_v3_route_recovery.py` 合计 25 个，改动前 23 过 2 败，改动后 23 败 2 过；`tests/test_runtime_v3_reducer_values.py::test_reducer_value_limits_reject_without_committed_output` 2 个由通过变为失败；`tests/test_runtime_v3_thread_host.py` 整文件运行时有 4 个同样报错（只挑这 4 个用例单独运行则通过）；多个文件同会话运行时还有更多测试出现同一报错。都是同一机制：场景模块在函数体内导入了其他测试模块，pytest 进程早已加载它们，worker 没有。
-- **建议。** 绝对导入的依赖不要按"本进程是否已加载"来确定：改为与相对导入一样按文件系统解析，或只在封存时确定依赖并写入清单，worker 按清单核对而不重新发现。修好后上述测试和用户写法的复现都应通过。
-- **更正。** 本条 11-25 首次发布（main-20261125-37）时写的是"修复或回退"，并把影响描述为路由图与恢复程序被拒绝加载；当时只有测试证据。经独立脚本核实后改为以上内容。
-
 ### T-031 向量检索的资源统计缺失
 
 - **现象。** `docs/vector_search.md` 写明 `stats.metrics['resources']['VectorSearch:0']` 记录实际版本、查询数和命中数；v3 的 `run_stream()` 统计里没有 `resources` 这一项。
@@ -220,6 +211,10 @@
 ### T-024 强杀后续跑偶尔打不开运行记录库
 
 已修（2026-11-25，用户同意改平台）。原因不是原先推测的 WAL：运行记录库用的是 SQLite 默认的回滚日志，写进程在事务中途被 SIGKILL 会留下未回滚的 `run.sqlite-journal`；下一次打开必须先回滚它，而回滚需要写权限，只读连接被拒绝（`SQLITE_READONLY_ROLLBACK`，报文 "attempt to write a readonly database"）。只有强杀落在事务中途才出现，所以是偶发。用纯 SQLite 脚本 5 次全部复现。修复：`RunJournal` 的只读打开遇到这一错误时，先用可写连接读一次（SQLite 随即回滚，不写任何表或行），再重新只读打开；无法以可写方式打开时抛出原错误。写进程仍存活时不会走到这一步（实测读者得到 `SQLITE_BUSY`，写进程随后正常提交 4000 行）。`execution/journal/run_reader.py` 等约定"什么都不写"的历史读取入口不变。新增 `tests/test_run_journal_connections.py::test_reader_opens_after_a_writer_was_killed_inside_a_transaction`（不改引擎时以该错误失败）；`tests/test_queue_v2_crash.py::test_sigkill_and_native_recovery[sqlite-True-claimed]` 修复后连跑 10 次全过。提交 `572d58d0`。
+
+### T-033 封存指纹取决于进程里已加载的模块：函数体内延迟导入同级模块时，worker 误判"代码已改"
+
+已修（2026-11-26，用户同意改平台）。函数体内的绝对导入不再算作静态依赖：它在函数被调用时才执行，封存进程是否恰好加载过那个模块，不应该改变指纹。相对导入仍按文件系统解析（包内延迟导入的同级模块照样随包分发），模块导入时就会执行的绝对导入仍按已加载计入。做法是这样选的：按文件系统把函数体内的绝对导入也算进去会更"全"，但会改变所有常见用法（驱动端没加载过该模块）下已封存运行的指纹，旧运行就续不了；现在的做法在常见用法下指纹不变。`eafb549a` 到本次之间封存、且清单里列了"当时已加载的延迟导入模块"的运行，核对时再按旧的发现规则算一次，原来能续的仍能续，被列入的模块若被改动仍会拒绝。实测（行函数体内 `import` 同级模块，驱动端提前导入与否 × 启动与续跑）：改前进程 worker 4 种组合通 1 种、线程 worker 通 2 种，改后 8 种全通；旧代码封存、新代码续跑没有任何一种变差。验收范围内原本失败的 61 个测试通过。`tests/test_runtime_v3_graph_adapter.py` 有 2 个测试原来被这个误判盖住，现在露出各自原有的失败（`test_mixed_residency_waits_for_memory_peer_but_rejects_durable_expansion[True]` 没有抛出预期的拒绝；`test_source_credit_pause_drains_pending_memory_before_original_cut` 没有出现在途内存数据），未分析。
 
 ### T-030 向量检索的输入错误跨 worker 后变成 `INTERNAL_PROTOCOL`
 
