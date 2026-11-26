@@ -433,3 +433,16 @@ def test_private_state_sampling_tolerates_owned_cleanup_without_losing_retained_
     monkeypatch.setattr(common.os, 'scandir', eager_scan)
     assert common.directory_bytes(home) >= retained.stat().st_size
     assert retained.read_bytes() == b'x' * 65536
+
+
+def test_private_directory_bytes_respects_caller_deadline_past_two_seconds(tmp_path, monkeypatch):
+    from demiflow.workbench.conversations import common
+    home = tmp_path / 'session-a'
+    home.mkdir()
+    (home / 'f1').write_bytes(b'abc')
+    (home / 'f2').write_bytes(b'def')
+    # Simulate a slow cold filesystem scan that takes 3.5s (> old 2s clamp, < 10s budget).
+    ticks = iter([100.0, 100.0, 103.5, 103.5, 103.5, 103.5, 103.5, 103.5])
+    monkeypatch.setattr(common.time, 'monotonic', lambda: next(ticks, 103.5))
+    size = common.directory_bytes(home, deadline=115.0)
+    assert size >= 6

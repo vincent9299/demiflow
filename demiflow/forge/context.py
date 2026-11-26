@@ -406,7 +406,6 @@ def render_context(result):
 
     def append_sdk(full=False):
         if full:
-            rows.append('\n' + api_markdown(sdk['apis']))
             flow_summaries = sdk.get('flow_api_summaries') or []
             if flow_summaries:
                 rows.append('\n### 其余实时发现的原生流程 API 速览（按需执行 `demiflow forge context --root . --api <模块>:<符号>` 查完整契约、参数/返回值说明与源码文档）')
@@ -414,6 +413,7 @@ def render_context(result):
                     role = f" ({item['role']})" if item.get('role') else ''
                     summary = f"：{item['summary']}" if item.get('summary') else ''
                     rows.append(f"- `{item['id']}`{role}{summary}")
+            rows.append('\n' + api_markdown(sdk['apis']))
             sym_index = sdk.get('symbol_index') or {}
             if sym_index:
                 rows.append('\n### 其余已实时发现的公开 SDK 符号（按需执行 `demiflow forge context --root . --api <模块>:<符号>` 查完整契约、参数/返回值说明与源码文档）')

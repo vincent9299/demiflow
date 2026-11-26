@@ -399,7 +399,8 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             # closure is evidence of independence, not another flow under review.
             if (paths and path not in relevant and param not in relevant
                     and 'workspace.json' not in relevant and dependencies.isdisjoint(relevant)):
-                if report['status'] != 'checked':
+                kept_unrelated_diags = [d for d in report['diagnostics'] if _keep_diagnostic(d)]
+                if report['status'] != 'checked' and (report['status'] != 'incomplete' or kept_unrelated_diags):
                     native.append(diagnostic('FL-10', path, '入口依赖未能完整解析，与变更的关系待核实。',
                                              status='incomplete'))
                 continue

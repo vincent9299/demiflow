@@ -180,6 +180,8 @@ def test_sdk_topic_dynamically_discovers_flow_apis_and_expands_project_used_symb
     empty_text = render_context(empty_ctx)
     assert '其余实时发现的原生流程 API 速览' in empty_text
     assert 'demiflow.data:ModelSelection.predict' in empty_text
+    # Table-of-contents summary must precede long full API bodies so head-N reads see all native flow APIs.
+    assert empty_text.index('其余实时发现的原生流程 API 速览') < empty_text.index('## 当前版本 DemiFlow 原生 API')
 
     # 2. In a project referencing non-essential public APIs across domains, --topic sdk
     #    dynamically expands their live docs (while respecting exclude boundaries).

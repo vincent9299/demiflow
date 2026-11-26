@@ -168,6 +168,10 @@ class PredictorSpec:
 
     The worker instantiates ``factory(model=..., inputs=..., parameters=...)`` with its
     sealed model binding and runs batched inference over the target Dataset.
+    ``model`` is a plain mapping with ``model["step"]`` (int), ``model["predictor_digest"]``,
+    and ``model["snapshot"]`` containing ``"step"``, ``"model_format"``, and
+    ``"files": {logical_name: {"uri": "file://...", "sha256": str, "size_bytes": int}}``
+    pointing to the sealed files in the managed model store.
 
     Fields:
         factory: Batch actor class whose constructor accepts ``(model, inputs, parameters)``.

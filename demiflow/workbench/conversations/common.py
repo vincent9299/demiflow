@@ -144,12 +144,12 @@ def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2, exclude=())
     return result
 
 
-def directory_bytes(root, *, entries=16384, deadline=None):
+def directory_bytes(root, *, entries=65536, deadline=None):
     # Include directory blocks and small-file allocation overhead. Logical size
     # alone undercounts retained provider state; sparse files still reserve their
     # logical size here because later writes can allocate their holes.
     now = time.monotonic()
-    deadline = min(deadline, now + 2) if deadline is not None else now + 2
+    deadline = deadline if deadline is not None else now + 10
     if now > deadline:
         reject('Private state scan exceeded entry/time budget', 'resource_limit')
     try:
@@ -194,7 +194,7 @@ def private_directory_bytes(root, *, entries):
     histories. Every worker shares the same overall deadline.
     """
     directories = []
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + 15
     with os.scandir(root) as children:
         for count, child in enumerate(children):
             if count > entries or time.monotonic() > deadline:
@@ -209,5 +209,5 @@ def private_directory_bytes(root, *, entries):
 
     if len(directories) < 2:
         return dict(map(scan, directories))
-    with ThreadPoolExecutor(max_workers=4) as workers:
+    with ThreadPoolExecutor(max_workers=min(8, len(directories))) as workers:
         return dict(workers.map(scan, directories))

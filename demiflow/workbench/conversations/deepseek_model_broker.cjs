@@ -31,7 +31,7 @@ exports.apply=function(ctx,config) {
     if(method==='model/resolve')return ctx.llm.resolveModelInfo(config.provider,config.model,active.signal);
     if(method!=='model/stream')throw new Error('Unsupported model method');
     const options={...params,provider:config.provider,model:config.model,
-      reasoningEffort:config.reasoningEffort,maxTokens:Math.min(params.maxTokens||16384,16384),signal:active.signal};
+      reasoningEffort:config.reasoningEffort,maxTokens:Math.min(params.maxTokens||65536,65536),signal:active.signal};
     let finished=false,pending=null,lastSent=0;
     async function flushPending() {
       if(!pending)return;
