@@ -1,4 +1,5 @@
 """Fixed model channel protocol and shared-turn quotas, without real model calls."""
+from demiflow.forge.bridge import model_channel as channel_module
 import json
 from pathlib import Path
 import shutil
@@ -24,7 +25,7 @@ def options():
 def native(tmp_path, monkeypatch):
     node = shutil.which('node')
     if not node: pytest.skip('Node is needed for the native-service protocol fixture')
-    plugin = Path(broker.__file__).with_name('deepseek_model_broker.cjs')
+    plugin = channel_module.plugin_path('deepseek_model_broker.cjs')
     driver = tmp_path/'llm.cjs'
     driver.write_text('''
 const plugin=require(process.argv[2]);
@@ -37,7 +38,7 @@ plugin.apply({effect(){},llm:{
  }
 }}, {provider:'fixture',model:'fixture-model',reasoningEffort:'high'});
 ''')
-    monkeypatch.setattr(broker, 'capabilities', lambda *_:dict(available=True))
+    monkeypatch.setattr(channel_module, 'capabilities', lambda *_:dict(available=True))
     def launch(config, home, root):
         assert config['_model_broker'] is True
         return [node,str(driver),str(plugin)], dict(PATH='/usr/bin:/bin',HOME=str(home))
@@ -108,7 +109,7 @@ def test_wrong_token_cannot_dispatch_and_valid_next_request_still_works(native):
 
 
 def test_repair_epoch_cannot_reset_root_turn_request_allowance(native, monkeypatch):
-    monkeypatch.setattr(broker,'REQUESTS',1)
+    monkeypatch.setattr(channel_module,'REQUESTS',1)
     first=native('one')
     try: assert exchange(first,'stream',options())[-1] == {'done':True}
     finally: first.close()
@@ -120,7 +121,7 @@ def test_repair_epoch_cannot_reset_root_turn_request_allowance(native, monkeypat
 
 
 def test_new_feedback_turn_and_warm_handoff_keep_original_quota(native, monkeypatch):
-    monkeypatch.setattr(broker, 'REQUESTS', 1)
+    monkeypatch.setattr(channel_module, 'REQUESTS', 1)
     first = native('author', turn_id='original')
     try:
         assert exchange(first, 'stream', options())[-1] == {'done': True}
@@ -139,16 +140,16 @@ def test_new_feedback_turn_and_warm_handoff_keep_original_quota(native, monkeypa
 
 
 def test_quota_rejects_overlapping_owner_corruption_and_alias(tmp_path):
-    path=tmp_path/'quota'; first=broker._Quota(path,'turn',65536)
+    path=tmp_path/'quota'; first=channel_module._Quota(path,'turn',65536)
     try:
-        with pytest.raises(BlockingIOError): broker._Quota(path,'turn',65536)
+        with pytest.raises(BlockingIOError): channel_module._Quota(path,'turn',65536)
         first.charge(requests=1,output=65536)
         with pytest.raises(ForgeError): first.charge(output=1)
     finally: first.close()
     path.write_text('{partial')
-    with pytest.raises(ValueError): broker._Quota(path,'turn',65536)
+    with pytest.raises(ValueError): channel_module._Quota(path,'turn',65536)
     path.unlink(); target=tmp_path/'private';target.write_text('preserved');path.symlink_to(target)
-    with pytest.raises(OSError): broker._Quota(path,'turn',65536)
+    with pytest.raises(OSError): channel_module._Quota(path,'turn',65536)
     assert target.read_text()=='preserved'
 
 
@@ -171,11 +172,11 @@ def test_capabilities_do_not_infer_codex_app_auth(monkeypatch):
 ])
 def test_responses_rejects_remote_account_content_and_hosted_tools(update):
     with pytest.raises(ForgeError):
-        broker.validate_responses({'model':'fixture','input':'text',**update},{'model':'fixture'})
+        channel_module.validate_responses({'model':'fixture','input':'text',**update},{'model':'fixture'})
 
 
 def test_responses_text_tool_history_remains_supported_with_fixed_output_cap():
-    value=broker.validate_responses(dict(model='fixture',input=[
+    value=channel_module.validate_responses(dict(model='fixture',input=[
         {'role':'user','content':[{'type':'input_text','text':'fixture'}]},
         {'type':'function_call','call_id':'c','name':'shell','arguments':'{}'},
         {'type':'function_call_output','call_id':'c','output':'bounded fixture output'},
@@ -216,7 +217,7 @@ def test_http_cancel_drains_blocked_upstream_and_releases_quota(tmp_path,monkeyp
         assert not channel.thread.is_alive() and channel.quota.fd is None
         assert helper.poll() is not None
         assert captured['body']['max_output_tokens']==65536
-        replacement=broker._Quota(channel.home.parent.parent/'turn.model-budget.json','turn',deployment.limits.output_bytes)
+        replacement=channel_module._Quota(channel.home.parent.parent/'turn.model-budget.json','turn',deployment.limits.output_bytes)
         try:assert replacement.value['requests']==1
         finally:replacement.close()
     finally:

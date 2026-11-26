@@ -76,7 +76,7 @@ def run_operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=
     if name == 'native_submission_inspect' and _dependencies is not None:
         request.pop('bootstrap', None)
         request['dependencies'] = _dependencies
-        inspection_reads, request['table_inputs'] = _inspection_inputs(root_path, request)
+        inspection_reads, request['table_inputs'] = inspection_inputs(root_path, request['arguments'].get('parameters', {}))
     if _source_modules is not None:
         request['source_modules'] = _source_modules
     settings = limits_with({'catalog_bytes': 9 * 1024**2})
@@ -111,7 +111,7 @@ def run_operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=
     return value['value']
 
 
-def _inspection_inputs(root: Path, request: dict):
+def inspection_inputs(root: Path, parameters: dict):
     """Grant project source and exact input tables while keeping controls private."""
     from demiflow.forge import project_workspace as ws
     from demiflow.forge.project import STATE_PATH
@@ -122,9 +122,7 @@ def _inspection_inputs(root: Path, request: dict):
     from demiflow.forge.table_bindings import make_resolver
 
     _, workspace = ws.load_workspace_control(root)
-    supplied = request['arguments']
     paths = {root / 'workspace.json', root / STATE_PATH, ws.relative_path(root, workspace['platform']['path'])}
-    parameters = supplied.get('parameters', {})
     fixed_inputs = {}
     allowed = set(ROLE_DIRS) | {'tables', 'configs', 'parameters', 'lib', 'src', 'data'}
     with os.scandir(root) as entries:

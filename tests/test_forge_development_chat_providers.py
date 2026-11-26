@@ -9,7 +9,7 @@ import pytest
 
 from demiflow.workbench.conversations.codex import Codex
 from demiflow.workbench.conversations.deepseek import DeepSeek
-from demiflow.workbench.conversations.transport import Transport
+from demiflow.forge.bridge.transport import Transport
 from demiflow.workbench.conversations.policy import Limits
 from demiflow.forge.schema import ForgeError
 

@@ -3,6 +3,7 @@
 Hosts supply truthful author completion, source observations and authorized I/O.
 This module has no knowledge of a browser, conversation database or provider RPC.
 """
+from contextlib import nullcontext
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -285,7 +286,7 @@ def receipt_summary(receipt):
 
 def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                     seconds=3600, review_seconds=REVIEW_SECONDS, resume=False, project_python=None,
-                    allowed_roots=None, denied_paths=()):
+                    allowed_roots=None, denied_paths=(), author_controls=None):
     """Drive the complete CLI engineering loop, persisting before every author send.
 
     The native author callback executes one harness interval. This function owns
@@ -380,7 +381,8 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 before = capture(root, watched, source_dir=source_dir)
                 guarded = capture_protected_files(root)
                 control_path = store.directory / ('controls-' + str(state['round']) + '.json')
-                prepare_control_writes(root, control_path, state['id'] + '-' + str(state['round']))
+                if author_controls is None:
+                    prepare_control_writes(root, control_path, state['id'] + '-' + str(state['round']))
                 state.update(phase='author_sending', before=before, watch=watched, delivery='prepared')
                 state['author']['cleanup'] = 'unknown'
                 store.save(state)
@@ -393,10 +395,14 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                         feedback_status(facts['delivery'])
                     store.save(state)
 
-                result = author(root, prompt, binding=binding, session=state['author'].get('session'),
-                                lease_fd=fd, deadline=state['deadline'], notify=notify, control_path=control_path)
+                controls = author_controls(guarded) if author_controls else nullcontext()
+                with controls as authorized_writes:
+                    result = author(root, prompt, binding=binding, session=state['author'].get('session'),
+                                    lease_fd=fd, deadline=state['deadline'], notify=notify,
+                                    control_path=None if author_controls else control_path)
+                if author_controls is None:
+                    authorized_writes = apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
                 state['author'] = result
-                authorized_writes = apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
                 state['protected_violations'] = enforce_protected_files(root, guarded, authorized=authorized_writes)
                 if not result.get('completed') or result['cleanup'] != 'complete':
                     state.update(phase='unknown' if state.get('delivery') == 'sending' else 'finished',

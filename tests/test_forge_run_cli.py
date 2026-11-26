@@ -20,6 +20,8 @@ def test_run_cli_prepares_without_execution_and_preserves_legacy(root):
     assert result.exit_code == 0
     result = runner.invoke(main, ['workbench', 'run', 'start', str(root), prepared['run_id'], '--expected', 'wrong'])
     assert result.exit_code == 1 and json.loads(result.output)['status'] == 'rejected'
-    result = runner.invoke(main, ['forge', 'run', '--help'])
+    managed = runner.invoke(main, ['forge', 'run', '--help'])
+    assert managed.exit_code == 0 and 'prepare' in managed.output
+    result = runner.invoke(main, ['run', '--help'])
     assert result.exit_code == 0 and '--config' in result.output
     assert 'prepare' not in result.output

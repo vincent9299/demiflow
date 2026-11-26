@@ -13,7 +13,7 @@ from demiflow.workbench.conversations.policy import Deployment
 from demiflow.workbench.conversations.policy import Limits
 from demiflow.workbench.conversations.service import Service
 from demiflow.workbench.conversations.store import Store
-from demiflow.workbench.conversations.transport import decode
+from demiflow.forge.bridge.transport import decode
 from demiflow.forge.schema import ForgeError
 
 

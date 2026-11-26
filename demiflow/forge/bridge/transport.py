@@ -7,8 +7,8 @@ import selectors
 import time
 
 from demiflow.agent_transport import strict_json
-from demiflow.workbench.conversations.common import reject
-from demiflow.workbench.conversations.common import wire
+from .common import reject
+from .common import wire
 
 
 def decode(raw):

@@ -11,7 +11,7 @@ import pytest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.deepseek import DeepSeek
 from demiflow.workbench.conversations.policy import Limits
-from demiflow.workbench.conversations.transport import Transport
+from demiflow.forge.bridge.transport import Transport
 from test_forge_development_chat_providers import Wire
 
 ROOT=Path(__file__).parents[1]

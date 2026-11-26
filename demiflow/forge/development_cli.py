@@ -1,5 +1,7 @@
 """Native CLI transport for Forge engineering turns, without a Workbench runtime."""
 import ctypes
+import json
+from contextlib import closing, contextmanager, nullcontext
 import fcntl
 import os
 from pathlib import Path
@@ -7,6 +9,7 @@ import selectors
 import shutil
 import signal
 import subprocess
+import sys
 import time
 
 import click
@@ -62,8 +65,52 @@ def author_command(binding, session):
     return command
 
 
+def _restricted_command(binding, session, home, channel):
+    """Build a native author command using only its private state and turn-scoped model token."""
+    env = dict(HOME=str(home), PATH=os.pathsep.join((str(Path(sys.executable).parent), '/usr/bin', '/bin')),
+               LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
+    provider = binding['provider']
+    env['CODEX_HOME' if provider == 'codex' else 'DSH_HOME'] = str(home)
+    command = author_command(binding, session)
+    if channel is None:
+        return command, env
+    config = channel.child_config
+    token = config['_boundary']['token']
+    if provider == 'codex':
+        overrides = {
+            'model': config['model'], 'model_provider': 'forge',
+            'model_providers.forge.name': 'Forge',
+            'model_providers.forge.base_url': 'http://__DEMIFLOW_MODEL_ENDPOINT__/v1',
+            'model_providers.forge.wire_api': 'responses', 'model_providers.forge.env_key': 'DEMIFLOW_MODEL_TOKEN',
+            'model_providers.forge.supports_websockets': False, 'model_providers.forge.requires_openai_auth': False,
+        }
+        command = [binding['executable']]
+        for key, value in overrides.items():
+            command.extend(('-c', key + '=' + json.dumps(value)))
+        command.extend(author_command(dict(binding, profile=None, model=None), session)[1:])
+        env['DEMIFLOW_MODEL_TOKEN'] = token
+    else:
+        from .bridge.model_channel import plugin_path
+        from .review_deepseek import _installation
+        exe, node = _installation(config)
+        route = config.get('model_provider', 'deepseek-official')
+        profile = Path(home) / 'profiles' / 'forge-author'
+        profile.mkdir(mode=0o700, parents=True, exist_ok=True)
+        manifest = {'name': 'forge-author', 'private': True, 'dsh': {'profile': {
+            'bundles': ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-headless']}}}
+        proxy = dict(id='forge-model', name=str(plugin_path('deepseek_model_proxy.cjs')), config=dict(
+            provider=route, model=config['model'], token=token, reasoningEffort=config.get('effort', 'high'),
+            requestSeconds=config['_request_seconds'], llmModule=str(exe.parents[1] / 'node_modules/@deepseek-ai/dsh-llm/lib/index.js')))
+        overlay = [dict(id='llm-deepseek', disabled=True), dict(id='llm-deepseek-account', disabled=True),
+                   dict(id='agent-default-model', config=dict(provider=route, model=config['model'])), dict(insert=[proxy])]
+        (profile / 'package.json').write_text(json.dumps(manifest))
+        (profile / 'cordis.patch.yml').write_text(json.dumps(overlay))
+        command = [str(node), str(exe), *author_command(dict(binding, profile='forge-author'), session)[1:]]
+    return command, env
+
+
 def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify, control_path=None, extra_path=None,
-                  sandbox_spec=None, control_socket=None):
+                  sandbox_spec=None, control_socket=None, channel=None):
     """Run one native interval; session creation is distinct from input acknowledgement."""
     from demiflow.resources.process_observation import UNIT_ENV, descendants, drain_owned, signal_owned
     if len(prompt.encode()) > 128 * 1024:
@@ -74,30 +121,16 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
         raise ForgeError('Cannot establish author descendant ownership', code='operation_rejected')
     if sandbox_spec is not None:
-        _forbidden = {'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH'}
-        _priority_prefixes = ('PATH', 'LANG', 'LC_', 'TERM', 'SSL_', 'REQUESTS_', 'CURL_',
-                              'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-                              'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
-                              'CODEX_', 'DSH_', 'OPENAI_', 'DEEPSEEK_', 'ANTHROPIC_', 'DEMIFLOW_')
-        env = {}
-        for k, v in os.environ.items():
-            if k in _forbidden or not isinstance(k, str) or not isinstance(v, str):
-                continue
-            if k.startswith(_priority_prefixes):
-                env[k] = v
-        for k, v in os.environ.items():
-            if len(env) >= 120:
-                break
-            if k in _forbidden or k in env or not isinstance(k, str) or not isinstance(v, str):
-                continue
-            env[k] = v
+        command, env = _restricted_command(binding, session, Path(sandbox_spec.private_home), channel)
     else:
+        command = author_command(binding, session)
         env = dict(os.environ)
+        env['CODEX_HOME' if binding['provider'] == 'codex' else 'DSH_HOME'] = binding['home']
     if extra_path:
         env['PATH'] = str(extra_path) + (os.pathsep + env['PATH'] if env.get('PATH') else '')
-    if agent_binding(binding['provider'], binding['executable'], binding['profile'], binding['model']) != binding:
+    original = {key: value for key, value in binding.items() if key != 'execution'}
+    if agent_binding(binding['provider'], binding['executable'], binding['profile'], binding['model']) != original:
         raise ForgeError('Original author configuration changed before dispatch', code='conflict')
-    env['CODEX_HOME' if binding['provider'] == 'codex' else 'DSH_HOME'] = binding['home']
     from .project_guard import CONTROL_ENV
     env.pop(CONTROL_ENV, None)
     if control_path is not None:
@@ -117,7 +150,8 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
         if sandbox_spec is not None:
             from .sandbox import launch_sandbox
             proc = launch_sandbox(
-                author_command(binding, session),
+                command,
+                model_socket=channel.socket_path if channel else None,
                 spec=sandbox_spec,
                 env=env,
                 cwd=str(root),
@@ -260,7 +294,9 @@ def register(forge, output):
                   help='Explicit project Python interpreter for live B-class package imports and A-class checks.')
     @click.option('--read-root', 'read_roots', multiple=True, type=click.Path(path_type=Path, file_okay=False),
                   help='Authorized external read directory for local_ref / vendor packages.')
-    @click.option('--mode', 'execution_mode', type=click.Choice(['restricted', 'trusted_local']), default=None,
+    @click.option('--model-config', type=click.Path(path_type=Path, dir_okay=False), envvar='DEMIFLOW_FORGE_MODEL_CONFIG',
+                  help='Host provider settings for restricted inference. Credentials stay on the host.')
+    @click.option('--mode', 'execution_mode', type=click.Choice(['restricted', 'trusted_local']), default='restricted', show_default=True,
                   help='Sandbox execution mode (restricted uses Forge Landlock/seccomp policy shared with Workbench).')
     @click.option('--timeout', type=click.IntRange(1, 7200), default=3600, show_default=True)
     @click.option('--review-timeout', type=click.IntRange(1, MAX_REVIEW_SECONDS), default=REVIEW_SECONDS, show_default=True)
@@ -268,9 +304,8 @@ def register(forge, output):
     @click.option('--status', is_flag=True, help='Read the persisted receipt without invoking an agent.')
     @click.option('--json', 'as_json', is_flag=True)
     def develop(root, state_dir, goal, agent, executable, profile, model, review, project_python, read_roots,
-                execution_mode, timeout, review_timeout, resume, status, as_json):
+                execution_mode, model_config, timeout, review_timeout, resume, status, as_json):
         """Run check/review/feedback/repair with the same native coding session."""
-        import sys
         import tempfile
         from uuid import uuid4
         from .development import run_development
@@ -293,45 +328,73 @@ def register(forge, output):
                     raise ForgeError('Select the DeepSeek model in its native profile', code='invalid_request')
                 py_str = str(project_python.absolute()) if project_python is not None else None
                 raw_read_roots = tuple(str(Path(p).resolve()) for p in read_roots)
-                effective_mode = execution_mode
-                if effective_mode is None:
-                    if (py_str or raw_read_roots) and sys.platform == 'linux' and backend_readiness().get('available'):
-                        effective_mode = 'restricted'
-                    else:
-                        effective_mode = 'trusted_local'
                 shims = None
                 bridge = None
-                priv_dir = None
                 created_empty_pyproject = False
                 try:
-                    if effective_mode == 'restricted':
+                    if execution_mode == 'restricted':
                         if not backend_readiness().get('available'):
-                            raise ForgeError('Restricted forge develop requires the Linux sandbox backend', code='operation_rejected')
+                            raise ForgeError('Restricted forge develop needs an available Linux sandbox. Configure the backend or explicitly select --mode trusted_local.', code='operation_rejected')
                         from .bridge.server import BridgeServer
-
-                        priv_dir = tempfile.TemporaryDirectory(prefix='forge-dev-home-')
-                        priv_home = Path(priv_dir.name)
-                        priv_home.chmod(0o700)
-                        denied = (Path(state_dir).resolve(),)
+                        from .bridge.model_channel import local_channel
+                        from .development_state import _private
+                        from .io import no_symlinks
+                        providers = {}
+                        if model_config is not None:
+                            value = decode_control(read_bounded(model_config.absolute(), 1024**2))
+                            if not isinstance(value, dict) or not isinstance(value.get('providers'), dict):
+                                raise ForgeError('Model settings require a providers object', code='invalid_request')
+                            providers = value['providers']
+                            if not isinstance(providers.get(agent), dict):
+                                raise ForgeError('The selected author has no host provider configuration')
+                        elif executable is None:
+                            raise ForgeError('Configure --model-config for restricted inference or supply an offline --executable')
+                        settings = providers.get(agent)
+                        if settings and (not isinstance(settings.get('model'), str) or not settings['model']
+                                         or model and model != settings['model']):
+                            raise ForgeError('Author model must match its host provider configuration')
+                        priv_home = _private(no_symlinks(state.directory.with_name(state.directory.name + '.author-home')))
+                        denied = (state.directory, Path(binding['home']).resolve())
+                        for provider_config in providers.values():
+                            if isinstance(provider_config, dict) and provider_config.get('native_credentials'):
+                                denied += (Path(provider_config['native_credentials']).resolve(),)
+                        if model_config is not None:
+                            denied += (model_config.resolve(),)
                         allowed_roots = authorized_read_roots(
                             root, read_roots=raw_read_roots, denied_paths=denied, private_home=priv_home,
                         )
+                        binding['execution'] = dict(mode='restricted', python=py_str, reads=list(allowed_roots),
+                                                    model_settings=content_digest(providers), home=str(priv_home))
                         turn_id = 'cli-' + uuid4().hex[:16]
-                        epoch = 'e-' + uuid4().hex[:12]
 
-                        class _CliActiveTurn:
+                        class ActiveTurn:
                             tid = turn_id
-                            def __init__(self, ep):
-                                self.epoch = ep
+                            def __init__(self):
+                                self.epoch = uuid4().hex
                             def require_active(self):
                                 return None
 
-                        bridge = BridgeServer(
-                            _CliActiveTurn(epoch),
-                            project_root=root,
-                            allowed_read_roots=allowed_roots,
-                            denied_paths=denied,
-                        )
+                        bridge = BridgeServer(None)
+
+                        @contextmanager
+                        def controls(snapshot):
+                            active = ActiveTurn()
+                            bridge.set_turn(active, project_root=root, protected_snapshot=snapshot,
+                                            allowed_read_roots=allowed_roots, denied_paths=denied)
+                            shims.set_control_binding(bridge.token, active.tid, active.epoch)
+                            paths = []
+                            try:
+                                yield paths
+                            finally:
+                                paths.extend(bridge.finish_turn())
+
+                        @contextmanager
+                        def model_connection(provider, config, deadline, request_seconds):
+                            owner = state.load()['id']
+                            with tempfile.TemporaryDirectory(prefix='model-', dir=state.directory) as home:
+                                with closing(local_channel(provider, config, state.directory, owner, home=home,
+                                                           deadline=deadline, request_seconds=request_seconds)) as channel:
+                                    yield channel
                         writables = _cli_writable_roots(root)
                         project_view = {
                             'root': str(Path(root).absolute()),
@@ -349,15 +412,12 @@ def register(forge, output):
                             allowed_read_roots=allowed_roots,
                             denied_paths=denied,
                         )
-                        shims.set_control_binding(bridge.token, turn_id, epoch)
                         rt_paths = default_runtime_paths(
                             executable=binding['executable'],
                             project_python=py_str,
                             extra_paths=(*shims.runtime_paths,),
                         )
                         extra_reads = list(shims.read_paths)
-                        if Path(binding['home']).exists():
-                            extra_reads.append(binding['home'])
                         pyproj = Path(root) / 'pyproject.toml'
                         had_pyproject = pyproj.exists() or pyproj.is_symlink()
                         dev_spec = build_development_sandbox_spec(
@@ -373,29 +433,31 @@ def register(forge, output):
                             phase='implementation',
                             readonly=False,
                             notebook_op=False,
-                            direct_network=True,
+                            direct_network=False,
                             seconds=min(86400, max(1, int(timeout))),
                             ensure_pyproject_placeholder=True,
                         )
                         created_empty_pyproject = (not had_pyproject) and pyproj.is_file()
 
                         def author_fn(*a, **kw):
-                            return native_author(
-                                *a, extra_path=shims.bin, sandbox_spec=dev_spec,
-                                control_socket=bridge.path, **kw,
-                            )
+                            connection = (model_connection(agent, settings, kw['deadline'], min(timeout, 3600))
+                                          if settings else nullcontext())
+                            with connection as channel:
+                                return native_author(*a, extra_path=shims.bin, sandbox_spec=dev_spec,
+                                                     control_socket=bridge.path, channel=channel, **kw)
 
                         def reviewer_fn(prompt, *, timeout=review_timeout):
-                            return run_reviewer(
-                                prompt, timeout=timeout, restricted=True,
-                                author_spec=dev_spec, denied_paths=denied,
-                            )
+                            from .review_deepseek import _local_config
+                            config = providers.get('deepseek') or _local_config()
+                            with model_connection('deepseek', config, time.time() + timeout, timeout) as channel:
+                                return run_reviewer(prompt, timeout=timeout, config=config, channel=channel, restricted=True,
+                                                    author_spec=dev_spec, denied_paths=denied)
 
                         return run_development(
                             state, goal=goal, binding=binding, author=author_fn,
                             reviewer=reviewer_fn, auto_review=review, seconds=timeout,
                             review_seconds=review_timeout, resume=resume, project_python=py_str,
-                            allowed_roots=allowed_roots, denied_paths=denied,
+                            allowed_roots=allowed_roots, denied_paths=denied, author_controls=controls,
                         )
 
                     author_fn = native_author
@@ -423,6 +485,4 @@ def register(forge, output):
                         bridge.close()
                     if shims is not None:
                         shims.close()
-                    if priv_dir is not None:
-                        priv_dir.cleanup()
         output(root, as_json, perform)
