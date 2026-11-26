@@ -28,6 +28,7 @@ from demiflow.workbench.projects import workspace as api
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects import registry as console
 from demiflow.forge.runs import operations as run_operations
+from demiflow.workbench.runs import http as run_http
 from demiflow.workbench.runs.authority import for_http as run_authority
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform_environment import read_bounded
@@ -160,6 +161,7 @@ POST_FIELDS = {
     'project-remove': ({'workspace_id', 'expected'}, set()),
     'project-permissions': ({'workspace_id', 'expected', 'run_submit', 'run_control', 'attach'}, set()),
     'project-python': ({'workspace_id', 'expected', 'python'}, set()),
+    'project-read-roots': ({'workspace_id', 'expected', 'read_roots'}, set()),
     'project-notebook-sandbox': ({'workspace_id', 'expected', 'mode'}, {'write_paths'}),
     'project-dev-network': ({'workspace_id', 'expected', 'enabled'}, set()),
     'flow-register': ({'entry'}, {'params'}),
@@ -178,8 +180,8 @@ POST_FIELDS = {
     'workflow-resume': ({'wf_run_id'}, {'from_node', 'reuse_runs'}),
     'workflow-reconcile': ({'wf_run_id'}, set()),
 }
-GET_FIELDS.update({name: spec.wire_fields() for name, spec in run_operations.HTTP_GET.items()})
-POST_FIELDS.update({name: spec.wire_fields() for name, spec in run_operations.HTTP_POST.items()})
+GET_FIELDS.update({name: route.wire_fields() for name, route in run_http.HTTP_GET.items()})
+POST_FIELDS.update({name: route.wire_fields() for name, route in run_http.HTTP_POST.items()})
 GET_FIELDS.update(development_http.GET_FIELDS)
 POST_FIELDS.update(development_http.POST_FIELDS)
 GET_FIELDS.update(analysis_http.GET_FIELDS)
@@ -588,8 +590,8 @@ class Handler(BaseHTTPRequestHandler):
         if any(len(v) != 1 or not v[0] for v in fields.values()):
             raise ForgeError('Empty or repeated query parameters', code='invalid_request')
         query = {k: v[0] for k, v in fields.items()}
-        if name in run_operations.HTTP_GET:
-            return run_operations.http_arguments(run_operations.HTTP_GET[name], query)
+        if name in run_http.HTTP_GET:
+            return run_http.http_arguments(run_http.HTTP_GET[name], query)
         _fields(query, GET_FIELDS[name])
         for key in ('offset', 'limit', 'row_id', 'attempt', 'version','points','node_offset'):
             if key in query:
@@ -631,8 +633,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(raw) != length:
             raise ForgeError('Incomplete request body', code='invalid_request')
         request = _json(raw)
-        if name in run_operations.HTTP_POST:
-            return run_operations.http_arguments(run_operations.HTTP_POST[name], request)
+        if name in run_http.HTTP_POST:
+            return run_http.http_arguments(run_http.HTTP_POST[name], request)
         _fields(request, POST_FIELDS[name])
         if name == 'plan-pipeline-source':
             from demiflow.workbench.graph.preview_snapshots import validate_basis
@@ -677,6 +679,10 @@ class Handler(BaseHTTPRequestHandler):
             if name == 'project-python' and key == 'python':
                 if value is not None and (type(value) is not str or len(value.encode()) > 2048):
                     raise ForgeError('Invalid python field', code='invalid_request')
+                continue
+            if name == 'project-read-roots' and key == 'read_roots':
+                if type(value) is not list or len(value) > 32 or any(type(v) is not str or len(v.encode()) > 2048 for v in value):
+                    raise ForgeError('Invalid read_roots field', code='invalid_request')
                 continue
             if name == 'project-notebook-sandbox' and key == 'write_paths':
                 if type(value) is not list or len(value) > 16 or any(type(v) is not str for v in value):
@@ -887,8 +893,8 @@ class Handler(BaseHTTPRequestHandler):
                     value = api.audit_status(root)
                 elif url.path == '/api/reports':
                     value = api.list_reports(root, offset=int(query.get('offset', 0)), limit=int(query.get('limit', 20)), cursor=query.get('cursor'))
-                elif name in run_operations.HTTP_GET:
-                    spec = run_operations.HTTP_GET[name]
+                elif name in run_http.HTTP_GET:
+                    spec = run_http.HTTP_GET[name]
                     value = run_operations.perform(spec.name, root,
                         authority=run_authority(self.server, self.path, root, spec.permission), **query)
                 elif url.path in {'/api/run-compare', '/api/run-source', '/api/run-evidence'}:
@@ -1009,7 +1015,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ForgeError('当前服务尚未安装可配置的本地开发代理。', code='operation_rejected')
                 with self._work(): value = self.server.development_settings.save(request)
                 self._send(value); return
-            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python','/api/project-notebook-sandbox','/api/project-dev-network'}:
+            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python','/api/project-read-roots','/api/project-notebook-sandbox','/api/project-dev-network'}:
                 if self.server.registry is None:
                     raise ForgeError('Project management requires a console registry', code='operation_rejected')
                 request = self._body(self.path.removeprefix('/api/'))
@@ -1078,14 +1084,15 @@ class Handler(BaseHTTPRequestHandler):
                                   '/api/project-permissions': console.set_permissions,
                                   '/api/project-capabilities':console.set_capabilities,
                                   '/api/project-python': console.set_python,
+                                  '/api/project-read-roots': console.set_read_roots,
                                   '/api/project-notebook-sandbox': console.set_notebook_sandbox,
                                   '/api/project-dev-network': console.set_dev_network}[self.path]
                         value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
                             if self.path=='/api/project-capabilities' else {}))
-                    if self.path in {'/api/project-python', '/api/project-dev-network'} and self.server.development_settings is not None:
+                    if self.path in {'/api/project-python', '/api/project-read-roots', '/api/project-dev-network'} and self.server.development_settings is not None:
                         with self.server.development_settings.service.lock:
                             self.server.development_settings.bindings.clear()
-                    if self.path in {'/api/project-python', '/api/project-notebook-sandbox'} and self.server.notebooks is not None:
+                    if self.path in {'/api/project-python', '/api/project-read-roots', '/api/project-notebook-sandbox'} and self.server.notebooks is not None:
                         self.server.notebooks.refresh_kernel_config(request['workspace_id'])
                 self._send(value)
                 return
@@ -1118,7 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
                 key = self.path.split('/')[3] if self.path.startswith('/api/workspaces/') else next(iter(self.server.single['projects']))
                 self._send(analysis_http.post(self.server,key,root,name,self._body(name),consumer_closed=self._consumer_closed))
                 return
-            permission=(run_operations.HTTP_POST[name].permission if name in run_operations.HTTP_POST else
+            permission=(run_http.HTTP_POST[name].permission if name in run_http.HTTP_POST else
                         'config_write' if name in {'flow-register','parameter-preview','parameters-update','flow-arguments-save','project-file-save','project-file-create'} else
                         'run_control' if name in {'run-cancel','run-reconcile','run-request-reconcile','workflow-cancel','workflow-reconcile'} else
                         'attach' if name=='run-attach' else 'run_submit')
@@ -1164,8 +1171,8 @@ class Handler(BaseHTTPRequestHandler):
                         authorize()
                         value = (parameters.preview(root, **request) if name == 'parameter-preview'
                                  else parameters.update(root, authorize=authorize, **request))
-                elif name in run_operations.HTTP_POST:
-                    spec = run_operations.HTTP_POST[name]
+                elif name in run_http.HTTP_POST:
+                    spec = run_http.HTTP_POST[name]
                     value = run_operations.perform(spec.name, root,
                         authority=run_authority(self.server, self.path, root, spec.permission), **request)
                 elif name == 'run-admission':

@@ -172,6 +172,87 @@ def current_environment(config: dict, *, check_conflicts: bool = False, probe_im
     )
 
 
+def _probe_runtime_dirs(interpreter: dict) -> list[Path]:
+    """Derive read-only Python runtime roots purely from filesystem metadata before spawning Python."""
+    dirs: set[Path] = {Path(__file__).resolve().parents[2]}
+    for key in ('prefix', 'base_prefix'):
+        raw = interpreter.get(key)
+        if raw:
+            p = Path(raw).resolve()
+            if p != Path('/') and p.exists():
+                dirs.add(p)
+    for key in ('path', 'binary'):
+        raw = interpreter.get(key)
+        if not raw:
+            continue
+        p = Path(raw)
+        if p.exists():
+            dirs.add(p.parent.resolve())
+            cand = p.parent.parent.resolve() if p.parent.name in ('bin', 'Scripts') else p.parent.resolve()
+            if cand != Path('/') and cand.exists():
+                dirs.add(cand)
+                cfg = cand / 'pyvenv.cfg'
+                if cfg.is_file() and not cfg.is_symlink():
+                    try:
+                        for line in read_bounded(cfg, 8192).decode('utf-8', errors='replace').splitlines():
+                            k, sep, v = line.partition('=')
+                            if sep and k.strip() == 'home' and v.strip():
+                                home_dir = Path(v.strip()).resolve()
+                                if home_dir.exists() and home_dir != Path('/'):
+                                    dirs.add(home_dir)
+                                    base = home_dir.parent.resolve()
+                                    if base != Path('/') and base.exists() and home_dir.name in ('bin', 'Scripts'):
+                                        dirs.add(base)
+                    except (OSError, ValueError):
+                        pass
+    for sys_dir in ('/usr', '/lib', '/lib64'):
+        p = Path(sys_dir)
+        if p.exists():
+            dirs.add(p)
+    return sorted(dirs)
+
+
+def launch_confined_probe(
+    command: list[str],
+    *,
+    interpreter: dict,
+    seconds: float = 30,
+    rss_bytes: int = 512 * 1024**2,
+    cwd,
+    env: dict[str, str],
+    stdin=None,
+):
+    """Launch a strictly read-only, network-disabled interpreter probe inside Forge's verifier sandbox."""
+    from .sandbox import SandboxSpec, launch_sandbox
+
+    if sys.platform != 'linux':
+        raise ForgeError('Confined project Python probe requires the Linux sandbox backend', code='operation_rejected')
+    cwd_path = Path(cwd).resolve()
+    home = cwd_path / 'home'
+    home.mkdir(mode=0o700, exist_ok=True)
+    runtime_dirs = _probe_runtime_dirs(interpreter)
+    spec = SandboxSpec(
+        read_paths=(str(cwd_path),),
+        traversal_paths=(),
+        write_paths=(),
+        runtime_paths=tuple(map(str, runtime_dirs)),
+        protected_paths=(),
+        denied_paths=(),
+        private_home=str(home),
+        role='verifier',
+        seconds=seconds,
+        rss_bytes=rss_bytes,
+        direct_network=False,
+    )
+    return launch_sandbox(
+        command,
+        spec=spec,
+        env={**env, 'HOME': str(home), 'TMPDIR': str(home)},
+        cwd=str(cwd_path),
+        stdin=stdin,
+    )
+
+
 def probe_environment(
     python,
     config: dict,
@@ -181,6 +262,7 @@ def probe_environment(
     strict: bool = True,
     check_conflicts: bool = True,
     probe_imports=(),
+    confined: bool | None = None,
 ) -> dict:
     """Inspect an explicitly provided project Python in a bounded isolated subprocess (no credentials)."""
     interpreter = validate_python_executable(python)
@@ -212,6 +294,19 @@ def probe_environment(
         'probe_imports': list(probe_imports or ()),
         'strict': bool(strict),
     }
+    launcher = None
+    in_sandbox = os.environ.get('DEMIFLOW_FORGE_SANDBOX_ACTIVE') == '1'
+    use_confined = False
+    if confined is True:
+        use_confined = not in_sandbox
+    elif confined is None and sys.platform == 'linux' and not in_sandbox:
+        from .sandbox import backend_readiness
+        use_confined = bool(backend_readiness().get('available'))
+    if use_confined:
+        launcher = lambda command, *, stdin, cwd, env, **_: launch_confined_probe(
+            command, interpreter=interpreter, seconds=30, rss_bytes=512 * 1024**2,
+            cwd=cwd, env=env, stdin=stdin,
+        )
     result = capture(
         [interpreter['path'], '-I', '-B', '-c', script, str(Path(__file__).resolve().parents[2])],
         body,
@@ -220,6 +315,7 @@ def probe_environment(
         input_limit=128 * 1024,
         tree_rss_limit=512 * 1024**2,
         inherit_authority=False,
+        launcher=launcher,
     )['data']
     if not identity_only:
         env_obj = result if strict else result['environment']

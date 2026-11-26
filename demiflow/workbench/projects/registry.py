@@ -438,7 +438,7 @@ def project_python_and_scope(root, *, authority=None, project=None, extra_read_r
 
 
 def project_dependencies(root, *, authority=None, project=None, python=None, verify_files=True,
-                         require_environment=False, extra_read_roots=()):
+                         require_environment=False, extra_read_roots=(), confined=None):
     """Resolve live validated project dependencies directly from pyproject.toml (no lock/approval)."""
     from demiflow.forge.dependencies import binding, declaration
     resolved_py, allowed_roots = project_python_and_scope(
@@ -456,6 +456,7 @@ def project_dependencies(root, *, authority=None, project=None, python=None, ver
         verify_files=verify_files,
         require_python=True,
         require_environment=require_environment,
+        confined=confined,
     )
 
 

@@ -400,6 +400,20 @@ OUT2=$(pytest -s tests/test_deps.py)
 echo "$OUT2" | grep -q "MYLIB_VERSION=v2"
 # Remove vendpkg via control bridge
 demiflow forge dep remove vendpkg --root . --json > /dev/null
+# Same-turn edit & save to pyproject.toml AFTER dep remove MUST still succeed (inode preserved),
+# while direct writes to packages/ and .forge/ MUST remain blocked by OS Landlock!
+python -c '
+from pathlib import Path
+cur = Path("pyproject.toml").read_text(encoding="utf-8")
+Path("pyproject.toml").write_text(cur + "\\n# post-remove edit in same turn\\n", encoding="utf-8")
+for forbidden in ("packages/after_remove.py", ".forge/after_remove.json"):
+    try:
+        Path(forbidden).write_text("bad")
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("OS did not keep blocking direct write to " + forbidden)
+'
 '''
     try:
         proc = launch_sandbox(
@@ -793,3 +807,692 @@ def run(*, digest, target):
     assert result['status'] == 'succeeded', (result, runs.logs(proj, prepared['run_id']))
     rows = lance.dataset(str(proj / 'data/scores.lance')).to_table().to_pylist()
     assert sorted((r['x'], r['decoded']) for r in rows) == [(5, 117), (5, 217)]
+
+
+# ---------------------------------------------------------------------------
+# 9. Regression tests for TOML remove surgery & external package feedback staleness
+# ---------------------------------------------------------------------------
+
+def test_dep_remove_preserves_unrelated_toml_and_handles_quoted_or_fail_closed(tmp_path):
+    import tomllib
+
+    # Case 1: [[array_of_tables]] after [tool.demiflow.packages.foo] MUST be preserved verbatim
+    p1 = tmp_path / 'case_array_table'
+    (p1 / '.forge').mkdir(parents=True)
+    _make_pkg(p1 / 'packages' / 'foo', {'__init__.py': 'X = 1\n'})
+    (p1 / 'pyproject.toml').write_text(
+        '[project]\n'
+        'name = "demo"\n'
+        'dependencies = ["numpy>=1.24"]\n\n'
+        '[tool.demiflow.packages.foo]\n'
+        'source = "vendored"\n'
+        'path = "packages/foo"\n\n'
+        '[[tool.other.items]]\n'
+        'name = "keep-1"\n\n'
+        '[[tool.other.items]]\n'
+        'name = "keep-2"\n\n'
+        '[tool.ruff]\n'
+        'line-length = 100\n',
+        encoding='utf-8',
+    )
+    res1 = deps.remove(p1, 'foo')
+    assert res1['removed_declaration'] is True and res1['removed_files'] is True
+    assert not (p1 / 'packages' / 'foo').exists()
+    parsed1 = tomllib.loads((p1 / 'pyproject.toml').read_text(encoding='utf-8'))
+    assert parsed1['project']['dependencies'] == ['numpy>=1.24']
+    assert parsed1['tool']['other']['items'] == [{'name': 'keep-1'}, {'name': 'keep-2'}]
+    assert parsed1['tool']['ruff'] == {'line-length': 100}
+    assert 'foo' not in (parsed1.get('tool', {}).get('demiflow', {}).get('packages') or {})
+
+    # Case 2: Inline table with `{`, `}`, `#` inside strings + unrelated [tool.pytest.ini_options]
+    p2 = tmp_path / 'case_braces_in_strings'
+    (p2 / '.forge').mkdir(parents=True)
+    ext_dir = _make_pkg(tmp_path / 'my#dir{v1}', {'__init__.py': 'X = 2\n'})
+    (p2 / 'pyproject.toml').write_text(
+        '[tool.demiflow.packages]\n'
+        f'foo = {{ source = "local_ref", path = "{ext_dir}" }} # comment with {{\n'
+        'bar = { source = "vendored", path = "packages/bar" }\n\n'
+        '[tool.pytest.ini_options]\n'
+        'testpaths = ["tests"]\n',
+        encoding='utf-8',
+    )
+    res2 = deps.remove(p2, 'foo')
+    assert res2['removed_declaration'] is True and res2['removed_files'] is False
+    assert (ext_dir / '__init__.py').exists()
+    parsed2 = tomllib.loads((p2 / 'pyproject.toml').read_text(encoding='utf-8'))
+    assert parsed2['tool']['demiflow']['packages'] == {'bar': {'source': 'vendored', 'path': 'packages/bar'}}
+    assert parsed2['tool']['pytest']['ini_options'] == {'testpaths': ['tests']}
+
+    # Case 3: Quoted keys, quoted table segments, dotted keys, inline packages table
+    quoted_cases = [
+        (
+            'double_quoted_key',
+            '[tool.demiflow.packages]\n'
+            '"foo" = { source = "vendored", path = "packages/foo" }\n'
+            'bar = { source = "vendored", path = "packages/bar" }\n\n'
+            '[tool.other]\n'
+            'keep = true\n',
+        ),
+        (
+            'single_quoted_key',
+            "[tool.demiflow.packages]\n"
+            "'foo' = { source = 'vendored', path = 'packages/foo' }\n"
+            "bar = { source = 'vendored', path = 'packages/bar' }\n\n"
+            "[tool.other]\n"
+            "keep = true\n",
+        ),
+        (
+            'quoted_table_header',
+            '[tool."demiflow".packages."foo"] # [comment]\n'
+            'source = "vendored"\n'
+            'path = "packages/foo"\n\n'
+            '[[tool.other.arr]]\n'
+            'keep = true\n',
+        ),
+        (
+            'dotted_key_form',
+            '[tool.demiflow.packages]\n'
+            '"foo".source = "vendored"\n'
+            '"foo".path = "packages/foo"\n'
+            'bar.source = "vendored"\n'
+            'bar.path = "packages/bar"\n\n'
+            '[tool.other]\n'
+            'keep = true\n',
+        ),
+        (
+            'inline_packages_table',
+            '[tool.demiflow]\n'
+            'packages = { "foo" = { source = "vendored", path = "packages/foo" }, bar = { source = "vendored", path = "packages/bar" } }\n\n'
+            '[tool.other]\n'
+            'keep = true\n',
+        ),
+    ]
+    for label, content in quoted_cases:
+        proj = tmp_path / f'case_{label}'
+        (proj / '.forge').mkdir(parents=True)
+        _make_pkg(proj / 'packages' / 'foo', {'__init__.py': 'V = 1\n'})
+        (proj / 'pyproject.toml').write_text(content, encoding='utf-8')
+        res = deps.remove(proj, 'foo')
+        assert res['removed_declaration'] is True, label
+        assert res['removed_files'] is True, label
+        assert not (proj / 'packages' / 'foo').exists(), label
+        parsed = tomllib.loads((proj / 'pyproject.toml').read_text(encoding='utf-8'))
+        assert 'foo' not in (parsed.get('tool', {}).get('demiflow', {}).get('packages') or {}), label
+        assert 'other' in parsed['tool'], label
+
+    # Case 4: Fail-closed when declaration is in an unsupported nested inline form:
+    # MUST raise conflict and preserve BOTH pyproject.toml AND packages/foo untouched!
+    p4 = tmp_path / 'case_fail_closed'
+    (p4 / '.forge').mkdir(parents=True)
+    _make_pkg(p4 / 'packages' / 'foo', {'__init__.py': 'KEEP = True\n'})
+    nested_raw = (
+        '[tool]\n'
+        'demiflow = { packages = { foo = { source = "vendored", path = "packages/foo" } } }\n'
+        'other = { keep = 1 }\n'
+    )
+    (p4 / 'pyproject.toml').write_text(nested_raw, encoding='utf-8')
+    with pytest.raises(ForgeError) as exc_info:
+        deps.remove(p4, 'foo')
+    assert exc_info.value.code == 'conflict'
+    assert (p4 / 'pyproject.toml').read_text(encoding='utf-8') == nested_raw
+    assert (p4 / 'packages' / 'foo' / '__init__.py').read_text(encoding='utf-8') == 'KEEP = True\n'
+
+    # Case 5: Atomic rollback when directory deletion raises OSError:
+    # BOTH pyproject.toml (same inode & original content) AND packages/foo MUST remain intact!
+    import shutil
+    p5 = tmp_path / 'case_rmtree_failure'
+    (p5 / '.forge').mkdir(parents=True)
+    _make_pkg(p5 / 'packages' / 'foo', {'__init__.py': 'INTACT = 1\n'})
+    raw5 = (
+        '[tool.demiflow.packages]\n'
+        'foo = { source = "vendored", path = "packages/foo" }\n'
+        'bar = { source = "vendored", path = "packages/bar" }\n'
+    )
+    toml5 = p5 / 'pyproject.toml'
+    toml5.write_text(raw5, encoding='utf-8')
+    inode_before = toml5.stat().st_ino
+    orig_rmtree = shutil.rmtree
+
+    def boom_rmtree(path, *a, **kw):
+        if Path(path).parent == p5 / 'packages':
+            raise OSError('simulated directory deletion I/O failure')
+        return orig_rmtree(path, *a, **kw)
+
+    monkeypatch_rmtree = pytest.MonkeyPatch()
+    monkeypatch_rmtree.setattr(deps.shutil, 'rmtree', boom_rmtree)
+    try:
+        with pytest.raises(OSError, match='simulated directory deletion'):
+            deps.remove(p5, 'foo')
+    finally:
+        monkeypatch_rmtree.undo()
+    assert toml5.read_text(encoding='utf-8') == raw5
+    assert toml5.stat().st_ino == inode_before
+    assert (p5 / 'packages' / 'foo' / '__init__.py').read_text(encoding='utf-8') == 'INTACT = 1\n'
+    assert not list((p5 / 'packages').glob('.remove-*'))
+
+
+def test_external_package_update_invalidates_review_and_queued_rework_feedback(tmp_path, monkeypatch):
+    from demiflow.forge.development import (
+        candidate_identity,
+        dependency_candidate_digest,
+        feedback_current,
+    )
+    from demiflow.forge.source_snapshot import capture
+    from demiflow.workbench.conversations.service import Service
+    from test_forge_development_runtime import combined_configuration
+
+    proj = _init_pipeline_project(tmp_path / 'proj')
+    ext = _make_pkg(tmp_path / 'ext_util', {'__init__.py': 'FACTOR = 1\n'})
+    (proj / 'pyproject.toml').write_text(
+        '[tool.demiflow.packages]\n'
+        f'ext_util = {{ source = "local_ref", path = "{ext}" }}\n',
+        encoding='utf-8',
+    )
+    (proj / 'flows/pipe.py').write_text(
+        'from ext_util import FACTOR\n'
+        'def run():\n'
+        '    return FACTOR\n',
+        encoding='utf-8',
+    )
+
+    allowed = (str(proj.resolve()), str(ext.resolve()))
+    ev = capture_evidence(proj, paths=['flows/pipe.py'], allowed_roots=allowed)
+    assert verify_evidence(proj, ev, allowed_roots=allowed) is True
+
+    watched = ['flows', 'pyproject.toml']
+    snap = capture(proj, watched, exclude=())
+    dep_dig = dependency_candidate_digest(proj, allowed_roots=allowed)
+    assert dep_dig is not None
+
+    author = {'provider': 'codex', 'session': 'sess-1'}
+    options = {
+        'origin': 'forge',
+        'author': dict(author),
+        'candidate': {
+            'watch': watched,
+            'exclude': [],
+            'digest': candidate_identity(snap),
+            'dependencies_digest': dep_dig,
+        },
+    }
+    assert feedback_current(proj, options, author, allowed_roots=allowed) is True
+
+    # Legacy candidate basis (without dependencies_digest) MUST fail closed when local_ref exists
+    legacy_options = {
+        'origin': 'forge',
+        'author': dict(author),
+        'candidate': {'watch': watched, 'exclude': [], 'digest': candidate_identity(snap)},
+    }
+    assert feedback_current(proj, legacy_options, author, allowed_roots=allowed) is False
+
+    # Now update ONLY the external local_ref package on disk (project tree stays 100% untouched!)
+    (ext / '__init__.py').write_text('FACTOR = 2\n', encoding='utf-8')
+    assert verify_evidence(proj, ev, allowed_roots=allowed) is False
+    assert feedback_current(proj, options, author, allowed_roots=allowed) is False
+
+    # Verify paired behavior via Workbench Service:
+    #   (a) When external package is UNCHANGED -> feedback_current is True and queue drainer attempts delivery.
+    #   (b) When external package is UPDATED -> review receipt & feedback_current both turn False,
+    #       Service.start rejects with conflict, and queue drainer discards stale feedback without starting a turn.
+    cfg_path, _, wid, _, _ = combined_configuration(tmp_path, proj, monkeypatch)
+    cfg_val = json.loads(cfg_path.read_text(encoding='utf-8'))
+    cfg_val['projects'][wid]['read_roots'] = [str(ext.resolve())]
+    cfg_val['projects'][wid]['writes'] = ['flows']
+    cfg_val['projects'][wid]['watch'] = watched
+    cfg_path.write_text(json.dumps(cfg_val), encoding='utf-8')
+    provider_id = next(iter(cfg_val['providers']))
+    author['provider'] = provider_id
+    options['author']['provider'] = provider_id
+
+    svc = Service(cfg_path)
+    try:
+        created = svc.create_project(wid, proj, 'req-create-1', provider_id)
+        sid = created['id']
+        with svc.store.connect(write=True) as db:
+            db.execute('UPDATE sessions SET provider_session=? WHERE id=?', ('sess-1', sid))
+        policy_hash = svc.current_hash(wid, proj)
+        forge_opts = {
+            **options,
+            'policy_hash': policy_hash,
+            'auto_review': True,
+            'round': 1,
+        }
+        fb_allowed, fb_denied = svc._feedback_scope(wid, proj)
+        assert str(ext.resolve()) in fb_allowed
+
+        # (a) Paired POSITIVE check: restore external package to v1 -> both evidence & feedback are current,
+        #     and the queue drainer invokes start_project to deliver the queued rework feedback!
+        (ext / '__init__.py').write_text('FACTOR = 1\n', encoding='utf-8')
+        assert verify_evidence(proj, ev, allowed_roots=fb_allowed, denied_paths=fb_denied) is True
+        assert feedback_current(proj, forge_opts, author, allowed_roots=fb_allowed, denied_paths=fb_denied) is True
+
+        dispatched = []
+        orig_start_project = svc.start_project
+
+        def capture_start_project(ws, r, s, sub, rev, txt, **kw):
+            dispatched.append((sub, txt, kw.get('forge_options')))
+            # Mark delivered by removing from followups so drainer exits cleanly
+            with svc.store.connect(write=True) as db:
+                db.execute('DELETE FROM followups WHERE session=? AND submission=?', (s, sub))
+            return {'status': 'captured'}
+
+        monkeypatch.setattr(svc, 'start_project', capture_start_project)
+        with svc.store.connect(write=True) as db:
+            db.execute(
+                'INSERT INTO turns(id,session,submission,body_hash,text,state,dispatch,cleanup,epoch,created,reserve,launch_phase,operation) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                ('t-origin', sid, 'sub-origin', 'h0', 'initial', 'completed', 'acknowledged', 'complete',
+                 'ep1', time.time(), 0, 'finished', 'message'),
+            )
+            db.execute(
+                'INSERT INTO followups(session,submission,origin_turn,text,forge_options) VALUES(?,?,?,?,?)',
+                (sid, 'sub-queued-fresh', 't-origin', 'fresh rework prompt', json.dumps(forge_opts)),
+            )
+        svc._watch_queue(wid, proj, sid)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not dispatched:
+            time.sleep(0.05)
+        assert len(dispatched) == 1 and dispatched[0][0] == 'sub-queued-fresh'
+
+        # (b) Paired NEGATIVE check: mutate ONLY external package (v1 -> v2) ->
+        #     review receipt is stale, feedback_current is False, Service.start rejects,
+        #     and queue drainer discards stale feedback without calling start_project!
+        (ext / '__init__.py').write_text('FACTOR = 2\n', encoding='utf-8')
+        assert verify_evidence(proj, ev, allowed_roots=fb_allowed, denied_paths=fb_denied) is False
+        assert feedback_current(proj, forge_opts, author, allowed_roots=fb_allowed, denied_paths=fb_denied) is False
+
+        monkeypatch.setattr(svc, 'start_project', orig_start_project)
+        with pytest.raises(ForgeError) as exc_info:
+            svc.start(wid, proj, sid, 'sub-rework-1', svc.show(wid, sid)['revision'],
+                      'rework prompt', forge_options=forge_opts)
+        assert exc_info.value.code == 'conflict'
+
+        dispatched.clear()
+        monkeypatch.setattr(svc, 'start_project', capture_start_project)
+        with svc.store.connect(write=True) as db:
+            db.execute(
+                'INSERT INTO followups(session,submission,origin_turn,text,forge_options) VALUES(?,?,?,?,?)',
+                (sid, 'sub-queued-stale', 't-origin', 'stale rework prompt', json.dumps(forge_opts)),
+            )
+        svc._watch_queue(wid, proj, sid)
+        drain_deadline = time.monotonic() + 5.0
+        while time.monotonic() < drain_deadline:
+            shown = svc.show(wid, sid)
+            if not shown.get('queued_messages'):
+                break
+            time.sleep(0.05)
+        shown = svc.show(wid, sid)
+        assert shown.get('queued_messages') == []
+        assert dispatched == []
+    finally:
+        svc.close()
+
+
+# ---------------------------------------------------------------------------
+# 10. Confined first-probe isolation (Item 3), shared terminal/Workbench
+#     restricted sandbox policy (Item 4), Workbench operator graph source
+#     locations (Item 5), and HTTP / read-roots architectural closures
+# ---------------------------------------------------------------------------
+
+def test_preview_and_first_probe_confine_untrusted_project_python_sitecustomize(tmp_path):
+    """Untrusted project Python sitecustomize.py MUST be confined on the very first probe."""
+    if sys.platform != 'linux':
+        pytest.skip('Linux Landlock sandbox required')
+    import venv
+    from demiflow.forge import runtime
+    from demiflow.forge.sandbox import backend_readiness
+    from demiflow.workbench.worker import operation as workbench_op
+
+    if not backend_readiness().get('available'):
+        pytest.skip('Linux sandbox backend unavailable')
+
+    sentinel = tmp_path / 'hostile_probe_write.txt'
+    venv_dir = tmp_path / 'hostile_venv'
+    venv.EnvBuilder(system_site_packages=True, symlinks=True, with_pip=False).create(venv_dir)
+    venv_py = venv_dir / 'bin' / 'python'
+    site_packages = next(venv_dir.glob('lib/python*/site-packages'))
+    (site_packages / 'sitecustomize.py').write_text(
+        f'from pathlib import Path\n'
+        f'try:\n'
+        f'    Path({str(sentinel)!r}).write_text("pwned", encoding="utf-8")\n'
+        f'except BaseException:\n'
+        f'    pass\n',
+        encoding='utf-8',
+    )
+
+    # 1. Direct confined first probe MUST NOT allow sitecustomize.py to touch sentinel
+    info = runtime.probe_environment(venv_py, {'requirements': [], 'packages': {}}, confined=True)
+    assert Path(info['interpreter']['path']).exists()
+    assert not sentinel.exists(), 'Untrusted sitecustomize wrote outside sandbox during probe_environment!'
+
+    # 2. Workbench plan_preview MUST also run its first dependency probe inside the confined path
+    proj = _init_pipeline_project(tmp_path / 'preview_hostile_proj')
+    (proj / 'pyproject.toml').write_text(
+        '[project]\nname = "preview-hostile"\nversion = "0.1.0"\ndependencies = []\n\n'
+        '[tool.demiflow.packages]\n',
+        encoding='utf-8',
+    )
+    (proj / 'flows/simple.py').write_text(
+        'from demiflow import data\n'
+        'def run():\n'
+        '    return data.from_items([{"x": 1}]).map(lambda r: {"x": r["x"] + 1}).materialize()\n',
+        encoding='utf-8',
+    )
+    (proj / 'configs/simple.json').write_text(json.dumps({
+        'format': 'demiflow_forge_flow_parameters_v1',
+        'arguments': {},
+    }), encoding='utf-8')
+    from _forge_project_fixtures import declare_existing_flow
+    declare_existing_flow(proj, 'flows/simple.py:run', params='configs/simple.json')
+
+    from demiflow.workbench.projects import registry
+    from demiflow.workbench.runs.authority import WebAuthority
+    reg_path = tmp_path / 'preview_console.json'
+    created = registry.add(reg_path, proj, allow_runs=True)
+    wid = created['workspace_id']
+    digest = registry.projects(registry.load_registry(reg_path))['digest']
+    registry.set_python(reg_path, wid, expected=digest, python=str(venv_py))
+    auth = WebAuthority(str(proj.resolve()), wid, str(reg_path.resolve()), 'read', False, False)
+
+    preview = workbench_op('plan_preview', proj, _authority=auth.bootstrap(),
+                           entry='flows/simple.py:run', params='configs/simple.json')
+    assert preview.get('format') == 'demiflow.plan_preview.v1', preview
+    assert not sentinel.exists(), 'Untrusted sitecustomize escaped sandbox during Workbench plan_preview!'
+
+
+def test_terminal_forge_develop_and_workbench_share_forge_restricted_sandbox_policy(tmp_path, monkeypatch):
+    """Both terminal `demiflow forge develop --mode restricted` and Workbench share Forge's sandbox policy."""
+    if sys.platform != 'linux':
+        pytest.skip('Linux Landlock sandbox required')
+    from click.testing import CliRunner
+    from demiflow.cli import main as cli_main
+    from demiflow.forge.sandbox import (
+        FORBIDDEN_DIRECT_WRITE_ROOTS,
+        backend_readiness,
+        build_review_sandbox_spec,
+    )
+    from demiflow.workbench.conversations.worker import sandbox_spec as wb_sandbox_spec
+
+    if not backend_readiness().get('available'):
+        pytest.skip('Linux sandbox backend unavailable')
+
+    proj = _init_pipeline_project(tmp_path / 'shared_policy_proj')
+    (proj / 'packages').mkdir(exist_ok=True)
+    ext_allowed = _make_pkg(tmp_path / 'ext_allowed', {'__init__.py': 'VAL = "v1"\n'})
+    ext_denied = tmp_path / 'ext_denied'
+    ext_denied.mkdir()
+    (ext_denied / 'secret.txt').write_text('top-secret\n', encoding='utf-8')
+    state_dir = tmp_path / 'dev_state'
+    state_dir.mkdir(mode=0o700)
+    codex_home = tmp_path / 'fake_codex_home'
+    codex_home.mkdir()
+    (codex_home / 'config.toml').write_text('# fixture\n', encoding='utf-8')
+    monkeypatch.setenv('CODEX_HOME', str(codex_home))
+
+    # Fake native author CLI executed INSIDE the real terminal `demiflow forge develop --mode restricted` sandbox
+    fake_author = tmp_path / 'fake_codex.py'
+    fake_author.write_text(f'''#!{sys.executable}
+import json, os, subprocess, sys
+from pathlib import Path
+
+_ = sys.stdin.read()
+root = Path.cwd()
+assert os.environ.get('DEMIFLOW_FORGE_SANDBOX_ACTIVE') == '1', 'Author did not run inside Forge OS sandbox!'
+
+# 1. Authorized external read_root IS readable; unauthorized sibling MUST fail with PermissionError
+assert Path({str(ext_allowed / '__init__.py')!r}).read_text(encoding='utf-8').strip() == 'VAL = "v1"'
+try:
+    Path({str(ext_denied / 'secret.txt')!r}).read_text(encoding='utf-8')
+except PermissionError:
+    pass
+else:
+    raise AssertionError('Unauthorized host path was readable inside forge develop restricted sandbox!')
+
+# 2. Direct writes to packages/ and .forge/ MUST be blocked by OS Landlock
+for forbidden in (root / 'packages' / 'rogue.py', root / '.forge' / 'rogue.txt'):
+    try:
+        forbidden.write_text('bad', encoding='utf-8')
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError(f'Direct write to {{forbidden}} was not blocked by OS Landlock!')
+
+# 3. Editing pyproject.toml directly MUST succeed
+(root / 'pyproject.toml').write_text(
+    '[tool.demiflow.packages]\\n'
+    'ext_allowed = {{source = "vendored", path = "packages/ext_allowed"}}\\n',
+    encoding='utf-8',
+)
+
+# 4. Managed `demiflow forge dep vendor` and `remove` go through Forge's host control channel
+v = subprocess.run(['demiflow', 'forge', 'dep', 'vendor', 'ext_allowed', {str(ext_allowed)!r}, '--root', str(root), '--json'],
+                   capture_output=True, text=True)
+assert v.returncode == 0, (v.stdout, v.stderr)
+assert (root / 'packages' / 'ext_allowed' / '__init__.py').is_file()
+
+r = subprocess.run(['demiflow', 'forge', 'dep', 'remove', 'ext_allowed', '--root', str(root), '--json'],
+                   capture_output=True, text=True)
+assert r.returncode == 0, (r.stdout, r.stderr)
+assert not (root / 'packages' / 'ext_allowed').exists()
+
+# 5. Same-turn edit of pyproject.toml AFTER dep remove MUST still succeed (inode preserved)
+(root / 'pyproject.toml').write_text('[tool.demiflow.packages]\\n', encoding='utf-8')
+
+# 6. `demiflow forge dep install` MUST stay blocked offline
+inst = subprocess.run(['demiflow', 'forge', 'dep', 'install', '--root', str(root)],
+                      capture_output=True, text=True)
+assert inst.returncode != 0
+
+for ev in (
+    {{'type': 'thread.started', 'thread_id': 'cli-restricted-sess-1'}},
+    {{'type': 'turn.started'}},
+    {{'type': 'item.completed', 'item': {{'type': 'agent_message', 'text': 'done'}}}},
+    {{'type': 'turn.completed'}},
+):
+    print(json.dumps(ev), flush=True)
+''', encoding='utf-8')
+    fake_author.chmod(0o755)
+
+    res = CliRunner().invoke(cli_main, [
+        'forge', 'develop',
+        '--root', str(proj),
+        '--state-dir', str(state_dir),
+        '--goal', 'Verify shared restricted Forge sandbox policy',
+        '--agent', 'codex',
+        '--executable', str(fake_author),
+        '--python', sys.executable,
+        '--read-root', str(ext_allowed),
+        '--mode', 'restricted',
+        '--no-review',
+        '--json',
+    ])
+    assert res.exit_code == 0, (res.output, res.exception)
+    payload = json.loads(res.output)
+    assert payload['author']['completed'] is True
+    assert payload['author']['cleanup'] == 'complete'
+    assert (proj / 'pyproject.toml').read_text(encoding='utf-8') == '[tool.demiflow.packages]\n'
+
+    # 7. Workbench sandbox_spec & build_review_sandbox_spec enforce the EXACT SAME Forge policy
+    wb_state = tmp_path / 'wb_state'
+    wb_state.mkdir(mode=0o700)
+    priv_home = wb_state / 's1' / 'provider'
+    priv_home.mkdir(parents=True, mode=0o700)
+    deployment = type('Dep', (), {
+        'mode': 'restricted', 'direct_model': False, 'state': wb_state, 'value': {},
+        'providers': {'codex': {'executable': str(fake_author)}},
+        'limits': type('Lim', (), {
+            'sessions': 8, 'turns': 8, 'turn_seconds': 60,
+            'rss_bytes': 2 * 1024**3, 'processes': 32,
+            'provider_bytes': 64 * 1024**2, 'private_total_bytes': 128 * 1024**2,
+        })(),
+    })()
+    wb_project = {
+        'root': str(proj), 'kind': 'pipeline', 'phase': 'implementation',
+        'writes': ['flows', 'packages', '.forge'], 'protected': [],
+        'python': sys.executable, 'read_roots': [str(ext_allowed)],
+    }
+    wb_spec = wb_sandbox_spec(
+        deployment, wb_project, {'id': 's1', 'provider': 'codex'},
+        {'operation': 'message', 'created': 10**12}, {'sources': []},
+        {'executable': str(fake_author)}, priv_home,
+    )
+    assert wb_spec.read_policy == 'scoped'
+    assert wb_spec.write_policy == 'scoped'
+    assert str((proj / 'pyproject.toml').resolve()) in wb_spec.write_paths
+    assert str(ext_allowed.resolve()) in wb_spec.read_paths
+    for forbidden_parts in FORBIDDEN_DIRECT_WRITE_ROOTS:
+        assert str((proj / forbidden_parts[0]).resolve()) not in wb_spec.write_paths
+        assert str((proj / forbidden_parts[0]).resolve()) in wb_spec.protected_paths
+
+    rev_home = wb_state / 'rev'
+    rev_home.mkdir(mode=0o700)
+    rev_spec = build_review_sandbox_spec(wb_spec, private_home=rev_home)
+    assert rev_spec.role == 'readonly'
+    assert rev_spec.read_policy == 'scoped'
+    assert rev_spec.write_paths == ()
+    assert str(proj.resolve()) not in rev_spec.read_paths
+
+
+def test_workbench_run_prepare_preserves_operator_graph_source_locations(tmp_path, monkeypatch):
+    """Workbench `run prepare` MUST seal operator callsite & implementation locations for historical graph views."""
+    from click.testing import CliRunner
+    from demiflow.cli import main as cli_main
+    from demiflow.workbench.projects import registry
+    from demiflow.workbench.worker import operation as workbench_op
+
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
+    proj = _init_pipeline_project(tmp_path / 'graph_loc_proj')
+    (proj / 'operators/rows.py').write_text(
+        'def add_one(row):\n'
+        '    return {"id": row["id"], "v": row["v"] + 1}\n',
+        encoding='utf-8',
+    )
+    (proj / 'data').mkdir(exist_ok=True)
+    (proj / 'flows/rows.py').write_text(
+        'from pathlib import Path\n'
+        'import pyarrow as pa\n'
+        'from demiflow import data\n'
+        'from operators.rows import add_one\n'
+        'def run():\n'
+        '    target = str(Path(__file__).parents[1] / "data/out.lance")\n'
+        '    return data.from_items([{"id": 1, "v": 7}]).map(add_one).write_lance(\n'
+        '        target, mode="create", schema=pa.schema([("id", pa.int64()), ("v", pa.int64())]), return_receipt=True\n'
+        '    )\n',
+        encoding='utf-8',
+    )
+    (proj / 'configs/rows.json').write_text(json.dumps({
+        'format': 'demiflow_forge_flow_parameters_v1',
+        'arguments': {},
+    }), encoding='utf-8')
+    from _forge_project_fixtures import declare_existing_flow
+    declare_existing_flow(proj, 'flows/rows.py:run', params='configs/rows.json')
+
+    reg_path = tmp_path / 'console.json'
+    created = registry.add(reg_path, proj, allow_runs=True)
+    wid = created['workspace_id']
+    digest = registry.projects(registry.load_registry(reg_path))['digest']
+    registry.set_python(reg_path, wid, expected=digest, python=sys.executable)
+
+    res = CliRunner().invoke(cli_main, [
+        'workbench', 'run', 'prepare',
+        str(proj),
+        'flows/rows.py:run',
+        '--params', 'configs/rows.json',
+        '--json',
+    ])
+    assert res.exit_code == 0, (res.output, res.exception)
+    prepared = json.loads(res.output)
+    assert prepared['status'] == 'prepared'
+    run_id = prepared['run_id']
+
+    from demiflow.workbench.graph import model as graph_model, source_view
+    graph = graph_model.get(proj, basis_kind='run', run_id=run_id, attempt=prepared['attempt'])
+    binding = graph['binding']
+    map_nodes = [n for n in graph.get('nodes', []) if 'map' in str(n.get('kind') or n.get('op_kind') or '').lower()]
+    assert map_nodes, f'Expected Map node in run graph, got: {graph}'
+    node = map_nodes[0]
+    callsite = source_view.get(proj, graph_binding=binding, node_id=node['id'], kind='callsite',
+                               logical_node_id=node.get('logical_node_id'), occurrence_id=node.get('occurrence_id'))
+    impl = source_view.get(proj, graph_binding=binding, node_id=node['id'], kind='implementation',
+                           logical_node_id=node.get('logical_node_id'), occurrence_id=node.get('occurrence_id'))
+    assert callsite['availability'] == 'available', callsite
+    assert 'flows/rows.py' in str(callsite.get('path') or ''), callsite
+    assert impl['availability'] == 'available', impl
+    assert 'operators/rows.py' in str(impl.get('path') or ''), impl
+
+
+def test_http_routing_owned_by_workbench_not_forge():
+    """Forge run_tools owns semantic specs only; Workbench owns HTTP routing & query decoding."""
+    from demiflow.forge.bridge import run_tools
+    from demiflow.workbench.runs import http as wb_http
+
+    for forbidden in ('HTTP_GET', 'HTTP_POST', 'http_arguments'):
+        assert not hasattr(run_tools, forbidden), f'Forge run_tools should not expose {forbidden}'
+    for spec in run_tools.OPERATIONS.values():
+        assert not hasattr(spec, 'method') and not hasattr(spec, 'endpoint')
+
+    assert set(wb_http.HTTP_GET) == {'run', 'runs', 'run-logs'}
+    assert set(wb_http.HTTP_POST) == {'run-prepare', 'run-start', 'run-cancel', 'run-resume'}
+    decoded = wb_http.http_arguments(wb_http.HTTP_GET['run'], {'run_id': 'r' + '0' * 24, 'report': '1'})
+    assert decoded == {'run_id': 'r' + '0' * 24, 'include_report': True}
+
+
+def test_workbench_http_api_authorizes_project_read_roots(tmp_path):
+    """Workbench exposes a real user-facing HTTP endpoint to authorize external read_roots."""
+    import threading
+    from urllib import error as urlerror, request as urlreq
+    from demiflow.workbench.api import WorkspaceServer
+    from demiflow.workbench.projects import registry
+
+    proj = _init_pipeline_project(tmp_path / 'http_rr_proj')
+    ext_a = tmp_path / 'ext_pkg_a'
+    ext_a.mkdir()
+    reg_path = tmp_path / 'console.json'
+    created = registry.add(reg_path, proj, allow_runs=True)
+    wid = created['workspace_id']
+    digest = registry.projects(registry.load_registry(reg_path))['digest']
+
+    token_file = tmp_path / 'token'
+    token_file.write_text('test-read-roots-token-' + 'a' * 32, encoding='utf-8')
+    token_file.chmod(0o600)
+    server = WorkspaceServer(registry=reg_path, token_file=token_file, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f'http://127.0.0.1:{server.server_port}'
+        headers = {
+            'X-Forge-Token': token_file.read_text(encoding='utf-8').strip(),
+            'Origin': base,
+            'Content-Type': 'application/json',
+        }
+        req = urlreq.Request(
+            base + '/api/project-read-roots',
+            data=json.dumps({'workspace_id': wid, 'expected': digest, 'read_roots': [str(ext_a)]}).encode('utf-8'),
+            headers=headers,
+            method='POST',
+        )
+        with urlreq.urlopen(req, timeout=5) as resp:
+            assert resp.status == 200
+            body = json.loads(resp.read().decode('utf-8'))
+        assert body['status'] == 'updated'
+        assert body['workspace_id'] == wid
+        assert body['read_roots'] == [str(ext_a.resolve())]
+        saved = registry.projects(registry.load_registry(reg_path))
+        proj_entry = next(p for p in saved['projects'] if p['workspace_id'] == wid)
+        assert proj_entry['read_roots'] == [str(ext_a.resolve())]
+
+        # Relative / nonexistent paths must be rejected cleanly with HTTP 400
+        bad_req = urlreq.Request(
+            base + '/api/project-read-roots',
+            data=json.dumps({'workspace_id': wid, 'expected': body['digest'], 'read_roots': ['relative/bad']}).encode('utf-8'),
+            headers=headers,
+            method='POST',
+        )
+        with pytest.raises(urlerror.HTTPError) as exc_info:
+            urlreq.urlopen(bad_req, timeout=5)
+        assert exc_info.value.code == 400
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+

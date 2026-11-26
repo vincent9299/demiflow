@@ -133,6 +133,7 @@ def main():
     host_pid = int(next(line for line in status.splitlines() if line.startswith('NSpid:')).split()[1])
     prctl(4, 0, 0, 0, 0)  # trusted PID 1 memory/FDs are not dumpable
     channels = []
+    spec['env']['DEMIFLOW_FORGE_SANDBOX_ACTIVE'] = '1'
     if spec.get('channels') and not spec.get('direct_network'):
         loopback()
     for name, fd in spec.get('channels', {}).items():

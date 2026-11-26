@@ -1,13 +1,13 @@
 """Agent-facing run.* operation and tool contracts owned by Forge.
 
-Pure schema, argument validation, HTTP wire decoding, and tool dispatch contract.
+Pure schema, argument validation, permission semantics, and tool dispatch contract.
 Execution authority and actual run execution are provided by the host (Forge runs
-or Workbench runs) via explicit callback without reverse imports.
+or Workbench runs) via explicit callback without reverse imports. HTTP routing and
+query-string decoding belong exclusively to Workbench.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from types import MappingProxyType
 
 from demiflow.forge.platform import bounded_json
@@ -24,7 +24,6 @@ class Field:
     minimum: int = 0
     maximum: int = 2**64 - 1
     nullable: bool = False
-    wire_name: str | None = None
 
     def check(self, name, value):
         if value is None and self.nullable:
@@ -45,22 +44,13 @@ class Field:
 class OperationSpec:
     name: str
     handler: str
-    method: str
-    endpoint: str
     fields: tuple[tuple[str, Field], ...]
     permission: str
     effects: str
     preconditions: str
     result: str
     retry: str
-    http_required: frozenset[str] = frozenset()
-
-    def wire_fields(self):
-        required, optional = set(), set()
-        for name, field in self.fields:
-            key = field.wire_name or name
-            (required if field.required or name in self.http_required else optional).add(key)
-        return required, optional
+    tool_required: frozenset[str] = frozenset()
 
     def validate(self, arguments):
         if type(arguments) is not dict:
@@ -85,7 +75,7 @@ _ATTEMPT = ('attempt', Field('int', minimum=1, maximum=32, nullable=True))
 _CONTROL = ('expected_attempt', Field('int', minimum=1, maximum=32, nullable=True))
 
 _SPECS = (
-    OperationSpec('prepare', 'prepare', 'POST', 'run-prepare', (
+    OperationSpec('prepare', 'prepare', (
         ('entry', Field('text', required=True)), ('params', Field('parameters', required=True)),
         ('inputs', Field('object', nullable=True)), ('outputs', Field('object', nullable=True)),
         ('overrides', Field('object', nullable=True)), ('output_prefix', Field('text', nullable=True)),
@@ -95,29 +85,29 @@ _SPECS = (
         'Registered inputs, effective program check, scope, fixed sources, outputs and budgets.',
         'Original run view; prepared/ready is not execution success.',
         'Same request_id and fingerprint only; pending/unknown requires receipt query or explicit reconcile.'),
-    OperationSpec('start', 'start', 'POST', 'run-start', (_RUN, _EXPECTED, _CONTROL),
+    OperationSpec('start', 'start', (_RUN, _EXPECTED, _CONTROL),
         'run_submit', 'Admit and launch the original prepared attempt.',
         'Expected manifest and attempt, ready receipt, current basis, outputs, capacity and native fence.',
         'Original run view; admission, execution and cleanup remain distinct.',
         'Unknown launch: query the same run/attempt; never automatically relaunch.', frozenset({'expected_attempt'})),
-    OperationSpec('show', 'show', 'GET', 'run', (_RUN, _ATTEMPT,
-        ('include_report', Field('bool', wire_name='report')), ('compact', Field('bool'))),
+    OperationSpec('show', 'show', (_RUN, _ATTEMPT,
+        ('include_report', Field('bool')), ('compact', Field('bool'))),
         'read', 'Read only.', 'Current project access and exact selected run/attempt.',
         'Original run view, with requested historical report or compact projection.', 'Read again with the same target.'),
-    OperationSpec('list', 'list_runs', 'GET', 'runs', (
+    OperationSpec('list', 'list_runs', (
         ('offset', Field('int')), ('limit', Field('int', minimum=1, maximum=100)),
         ('cursor', Field('text', nullable=True)),
     ), 'read', 'Read only; no implicit index rebuild or reconciliation.', 'Current project access and bounded page.',
         'Original runs/total/next_cursor/index.', 'Invalidated cursor requires an explicit fresh page.'),
-    OperationSpec('logs', 'logs', 'GET', 'run-logs', (_RUN, _ATTEMPT, ('offset', Field('int'))),
+    OperationSpec('logs', 'logs', (_RUN, _ATTEMPT, ('offset', Field('int'))),
         'read', 'Read only.', 'Current project access; selected attempt and byte offset.',
         'Original text/next_offset/truncated/evicted; existing 64 KiB domain page limit.',
         'Do not reuse an offset across attempts; retained history may be evicted.'),
-    OperationSpec('cancel', 'cancel', 'POST', 'run-cancel', (_RUN, _CONTROL, ('compact', Field('bool'))),
+    OperationSpec('cancel', 'cancel', (_RUN, _CONTROL, ('compact', Field('bool'))),
         'run_control', 'Request stopping for the exact attempt.', 'Current control permission and attempt CAS; no development recheck.',
         'Original run view or compact snapshot; requested stop is not confirmed exit/cleanup.',
         'Query the same attempt after disconnection; never follow a changed current attempt.', frozenset({'expected_attempt'})),
-    OperationSpec('resume', 'resume', 'POST', 'run-resume', (_RUN, _EXPECTED,
+    OperationSpec('resume', 'resume', (_RUN, _EXPECTED,
         ('expected_attempt', Field('int', required=True, minimum=1, maximum=31))),
         'run_submit', 'Create next attempt, then invoke existing start.',
         'Original basis, compatible recovery, stopped execution, complete cleanup/accounting and remaining budget.',
@@ -125,34 +115,6 @@ _SPECS = (
         'Query original run; explicitly start a verified prepared next attempt, not blind resume of the old one.'),
 )
 OPERATIONS = MappingProxyType({spec.name: spec for spec in _SPECS})
-HTTP_GET = MappingProxyType({s.endpoint: s for s in _SPECS if s.method == 'GET'})
-HTTP_POST = MappingProxyType({s.endpoint: s for s in _SPECS if s.method == 'POST'})
-
-
-def http_arguments(spec, values):
-    """Decode the existing wire shape, then apply the shared typed contract."""
-    required, optional = spec.wire_fields()
-    if type(values) is not dict or not required <= values.keys() or values.keys() - required - optional:
-        raise ForgeError('Missing or unknown request fields', code='invalid_request')
-    result = {}
-    for name, field in spec.fields:
-        wire_name = field.wire_name or name
-        if wire_name not in values:
-            continue
-        value = values[wire_name]
-        if spec.method == 'GET':
-            if field.kind == 'int':
-                if type(value) is not str or not re.fullmatch(r'[0-9]{1,20}', value):
-                    raise ForgeError('Invalid integer query field: ' + wire_name, code='invalid_request')
-                value = int(value)
-            elif field.kind == 'bool':
-                if value not in {'0', '1'}:
-                    raise ForgeError(wire_name + ' must be 0 or 1', code='invalid_request')
-                value = value == '1'
-        elif (value is None and field.kind != 'int') or (field.kind == 'parameters' and type(value) is not str):
-            raise ForgeError('Invalid HTTP run argument: ' + wire_name, code='invalid_request')
-        result[name] = value
-    return spec.validate(result)
 
 
 def describe():
@@ -170,7 +132,7 @@ def describe():
             if field.nullable:
                 schema = {'anyOf': [schema, {'type': 'null'}]}
             properties[name] = schema
-            if field.required or name in spec.http_required or spec.name == 'prepare' and name == 'request_id':
+            if field.required or name in spec.tool_required or spec.name == 'prepare' and name == 'request_id':
                 required.append(name)
         if spec.name == 'prepare':
             properties['request_id'] = {'type': 'string', 'minLength': 1, 'maxLength': 4096}

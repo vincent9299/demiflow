@@ -28,12 +28,25 @@ HOST = REPO / 'demiflow/execution/host'
 SURFACE = ast.literal_eval(ast.parse((HOST / '_surface.py').read_text()).body[1].value)
 
 
+# Exact minimal independent-import allowlist for Forge's standalone run inspector
+# (strictly narrower than workbench/worker.py — e.g. NO Catalog access).
+FORGE_INSPECTOR_PATH = 'demiflow/forge/runs/inspector.py'
+FORGE_INSPECTOR_IMPORTS = {
+    'demiflow.errors': {'DemiflowError', 'ExecutionConflict'},
+    'demiflow.lance': {'preview'},
+}
+FORGE_INSPECTOR_MODULE_MEMBERS = {
+    'demiflow.lance.preview': {'snapshot_metadata'},
+}
+
+
 def _surface_path(path):
+    """Map ONLY files moved 1-to-1 from workbench/runs -> forge/runs (never duplicate an existing file)."""
     text = str(path)
-    if text == 'demiflow/forge/runs/inspector.py':
-        return 'demiflow/workbench/worker.py'
-    if text.startswith('demiflow/forge/runs/'):
-        return 'demiflow/workbench/runs/' + text.removeprefix('demiflow/forge/runs/')
+    if text.startswith('demiflow/forge/runs/') and text != FORGE_INSPECTOR_PATH:
+        old = 'demiflow/workbench/runs/' + text.removeprefix('demiflow/forge/runs/')
+        if not (REPO / old).exists():
+            return old
     return text
 
 
@@ -85,6 +98,11 @@ def _import_errors(tree, path):
             continue
         side = module.removeprefix('demiflow.execution.host.')
         if side in SURFACE['exports'] and name in SURFACE['exports'][side]:
+            continue
+        if str(path) == FORGE_INSPECTOR_PATH:
+            if name in FORGE_INSPECTOR_IMPORTS.get(module, ()):
+                continue
+            errors.append((node.lineno, 'unapproved import', module, name))
             continue
         allowed = SURFACE['independent_imports'].get(module, {}).get(name, [])
         if str(path) in allowed or _surface_path(path) in allowed:
@@ -238,8 +256,14 @@ class Uses(ast.NodeVisitor):
     def visit_Attribute(self, node):
         base = self.origin(node.value)
         module_members = SURFACE['independent_module_members'].get(base)
-        if module_members is not None and node.attr not in module_members.get(self.path, []):
-            self.problem(node, 'unapproved independent module member: ' + node.attr)
+        if module_members is not None:
+            allowed_members = (
+                FORGE_INSPECTOR_MODULE_MEMBERS.get(base, ())
+                if self.path == FORGE_INSPECTOR_PATH
+                else module_members.get(self.path, ())
+            )
+            if node.attr not in allowed_members:
+                self.problem(node, 'unapproved independent module member: ' + node.attr)
         base = SURFACE['result_origins'].get(base, base)
         if base in SURFACE['record_fields'] and node.attr != 'get':
             self.problem(node, 'native projection requires a named field: ' + node.attr)
@@ -500,3 +524,11 @@ def test_approved_reexport_matches_its_real_import():
         imported = {(owner + '.' + symbol, alias) for _, owner, symbol, alias in
                     _imports(ast.parse((REPO / path).read_text()), path)}
         assert (original, name) in imported
+
+
+def test_forge_inspector_does_not_inherit_workbench_worker_only_imports():
+    # workbench/worker.py is authorized for Catalog and preview.describe_table,
+    # while forge/runs/inspector.py must NOT inherit those extra consumer grants.
+    assert _import_errors(ast.parse('from demiflow.lance.registry import Catalog\n'), FORGE_INSPECTOR_PATH)
+    assert _member_errors(ast.parse('from demiflow.lance import preview\npreview.describe_table(x)\n'), FORGE_INSPECTOR_PATH)
+    assert not _member_errors(ast.parse('from demiflow.lance import preview\npreview.snapshot_metadata(x, 1)\n'), FORGE_INSPECTOR_PATH)

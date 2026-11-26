@@ -142,6 +142,16 @@ class Service:
     def project(self, workspace, root):
         return self.binding(workspace, root)[0].project(workspace, root)
 
+    def _feedback_scope(self, workspace, root):
+        from .worker import _authorized_read_roots
+        deployment, _, config_path = self.binding(workspace, root)
+        project = deployment.project(workspace, root)
+        denied = [deployment.state, Path(config_path).resolve(), *(Path(p) for p in self.input_denied_paths)]
+        if deployment.value.get('runtime_domain'):
+            denied.append(Path(deployment.value['runtime_domain']))
+        allowed = _authorized_read_roots(project['root'], project, denied)
+        return allowed, tuple(denied)
+
     def capabilities(self, workspace, root):
         deployment, _, _ = self.binding(workspace, root)
         caps=deployment.capabilities(workspace, root)
@@ -404,8 +414,10 @@ class Service:
                             if options.get('origin') == 'forge':
                                 from demiflow.forge.development import feedback_current
                                 saved_session = self.store.session(sid)
+                                fb_allowed, fb_denied = self._feedback_scope(workspace, root)
                                 if not feedback_current(root, options, dict(provider=saved_session['provider'],
-                                                                          session=saved_session['provider_session'])):
+                                                                          session=saved_session['provider_session']),
+                                                        allowed_roots=fb_allowed, denied_paths=fb_denied):
                                     self.store.discard_feedback(workspace, sid, head['submission'], 'stale')
                                     continue
                             self.start_project(workspace, root, sid, head['submission'], session['revision'], head['text'],
@@ -456,9 +468,11 @@ class Service:
                    dict(origin='user', purpose=purpose, auto_review=bool(auto_review), round=int(rework_depth)))
         if options.get('origin') == 'forge':
             from demiflow.forge.development import feedback_current
+            fb_allowed, fb_denied = self._feedback_scope(workspace, root)
             if (session['provider'] not in available_providers or options.get('policy_hash') != current_hash
                     or not feedback_current(root, options, dict(provider=session['provider'],
-                        session=self.store.session(session_id)['provider_session']))):
+                        session=self.store.session(session_id)['provider_session']),
+                        allowed_roots=fb_allowed, denied_paths=fb_denied)):
                 reject('原作者配置或候选已变化，自动修正已停止，请重新检查。', 'conflict')
         target_provider = session['provider'] if session['provider'] in available_providers else available_providers[0]
         with self.lock:

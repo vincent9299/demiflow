@@ -62,7 +62,8 @@ def author_command(binding, session):
     return command
 
 
-def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify, control_path=None, extra_path=None):
+def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify, control_path=None, extra_path=None,
+                  sandbox_spec=None, control_socket=None):
     """Run one native interval; session creation is distinct from input acknowledgement."""
     from demiflow.resources.process_observation import UNIT_ENV, descendants, drain_owned, signal_owned
     if len(prompt.encode()) > 128 * 1024:
@@ -72,7 +73,26 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
     # This CLI process owns only its author/reviewer children, never a host service.
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
         raise ForgeError('Cannot establish author descendant ownership', code='operation_rejected')
-    env = dict(os.environ)
+    if sandbox_spec is not None:
+        _forbidden = {'LD_PRELOAD', 'LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH'}
+        _priority_prefixes = ('PATH', 'LANG', 'LC_', 'TERM', 'SSL_', 'REQUESTS_', 'CURL_',
+                              'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                              'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+                              'CODEX_', 'DSH_', 'OPENAI_', 'DEEPSEEK_', 'ANTHROPIC_', 'DEMIFLOW_')
+        env = {}
+        for k, v in os.environ.items():
+            if k in _forbidden or not isinstance(k, str) or not isinstance(v, str):
+                continue
+            if k.startswith(_priority_prefixes):
+                env[k] = v
+        for k, v in os.environ.items():
+            if len(env) >= 120:
+                break
+            if k in _forbidden or k in env or not isinstance(k, str) or not isinstance(v, str):
+                continue
+            env[k] = v
+    else:
+        env = dict(os.environ)
     if extra_path:
         env['PATH'] = str(extra_path) + (os.pathsep + env['PATH'] if env.get('PATH') else '')
     if agent_binding(binding['provider'], binding['executable'], binding['profile'], binding['model']) != binding:
@@ -94,10 +114,22 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
                    provider=binding['provider'])
     try:
         notify(dict(delivery='sending'))
-        from .native_exec import launch_command
-        proc = subprocess.Popen(launch_command(author_command(binding, session)), cwd=root, env=env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            start_new_session=True, pass_fds=(lease_fd,))
+        if sandbox_spec is not None:
+            from .sandbox import launch_sandbox
+            proc = launch_sandbox(
+                author_command(binding, session),
+                spec=sandbox_spec,
+                env=env,
+                cwd=str(root),
+                lease_fd=lease_fd,
+                control_socket=control_socket,
+                stdin=subprocess.PIPE,
+            )
+        else:
+            from .native_exec import launch_command
+            proc = subprocess.Popen(launch_command(author_command(binding, session)), cwd=root, env=env,
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True, pass_fds=(lease_fd,))
         with selectors.DefaultSelector() as selector:
             for stream, interest in ((proc.stdin, selectors.EVENT_WRITE), (proc.stdout, selectors.EVENT_READ),
                                      (proc.stderr, selectors.EVENT_READ)):
@@ -198,6 +230,21 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
     return outcome
 
 
+def _cli_writable_roots(root: Path) -> tuple[str, ...]:
+    from .sandbox import FORBIDDEN_DIRECT_WRITE_ROOTS, PROTECTED_PROJECT_NAMES
+    protected = set(PROTECTED_PROJECT_NAMES) | {p[0] for p in FORBIDDEN_DIRECT_WRITE_ROOTS}
+    names: list[str] = []
+    if root.is_dir():
+        for entry in sorted(os.scandir(root), key=lambda e: e.name):
+            if entry.name.startswith('.') or entry.name in protected:
+                continue
+            if entry.is_symlink():
+                continue
+            if entry.is_dir(follow_symlinks=False) or entry.is_file(follow_symlinks=False):
+                names.append(entry.name)
+    return tuple(names)
+
+
 def register(forge, output):
     @forge.command()
     @click.option('--root', required=True, type=click.Path(path_type=Path, file_okay=False))
@@ -211,16 +258,31 @@ def register(forge, output):
     @click.option('--review/--no-review', default=True, help='Enable independent model review after code changes.')
     @click.option('--python', 'project_python', default=None, type=click.Path(path_type=Path, dir_okay=False),
                   help='Explicit project Python interpreter for live B-class package imports and A-class checks.')
+    @click.option('--read-root', 'read_roots', multiple=True, type=click.Path(path_type=Path, file_okay=False),
+                  help='Authorized external read directory for local_ref / vendor packages.')
+    @click.option('--mode', 'execution_mode', type=click.Choice(['restricted', 'trusted_local']), default=None,
+                  help='Sandbox execution mode (restricted uses Forge Landlock/seccomp policy shared with Workbench).')
     @click.option('--timeout', type=click.IntRange(1, 7200), default=3600, show_default=True)
     @click.option('--review-timeout', type=click.IntRange(1, MAX_REVIEW_SECONDS), default=REVIEW_SECONDS, show_default=True)
     @click.option('--resume', is_flag=True, help='Continue a definitely unsent action from this receipt.')
     @click.option('--status', is_flag=True, help='Read the persisted receipt without invoking an agent.')
     @click.option('--json', 'as_json', is_flag=True)
-    def develop(root, state_dir, goal, agent, executable, profile, model, review, project_python, timeout, review_timeout,
-                resume, status, as_json):
+    def develop(root, state_dir, goal, agent, executable, profile, model, review, project_python, read_roots,
+                execution_mode, timeout, review_timeout, resume, status, as_json):
         """Run check/review/feedback/repair with the same native coding session."""
+        import sys
+        import tempfile
+        from uuid import uuid4
         from .development import run_development
         from .review_deepseek import run_reviewer
+        from .sandbox import (
+            SandboxShims,
+            authorized_read_roots,
+            backend_readiness,
+            build_development_sandbox_spec,
+            default_runtime_paths,
+        )
+
         def perform():
             state = DevelopmentState(state_dir, root)
             if status:
@@ -229,19 +291,138 @@ def register(forge, output):
                 binding = agent_binding(agent, executable, profile, model)
                 if agent == 'deepseek' and model:
                     raise ForgeError('Select the DeepSeek model in its native profile', code='invalid_request')
-                shims = None
                 py_str = str(project_python.absolute()) if project_python is not None else None
+                raw_read_roots = tuple(str(Path(p).resolve()) for p in read_roots)
+                effective_mode = execution_mode
+                if effective_mode is None:
+                    if (py_str or raw_read_roots) and sys.platform == 'linux' and backend_readiness().get('available'):
+                        effective_mode = 'restricted'
+                    else:
+                        effective_mode = 'trusted_local'
+                shims = None
+                bridge = None
+                priv_dir = None
+                created_empty_pyproject = False
                 try:
+                    if effective_mode == 'restricted':
+                        if not backend_readiness().get('available'):
+                            raise ForgeError('Restricted forge develop requires the Linux sandbox backend', code='operation_rejected')
+                        from .bridge.server import BridgeServer
+
+                        priv_dir = tempfile.TemporaryDirectory(prefix='forge-dev-home-')
+                        priv_home = Path(priv_dir.name)
+                        priv_home.chmod(0o700)
+                        denied = (Path(state_dir).resolve(),)
+                        allowed_roots = authorized_read_roots(
+                            root, read_roots=raw_read_roots, denied_paths=denied, private_home=priv_home,
+                        )
+                        turn_id = 'cli-' + uuid4().hex[:16]
+                        epoch = 'e-' + uuid4().hex[:12]
+
+                        class _CliActiveTurn:
+                            tid = turn_id
+                            def __init__(self, ep):
+                                self.epoch = ep
+                            def require_active(self):
+                                return None
+
+                        bridge = BridgeServer(
+                            _CliActiveTurn(epoch),
+                            project_root=root,
+                            allowed_read_roots=allowed_roots,
+                            denied_paths=denied,
+                        )
+                        writables = _cli_writable_roots(root)
+                        project_view = {
+                            'root': str(Path(root).absolute()),
+                            'kind': 'pipeline',
+                            'phase': 'implementation',
+                            'writes': list(writables),
+                            'protected': [],
+                            'python': py_str,
+                            'read_roots': list(raw_read_roots),
+                        }
+                        shims = SandboxShims(
+                            project_view,
+                            execution_mode='restricted',
+                            project_python=py_str,
+                            allowed_read_roots=allowed_roots,
+                            denied_paths=denied,
+                        )
+                        shims.set_control_binding(bridge.token, turn_id, epoch)
+                        rt_paths = default_runtime_paths(
+                            executable=binding['executable'],
+                            project_python=py_str,
+                            extra_paths=(*shims.runtime_paths,),
+                        )
+                        extra_reads = list(shims.read_paths)
+                        if Path(binding['home']).exists():
+                            extra_reads.append(binding['home'])
+                        pyproj = Path(root) / 'pyproject.toml'
+                        had_pyproject = pyproj.exists() or pyproj.is_symlink()
+                        dev_spec = build_development_sandbox_spec(
+                            root,
+                            writes=writables,
+                            protected=(),
+                            read_roots=raw_read_roots,
+                            extra_read_paths=extra_reads,
+                            runtime_paths=rt_paths,
+                            denied_paths=denied,
+                            private_home=priv_home,
+                            kind='pipeline',
+                            phase='implementation',
+                            readonly=False,
+                            notebook_op=False,
+                            direct_network=True,
+                            seconds=min(86400, max(1, int(timeout))),
+                            ensure_pyproject_placeholder=True,
+                        )
+                        created_empty_pyproject = (not had_pyproject) and pyproj.is_file()
+
+                        def author_fn(*a, **kw):
+                            return native_author(
+                                *a, extra_path=shims.bin, sandbox_spec=dev_spec,
+                                control_socket=bridge.path, **kw,
+                            )
+
+                        def reviewer_fn(prompt, *, timeout=review_timeout):
+                            return run_reviewer(
+                                prompt, timeout=timeout, restricted=True,
+                                author_spec=dev_spec, denied_paths=denied,
+                            )
+
+                        return run_development(
+                            state, goal=goal, binding=binding, author=author_fn,
+                            reviewer=reviewer_fn, auto_review=review, seconds=timeout,
+                            review_seconds=review_timeout, resume=resume, project_python=py_str,
+                            allowed_roots=allowed_roots, denied_paths=denied,
+                        )
+
                     author_fn = native_author
                     if py_str:
-                        from .sandbox import SandboxShims
                         shims = SandboxShims({'root': str(root)}, execution_mode='trusted_local', project_python=py_str)
+
                         def author_fn(*a, **kw):
                             return native_author(*a, extra_path=shims.bin, **kw)
-                    return run_development(state, goal=goal, binding=binding, author=author_fn,
+
+                    return run_development(
+                        state, goal=goal, binding=binding, author=author_fn,
                         reviewer=run_reviewer, auto_review=review, seconds=timeout,
-                        review_seconds=review_timeout, resume=resume, project_python=py_str)
+                        review_seconds=review_timeout, resume=resume, project_python=py_str,
+                        allowed_roots=authorized_read_roots(root, read_roots=raw_read_roots) if raw_read_roots else None,
+                    )
                 finally:
+                    if created_empty_pyproject:
+                        pyproj = Path(root) / 'pyproject.toml'
+                        try:
+                            if pyproj.is_file() and not pyproj.is_symlink() and pyproj.stat().st_size == 0:
+                                pyproj.unlink()
+                        except OSError:
+                            pass
+                    if bridge is not None:
+                        bridge.close()
                     if shims is not None:
                         shims.close()
+                    if priv_dir is not None:
+                        priv_dir.cleanup()
         output(root, as_json, perform)

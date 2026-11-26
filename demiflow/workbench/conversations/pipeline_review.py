@@ -86,14 +86,16 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
         home = Path(temporary)
         spec = broker = channel = None
         if deployment.mode == 'restricted':
+            from demiflow.forge.sandbox import build_review_sandbox_spec
             from .model_broker import start_model_broker
             from .execution import runtime_paths
-            review_runtime = tuple(dict.fromkeys((*author_spec.runtime_paths, *runtime_paths(config))))
-            spec = replace(author_spec, role='readonly', read_policy='scoped', write_policy='scoped',
-                direct_network=False, seconds=timeout, private_home=temporary, write_paths=(),
-                runtime_paths=tuple(path for path in review_runtime if Path(path).exists()),
-                denied_paths=(*author_spec.denied_paths, author_spec.private_home),
-                read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))
+            spec = build_review_sandbox_spec(
+                author_spec,
+                private_home=temporary,
+                seconds=timeout,
+                extra_runtime_paths=runtime_paths(config),
+                direct_network=False,
+            )
             # Both brokers debit the existing turn quota under this control directory.
             broker = start_model_broker(deployment, turn, session, broker_home.with_name('review-model'),
                                         defer_handshake=True, request_seconds=timeout, deadline=deadline)

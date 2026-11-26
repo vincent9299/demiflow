@@ -329,7 +329,8 @@ def collect_review(process, prompt, *, cwd, model, timeout=REVIEW_SECONDS, check
             process.wait()
 
 
-def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=None):
+def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=None,
+                 restricted=False, author_spec=None, denied_paths=()):
     """Start a fresh native headless agent with only its supplied text evidence."""
     if check_cancel is not None:
         check_cancel()
@@ -337,11 +338,30 @@ def run_reviewer(prompt, *, timeout=REVIEW_SECONDS, config=None, check_cancel=No
         config = _local_config()
     with tempfile.TemporaryDirectory(prefix='demiflow-forge-review-') as directory:
         home = Path(directory)
+        home.chmod(0o700)
         command, env = prepare_launch(dict(config, _request_seconds=timeout), home)
         try:
-            from .native_exec import launch_command
-            proc = subprocess.Popen(launch_command(command), cwd=home, env=env, stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
-        except OSError as exc:
+            if restricted:
+                from .sandbox import build_review_sandbox_spec, default_runtime_paths, launch_sandbox
+                exe_path = Path(config['executable']).resolve()
+                node_path = Path(config['node']).resolve()
+                review_rt = default_runtime_paths(
+                    executable=exe_path,
+                    extra_paths=(node_path.parent, exe_path.parents[1]),
+                )
+                spec = build_review_sandbox_spec(
+                    author_spec,
+                    private_home=home,
+                    seconds=max(1.0, float(timeout)),
+                    extra_runtime_paths=review_rt,
+                    denied_paths=denied_paths,
+                    direct_network=True,
+                )
+                proc = launch_sandbox(command, spec=spec, env=env, cwd=str(home), stdin=subprocess.PIPE)
+            else:
+                from .native_exec import launch_command
+                proc = subprocess.Popen(launch_command(command), cwd=home, env=env, stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        except (OSError, RuntimeError, ValueError) as exc:
             raise _unavailable('Failed to launch the configured DeepSeek CLI') from exc
         return collect_review(proc, prompt, cwd=home, model=config['model'], timeout=timeout, check_cancel=check_cancel)

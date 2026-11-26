@@ -28,7 +28,8 @@ def _local_authority(root: Path, python: Path | None, read_roots: tuple[Path, ..
     return LocalAuthority(str(Path(root).absolute()), python=py, read_roots=rr)
 
 
-def register(parent_group, *, group_name='run'):
+def register(parent_group, *, group_name='run', authority_factory=None):
+    make_authority = authority_factory or _local_authority
     root_arg = click.argument('root', type=click.Path(path_type=Path, file_okay=False))
     id_arg = click.argument('run_id')
     pretty = click.option('--json', 'pretty', is_flag=True)
@@ -60,7 +61,7 @@ def register(parent_group, *, group_name='run'):
     @pretty
     def invoke(root, name, arguments, python_path, pretty):
         from demiflow.forge.bridge.run_tools import invoke as call
-        auth = _local_authority(root, python_path)
+        auth = make_authority(root, python_path)
         emit(lambda: call(name, root, json.loads(arguments), authority=auth, perform=run_operations.perform), pretty)
 
     @group.command('prepare')
@@ -79,7 +80,7 @@ def register(parent_group, *, group_name='run'):
     @click.option('--request-id', default=None, help='Persistent prepare identity for safe retry after disconnection.')
     @pretty
     def prepare(root, entry, params, python_path, read_roots, exact_output, outputs, inputs, limits, request_id, metrics, pretty):
-        auth = _local_authority(root, python_path, read_roots)
+        auth = make_authority(root, python_path, read_roots)
         emit(lambda: run_operations.perform(
             'prepare', root, authority=auth, entry=entry, params=params, outputs=json.loads(outputs),
             inputs=json.loads(inputs), new_outputs=not exact_output, limits=json.loads(limits),
@@ -96,7 +97,7 @@ def register(parent_group, *, group_name='run'):
     @click.option('--wait', 'wait_for_run', is_flag=True)
     @pretty
     def start(root, run_id, expected, expected_attempt, python_path, read_roots, wait_for_run, pretty):
-        auth = _local_authority(root, python_path, read_roots)
+        auth = make_authority(root, python_path, read_roots)
 
         def perform():
             result = run_operations.perform(
@@ -131,9 +132,11 @@ def register(parent_group, *, group_name='run'):
     @click.option('--wait', 'wait_for_run', is_flag=True)
     @pretty
     def resume(root, run_id, expected, expected_attempt, wait_for_run, pretty):
+        auth = make_authority(root, None)
+
         def perform():
             result = run_operations.perform(
-                'resume', root, run_id=run_id, expected=expected, expected_attempt=expected_attempt,
+                'resume', root, authority=auth, run_id=run_id, expected=expected, expected_attempt=expected_attempt,
             )
             selected_attempt = result.get('attempt')
             deadline = time.monotonic() + result['limits']['timeout_s'] + 60

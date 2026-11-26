@@ -44,7 +44,10 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         _source_modules = deployment_modules(Path(request['root']))
     if name == 'plan_preview':
         from demiflow.workbench.projects.registry import project_dependencies
-        _dependencies = project_dependencies(root, authority=_authority, verify_files=True, require_environment=True)
+        _dependencies = project_dependencies(
+            root, authority=_authority, verify_files=True, require_environment=True,
+            confined=(sys.platform == 'linux'),
+        )
     if name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None:
         request.pop('bootstrap', None)
         request['dependencies'] = _dependencies

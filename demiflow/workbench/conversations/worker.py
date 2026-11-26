@@ -40,7 +40,12 @@ from demiflow.workbench.conversations.provider import adapter_for
 from demiflow.forge.bridge.agent_context import assemble, authoritative_source_paths
 from demiflow.forge.bridge.server import BridgeServer
 from demiflow.forge.bridge.tools import INPUT_TOOL
-from demiflow.forge.development import assess_turn, review_requested as needs_review, candidate_identity
+from demiflow.forge.development import (
+    assess_turn,
+    candidate_identity,
+    dependency_candidate_digest,
+    review_requested as needs_review,
+)
 from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
 from demiflow.forge.source_snapshot import capture
 from demiflow.forge.source_snapshot import differences
@@ -118,84 +123,36 @@ def _declared_readonly_locations(root: Path, denied: list[Path], private_home: P
 
 
 def _authorized_read_roots(root, project, denied, private_home=None):
-    """Collect host-granted read directories (project root, explicit read_roots, readonly locations)."""
-    from demiflow.workbench.projects.workspace import scoped_data_location
-    root_path = Path(root).absolute()
-    granted = [root_path.resolve()]
-    private = [*(Path(p) for p in denied), *([Path(private_home)] if private_home is not None else [])]
-    for raw in (project.get('read_roots') or ()):
-        if raw:
-            scoped = scoped_data_location(root_path, raw, private=private)
-            if scoped is not None and scoped not in granted:
-                granted.append(scoped)
-    for loc_path in _declared_readonly_locations(root_path, denied, Path(private_home) if private_home is not None else root_path):
-        resolved = loc_path.resolve()
-        if resolved not in granted:
-            granted.append(resolved)
-    return tuple(str(p) for p in granted)
+    """Collect host-granted read directories via the shared Forge sandbox policy."""
+    from demiflow.forge.sandbox import authorized_read_roots
+    return authorized_read_roots(
+        root,
+        read_roots=project.get('read_roots') or (),
+        denied_paths=denied,
+        private_home=private_home,
+    )
 
 
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None,
                  extra_read_paths=(), extra_runtime_paths=()):
-    """Assemble only controller-declared scope; no provider-supplied path grants."""
-    from demiflow.forge.dependencies import declaration as dependency_declaration
-    from demiflow.forge.sandbox import SandboxSpec
+    """Assemble Workbench host facts and delegate sandbox policy directly to Forge."""
+    from demiflow.forge.sandbox import build_development_sandbox_spec
     root = Path(project['root'])
     readonly = turn.get('operation') in ('compact', 'notebook_cell', 'notebook_cell_cli')
     notebook_op = turn.get('operation') in ('notebook_cell', 'notebook_cell_cli')
     sources = [] if notebook_op else [Path(source['canonical_path']) for source in manifest.get('sources', [])
                if source.get('origin') == 'authoritative_file']
-    read = [] if notebook_op else [root, *[path for path in sources if path.is_file()], *(Path(p) for p in extra_read_paths)]
-    openssl = Path('/etc/ssl/openssl.cnf')
-    if openssl.is_file(): read.append(openssl)
+    extra_reads = [] if notebook_op else [*[path for path in sources if path.is_file()], *(Path(p) for p in extra_read_paths)]
     direct_network = bool(
         deployment.mode == 'restricted'
         and (getattr(deployment, 'direct_model', False) or (not readonly and bool(project.get('dev_network', False))))
     )
     active_cred = None
-    if direct_network:
-        for net_path in ('/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/gai.conf',
-                         '/etc/ssl', '/etc/ca-certificates', '/usr/share/ca-certificates', '/etc/ld.so.cache'):
-            candidate = Path(net_path)
-            if candidate.exists():
-                read.append(candidate)
-        if getattr(deployment, 'direct_model', False) and config.get('native_credentials'):
-            cred_path = Path(config['native_credentials']).resolve()
-            if cred_path.is_file():
-                active_cred = cred_path
-                read.append(cred_path)
-    # Never block opening a developer session when dependencies are missing or incomplete.
-    has_deps = False
-    if not notebook_op:
-        try:
-            has_deps = dependency_declaration(root) is not None
-        except Exception:
-            has_deps = (root / 'pyproject.toml').is_file()
-    writes = (
-        [] if readonly else
-        [root / name for name in project['writes']
-         if Path(name).parts[:1] not in {('data_tools',), ('packages',), ('.forge',)} and (root / name).exists()]
-    )
-    if not readonly and not notebook_op and project.get('kind') == 'pipeline' and project.get('phase') == 'implementation':
-        pyproject = root / 'pyproject.toml'
-        if (pyproject.is_file() and not pyproject.is_symlink()
-                and 'pyproject.toml' not in (project.get('protected') or ())
-                and pyproject not in writes):
-            writes.append(pyproject)
-    protected = [] if notebook_op else [root / name for name in ('.git', '.forge', '.venv', '.env', '.env.local', 'AGENTS.md', 'workspace.json', 'PIPELINE_SPEC.md', 'data_tools', 'packages')]
-    if not notebook_op and root.is_dir():
-        try:
-            with os.scandir(root) as root_entries:
-                for entry in root_entries:
-                    if entry.name.startswith('.env.') and entry.name not in {'.env.example', '.env.sample'}:
-                        protected.append(root / entry.name)
-        except OSError:
-            pass
-    protected.extend(path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'})
-    if not notebook_op:
-        protected.extend(root / name for name in project.get('protected', []))
-    if active_cred is not None:
-        protected.append(active_cred)
+    if direct_network and getattr(deployment, 'direct_model', False) and config.get('native_credentials'):
+        cred_path = Path(config['native_credentials']).resolve()
+        if cred_path.is_file():
+            active_cred = cred_path
+    extra_protected = [path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'}]
     denied = [deployment.state / 'chat.sqlite3',
               deployment.state / 'service.lock', deployment.state / 'control.reserve']
     if deployment.value.get('runtime_domain'): denied.append(Path(deployment.value['runtime_domain']))
@@ -214,12 +171,6 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             cred = Path(provider['native_credentials'])
             if active_cred is None or cred.resolve() != active_cred:
                 denied.append(cred)
-    if not notebook_op:
-        for granted_str in _authorized_read_roots(root, project, denied, private_home):
-            granted_path = Path(granted_str)
-            if granted_path.exists():
-                read.append(granted_path)
-    unique = lambda paths: tuple(sorted({str(path.absolute()) for path in paths}))
     if seconds is not None:
         duration = seconds
     elif deployment.limits.turn_seconds == 0 and not readonly:
@@ -229,17 +180,28 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
     spec_seconds = 0 if (not readonly and duration == 0) else min(86400, max(.1, duration))
     rt = tuple(sorted({*runtime_paths(config, project_python=None if notebook_op else effective_project_python(project)),
                        *(str(Path(p).absolute()) for p in extra_runtime_paths)}))
-    scoped_reads = bool(readonly or has_deps or project.get('read_roots'))
-    return SandboxSpec(read_paths=unique(read), write_paths=unique(writes),
+    return build_development_sandbox_spec(
+        root,
+        writes=project['writes'],
+        protected=project.get('protected', ()),
+        read_roots=project.get('read_roots') or (),
+        extra_read_paths=extra_reads,
         runtime_paths=rt,
-        protected_paths=unique(protected), denied_paths=unique(denied), private_home=str(private_home),
-        role='readonly' if readonly else 'developer',
-        seconds=spec_seconds, rss_bytes=deployment.limits.rss_bytes,
-        processes=deployment.limits.processes, file_bytes=min(64*1024**2, deployment.limits.provider_bytes),
-        private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
+        denied_paths=denied,
+        private_home=private_home,
+        kind=project.get('kind', 'pipeline'),
+        phase=project.get('phase', 'implementation'),
+        readonly=readonly,
+        notebook_op=notebook_op,
         direct_network=direct_network,
-        read_policy='scoped' if scoped_reads else 'inherit_os',
-        write_policy='scoped')
+        active_credential_path=active_cred,
+        extra_protected=extra_protected,
+        seconds=spec_seconds,
+        rss_bytes=deployment.limits.rss_bytes,
+        processes=deployment.limits.processes,
+        file_bytes=min(64 * 1024**2, deployment.limits.provider_bytes),
+        private_bytes=min(deployment.limits.provider_bytes, deployment.limits.private_total_bytes),
+    )
 
 
 def automatic_approval(project, request, *, assurance):
@@ -889,7 +851,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     from demiflow.forge.development import feedback_current
                     original = store.session(session['id'])
                     if not feedback_current(project['root'], forge_opts,
-                            dict(provider=original['provider'], session=original['provider_session'])):
+                            dict(provider=original['provider'], session=original['provider_session']),
+                            allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths):
                         reject('自动修正候选或原作者已变化，输入未发送。', 'inputs_changed')
 
                 turn_op = turn.get('operation', 'message')
@@ -1321,10 +1284,28 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if requested or store.turn(tid)['stop_at']:
                         raise InterruptedError(reason or '工程检查已取消。')
 
+                try:
+                    dep_digest_after = dependency_candidate_digest(
+                        project['root'], allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths,
+                    )
+                    dep_digest_valid = True
+                except (OSError, ValueError):
+                    dep_digest_after = None
+                    dep_digest_valid = False
+
                 def source_current():
-                    return (not coding or sdk_identity(coding['catalog']) == coding['sdk_revision']) and (
+                    if not ((not coding or sdk_identity(coding['catalog']) == coding['sdk_revision']) and (
                         not watched or capture(project['root'], watched_after, exclude=excluded,
-                            source_dir=scratch / 'sources') == after)
+                            source_dir=scratch / 'sources') == after)):
+                        return False
+                    if not dep_digest_valid:
+                        return False
+                    try:
+                        return dependency_candidate_digest(
+                            project['root'], allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths,
+                        ) == dep_digest_after
+                    except (OSError, ValueError):
+                        return False
 
                 if guided and not compact and not notebook:
                     from dataclasses import replace
@@ -1359,7 +1340,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         # The host's candidate fingerprint is rechecked again before transport.
                         if receipt.get('feedback'):
                             receipt['feedback']['candidate'] = dict(watch=watched_after, exclude=list(excluded),
-                                digest=candidate_identity(after))
+                                digest=candidate_identity(after), dependencies_digest=dep_digest_after)
                     except InterruptedError:
                         final = 'cancelled'
                         report = dict(status='incomplete', diagnostics=[dict(detail='评审已停止。')])

@@ -456,6 +456,7 @@ def inspect_dependencies(
     check_environment: bool = False,
     probe_imports=(),
     allow_partial: bool = True,
+    confined: bool | None = None,
 ) -> dict:
     """Live inspection of pyproject.toml, B-class packages, orphans, and optional A-class Python environment."""
     root = no_symlinks(Path(root).absolute())
@@ -577,6 +578,7 @@ def inspect_dependencies(
                     strict=not allow_partial,
                     check_conflicts=True,
                     probe_imports=tuple(sorted(set(probe_imports))),
+                    confined=confined,
                 )
                 if 'environment' in probed and 'interpreter' not in probed:
                     environment = probed['environment']
@@ -639,6 +641,7 @@ def binding(
     check_imports: bool = False,
     require_python: bool = False,
     require_environment: bool = False,
+    confined: bool | None = None,
 ) -> dict | None:
     """Resolve live validated dependency binding directly from pyproject.toml (no lock file)."""
     root = no_symlinks(Path(root).absolute())
@@ -656,6 +659,7 @@ def binding(
             check_imports=check_imports,
             check_environment=bool(python and require_environment),
             allow_partial=False,
+            confined=confined,
         )
         packages = inspected['packages']
         environment = inspected['environment']
@@ -673,6 +677,7 @@ def binding(
                      packages=sorted(config['packages'])),
                 strict=True,
                 check_conflicts=True,
+                confined=confined,
             )
             environment = probed
     requirements = _requirements_with_platform(config)
@@ -833,54 +838,361 @@ def vendor(root, name: str, source, *, allowed_roots=None, denied_paths=()) -> d
     )
 
 
-def _remove_package_from_toml(raw_text: str, name: str) -> tuple[str, bool]:
-    """Surgically remove one package entry from [tool.demiflow.packages] while preserving other sections."""
-    lines = raw_text.splitlines(keepends=True)
-    out = []
-    section = ''
-    skipping_subtable = False
-    skipping_braces = 0
-    removed = False
-    entry_re = re.compile(rf'^\s*{re.escape(name)}\s*=')
-    for line in lines:
-        if skipping_braces > 0:
-            code_part = line.split('#', 1)[0]
-            skipping_braces += code_part.count('{') - code_part.count('}')
-            if skipping_braces < 0:
-                skipping_braces = 0
+def _skip_toml_string(text: str, i: int) -> int:
+    """Advance index `i` past a single-line or multiline TOML string literal starting at `text[i]`."""
+    n = len(text)
+    if text[i:i + 3] in ('"""', "'''"):
+        delim = text[i:i + 3]
+        i += 3
+        while i < n:
+            if delim == '"""' and text[i] == '\\':
+                i += 2
+                continue
+            if text[i:i + 3] == delim:
+                run = 3
+                while i + run < n and text[i + run] == delim[0] and run < 5:
+                    run += 1
+                return i + run
+            i += 1
+        return n
+    quote = text[i]
+    i += 1
+    while i < n:
+        if quote == '"' and text[i] == '\\':
+            i += 2
             continue
-        stripped = line.strip()
-        header = stripped.split('#', 1)[0].strip()
-        if header.startswith('[') and header.endswith(']') and not header.startswith('[['):
-            section = header[1:-1].strip()
-            if section == f'tool.demiflow.packages.{name}':
+        if text[i] == quote:
+            return i + 1
+        i += 1
+    return n
+
+
+def _strip_toml_comment(line: str) -> str:
+    """Return the code portion of a single-line TOML fragment outside string literals."""
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if ch == '#':
+            return line[:i]
+        if ch in ('"', "'"):
+            i = _skip_toml_string(line, i)
+            continue
+        i += 1
+    return line
+
+
+def _advance_toml_state(line: str, state: dict) -> None:
+    """Update multiline string and bracket/brace nesting state across one TOML line."""
+    i, n = 0, len(line)
+    while i < n:
+        ml = state['ml']
+        if ml is not None:
+            if ml == '"""' and line[i] == '\\':
+                i += 2
+                continue
+            if line[i:i + 3] == ml:
+                run = 3
+                while i + run < n and line[i + run] == ml[0] and run < 5:
+                    run += 1
+                i += run
+                state['ml'] = None
+                continue
+            i += 1
+            continue
+        ch = line[i]
+        if ch == '#':
+            break
+        if line[i:i + 3] in ('"""', "'''"):
+            state['ml'] = line[i:i + 3]
+            i += 3
+            continue
+        if ch in ('"', "'"):
+            i = _skip_toml_string(line, i)
+            continue
+        if ch == '[':
+            state['brackets'] += 1
+        elif ch == ']':
+            state['brackets'] = max(0, state['brackets'] - 1)
+        elif ch == '{':
+            state['braces'] += 1
+        elif ch == '}':
+            state['braces'] = max(0, state['braces'] - 1)
+        i += 1
+
+
+def _extract_single_toml_path(obj) -> tuple[str, ...]:
+    path: list[str] = []
+    cur = obj
+    while isinstance(cur, dict) and len(cur) == 1:
+        key, val = next(iter(cur.items()))
+        path.append(key)
+        cur = val
+        if isinstance(cur, list) and len(cur) == 1 and isinstance(cur[0], dict):
+            cur = cur[0]
+    return tuple(path)
+
+
+def _parse_toml_header(code: str) -> tuple[bool, tuple[str, ...]] | None:
+    stripped = code.strip()
+    if not stripped.startswith('[') or not stripped.endswith(']'):
+        return None
+    is_array = stripped.startswith('[[') and stripped.endswith(']]')
+    try:
+        parsed = tomllib.loads(stripped + '\n')
+    except tomllib.TOMLDecodeError:
+        return None
+    path = _extract_single_toml_path(parsed)
+    return (is_array, path) if path else None
+
+
+def _split_top_level_assignment(stmt: str) -> tuple[str, str] | None:
+    """Split a TOML `lhs = rhs` statement on the first `=` outside quotes."""
+    i, n = 0, len(stmt)
+    while i < n:
+        ch = stmt[i]
+        if ch == '=':
+            return stmt[:i], stmt[i + 1:]
+        if ch in ('"', "'"):
+            i = _skip_toml_string(stmt, i)
+            continue
+        if ch in ('#', '\n', '\r'):
+            return None
+        i += 1
+    return None
+
+
+def _parse_toml_key_path(lhs: str) -> tuple[str, ...] | None:
+    try:
+        parsed = tomllib.loads(lhs.strip() + ' = 0\n')
+    except tomllib.TOMLDecodeError:
+        return None
+    path = _extract_single_toml_path(parsed)
+    return path if path else None
+
+
+def _remove_from_inline_packages_table(stmt: str, name: str) -> tuple[str, bool]:
+    """Remove key `name` from an inline table assignment `...packages = { ... }`."""
+    split = _split_top_level_assignment(stmt)
+    if split is None:
+        return stmt, False
+    lhs, rhs = split
+    brace_start = rhs.find('{')
+    if brace_start < 0:
+        return stmt, False
+    depth = 0
+    brace_end = -1
+    i, n = brace_start, len(rhs)
+    while i < n:
+        ch = rhs[i]
+        if ch == '#':
+            nl = rhs.find('\n', i)
+            i = n if nl < 0 else nl + 1
+            continue
+        if ch in ('"', "'"):
+            i = _skip_toml_string(rhs, i)
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                brace_end = i
+                break
+        i += 1
+    if brace_end < 0:
+        return stmt, False
+
+    inner = rhs[brace_start + 1:brace_end]
+    entries: list[str] = []
+    start = b_depth = k_depth = j = 0
+    m = len(inner)
+    while j < m:
+        ch = inner[j]
+        if ch == '#':
+            nl = inner.find('\n', j)
+            j = m if nl < 0 else nl + 1
+            continue
+        if ch in ('"', "'"):
+            j = _skip_toml_string(inner, j)
+            continue
+        if ch == '{':
+            b_depth += 1
+        elif ch == '}':
+            b_depth -= 1
+        elif ch == '[':
+            k_depth += 1
+        elif ch == ']':
+            k_depth -= 1
+        elif ch == ',' and b_depth == 0 and k_depth == 0:
+            entries.append(inner[start:j])
+            start = j + 1
+        j += 1
+    if inner[start:].strip():
+        entries.append(inner[start:])
+
+    kept: list[str] = []
+    removed = False
+    for entry in entries:
+        item_split = _split_top_level_assignment(entry.strip())
+        if item_split is not None:
+            item_path = _parse_toml_key_path(item_split[0])
+            if item_path and item_path[0] == name:
+                removed = True
+                continue
+        kept.append(entry.strip())
+    if not removed:
+        return stmt, False
+    return lhs + '=' + rhs[:brace_start + 1] + ', '.join(kept) + rhs[brace_end:], True
+
+
+def _normalize_demiflow_packages_for_compare(doc: dict) -> dict:
+    """Prune empty tool.demiflow.packages ancestors ONLY so semantic diff compares every other key."""
+    import copy
+    out = copy.deepcopy(doc)
+    tool = out.get('tool')
+    if isinstance(tool, dict):
+        df = tool.get('demiflow')
+        if isinstance(df, dict):
+            pkgs = df.get('packages')
+            if isinstance(pkgs, dict) and not pkgs:
+                df.pop('packages', None)
+            if not df:
+                tool.pop('demiflow', None)
+        if not tool:
+            out.pop('tool', None)
+    return out
+
+
+def _write_text_preserving_inode(path: Path, text: str) -> None:
+    """Update an existing regular TOML file in place so active Linux Landlock file-inode rules remain valid."""
+    no_symlinks(path)
+    raw = text.encode('utf-8')
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ForgeError('pyproject.toml must be a regular file', code='operation_rejected')
+        os.lseek(fd, 0, os.SEEK_SET)
+        view = memoryview(raw)
+        written = 0
+        while written < len(raw):
+            written += os.write(fd, view[written:])
+        os.ftruncate(fd, len(raw))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _remove_package_from_toml(raw_text: str, name: str) -> tuple[str, bool]:
+    """Surgically remove one package entry from [tool.demiflow.packages] while preserving all other config.
+
+    Fail-closed: parses both before and after with tomllib and verifies that ONLY
+    `tool.demiflow.packages.<name>` changed; refuses to corrupt unrelated config.
+    """
+    before = tomllib.loads(raw_text)
+    before_pkgs = (before.get('tool') or {}).get('demiflow', {}).get('packages')
+    if not (isinstance(before_pkgs, dict) and name in before_pkgs):
+        return raw_text, False
+
+    target = ('tool', 'demiflow', 'packages', name)
+    packages_path = ('tool', 'demiflow', 'packages')
+    lines = raw_text.splitlines(keepends=True)
+    out: list[str] = []
+    current_section: tuple[str, ...] = ()
+    skipping_subtable = False
+    removed = False
+    idx, total = 0, len(lines)
+
+    while idx < total:
+        line = lines[idx]
+        code = _strip_toml_comment(line).strip()
+        if not code:
+            if not skipping_subtable:
+                out.append(line)
+            idx += 1
+            continue
+
+        header = _parse_toml_header(code)
+        if header is not None:
+            is_array, path = header
+            current_section = path
+            if not is_array and len(path) >= 4 and path[:4] == target:
                 skipping_subtable = True
                 removed = True
+                idx += 1
                 continue
             skipping_subtable = False
             out.append(line)
+            idx += 1
             continue
+
+        stmt_lines = [line]
+        state = {'ml': None, 'brackets': 0, 'braces': 0}
+        _advance_toml_state(line, state)
+        idx += 1
+        while idx < total and (state['ml'] is not None or state['brackets'] > 0 or state['braces'] > 0):
+            nxt = lines[idx]
+            stmt_lines.append(nxt)
+            _advance_toml_state(nxt, state)
+            idx += 1
+
         if skipping_subtable:
             continue
-        if section == 'tool.demiflow.packages' and entry_re.match(line):
-            removed = True
-            code_part = line.split('#', 1)[0]
-            delta = code_part.count('{') - code_part.count('}')
-            if delta > 0:
-                skipping_braces = delta
-            continue
-        out.append(line)
+
+        stmt = ''.join(stmt_lines)
+        split = _split_top_level_assignment(stmt)
+        if split is not None:
+            rel_path = _parse_toml_key_path(split[0])
+            if rel_path is not None:
+                full_path = current_section + rel_path
+                if len(full_path) >= 4 and full_path[:4] == target:
+                    removed = True
+                    continue
+                if full_path == packages_path:
+                    rebuilt, inline_removed = _remove_from_inline_packages_table(stmt, name)
+                    if inline_removed:
+                        removed = True
+                        out.append(rebuilt)
+                        continue
+
+        out.append(stmt)
+
+    if not removed:
+        raise ForgeError(
+            f'Unable to locate declaration for {name!r} in pyproject.toml for safe removal',
+            code='conflict',
+        )
+
     updated = ''.join(out)
-    if removed:
-        parsed = tomllib.loads(updated)
-        pkgs = (parsed.get('tool') or {}).get('demiflow', {}).get('packages')
-        if isinstance(pkgs, dict) and name in pkgs:
-            raise ForgeError(f'Unable to cleanly remove {name} from pyproject.toml', code='conflict')
-    return updated, removed
+    try:
+        after = tomllib.loads(updated)
+    except tomllib.TOMLDecodeError as exc:
+        raise ForgeError(
+            f'Unable to safely remove {name!r} from pyproject.toml: {exc}',
+            code='conflict',
+        ) from exc
+
+    after_pkgs = (after.get('tool') or {}).get('demiflow', {}).get('packages')
+    if isinstance(after_pkgs, dict) and name in after_pkgs:
+        raise ForgeError(f'Unable to cleanly remove {name!r} from pyproject.toml', code='conflict')
+
+    import copy
+    expected = copy.deepcopy(before)
+    del expected['tool']['demiflow']['packages'][name]
+    if _normalize_demiflow_packages_for_compare(after) != _normalize_demiflow_packages_for_compare(expected):
+        raise ForgeError(
+            f'Refusing unsafe pyproject.toml edit while removing {name!r}: unrelated configuration would change',
+            code='conflict',
+        )
+    return updated, True
 
 
 def remove(root, name: str) -> dict:
-    """Remove a single declared package by name and delete ONLY its project-owned vendored copy."""
+    """Remove a single declared package by name and delete ONLY its project-owned vendored copy.
+
+    Atomically rolls back both `pyproject.toml` and `packages/<name>` on any failure,
+    and updates `pyproject.toml` in-place to preserve its inode for active Linux Landlock rules.
+    """
     if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise ForgeError('Invalid package name: ' + str(name)[:64], code='invalid_request')
     root = no_symlinks(Path(root).absolute())
@@ -888,34 +1200,66 @@ def remove(root, name: str) -> dict:
         pyproject = root / 'pyproject.toml'
         config = declaration(root)
         declared_source = None
+        updated_text = None
         removed_declaration = False
         if config is not None and name in config['packages']:
             declared_source = config['packages'][name]['source']
             updated_text, removed_declaration = _remove_package_from_toml(config['raw'], name)
-            # Re-verify file bytes did not change concurrently before writing.
+            if not removed_declaration:
+                raise ForgeError(
+                    f'Unable to remove declaration for {name!r} from pyproject.toml; preserving files',
+                    code='conflict',
+                )
             current_raw = read_bounded(pyproject, MAX_DECLARATION_BYTES)
             if hashlib.sha256(current_raw).hexdigest() != config['sha256']:
                 raise ForgeError('pyproject.toml changed concurrently during remove; preserving existing content', code='inputs_changed')
-            if removed_declaration:
-                atomic_write_text(pyproject, updated_text)
+
+        vendor_dir = root / 'packages'
+        target = vendor_dir / name
+        has_managed_files = (
+            declared_source != 'local_ref'
+            and vendor_dir.is_dir()
+            and not vendor_dir.is_symlink()
+            and target.exists()
+        )
+        if has_managed_files and target.is_symlink():
+            raise ForgeError(f'Refusing to remove symlink under packages/: {name}', code='operation_rejected')
+        if not removed_declaration and not has_managed_files:
+            raise ForgeError(f'Package {name!r} is neither declared nor present under packages/', code='not_found')
+
+        staging = vendor_dir / f'.remove-{name}-{secrets.token_hex(6)}' if has_managed_files else None
+        staged = False
+        toml_written = False
         removed_files = False
-        # Never touch external local_ref directories — only project-owned packages/<name>.
-        if declared_source != 'local_ref':
-            vendor_dir = root / 'packages'
-            target = vendor_dir / name
-            if vendor_dir.is_dir() and not vendor_dir.is_symlink() and target.exists():
-                if target.is_symlink():
-                    raise ForgeError(f'Refusing to remove symlink under packages/: {name}', code='operation_rejected')
-                if target.is_dir():
-                    shutil.rmtree(target)
+        try:
+            if has_managed_files and staging is not None:
+                os.replace(target, staging)
+                staged = True
+            if removed_declaration and updated_text is not None:
+                _write_text_preserving_inode(pyproject, updated_text)
+                toml_written = True
+            if staged and staging is not None:
+                if staging.is_dir():
+                    shutil.rmtree(staging)
                 else:
-                    target.unlink()
+                    staging.unlink()
                 removed_files = True
+            if removed_files:
                 from .project_guard import record_authorized_tree_write
                 record_authorized_tree_write(root, 'packages')
                 record_authorized_tree_write(root, f'packages/{name}')
-        if not removed_declaration and not removed_files:
-            raise ForgeError(f'Package {name!r} is neither declared nor present under packages/', code='not_found')
+        except BaseException:
+            if toml_written and config is not None:
+                try:
+                    _write_text_preserving_inode(pyproject, config['raw'])
+                except OSError:
+                    pass
+            if staged and staging is not None and staging.exists() and not target.exists():
+                try:
+                    os.replace(staging, target)
+                except OSError:
+                    pass
+            raise
     return dict(
         status='removed',
         package=name,

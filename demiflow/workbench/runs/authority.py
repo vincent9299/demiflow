@@ -14,6 +14,24 @@ from demiflow.forge.schema import ForgeError
 
 
 @dataclass(frozen=True)
+class WorkbenchLocalAuthority(LocalAuthority):
+    """Trusted-local Workbench CLI authority that uses Workbench's worker for graph source materials."""
+
+    def inspector_operation(self, name, root, *, _pass_fds=(), _authority=None, _source_modules=None, _dependencies=None, **arguments):
+        from demiflow.workbench.worker import operation
+        return operation(
+            name, root, _pass_fds=_pass_fds, _authority=_authority,
+            _source_modules=_source_modules, _dependencies=_dependencies, **arguments,
+        )
+
+
+def local_authority(root: Path, python: Path | None = None, read_roots: tuple[Path, ...] = ()):
+    py = str(python) if python is not None else None
+    rr = tuple(str(Path(p).resolve()) for p in read_roots) if read_roots else None
+    return WorkbenchLocalAuthority(str(Path(root).absolute()), python=py, read_roots=rr)
+
+
+@dataclass(frozen=True)
 class WebAuthority:
     root: str
     workspace_id: str
@@ -88,7 +106,10 @@ register_bootstrap_kind('web', _from_web_bootstrap)
 
 
 def from_bootstrap(value, root):
-    return _forge_from_bootstrap(value, root)
+    auth = _forge_from_bootstrap(value, root)
+    if type(auth) is LocalAuthority:
+        return WorkbenchLocalAuthority(auth.root, python=auth.python, read_roots=auth.read_roots)
+    return auth
 
 
 def for_http(server, path, root, action):

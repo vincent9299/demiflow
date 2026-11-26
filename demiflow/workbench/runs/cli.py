@@ -7,6 +7,7 @@ import click
 from demiflow.forge.runs import manager as runs
 from demiflow.forge.runs.cli import emit, register as register_forge_runs
 from demiflow.workbench import project_operations as project_ops
+from demiflow.workbench.runs.authority import local_authority
 
 
 def register(workspace):
@@ -14,7 +15,7 @@ def register(workspace):
     id_arg = click.argument('run_id')
     pretty = click.option('--json', 'pretty', is_flag=True)
 
-    group = register_forge_runs(workspace)
+    group = register_forge_runs(workspace, authority_factory=local_authority)
 
     @group.command('attach')
     @root_arg

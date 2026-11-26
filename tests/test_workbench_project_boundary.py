@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = 'demiflow.workbench.projects'
 CORE = {'workspace', 'checks', 'discovery', 'definitions', 'documents', 'io'}
 APPLICATION = {'registry', 'watch', 'flow_arguments'}
-RUN_MODULES = {'authority', 'cli', 'facts', 'view'}
+RUN_MODULES = {'authority', 'cli', 'facts', 'http', 'view'}
 FORBIDDEN = {PROJECTS + '.' + name for name in APPLICATION} | {
     'demiflow.workbench.worker', 'demiflow.workbench.api',
     'demiflow.workbench.project_operations', 'demiflow.workbench.directory_operations'}
