@@ -449,7 +449,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
         try:
             operation_budget.check(deadline)
             if Path(path).parts[0] == 'workflows':
-                from .workflow import MAX_WORKFLOW_BYTES, validate_workflow
+                from .workflow import MAX_WORKFLOW_BYTES, external_workflow_bindings, validate_workflow
                 raw_wf = read_bounded(relative_path(root, path), MAX_WORKFLOW_BYTES)
                 _record(sources, path, sha256(raw_wf).hexdigest())
                 layout_paths.add(path)
@@ -463,8 +463,7 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
                         format=wf_spec.get('format') or 'demiflow_workflow_v1',
                         symbols=[n['id'] for n in wf_spec.get('nodes') or ()],
                         scope='definition', unverified_projects=wf_spec['unverified_projects'],
-                        external_bindings=[dict(project=wf_spec['projects'][n['project']], entry=n['entry'], params=n.get('params'))
-                                           for n in wf_spec['nodes'] if n['project'] in wf_spec['projects']],
+                        external_bindings=external_workflow_bindings(wf_spec),
                     ))
                 checked_workflows.add(path)
                 continue

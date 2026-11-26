@@ -146,6 +146,20 @@ def test_workflow_review_links_only_local_bindings_and_rechecks_the_candidate(tm
     assert not verify_evidence(root, evidence)
 
 
+@pytest.mark.parametrize('malformed', [[], {}])
+def test_invalid_external_binding_still_returns_static_feedback_with_review(tmp_path, malformed):
+    root = _make_project(tmp_path/'project')
+    write_workflow(root, projects={'peer':'other'}, nodes=[dict(id='bad', project='peer', entry=ENTRY, params=malformed)])
+    def catalog(arguments):
+        pytest.fail('Malformed external bindings cannot be queried')
+    receipt = assess_turn(root, author=dict(provider='codex', session='original', completed=True,
+                                             acknowledged=True, cleanup='complete'),
+                          goal='核验项目绑定', changes=[dict(path=PATH)], auto_review=True,
+                          reviewer=response_for, observations=lambda definitions: workflow_review_observations(catalog, definitions))
+    assert any(d['rule'] == 'WF-01' for d in receipt['checks']['project_layout']['diagnostics'])
+    assert receipt['feedback']['author']['session'] == 'original'
+
+
 def test_project_catalog_is_paged_read_only_and_rechecks_membership(tmp_path):
     host = _make_project(tmp_path/'host', 'host')
     peer = _make_project(tmp_path/'peer', 'peer')

@@ -277,6 +277,16 @@ def local_workflow_bindings(document, entries):
         yield entry, params if _validate_params_syntax(params) else None
 
 
+def external_workflow_bindings(spec):
+    """Project only well-formed external node selectors; WF diagnostics retain malformed fields."""
+    return [
+        dict(project=spec['projects'][node['project']], entry=node['entry'], params=node['params'])
+        for node in spec['nodes']
+        if node['project'] in spec['projects'] and _validate_entry_syntax(node['entry'])
+        and (node['params'] is None or _validate_params_syntax(node['params']))
+    ]
+
+
 def validate_workflow(root: Path | str, path: str, *, control: dict | None = None,
                       project_resolver=None) -> dict:
     """Statically validate one ``workflows/<name>.json`` file and project its DAG structure.
