@@ -167,6 +167,7 @@ class DataflowExecution:
         self._sinks = {}
         self._restore_image: RecoveryImage | None = None
         self._verified_completed_image: RecoveryImage | None = None
+        self._unverified_business_import: str | None = None
         self._channels = None
         self._cut: CutRequest | None = None
         self._contributions: dict[str, CutContribution] = {}
@@ -486,7 +487,7 @@ class DataflowExecution:
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
             from demiflow.execution.seal.plan import validate_execution_binding
             validate_execution_binding(self._request, graph)
-            completed_live_nodes = verify_action_programs(
+            completed_live_nodes, self._unverified_business_import = verify_action_programs(
                 self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
@@ -802,6 +803,10 @@ class DataflowExecution:
         # carrier. Continuing execution does: prepare retained the sealed
         # policy, while services/hosts were assembled for the current request.
         # Never start those hosts under another provider's physical contract.
+        if self._unverified_business_import is not None:
+            raise DataflowError('INCOMPATIBLE_HISTORY',
+                                'Original seal cannot verify a project import. Start a new run to compute more rows.',
+                                context={'import': self._unverified_business_import})
         providers = {host.provider for host in self._services.hosts}
         if providers != {self._physical.policy.provider}:
             raise DataflowError("INCOMPATIBLE_HISTORY",
