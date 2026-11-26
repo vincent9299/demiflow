@@ -365,7 +365,12 @@ def codec_window(kernel, operation, bounds, *, explicit_limits=frozenset()):
         # single-call map. The minimum holds a single call, so a legal row
         # always proceeds once earlier calls finish; granted slack admits more
         # calls at once. State and fixed costs per slot still coexist.
-        call_input = call_output = bounds.max_row_bytes
+        # A platform actor that bounds what it appends reserves that bound
+        # instead of a full output row; the kernel holds every output to it.
+        from demiflow.execution.compiler_support.dataflow_native import declared_output_growth
+        growth = declared_output_growth(operation) if operation is not None else None
+        call_input = bounds.max_row_bytes
+        call_output = bounds.max_row_bytes if growth is None else min(bounds.max_row_bytes, growth)
         minimum -= calls * (bounds.max_batch_bytes + bounds.max_row_bytes) - (
             call_input + call_output + bounds.max_batch_bytes)
     if not matches:

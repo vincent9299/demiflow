@@ -94,6 +94,8 @@ def test_default_budget_runs_concurrent_model_calls_in_one_resident_layout(serve
     row, batch = bounds.max_row_bytes, bounds.max_batch_bytes
     assert kernel.configuration['concurrency'] == calls
     assert kernel.configuration['codec_min_bytes'] == 2 * row + batch
+    # A prompt's output has no bound below a row (retries, traces, typed results).
+    assert kernel.configuration['call_output_min_bytes'] == row
     selected = physical(graph, policy, bounds)
     # Every memory edge stays in memory: no stage is parked and restarted.
     assert {exchange.mode for exchange in selected.exchanges} == {'memory_incremental'}
@@ -318,3 +320,57 @@ def test_waiting_input_and_output_encoding_keep_a_batch_window(tmp_path, mode):
     with RunContext.start(tmp_path / 'run', limits=limits), data.local_execution(workers=2, worker_mode=mode):
         rows = data.from_items([{'i': i} for i in range(6)]).map_async(_enrich, concurrency=2).take_all()
     assert sorted(rows, key=lambda r: r['i']) == [{'i': i, 'payload': list(range(100))} for i in range(6)]
+
+
+# ---- outputs bounded by the node itself -----------------------------------------------------
+
+def _fetch(tmp_path, rows, *, concurrency):
+    from demiflow.collect import FetchPolicy, HttpSource
+    from demiflow.objects import LocalObjectStore
+    return data.from_items(rows).fetch(store=LocalObjectStore(tmp_path / 'objects'),
+        policy=FetchPolicy(http=HttpSource(allow_private=True)), concurrency=concurrency)
+
+
+def test_a_fetch_call_reserves_the_receipt_it_can_append(tmp_path):
+    from demiflow.collect import FetchPolicy
+    from demiflow.execution.compiler_support.dataflow_native import OUTPUT_FIELD_BYTES, TYPED_ROW_EXPANSION
+    kernel, *_, bounds = _compiled(_fetch(tmp_path, [{'request': {'uri': 'http://127.0.0.1:9/x'}}], concurrency=16),
+                                   'AsyncMapOp')  # a fetch is an async map over the platform fetch actor
+    receipt = FetchPolicy().max_receipt_bytes
+    # The fetch actor checks its receipt against max_receipt_bytes before
+    # returning the row; object bytes stay in the store.
+    assert kernel.configuration['call_output_min_bytes'] == TYPED_ROW_EXPANSION * receipt + OUTPUT_FIELD_BYTES
+    assert kernel.configuration['call_output_min_bytes'] < bounds.max_row_bytes
+    assert kernel.configuration['call_input_min_bytes'] == bounds.max_row_bytes
+
+
+def test_an_output_beyond_its_call_reserve_is_refused():
+    small, big = rec({'v': 'x'}, sequence=0), rec({'v': 'x' * 4000}, sequence=0)
+    calls = ConcurrentCalls(2, check_stop=lambda: None, byte_limit=small.encoded_bytes + 1100, output_reserve=100)
+    try:
+        with pytest.raises(DataflowError) as error:
+            list(calls.submit(lambda slot: iter((big,)), scope=lambda slot: 'a' * 64, input=small))
+            list(calls.finish())
+        assert error.value.code == 'BUDGET_EXCEEDED' and 'reserved' in str(error.value)
+    finally:
+        calls.close(timeout=5)
+    # Plans sealed before outputs were reserved hold no output to their input credit.
+    legacy = ConcurrentCalls(2, check_stop=lambda: None, byte_limit=small.encoded_bytes + 1100, output_reserve=0)
+    try:
+        produced = list(legacy.submit(lambda slot: iter((big,)), scope=lambda slot: 'b' * 64, input=small))
+        assert produced + list(legacy.finish()) == [big]
+    finally:
+        legacy.close(timeout=5)
+
+
+def test_default_budget_window_holds_every_declared_fetch_call(tmp_path):
+    from test_raw_fetch import origin_server
+    with origin_server() as (url, calls), data.local_execution(workers=2, worker_mode='thread') as local:
+        rows = _fetch(tmp_path, [{'request': {'uri': url + '/file'}} for _ in range(24)], concurrency=16).take_all()
+    assert len(rows) == 24 and all(row['result']['status'] == 'ok' for row in rows)
+    entry, = [item for item in local.stats['call_concurrency'] if item['capacity'] == 16]
+    # With a full 16 MiB row reserved per call the window held about 7 calls;
+    # the receipt bound lets all 16 declared calls in at once.
+    assert entry['output_reserve'] < 1024 ** 2
+    assert entry['byte_limit'] >= 16 * (entry['output_reserve'] + 4096)
+    assert entry['limited_by'] is None
