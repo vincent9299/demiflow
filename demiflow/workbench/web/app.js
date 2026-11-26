@@ -152,6 +152,7 @@
   window.addEventListener('hashchange', reloadSessionEntry);
   let workspaceId = '', projectList = [], projectNav, projectDigest = '', projectRemovalEnabled = false, projectManageEnabled = false;
   let pendingOriginalPath = null, pendingOperatorTarget = null;
+  let workflowReturnContext = null, pendingWorkflowTarget = null, workflowReturnBar = null;
   let developmentView = null, workbenchView = null, notebooksView = null;
   const readers = new Set();
   // Cleanup registry only: view-scoped DOM handles disposed
@@ -321,7 +322,7 @@
         // Keep transient admission contention inside the original project read.
         // Result-source selection and all writes retain their explicit recovery.
         const projectRead=err.operationStarted===false&&(
-          !body&&['projects','capabilities','context','changes','runs','graph','graph-source','table','sample','project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown'].includes(path)
+          !body&&['projects','capabilities','context','changes','runs','graph','graph-source','table','sample','project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown','workflows','workflow-inspect','workflow-runs','workflow-run'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));
         if(projectRead&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
@@ -873,14 +874,75 @@
     const at=destination.tables.findIndex(t=>t.alias===alias);if(at<0)destination.tables.push(t);else destination.tables[at]=t;return alias;
   }
   async function openResult(run,output){const alias=addResultTable(run,output);await openTable(alias);}
+  function renderWorkflowReturnBar() {
+    if (!workflowReturnBar) return;
+    if (!workflowReturnContext) {
+      workflowReturnBar.hidden = true;
+      workflowReturnBar.replaceChildren();
+      document.body.classList.remove('has-wf-return-bar');
+      return;
+    }
+    const ctx = workflowReturnContext;
+    workflowReturnBar.hidden = false;
+    document.body.classList.add('has-wf-return-bar');
+    workflowReturnBar.replaceChildren();
+    const backBtn = $('button', `← 返回编排：${ctx.hostProjectName} / ${ctx.workflowName}`, 'wf-return-btn');
+    backBtn.type = 'button';
+    backBtn.onclick = async () => {
+      const targetInfo = workflowReturnContext;
+      workflowReturnContext = null;
+      renderWorkflowReturnBar();
+      if (!targetInfo) return;
+      try {
+        if (workspaceId === targetInfo.hostWorkspaceId && workbenchView?.openWorkflow) {
+          await workbenchView.openWorkflow(targetInfo.workflowPath, {wfRunId: targetInfo.wfRunId});
+        } else {
+          pendingWorkflowTarget = {workflowPath: targetInfo.workflowPath, wfRunId: targetInfo.wfRunId};
+          await switchProject(targetInfo.hostWorkspaceId, {v: 2, workspace: targetInfo.hostWorkspaceId, kind: 'flows', panel: 'flows'});
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') error(main, err);
+      }
+    };
+    const info = $('span', `正在查看子节点：${ctx.nodeTitle} (${ctx.entry})`, 'wf-return-meta');
+    const dismiss = $('button', '×', 'wf-return-close');
+    dismiss.type = 'button';
+    dismiss.title = '关闭返回栏';
+    dismiss.setAttribute('aria-label', '关闭返回栏');
+    dismiss.onclick = () => { workflowReturnContext = null; renderWorkflowReturnBar(); };
+    workflowReturnBar.append(backBtn, info, dismiss);
+  }
+
+  async function openWorkflowChild(info) {
+    if (!info || !info.targetWorkspaceId) return;
+    workflowReturnContext = info;
+    renderWorkflowReturnBar();
+    const targetWs = info.targetWorkspaceId;
+    const requested = info.childRunId
+      ? {v: 2, workspace: targetWs, kind: 'run', run_id: info.childRunId, ...(info.childAttempt ? {attempt: info.childAttempt} : {}), panel: 'monitor'}
+      : {v: 2, workspace: targetWs, kind: 'flows', panel: 'flows', ...(info.entry ? {entry: info.entry} : {}), ...(info.params ? {params: info.params} : {})};
+    try {
+      if (targetWs === workspaceId) {
+        await openView(requested);
+      } else {
+        await switchProject(targetWs, requested, 'push', {preserveWorkflowReturn: true});
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') error(main, err);
+    }
+  }
+
   async function pipeline(request){
     if(workbenchContract!=='demiflow_workbench_graph_v1')throw new Error('当前服务尚未提供图工作台契约');
     const id=workspaceId,epoch=viewEpoch;let reference=request,mountedHandle=null,checkVersion=0,checksPending=0;
     const isCurrent=()=>epoch===viewEpoch&&workspaceId===id;
     const localApi=(path,query,body,projectId=id,opts)=>{if(epoch!==viewEpoch)throw staleRequest();return api(path,query,body,projectId,opts);};
     const operatorTarget=pendingOperatorTarget;pendingOperatorTarget=null;
+    const initialWorkflowTarget=pendingWorkflowTarget;pendingWorkflowTarget=null;
     const handle=await ForgePipelineWorkspace.mount({main,api:localApi,icon,context,workspaceId:id,view:request,mountText,disposeReaders,openResult,navigate,
       operatorTarget,
+      initialWorkflowTarget,
+      openWorkflowChild,
       openNew:()=>epoch===viewEpoch?openView(target('development_new')):undefined,
       openSession:sid=>epoch===viewEpoch?openView(target('development_session',{session_id:sid})):undefined,
       error,
@@ -1121,10 +1183,11 @@
     for(const id of projectTabs.keys())if(!rows.some(p=>p.workspace_id===id))projectTabs.delete(id);
     if(workspaceId&&!rows.some(p=>p.workspace_id===workspaceId))clearProject('项目已移出 DemiFlow 登记清单，项目文件和历史数据均已保留。可以重新注册，或选择其他项目。');
   }
-  async function switchProject(id, requested=null, historyMode='push') {
+  async function switchProject(id, requested=null, historyMode='push', {preserveWorkflowReturn=false}={}) {
     if(!canLeaveViews())return;
     if(activeWrites)throw new Error('正在提交操作，完成后再切换项目。');
     if(!projectList.some(p=>p.workspace_id===id))throw new Error('此工作区尚未登记');
+    if(!preserveWorkflowReturn && workflowReturnContext){workflowReturnContext=null;renderWorkflowReturnBar();}
     rememberTab();
     clearTimeout(syncTimer);readController.abort();readController=new AbortController();
     document.getElementById('workspace-status').open=false;
@@ -1164,7 +1227,8 @@
     main=$('main');main.id='workspace-content';
     const title=$('div',undefined,'workspace-title'),workspaceName=$('strong');workspaceName.id='workspace-name';
     title.append(brand);header.append(title);
-    top.append(header);content.append(top,main);shell.append(content);app.append(shell);
+    workflowReturnBar=$('div',undefined,'wf-return-bar');workflowReturnBar.id='workflow-return-bar';workflowReturnBar.hidden=true;
+    top.append(header,workflowReturnBar);content.append(top,main);shell.append(content);app.append(shell);
     if(offline){workspaceName.textContent='固定快照 · 只读';title.append(workspaceName);heading('接线检查报告','此页面可独立查看。当前源码、表数据和运行结果未复核。');renderOffline(offline,main);return;}
     const toggle=button('',toggleProjectPicker,title);toggle.className='project-switcher';toggle.id='project-switcher';
     toggle.append(workspaceName,icon(['m8 10 4 4 4-4']));toggle.setAttribute('aria-haspopup','dialog');toggle.setAttribute('aria-controls','project-picker');toggle.setAttribute('aria-expanded','false');

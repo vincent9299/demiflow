@@ -13,7 +13,7 @@
   const MAX_NODES = 256, MAX_EDGES = 512;
   const kindLabel = {source_call: '源码调用', read_table: '数据输入', write_table: '输出', map: '自定义算子', join: '关联', filter: '筛选', query: '查询', reduce: '聚合'};
   const states = {pending: '已登记 · 未开始', running: '运行中', succeeded: '执行完成', failed: '执行失败', incomplete: '观测不完整', reused: '复用物化结果', cancelled: '已取消'};
-  const EDGE_LABEL = {data: '数据流', value: '值依赖', action: '动作先后', reference: '源码引用 · 类型未核验'};
+  const EDGE_LABEL = {data: '数据流', value: '值依赖', action: '动作先后', reference: '源码引用 · 类型未核验', workflow_data: '跨管线数据表交付', workflow_model: '跨管线模型权重交付', workflow_after: '编排顺序依赖'};
   const EXCHANGE_TIP = {
     finite_sealed: '等上游全部完成后开始（汇聚屏障）',
     durable_incremental: '持久化流式：分段落盘后增量传递',
@@ -49,6 +49,9 @@
   function edgeCaption(edge,target) {
     if(edge.kind==='model_manifest')return '模型 · 第 '+edge.step+' 步';
     if(edge.kind==='fixed_dataset')return '固定数据 · '+edge.toPort;
+    if(edge.kind==='workflow_data')return edge.step?('表 · '+edge.step):'数据交付';
+    if(edge.kind==='workflow_model')return edge.step?('模型 · '+edge.step):'模型交付';
+    if(edge.kind==='workflow_after')return '顺序依赖';
     return [portLabel(edge.fromPort,'output',target),portLabel(edge.toPort,'input',target)].filter(Boolean).join(' → ');
   }
   function visibleSummary(card) {

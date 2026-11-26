@@ -239,6 +239,107 @@ class RunReader:
         _compact(result, MAX_DOCUMENT_BYTES)
         return result
 
+    def published_models(self):
+        """Read bounded, sha256-verified model manifests committed by this run (never opens weights)."""
+        from demiflow.execution.contracts.training import FitResult, ProjectObject
+        from demiflow.execution.storage.model_store import local_path, open_regular_file
+
+        entries = []
+        seen = set()
+
+        def record(action_id, occurrence, instance_id, fit_key, manifest_dict):
+            key = (action_id, occurrence, instance_id)
+            if key in seen or len(entries) >= 32:
+                return
+            seen.add(key)
+            entries.append((action_id, occurrence, instance_id, fit_key, manifest_dict))
+
+        if self.has_table('runtime_sources'):
+            rows = self.db.execute(
+                'SELECT ' + _TEXT_BYTES + " FROM runtime_sources WHERE json_extract(document, '$.schema')='demiflow.fit_consumption.v1' ORDER BY action_id LIMIT 33",
+                (8193,),
+            ).fetchall()
+            if len(rows) > 32:
+                raise RunReadError('Published model record count exceeds budget', code='resource_limit')
+            for raw, in rows:
+                if type(raw) is not bytes or len(raw) > 8192:
+                    raise RunReadError('Published model record exceeds budget', code='resource_limit')
+                val = _bounded_object(raw)
+                if type(val.get('manifest')) is dict:
+                    record(val.get('action'), val.get('occurrence'), val.get('instance'), val.get('fit_key'), val['manifest'])
+
+        if self.has_table('runtime_commit_scopes') and self.has_table('runtime_commits'):
+            scope_rows = self.db.execute(
+                "SELECT scope_id, parent_action_id, " + _TEXT_BYTES.replace('document', 'declaration')
+                + " FROM runtime_commit_scopes WHERE json_extract(declaration, '$.kind')='model_manifest' ORDER BY scope_id LIMIT 33",
+                (8193,),
+            ).fetchall()
+            if len(scope_rows) > 32:
+                raise RunReadError('Published model scope count exceeds budget', code='resource_limit')
+            for scope_id, parent_action_id, raw_decl in scope_rows:
+                if type(raw_decl) is not bytes or len(raw_decl) > 8192:
+                    raise RunReadError('Model scope declaration exceeds budget', code='resource_limit')
+                decl = _bounded_object(raw_decl)
+                commit_row = self.db.execute(
+                    "SELECT commit_id FROM runtime_commits WHERE action_id=? AND sequence=1 AND status='acked' LIMIT 1",
+                    (scope_id,),
+                ).fetchone()
+                if not commit_row:
+                    continue
+                fact = _ReadonlyJournal._commit(self.db, commit_row[0])
+                if not fact or fact.get('status') != 'acked':
+                    continue
+                receipt = (fact.get('receipts') or {}).get('model_manifest')
+                data = (receipt or {}).get('data') if type(receipt) is dict else None
+                if type(data) is dict and type(data.get('manifest')) is dict:
+                    record(
+                        parent_action_id,
+                        decl.get('occurrence'),
+                        data.get('instance') or decl.get('instance'),
+                        data.get('fit_key'),
+                        data['manifest'],
+                    )
+
+        models = []
+        for action_id, occurrence, instance_id, fit_key, manifest_dict in entries:
+            try:
+                ref = ProjectObject.from_dict(manifest_dict)
+                if ref.size_bytes > MAX_DOCUMENT_BYTES:
+                    raise RunReadError('Published model manifest exceeds budget', code='resource_limit')
+                with open_regular_file(local_path(ref.uri)) as stream:
+                    raw_manifest = stream.read(MAX_DOCUMENT_BYTES + 1)
+                if len(raw_manifest) != ref.size_bytes or hashlib.sha256(raw_manifest).hexdigest() != ref.sha256:
+                    raise RunReadError('Published model manifest digest mismatch')
+                fit_res = FitResult.from_dict(json.loads(raw_manifest.decode('utf-8')))
+            except RunReadError:
+                raise
+            except (OSError, ValueError, TypeError, KeyError, RecoveryContractError) as exc:
+                raise RunReadError('Failed to verify published model manifest: ' + str(exc)) from exc
+            steps = {}
+            for snap in fit_res.snapshots:
+                steps[str(snap.step)] = {
+                    'step': snap.step,
+                    'model_format': snap.model_format,
+                    'files': {
+                        k: {'uri': obj.uri, 'sha256': obj.sha256, 'size_bytes': obj.size_bytes}
+                        for k, obj in snap.files.items()
+                    },
+                }
+            final_files = steps.get(str(fit_res.final_step), {}).get('files', {})
+            models.append({
+                'action_id': action_id,
+                'occurrence': occurrence,
+                'instance_id': fit_res.instance_id or instance_id,
+                'fit_key': fit_res.fit_key or fit_key,
+                'manifest_digest': ref.sha256,
+                'manifest_uri': ref.uri,
+                'final_step': fit_res.final_step,
+                'files': final_files,
+                'steps': steps,
+            })
+        _compact(models, MAX_DOCUMENT_BYTES)
+        return models
+
     # -- shape -------------------------------------------------------------
     def tables(self, limit=33):
         return {row[0] for row in self.db.execute(

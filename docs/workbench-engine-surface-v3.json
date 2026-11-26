@@ -11,29 +11,17 @@
   },
   "exports": {
     "control": {
-      "retained_process_units": [
-        "demiflow.execution.hosts.execution_recovery",
-        "retained_process_units"
-      ],
-      "training_deployment_reference": [
-        "demiflow.execution.pipeline.training_deployment",
-        "training_deployment_reference"
-      ],
-      "reconcile_stopped_fits": [
-        "demiflow.execution.pipeline.training_maintenance",
-        "reconcile_stopped_fits"
-      ],
       "CheckedExecution": [
         "demiflow.execution.pipeline.checked",
         "CheckedExecution"
       ],
-      "NativeExecution": [
-        "demiflow.execution.pipeline.managed_native",
-        "NativeExecution"
-      ],
       "DEFAULT_LIMITS": [
         "demiflow.planning.dataflow_policy",
         "DEFAULT_LIMITS"
+      ],
+      "NativeExecution": [
+        "demiflow.execution.pipeline.managed_native",
+        "NativeExecution"
       ],
       "RunContext": [
         "demiflow.execution.pipeline.run_context",
@@ -51,10 +39,6 @@
         "demiflow.execution.pipeline.run_context",
         "clean_stopped_execution"
       ],
-      "local_execution": [
-        "demiflow.execution.pipeline.local_kernel",
-        "local_execution"
-      ],
       "local_capacity": [
         "demiflow.execution.hosts.capacity",
         "local_capacity"
@@ -63,17 +47,33 @@
         "demiflow.execution.hosts.capacity",
         "local_capacity_domain"
       ],
+      "local_execution": [
+        "demiflow.execution.pipeline.local_kernel",
+        "local_execution"
+      ],
       "observe": [
         "demiflow.execution.journal.run_telemetry",
         "observe"
+      ],
+      "reconcile_stopped_fits": [
+        "demiflow.execution.pipeline.training_maintenance",
+        "reconcile_stopped_fits"
       ],
       "resolve_payload_bounds": [
         "demiflow.planning.dataflow_policy",
         "resolve_payload_bounds"
       ],
+      "retained_process_units": [
+        "demiflow.execution.hosts.execution_recovery",
+        "retained_process_units"
+      ],
       "stream_limits": [
         "demiflow.execution.compiler_support.payload_limits",
         "stream_limits"
+      ],
+      "training_deployment_reference": [
+        "demiflow.execution.pipeline.training_deployment",
+        "training_deployment_reference"
       ]
     },
     "inspection": {
@@ -113,17 +113,13 @@
         "demiflow.execution.journal.program_materials",
         "build_logical_plan_view"
       ],
-      "capture_pipeline": [
-        "demiflow.execution.pipeline.managed_native",
-        "capture_pipeline"
-      ],
       "capture_managed_pipeline": [
         "demiflow.execution.pipeline.managed_native",
         "capture_managed_pipeline"
       ],
-      "native_submission_view": [
-        "demiflow.execution.journal.dataflow_history",
-        "native_submission_view"
+      "capture_pipeline": [
+        "demiflow.execution.pipeline.managed_native",
+        "capture_pipeline"
       ],
       "compile_declared_dag": [
         "demiflow.planning.dag",
@@ -148,6 +144,10 @@
       "latest": [
         "demiflow.execution.journal.run_telemetry",
         "latest"
+      ],
+      "native_submission_view": [
+        "demiflow.execution.journal.dataflow_history",
+        "native_submission_view"
       ],
       "observe_storage": [
         "demiflow.execution.journal.run_reader",
@@ -260,17 +260,17 @@
       ]
     },
     "demiflow.lance.preview": {
-      "preview_value": [
-        "demiflow/workbench/conversations/inputs.py"
-      ],
-      "sample_open_table": [
-        "demiflow/workbench/conversations/inputs.py"
-      ],
       "describe_table": [
         "demiflow/workbench/projects/workspace.py"
       ],
       "image_bytes_preview": [
         "demiflow/workbench/catalog.py"
+      ],
+      "preview_value": [
+        "demiflow/workbench/conversations/inputs.py"
+      ],
+      "sample_open_table": [
+        "demiflow/workbench/conversations/inputs.py"
       ]
     },
     "demiflow.lance.refs": {
@@ -498,9 +498,6 @@
       "entry_completed",
       "submission"
     ],
-    "NativeExecution": [
-      "bind_context"
-    ],
     "Catalog": [
       "versions"
     ],
@@ -554,6 +551,9 @@
       "_open",
       "_rows",
       "_json_value"
+    ],
+    "NativeExecution": [
+      "bind_context"
     ],
     "NodeConfigurationMaterial": [
       "availability",
@@ -636,6 +636,7 @@
     "RunReader": [
       "training_provenance",
       "training_outputs",
+      "published_models",
       "state",
       "attempt_state",
       "execution_view",
@@ -670,12 +671,6 @@
     }
   },
   "parameter_origins": {
-    "demiflow/workbench/runs/worker.py:_execute": {
-      "run": "RunJournal"
-    },
-    "demiflow/workbench/runs/worker.py:_supervise": {
-      "run": "RunJournal"
-    },
     "demiflow/workbench/graph/plan_callsite.py:_observe": {
       "receiver": "Dataset",
       "returned": "Dataset"
@@ -701,37 +696,43 @@
     "demiflow/workbench/runs/storage.py:clean_stopped": {
       "run": "RunJournal"
     },
+    "demiflow/workbench/runs/worker.py:_execute": {
+      "run": "RunJournal"
+    },
+    "demiflow/workbench/runs/worker.py:_supervise": {
+      "run": "RunJournal"
+    },
     "demiflow/workbench/runs/worker.py:sample_output": {
       "output_watch": "OutputWatch"
     }
   },
   "record_fields": {
-    "record:NativeSubmission": {
-      "format": "value",
-      "action_id": "value",
-      "kind": "value",
-      "graph": "opaque:compiled_wire",
-      "outputs": "seq:record:NativeOutput",
-      "object_roots": "value",
-      "credential_names": "value"
-    },
     "record:NativeOutput": {
+      "expected_version": "value",
+      "max_index_bytes": "value",
+      "mode": "value",
       "node_id": "value",
       "occurrence_id": "value",
-      "uri": "value",
-      "mode": "value",
-      "expected_version": "value",
       "schema_identity": "value",
-      "write_spec": "value",
-      "writer_mode": "value",
       "stage": "value",
-      "max_index_bytes": "value"
+      "uri": "value",
+      "write_spec": "value",
+      "writer_mode": "value"
     },
     "record:NativeRecording": {
       "action_id": "value",
       "attempt": "value",
       "kind": "value",
       "value": "opaque:native_recording"
+    },
+    "record:NativeSubmission": {
+      "action_id": "value",
+      "credential_names": "value",
+      "format": "value",
+      "graph": "opaque:compiled_wire",
+      "kind": "value",
+      "object_roots": "value",
+      "outputs": "seq:record:NativeOutput"
     },
     "record:VerifiedPublication": {
       "action_id": "value",
@@ -755,17 +756,15 @@
     "demiflow.workbench.runs.manager.RunJournal": "demiflow.execution.host.control.RunJournal"
   },
   "reflection_sites": {
-    "demiflow/workbench/runs/native_submission.py:inspect_submission": "Registered business entry imported in disposable read-only compiler worker; never an engine module loader.",
     "demiflow/workbench/analysis/trusted_entry.py:main": "Fixed local worker dispatcher selects one of four existing workbench.analysis modules from validated operation/role; independent of Pipeline surface.",
     "demiflow/workbench/graph/plan_callsite.py:__init__": "vars(owner) enumerates exact DataAPI/Dataset/MaterializedDataset methods and passive FunctionType code/signature; no declaration state.",
     "demiflow/workbench/graph/preview.py:preview": "Existing authorized import of pinned project entry in isolated compiler worker; not an engine dependency loader.",
+    "demiflow/workbench/runs/native_submission.py:inspect_submission": "Registered business entry imported in disposable read-only compiler worker; never an engine module loader.",
     "demiflow/workbench/runs/worker.py:execute": "Existing authorized import of pinned project entry after worker guards; not an engine dependency loader."
   },
   "result_origins": {
-    "RunJournal.connection_scope": "RunJournal",
     "CapturedAction.compiled": "CompiledDataflow",
     "CapturedAction.submission": "record:NativeSubmission",
-    "NativeExecution.bind_context": "NativeExecution",
     "CheckedExecution.bind_context": "CheckedExecution",
     "CompiledDataflow.declarations": "opaque:declarations",
     "CompiledDataflow.graph": "DataflowGraph",
@@ -775,25 +774,27 @@
     "CompiledNodeMaterials.prompts": "ProgramPromptMaterials",
     "CompiledNodeMaterials.schema": "NodeSchemaMaterial",
     "DataflowGraph.nodes": "seq:GraphNode",
+    "NativeExecution.bind_context": "NativeExecution",
     "NodeConfigurationMaterial.engine_configuration": "opaque:configuration",
     "ProgramPromptMaterials.prompts": "seq:PromptMaterial",
     "PromptMaterial.definition": "PromptDefinition",
+    "RunJournal.connection_scope": "RunJournal",
     "contextlib.ExitStack": "stdlib:ExitStack",
     "demiflow.data.dataset.Dataset": "Dataset",
     "demiflow.data.dataset.MaterializedDataset": "Dataset",
-    "demiflow.execution.hosts.datafusion.DataFusionSession": "DataFusionSession",
     "demiflow.execution.host.control.CheckedExecution": "CheckedExecution",
     "demiflow.execution.host.control.NativeExecution": "NativeExecution",
     "demiflow.execution.host.control.RunContext": "RunContext",
     "demiflow.execution.host.control.RunContext.attach": "RunContext",
     "demiflow.execution.host.control.RunJournal": "RunJournal",
-    "demiflow.execution.host.inspection.capture_pipeline": "CapturedAction",
     "demiflow.execution.host.inspection.capture_managed_pipeline": "CapturedAction",
+    "demiflow.execution.host.inspection.capture_pipeline": "CapturedAction",
     "demiflow.execution.host.inspection.compiled_node_materials": "map:CompiledNodeMaterials",
     "demiflow.execution.host.inspection.observe_storage": "StorageObservation",
     "demiflow.execution.host.inspection.read_run": "RunReader",
     "demiflow.execution.host.inspection.verify_published_output": "record:VerifiedPublication",
     "demiflow.execution.host.inspection.verify_write_receipt": "record:VerifiedPublication",
+    "demiflow.execution.hosts.datafusion.DataFusionSession": "DataFusionSession",
     "demiflow.execution.journal.output_watch.OutputWatch": "OutputWatch",
     "demiflow.lance.preview": "LancePreview",
     "demiflow.lance.refs.DatasetRef": "DatasetRef",
@@ -804,14 +805,6 @@
     "demiflow.workbench.runs.view._reading": "tuple:unknown,RunReader"
   },
   "return_contracts": {
-    "RunReader.training_provenance": {
-      "signature": "training_provenance(attempt, action_id, occurrence)",
-      "result": "One recorded scoring-table version, model/weight/base and training/evaluation source facts, at most 1 MiB"
-    },
-    "RunReader.training_outputs": {
-      "signature": "training_outputs(attempt, action_id)",
-      "result": "None or at most eight immutable table/model facts for this attempt, with has_more"
-    },
     "RunReader.execution_view": {
       "result": {
         "actions": "dict[action_id, dict[kind,JsonValue]], full compatibility diagnostics assembled natively",
@@ -877,6 +870,18 @@
         "status": "existing design values never_started or not_proven"
       },
       "signature": "preparation_evidence() -> PreparationEvidence"
+    },
+    "RunReader.published_models": {
+      "result": "At most 32 sha256-verified committed model manifests from this run journal, with final_step, steps, and files metadata (never opens weight files or external indexes), at most 1 MiB",
+      "signature": "published_models()"
+    },
+    "RunReader.training_outputs": {
+      "result": "None or at most eight immutable table/model facts for this attempt, with has_more",
+      "signature": "training_outputs(attempt, action_id)"
+    },
+    "RunReader.training_provenance": {
+      "result": "One recorded scoring-table version, model/weight/base and training/evaluation source facts, at most 1 MiB",
+      "signature": "training_provenance(attempt, action_id, occurrence)"
     },
     "action_recovery_facts": {
       "result": {
