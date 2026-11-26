@@ -33,6 +33,18 @@ def _slow_map(row):
     return {'k': row['id'] % 13, 'v': row['id'], 'pid': os.getpid()}
 
 
+def test_temp_directory_is_accepted_and_left_untouched(tmp_path):
+    """The option is documented as unused: the action runs and nothing appears there."""
+    scratch = tmp_path / 'scratch'
+    scratch.mkdir()
+    with data.local_execution(workers=2, worker_mode='thread', temp_directory=str(scratch)):
+        assert sorted(row['id'] for row in data.range(8).map(lambda row: row).take_all()) == list(range(8))
+    assert list(scratch.iterdir()) == []
+    with data.local_execution(workers=2, worker_mode='thread', temp_directory=str(tmp_path / 'absent')):
+        assert data.range(3).count() == 3
+    assert not (tmp_path / 'absent').exists()
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize('mode', ['thread', 'process'])
 def test_fused_map_shuffle_reduce_uses_workers_and_preserves_fold_order(mode):
