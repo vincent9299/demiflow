@@ -40,7 +40,7 @@ class StreamStats:
         return next(reversed(self.stages.values()))["emitted"]
 
     def summary(self) -> str:
-        st = "、".join(f"{k}[in={v['in']}→out={v['emitted']}]"
+        st = ", ".join(f"{k}[in={v['in']}→out={v['emitted']}]"
                       for k, v in self.stages.items())
         miss = ", ".join(f"{k}×{v}" for k, v in
                          sorted(self.miss.items(), key=lambda x: -x[1]))
