@@ -131,7 +131,7 @@ def set_table_view(root, alias, *, display, provenance, expected):
 def register_flow(root, entry, *, params=None, authorize, authority=None):
     """Register an authored flow using the deployment's current authority."""
     from demiflow.forge.project import register_flow as register
-    from demiflow.workbench.python_sources import dependency_scope, project_dependencies
+    from demiflow.workbench.projects.registry import dependency_scope, project_dependencies
     from demiflow.workbench.table_bindings import make_resolver
 
     authorize()

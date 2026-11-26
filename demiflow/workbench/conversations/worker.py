@@ -144,7 +144,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
-    from demiflow.workbench.python_sources import project_dependencies
+    from demiflow.workbench.projects.registry import project_dependencies
     dependencies = None if notebook_op else project_dependencies(root, project=project)
     project_root_write = (
         not readonly

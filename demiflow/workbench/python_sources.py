@@ -312,35 +312,6 @@ class PythonSources(importlib.abc.MetaPathFinder):
                 raise ForgeError('Source changed during plan construction', code='conflict')
 
 
-def project_dependencies(root, *, authority=None, project=None, verify_files=True):
-    """Resolve trusted local or registry-approved dependency input before use."""
-    from demiflow.forge.dependencies import binding, declaration
-
-    if authority is not None and authority.get('kind') == 'web':
-        from demiflow.workbench.projects.registry import load_registry
-        registry = authority.get('registry')
-        project = load_registry(registry)['projects'].get(authority['workspace_id'], {}) if registry else {}
-    if project is None:
-        return binding(root, verify_files=verify_files)
-    if project.get('root') is not None and Path(project['root']).absolute() != Path(root).absolute():
-        raise ForgeError('Dependency approval belongs to another project', code='conflict')
-    if declaration(root) is not None and not project.get('python'):
-        raise ForgeError('Configure an explicit project Python before admitting dependencies', code='operation_rejected')
-    return binding(root, approval=project.get('dependency_lock') or '', python=project.get('python'),
-                   verify_files=verify_files)
-
-
-def dependency_scope(root, *, authority=None, project=None):
-    """Give a Forge authoring use case the approval provided by its Workbench host."""
-    from contextlib import nullcontext
-    from demiflow.forge.dependencies import host_approval
-
-    if project is None and (authority is None or authority.get('kind') != 'web'):
-        return nullcontext()
-    locked = project_dependencies(root, authority=authority, project=project, verify_files=False)
-    return host_approval(root, locked['digest'], locked['environment']['interpreter']['path']) if locked else host_approval(root, None, None)
-
-
 def install_bound_imports(modules, *, project_roots=(), project_package=()):
     """Install the existing exact-name loader from a trusted immutable inventory."""
     paths = {name: Path(row['path']) for name, row in modules.items()}

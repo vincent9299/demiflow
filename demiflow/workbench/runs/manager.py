@@ -350,7 +350,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     output_prefix = _validate_output_prefix(output_prefix)
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, 'run_submit')
-    from demiflow.workbench.python_sources import project_dependencies
+    from demiflow.workbench.projects.registry import project_dependencies
     dependencies = project_dependencies(root, authority=authority.bootstrap())
     root, workspace, platform = ws.load_workspace(root)
     platform = ws.current_platform_snapshot(platform)
@@ -1019,7 +1019,7 @@ def _preflight(root, run_id, *, expected, authority=None):
 def _verify_dependency_commit(root, manifest, authority):
     """Recheck the approval under the existing admission and registry locks."""
     expected = manifest.get('project_dependencies')
-    from demiflow.workbench.python_sources import project_dependencies
+    from demiflow.workbench.projects.registry import project_dependencies
     current = project_dependencies(root, authority=authority.bootstrap(), verify_files=False)
     if (current['digest'] if current else None) != (expected['digest'] if expected else None):
         raise ForgeError('Project dependency approval changed during admission', code='conflict')
@@ -1034,7 +1034,7 @@ def _check_basis(root, target, m, *, phase='preflight', authority=None):
         if phase == 'resume':
             historical_modules = dependencies['modules']
         else:
-            from demiflow.workbench.python_sources import project_dependencies
+            from demiflow.workbench.projects.registry import project_dependencies
             live = project_dependencies(root, authority=authority.bootstrap() if authority else None)
             if live is None or live['digest'] != dependencies['digest']:
                 raise ForgeError('Project dependency approval changed before start', code='conflict')

@@ -97,9 +97,13 @@ def bind_table(root, alias, raw_path, *, location_id=None, version=None):
     )
 
 
-def table_binding(root, value, alias):
+def table_reference(control):
+    """Decode a fixed table control's published reference."""
     from demiflow.lance.refs import DatasetRef
+    return DatasetRef.from_dict(control['ref'])
 
+
+def table_binding(root, value, alias):
     identifier(alias)
     control = read_control(root / "tables" / f"{alias}.json", 16384)
     modern = control.get('format') == 'demiflow_forge_table_v2'
@@ -111,7 +115,7 @@ def table_binding(root, value, alias):
         raise ForgeError("Invalid table reference")
     if control["location_id"] not in value["locations"]:
         raise ForgeError("Unknown table location")
-    ref = DatasetRef.from_dict(control["ref"])
+    ref = table_reference(control)
     base = location_root(root, value["locations"][control["location_id"]])
     uri = relative_path(base, ref.relative_uri)
     if ref.store_id != control["location_id"]:

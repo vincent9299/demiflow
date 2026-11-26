@@ -21,7 +21,8 @@ import shutil
 import sys
 import tempfile
 
-from demiflow.workbench.python_sources import deployment_modules, project_dependencies
+from demiflow.workbench.python_sources import deployment_modules
+from demiflow.workbench.projects.registry import project_dependencies
 
 _FORGE_SHIM_ENTRY = """\
 import os

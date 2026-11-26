@@ -458,7 +458,7 @@ class BridgeServer:
         if name == INPUT_TOOL['name']:
             answer = active.invoke(params['arguments'])
         elif name == PROJECT_LAYOUT_TOOL['name']:
-            from demiflow.workbench.python_sources import dependency_scope
+            from demiflow.workbench.projects.registry import dependency_scope
             with dependency_scope(layout_root, project=active.project):
                 answer = _run_project_layout(layout_root, params['arguments'])
             self._record_layout_paths(params['arguments'].get('action') if isinstance(params.get('arguments'), dict) else None, answer)

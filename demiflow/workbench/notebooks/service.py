@@ -254,7 +254,7 @@ class Notebooks:
             'write_paths': sandbox['write_paths'],
             'locations': locations,
         }
-        from demiflow.workbench.python_sources import project_dependencies
+        from demiflow.workbench.projects.registry import project_dependencies
         try:
             dependencies = project_dependencies(root, project=item, verify_files=False)
         except (OSError, ValueError) as exc:

@@ -43,7 +43,7 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
         from demiflow.workbench.python_sources import deployment_modules
         _source_modules = deployment_modules(Path(request['root']))
     if name == 'plan_preview':
-        from demiflow.workbench.python_sources import project_dependencies
+        from demiflow.workbench.projects.registry import project_dependencies
         _dependencies = project_dependencies(root, authority=_authority)
     if name in {'plan_preview', 'native_submission_inspect'} and _dependencies is not None:
         request.pop('bootstrap', None)
@@ -174,10 +174,10 @@ def _inspection_inputs(root, request):
                 alias = item['alias']
                 if isinstance(alias, str) and alias in fixed_inputs:
                     continue
-                control, ref, target = resolver(root, workspace, alias)
+                control, _, target = resolver(root, workspace, alias)
                 paths.add(target)
                 if alias.startswith('run:'):
-                    fixed_inputs[alias] = dict(control=control, ref=ref.to_dict(), path=str(target))
+                    fixed_inputs[alias] = dict(control=control, path=str(target))
             elif item.get('kind') == 'location' and set(item) == {'kind', 'location_id'}:
                 location = workspace['locations'].get(item['location_id'])
                 if location is not None and location.get('writable') is False:
@@ -244,17 +244,17 @@ def dispatch(request):
     from demiflow.workbench.projects import workspace as ws
     from demiflow.workbench.runs import manager as runs
     from demiflow.workbench.table_bindings import make_resolver
-    from demiflow.workbench.python_sources import dependency_scope
+    from demiflow.workbench.projects.registry import dependency_scope
     table_resolver = make_resolver(ws.table_binding, runs.result_table)
     if 'dependencies' in request:
-        from demiflow.lance.refs import DatasetRef
+        from demiflow.forge.project_bindings import table_reference
 
         def table_resolver(root, control, selector):
             if isinstance(selector, str) and selector.startswith('run:'):
                 fact = request['table_inputs'].get(selector)
                 if fact is None:
                     raise ForgeError('Missing admitted run output reference', code='conflict')
-                return fact['control'], DatasetRef.from_dict(fact['ref']), Path(fact['path'])
+                return fact['control'], table_reference(fact['control']), Path(fact['path'])
             return ws.table_binding(root, control, selector)
     try:
         from demiflow.errors import DemiflowError
