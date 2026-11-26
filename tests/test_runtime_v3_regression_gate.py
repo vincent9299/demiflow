@@ -15,10 +15,10 @@ def fixture(tmp_path, monkeypatch):
     """Synthetic report documents only; these are not business-run evidence."""
     real_root = gate.ROOT
     for name in ('historical-dispositions.json', 'regression-files.json'):
-        relative = Path('docs/unified-runtime-v3-20261114/evidence') / name
+        relative = Path('tests/runtime_v3_package/evidence') / name
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / relative).write_bytes((real_root / relative).read_bytes())
-    source = gate.read_json(real_root / 'docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json')
+    source = gate.read_json(real_root / 'tests/runtime_v3_package/evidence/historical-dispositions.json')
     changes = {
         'test_every_explicit_option_rejects_lazy_actions_before_reads': 'test_every_explicit_option_supports_lazy_actions_without_eager_reads',
         'test_checkpoint_bridges_map_only_and_replays_without_calls': 'test_retired_checkpoint_is_rejected_and_native_run_replays_without_calls',
@@ -36,7 +36,7 @@ def fixture(tmp_path, monkeypatch):
     # Small synthetic baseline for validator-only tests; the real harness uses
     # the repository's source-bound 577-file historical inventory.
     files = sorted({n.split('::')[0] for n in nodes})
-    (tmp_path / 'docs/unified-runtime-v3-20261114/evidence/regression-files.json').write_text(
+    (tmp_path / 'tests/runtime_v3_package/evidence/regression-files.json').write_text(
         json.dumps({'count': len(files), 'files': [{'file': f} for f in files]}))
     inputs = {'demiflow/guard-fixture.py': '0' * 64}
     bound = {'head': 'guard-fixture-only', 'inputs': inputs}
@@ -164,7 +164,7 @@ def test_real_unittest_subtests_have_distinct_reports_and_one_parent(tmp_path):
 
 
 def test_repository_file_omitted_by_ignore_is_not_complete(fixture, tmp_path):
-    (tmp_path / 'tests').mkdir()
+    (tmp_path / "tests").mkdir(exist_ok=True)
     (tmp_path / 'tests/test_ignored.py').write_text('def test_ignored(): assert False\n')
     result = check(fixture)
     assert not result['complete']
@@ -252,7 +252,7 @@ def test_inventory_refuses_missing_or_shared_write_domain(tmp_path, monkeypatch,
 
 
 def test_missing_historical_file_is_not_silently_retired(fixture, tmp_path):
-    path = tmp_path / 'docs/unified-runtime-v3-20261114/evidence/regression-files.json'
+    path = tmp_path / 'tests/runtime_v3_package/evidence/regression-files.json'
     baseline = json.loads(path.read_text())
     baseline['files'].append({'file': 'tests/test_historical_deleted.py'})
     path.write_text(json.dumps(baseline))
@@ -278,7 +278,7 @@ def test_duplicate_planned_batches_are_refused_before_launch(fixture):
     'examples/forge_text_map/flows/config.json',
     'tools/forge_analysis/build_image.py',
     'tools/forge_analysis/build_helper.py',
-    'docs/unified-runtime-v3-20261114/plan.json',
+    'tests/runtime_v3_package/plan.json',
 ])
 def test_js_html_css_and_fixture_contract_changes_invalidate_old_receipt(tmp_path, monkeypatch, changed):
     import subprocess
@@ -299,7 +299,7 @@ def test_js_html_css_and_fixture_contract_changes_invalidate_old_receipt(tmp_pat
     unrelated = repository / 'production-data/not-a-source.json'
     unrelated.parent.mkdir()
     unrelated.write_text('not scanned')
-    generated = repository / 'docs/unified-runtime-v3-20261114/evidence/new-verification.json'
+    generated = repository / 'tests/runtime_v3_package/evidence/new-verification.json'
     generated.parent.mkdir(parents=True, exist_ok=True)
     generated.write_text('generated evidence is not a recursive input')
     monkeypatch.setattr(inventory, 'ROOT', repository)

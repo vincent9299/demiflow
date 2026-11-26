@@ -1,6 +1,0 @@
-{
-  "report_source": "/tmp/demiflow-qwen-review-20261113/QWEN-INDEPENDENT-REVIEW.md",
-  "report_sha256": "fae2dce707e6e02fe558fa393f7ee5d72e761da41f7c905310b0d4cbf0b32558",
-  "report_lines": 1564,
-  "review_scope": "design revision; production unchanged; runtime acceptance not performed"
-}

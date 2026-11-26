@@ -409,7 +409,7 @@ def _run_case(fx,case,index,source):
 def api_matrix(fx,fault=None,*,case_observer=None):
     """Run all planned groups or an explicit group; return coverage without a false green."""
     from runtime_v3_recovery_scenarios import _provider
-    plan=json.loads((WORKTREE/'docs/unified-runtime-v3-20261114/plan.json').read_text())['api']
+    plan=json.loads((WORKTREE/'tests/runtime_v3_package/plan.json').read_text())['api']
     assert len(plan)==98 and len({x['symbol'] for x in plan})==98
     source=_fixtures(fx.root/'api-sources')
     cases=_cases(source)

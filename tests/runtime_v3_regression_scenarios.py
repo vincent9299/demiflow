@@ -76,7 +76,7 @@ def inventory_union(receipts, *, inputs):
                   or not any(n.split('::')[0] == p['nodeid'] for n in nodes)]
     accounted_files = {item['file'] for item in nodes.values()} | {p['nodeid'] for p in unresolved}
     expected_files = {str(path.relative_to(ROOT)) for path in ROOT.joinpath('tests').rglob('test*.py')}
-    baseline = read_json(ROOT / 'docs/unified-runtime-v3-20261114/evidence/regression-files.json')
+    baseline = read_json(ROOT / 'tests/runtime_v3_package/evidence/regression-files.json')
     expected_files.update(item['file'] for item in baseline['files'])
     for name in sorted(expected_files):
         if name not in accounted_files:
@@ -87,7 +87,7 @@ def inventory_union(receipts, *, inputs):
 
 def disposition_map(universe):
     """All 44 old failures have exact executable assertions, including params."""
-    path = ROOT / 'docs/unified-runtime-v3-20261114/evidence/historical-dispositions.json'
+    path = ROOT / 'tests/runtime_v3_package/evidence/historical-dispositions.json'
     replacements = {
         'test_every_explicit_option_rejects_lazy_actions_before_reads':
             'test_every_explicit_option_supports_lazy_actions_without_eager_reads',
@@ -245,7 +245,7 @@ def evaluate(plan, collections, receipts, *, inputs):
     return {'complete': not missing and not failed and not problems,
         'collection': {'exit_code': 0, 'nodeid_count': len(universe),
             'file_count': len({i['file'] for i in universe.values()}),
-            'baseline_file_count': read_json(ROOT / 'docs/unified-runtime-v3-20261114/evidence/regression-files.json')['count']},
+            'baseline_file_count': read_json(ROOT / 'tests/runtime_v3_package/evidence/regression-files.json')['count']},
         'dispositions': [{**d, 'passed': all(n in executed for n in d['replacement_nodeids'])}
                          for d in plan['dispositions']],
         'executed': executed, 'failed': failed, 'not_run': missing,

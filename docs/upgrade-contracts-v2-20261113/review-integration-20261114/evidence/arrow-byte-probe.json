@@ -1,5 +1,0 @@
-{
-  "configured_output_bytes": 8,
-  "physical_ipc_bytes": 288,
-  "rows": "TaskOutput(value=ArrowBlock(path='/tmp/demiflow-arrow-probe-n85cmlub/out.arrow', rows=1, bytes=288), rows_input=1, observations=())"
-}
