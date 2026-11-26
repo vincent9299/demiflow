@@ -29,9 +29,10 @@
       openResult, navigate, onContext, rememberView, onPageChange, projectSettings, openProjectSettings,
       renderProjectInfo, projectCheckState, continueInput, continueWithResult,
       error, openNew, openSession, initialDrawer = null, operatorTarget = null, register,
+      openWorkflowChild = null, initialWorkflowTarget = null,
     } = options;
 
-    let disposed = false, workbenchHandle = null, devHandle = null;
+    let disposed = false, mounted = false, workbenchHandle = null, devHandle = null, workflowHandle = null;
     let currentContext = context;
     let sidebarTab = 'flows', stageMode = 'canvas', rightMode = null, drawerExpanded = false;
 
@@ -49,6 +50,7 @@
       onSearch: () => {
         const q = navigation.search.value;
         workbenchHandle?.filterFlows?.(q);
+        workflowHandle?.setFilter?.(q);
         devHandle?.setSessionFilter?.(q);
         devHandle?.files?.setFilter(q);
       },
@@ -76,19 +78,21 @@
     const filesPane = el('div', undefined, 'pw-sidebar-pane'); filesPane.hidden = true;
     sidebar.append(navigation.element, sideTabs, flowsPane, sessionsPane, filesPane);
 
-    // 2. Center wide stage (管线画布 ⇄ 管线开发助手会话)
+    // 2. Center wide stage (管线画布 ⇄ 多管线编排画布 ⇄ 管线开发助手会话)
     const center = el('section', undefined, 'pw-center');
     const workbenchHost = el('div', undefined, 'pw-workbench-host');
+    const workflowHost = el('div', undefined, 'pw-workflow-host'); workflowHost.hidden = true;
     const assistantHost = el('div', undefined, 'pw-assistant-host'); assistantHost.hidden = true;
-    center.append(workbenchHost, assistantHost);
+    center.append(workbenchHost, workflowHost, assistantHost);
 
-    // 3. Right collapsible & resizable supplementary panel (补充信息区: 节点详情 | 代码/组件阅读器)
+    // 3. Right collapsible & resizable supplementary panel (补充信息区: 节点详情 | 编排节点详情 | 代码/组件阅读器)
     const drawer = el('aside', undefined, 'pw-drawer');
     drawer.setAttribute('aria-label', '补充信息区');
     drawer.hidden = true;
     const detailPane = el('div', undefined, 'pw-drawer-pane'); detailPane.dataset.pane = 'detail'; detailPane.hidden = true;
+    const wfDetailPane = el('div', undefined, 'pw-drawer-pane'); wfDetailPane.dataset.pane = 'workflow-detail'; wfDetailPane.hidden = true;
     const codePane = el('div', undefined, 'pw-drawer-pane'); codePane.dataset.pane = 'code'; codePane.hidden = true;
-    drawer.append(detailPane, codePane);
+    drawer.append(detailPane, wfDetailPane, codePane);
 
     root.append(sidebar, center, drawer);
 
@@ -123,7 +127,7 @@
     }
 
     function setRightMode(next) {
-      rightMode = (next === 'detail' || next === 'code') ? next : null;
+      rightMode = (next === 'detail' || next === 'workflow-detail' || next === 'code') ? next : null;
       const open = !!rightMode;
       if (rightMode !== 'code' && drawerExpanded) {
         drawerExpanded = false;
@@ -134,19 +138,28 @@
       root.dataset.drawerMode = rightMode || '';
       drawer.hidden = !open;
       detailPane.hidden = rightMode !== 'detail';
+      wfDetailPane.hidden = rightMode !== 'workflow-detail';
       codePane.hidden = rightMode !== 'code';
       headerSourceBtn.setAttribute('aria-pressed', String(rightMode === 'code'));
       drawerResize.setActive(open && !drawerExpanded && !matchMedia('(max-width:900px)').matches);
     }
 
     function setStageMode(next) {
-      stageMode = next === 'assistant' ? 'assistant' : 'canvas';
+      stageMode = ['canvas', 'workflow', 'assistant'].includes(next) ? next : 'canvas';
       root.dataset.stage = stageMode;
       if (drawerExpanded) setDrawerExpanded(false);
       workbenchHost.hidden = stageMode !== 'canvas';
+      workflowHost.hidden = stageMode !== 'workflow';
       assistantHost.hidden = stageMode !== 'assistant';
-      // When switching away from canvas to assistant, hide node detail if it was open (keep code reader if open).
-      if (stageMode === 'assistant' && rightMode === 'detail') {
+      if (stageMode !== 'workflow') {
+        workflowHandle?.deactivate?.();
+        if (rightMode === 'workflow-detail') {
+          workflowHandle?.closeDetail?.();
+          setRightMode(null);
+        }
+      }
+      // When switching away from canvas to assistant/workflow, hide single-flow node detail if it was open.
+      if (stageMode !== 'canvas' && rightMode === 'detail') {
         workbenchHandle?.closeDetail?.();
         setRightMode(null);
       }
@@ -168,6 +181,7 @@
         devHandle?.setSessionFilter?.(navigation.search.value);
       } else if (sidebarTab === 'flows') {
         workbenchHandle?.filterFlows?.(navigation.search.value);
+        workflowHandle?.setFilter?.(navigation.search.value);
       }
     }
 
@@ -190,6 +204,11 @@
       },
       openAssistant: () => { setSidebarTab('sessions'); setStageMode('assistant'); },
       openCanvas: () => setStageMode('canvas'),
+      openWorkflow: async (wfPath, opts = {}) => {
+        setSidebarTab('flows');
+        setStageMode('workflow');
+        await workflowHandle?.openWorkflow?.(wfPath, opts);
+      },
       showPage: async page => {
         setStageMode('canvas');
         if (workbenchHandle?.showPage) await workbenchHandle.showPage(page);
@@ -223,6 +242,7 @@
         await workbenchHandle?.sync?.(fresh, opts);
         if (opts.catalogChanged || opts.graphChanged || opts.force) {
           devHandle?.files?.ensureOperatorsLoaded?.({force: true});
+          workflowHandle?.loadList?.();
         }
       },
       projectCheckSettled: () => workbenchHandle?.projectCheckSettled?.(),
@@ -231,6 +251,7 @@
         disposed = true;
         sidebarCollapse.dispose();
         drawerResize.dispose();
+        workflowHandle?.dispose?.();
         workbenchHandle?.dispose?.();
         devHandle?.dispose?.();
         main.classList.remove('pipeline-workspace-active');
@@ -280,6 +301,7 @@
             onContext?.(fresh);
             await workbenchHandle?.sync?.(fresh, {graphChanged: true, catalogChanged: true, force: true});
             devHandle?.files?.ensureOperatorsLoaded?.({force: true});
+            workflowHandle?.loadList?.();
           }
         } catch {}
       },
@@ -319,7 +341,7 @@
         flowListHost: flowsPane,
         nodeDetailHost: detailPane,
         sourceButton: headerSourceBtn,
-        onFlowSelect: () => setStageMode('canvas'),
+        onFlowSelect: () => { if (mounted) setStageMode('canvas'); },
         onOpenAssistant: () => { setSidebarTab('sessions'); setStageMode('assistant'); },
         onDetailOpen: () => {
           devHandle?.files?.setOpen?.(false, {skipFocus: true});
@@ -342,22 +364,76 @@
       },
     });
 
+    let wfInitPromise = Promise.resolve();
+    if (globalThis.ForgeWorkflowPanel?.mount) {
+      workflowHandle = globalThis.ForgeWorkflowPanel.mount({
+        sidebarHost: flowsPane,
+        stageHost: workflowHost,
+        detailHost: wfDetailPane,
+        api,
+        workspaceId,
+        context: currentContext,
+        onActivate: () => {
+          setSidebarTab('flows');
+          setStageMode('workflow');
+        },
+        onDeactivate: () => {},
+        onDetailOpen: () => {
+          devHandle?.files?.setOpen?.(false, {skipFocus: true});
+          setRightMode('workflow-detail');
+        },
+        onDetailClose: () => {
+          if (rightMode === 'workflow-detail') setRightMode(null);
+        },
+        onOpenSource: wfPath => {
+          if (wfPath && devHandle?.files?.openFile) {
+            devHandle.files.openFile(wfPath, 'source');
+          }
+        },
+        onOpenChild: async info => {
+          if (openWorkflowChild) await openWorkflowChild(info);
+        },
+        error,
+      });
+      wfInitPromise = (async () => {
+        await workflowHandle.loadList();
+        if (disposed) return;
+        if (initialWorkflowTarget?.workflowPath) {
+          setSidebarTab('flows');
+          setStageMode('workflow');
+          await workflowHandle.openWorkflow(initialWorkflowTarget.workflowPath, {wfRunId: initialWorkflowTarget.wfRunId || null});
+        }
+      })();
+    }
+
     await Promise.all([
+      wfInitPromise,
       devPromise.catch(err => {
         if (!disposed) assistantHost.replaceChildren(el('p', err?.message || '当前服务未启用开发助手。', 'op-muted dev-op-pad'));
       }),
       wbPromise,
     ]);
     if (disposed) return handle;
+    mounted = true;
 
     devHandle?.files?.ensureOperatorsLoaded?.();
 
-    if (initialDrawer === 'assistant' || isDevView) {
+    if (initialWorkflowTarget?.workflowPath && workflowHandle) {
+      setSidebarTab('flows');
+      setStageMode('workflow');
+      workflowHandle.loadList();
+    } else if (workflowHandle?.isActive?.()) {
+      setSidebarTab('flows');
+      setStageMode('workflow');
+    } else if (initialDrawer === 'assistant' || isDevView) {
       setSidebarTab('sessions');
       setStageMode('assistant');
-    } else if (!(context?.flows?.length || context?.project?.entries?.length)) {
+    } else if (!(context?.flows?.length || context?.project?.entries?.length || workflowHandle?.hasWorkflows?.())) {
       setSidebarTab('sessions');
       setStageMode('assistant');
+    } else if (!(context?.flows?.length || context?.project?.entries?.length) && workflowHandle?.hasWorkflows?.()) {
+      setSidebarTab('flows');
+      setStageMode('workflow');
     } else {
       setSidebarTab('flows');
       setStageMode('canvas');

@@ -22,7 +22,7 @@ FORMAT_V2 = "demiflow_forge_workspace_v2"
 FORMAT_V3 = "demiflow_forge_workspace_v3"
 MODERN_FORMATS = {FORMAT_V2, FORMAT_V3}
 STATE_PATH = ".forge/state.json"
-_SLIM_MANIFEST_FIELDS = frozenset({"name", "entries", "budgets", "locations"})
+_SLIM_MANIFEST_FIELDS = frozenset({"name", "entries", "budgets", "locations", "workflows"})
 _DEFAULT_AUDIT = {"reports": [], "change_scope": None}
 
 def project_name(value):
@@ -131,12 +131,14 @@ def load_project(root):
         }
         if "budgets" in raw:
             value["budgets"] = raw["budgets"]
+        if "workflows" in raw:
+            value["workflows"] = raw["workflows"]
     else:
         value = raw
     modern = type(value) is dict and value.get('format') in (FORMAT_V2, FORMAT_V3)
     audit_fields = {'audit'} if type(value) is dict and value.get('format') == FORMAT_V3 else set()
     if (type(value) is not dict or value.get('format') not in (FORMAT, FORMAT_V2, FORMAT_V3)
-            or set(value) - ({'budgets'} if modern else set()) != {'format', 'name', 'locations', 'platform'} | ({'id', 'entries'} if modern else set()) | audit_fields):
+            or set(value) - ({'budgets', 'workflows'} if modern else set()) != {'format', 'name', 'locations', 'platform'} | ({'id', 'entries'} if modern else set()) | audit_fields):
         raise ForgeError("Unsupported workspace format")
     if audit_fields:
         from demiflow.forge.audit import validate_policy
@@ -144,6 +146,16 @@ def load_project(root):
     if modern:
         if 'budgets' in value:
             validate_budget_declaration(value['budgets'])
+        if 'workflows' in value:
+            wf_list = value['workflows']
+            if type(wf_list) is not list or len(wf_list) > 64 or any(type(w) is not str for w in wf_list) or len(set(wf_list)) != len(wf_list):
+                raise ForgeError('Workspace workflows must be a list of at most 64 distinct relative paths')
+            for wf_path in wf_list:
+                wf_target = relative_path(root, wf_path)
+                wf_parts = Path(wf_path).parts
+                if (len(wf_parts) < 2 or wf_parts[0] != 'workflows' or wf_target.suffix != '.json'
+                        or any(part.startswith('.') for part in wf_parts)):
+                    raise ForgeError('Workflow declarations must reference workflows/*.json files')
         if not isinstance(value['id'], str) or not re.fullmatch(r'w[0-9a-f]{32}', value['id']):
             raise ForgeError('Invalid workspace identity')
         if type(value['entries']) is not dict or len(value['entries']) > 256:
@@ -212,6 +224,8 @@ def save_project(root, value, *, expected=None, create=False):
     ws_doc = {"name": value["name"], "entries": value.get("entries", {})}
     if "budgets" in value:
         ws_doc["budgets"] = value["budgets"]
+    if value.get("workflows"):
+        ws_doc["workflows"] = value["workflows"]
     if value.get("locations"):
         ws_doc["locations"] = value["locations"]
     state_doc = {
@@ -280,6 +294,8 @@ def slim_project_manifest(root):
         ws_doc = {"name": value["name"], "entries": value.get("entries", {})}
         if "budgets" in value:
             ws_doc["budgets"] = value["budgets"]
+        if value.get("workflows"):
+            ws_doc["workflows"] = value["workflows"]
         if kept_locations:
             ws_doc["locations"] = kept_locations
         state_doc = {
@@ -361,6 +377,7 @@ def discover_project_sources(root, *, exclude=(), include_roles=True):
     for role in roles:
         pending = [root / role]
         suffixes = ({'.yaml', '.yml', '.json'} if role in {'prompts', 'configs'}
+                    else {'.json'} if role == 'workflows'
                     else {'.ipynb'} if role == 'notebooks' else {'.py'})
         while pending:
             folder = pending.pop()
@@ -609,3 +626,45 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
                     path=source.relative_to(root).as_posix(), entry=entry, params=selected,
                     registered=True, created_paths=created, check_digest=check['check_digest'],
                     manifest_sha256=sha256(read_bounded(manifest, 1024**2)).hexdigest(), diagnostics=[])
+
+
+def register_workflow(root, path, *, authorize=None):
+    """Validate and register a workflows/*.json file in workspace.json['workflows']."""
+    from .workflow import MAX_WORKFLOWS_PER_PROJECT, validate_workflow, validate_workflow_path
+    root, value = load_project(root)
+    if value['format'] != FORMAT_V3:
+        raise ForgeError('Workflow registration requires a v3 project', code='invalid_request')
+    target = validate_workflow_path(root, path)
+    rel = target.relative_to(root).as_posix()
+    spec = validate_workflow(root, rel, control=value)
+    if spec['status'] != 'passed':
+        detail = '; '.join(item['detail'][:256] for item in spec['diagnostics'][:4])
+        raise ForgeError('Workflow registration requires a valid workflow definition: ' + detail,
+                         code='operation_rejected')
+    manifest = root / 'workspace.json'
+    with control_lock(root):
+        if authorize is not None:
+            authorize()
+        _, current = load_project(root)
+        if current != value:
+            raise ForgeError('Project declaration changed before workflow registration', code='inputs_changed')
+        existing = list(current.get('workflows') or ())
+        already = rel in existing
+        if not already:
+            if len(existing) >= MAX_WORKFLOWS_PER_PROJECT:
+                raise ForgeError('Registered workflow count exceeds the project limit', code='resource_limit')
+            expected = content_digest(current)
+            current['workflows'] = [*existing, rel]
+            bounded_json(current, 1024**2)
+            save_project(root, current, expected=expected)
+        return dict(
+            status='unchanged' if already else 'registered',
+            role='workflow',
+            root=str(root),
+            path=rel,
+            name=spec['name'],
+            registered=True,
+            workflow_digest=spec['digest'],
+            manifest_sha256=sha256(read_bounded(manifest, 1024**2)).hexdigest(),
+            diagnostics=[],
+        )

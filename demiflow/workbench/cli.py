@@ -237,6 +237,9 @@ def register(main):
     from demiflow.workbench.runs.cli import register as register_runs
     register_runs(workspace)
 
+    from demiflow.workbench.workflows.cli import register as register_workflows
+    register_workflows(workspace)
+
     @workspace.group("table")
     def table():
         """Attach fixed table versions and browse their real rows."""

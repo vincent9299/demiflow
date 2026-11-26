@@ -29,7 +29,7 @@ Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/data
 
 ## 模型与环境的交互仍然算子化
 
-用户于 2026-10-03 明确：Dataset／流及其上的算子是统一抽象，算子同时是模型的工具与环境接口。单行内多轮交互使用 `agentmap_async`；模型输出与公开算子契约对齐的结构化方法和参数，由平台校验并执行同一算子实现。不得为每次工具请求创建子 Dataset／流，也不得在业务行函数另写工具循环。`map_prompt_async` 保留单次完成语义。实现范围、预算与限制见 [算子环境](docs/operator_environment.md)。
+用户于 2026-10-03 明确：Dataset／流及其上的算子是统一抽象，算子同时是模型的工具与环境接口。单行内多轮交互使用 `agentmap_async`；模型输出与公开算子契约对齐的结构化方法和参数，由平台校验并执行同一算子实现。不得为每次工具请求创建子 Dataset／流，也不得在业务行函数另写工具循环。`map_prompt_async` 保留单次完成语义。实现范围、预算与限制见 [算子环境](docs/agents.md)。
 
 同日最新确认：`agentmap_async` 与 `map_prompt_*` 各有唯一的一份完整配置。agent 使用 `demiflow_agent_v2`，在同一文件内直接写模型、runtime、工具、预算、任务正文和输出 schema，不引用共享任务文件，不分别维护 HTTP/Codex 两份业务 agent 配置；后端由 runtime 选择。普通 prompt 保持原 `demiflow_prompt_pack_v2` 完整内联契约。平台解析装配，业务节点不能另传 environment 或覆盖执行配置。全部轮次及重试共享有限请求额度；节点只能收紧 agent 预算，不自动扩额。
 
@@ -41,7 +41,7 @@ Dataset 引擎的设计和代码评审须按[引擎项目架构规约](docs/data
 
 2026-10-05 用户最终确认：不把 OperatorAPI 扩展到 Dataset，也不保留业务侧注册抽象。业务算子仍是普通 fn/actor，只有 Agent 需要动态调用时，才在唯一 YAML 的 operators 下直接引用实现并声明必要工具信息。自定义实现与校验只能实际定义在 operators/ 中，不能通过转导入绕过；标准平台函数保持原生模块归属。Dataset 原 fn/actor 接口不变，不创建平行执行体系。旧标准名称配置兼容，历史请求／结果不重写。通用解析和调度只处理契约、绑定、限制与生命周期，不加入业务分支或改写参数。
 
-Actor 不强制继承基类。Agent 中首次合法调用才构造，每行独立复用，按已有 astart/astop/aclose 协议管理，结束／失败／取消清理；阻塞工作排空后才能关闭资源。YAML 加载不能构造 actor 或启动服务。资源与重放边界见 [算子环境](docs/operator_environment.md)。本条覆盖上文“Python登记算子”的旧约定。
+Actor 不强制继承基类。Agent 中首次合法调用才构造，每行独立复用，按已有 astart/astop/aclose 协议管理，结束／失败／取消清理；阻塞工作排空后才能关闭资源。YAML 加载不能构造 actor 或启动服务。资源与重放边界见 [算子环境](docs/agents.md)。本条覆盖上文“Python登记算子”的旧约定。
 
 ## 有限资源是所有代码的设计前提
 

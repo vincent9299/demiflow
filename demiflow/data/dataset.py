@@ -1277,7 +1277,7 @@ class Dataset:
         native ANN parameters (nprobes, refine_factor, HNSW ef) and
         cache/scan/result budgets. Explicit ef must cover top_k * refine_factor;
         max_search_candidates bounds expanded candidates and the HNSW beam. See
-        docs/vector_search.md. The node does not create or update indices.
+        docs/vectors.md. The node does not create or update indices.
 
         Planned by the unified engine on either host: chain after map_embeddings
         and before downstream nodes, execute with run_stream() or materialize().
@@ -1348,7 +1348,7 @@ class Dataset:
         journals preserve exact batches; uncertain calls require explicit recovery.
 
         Execute with run_stream(), or materialize() before relational work/writers.
-        Planned by the unified engine on either host. See docs/embeddings.md for options and examples.
+        Planned by the unified engine on either host. See docs/vectors.md for options and examples.
         """
         from ..embeddings.runtime import EmbeddingActor
         from ..embeddings import embedding_execution_config
@@ -1468,7 +1468,7 @@ class Dataset:
         read_timeout_s (idle gap), write_timeout_s and pool_timeout_s are distinct
         from timeout_s (total HTTP exchange). Truncated streams fail without implicit retries. ``gateway='litellm'`` explicitly
         sends zero-retry/no-fallback controls. Generic endpoints receive none.
-        See docs/prompt_http.md for bounds, logs and recovery semantics.
+        See docs/llm.md for bounds, logs and recovery semantics.
 
         ``request_policy`` declares an operator-owned adaptive gate. Its maximum
         cannot exceed node concurrency.

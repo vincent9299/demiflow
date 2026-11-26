@@ -242,11 +242,13 @@ demiflow workbench console --registry ~/demiflow/console.json serve --port 59865
 | Topic | Guide |
 |---|---|
 | Streaming `map` and concurrency | [docs/en/streaming-map.md](docs/en/streaming-map.md) |
-| LLM operators and HTTP contract | [docs/prompt_http.md](docs/prompt_http.md) |
-| Multi-turn agent operators | [docs/operator_environment.md](docs/operator_environment.md) |
-| Embeddings and vector search | [docs/embeddings.md](docs/embeddings.md) · [docs/en/vector_search.md](docs/en/vector_search.md) |
+| Calling LLMs: prompt packs, budgets, failures, routes | [docs/en/llm.md](docs/en/llm.md) |
+| Image generation | [docs/en/image_generation.md](docs/en/image_generation.md) |
+| Agent operators: multi-turn tool use within a row | [docs/en/agents.md](docs/en/agents.md) |
+| Joins, grouping and sorting | [docs/en/relational.md](docs/en/relational.md) |
+| Embeddings, vector index and vector search | [docs/en/vectors.md](docs/en/vectors.md) |
 | Fetch, queues and acquisition | [docs/dataset-fetch.md](docs/dataset-fetch.md) |
-| Lance merge semantics | [docs/en/lance_merge.md](docs/en/lance_merge.md) |
+| Writing Lance tables and partial-column merge | [docs/en/lance-write.md](docs/en/lance-write.md) |
 | Training and evaluation | [docs/en/dataset-training.md](docs/en/dataset-training.md) |
 | Workbench and Forge | [docs/forge-workspace.md](docs/forge-workspace.md) · [docs/en/forge-cli.md](docs/en/forge-cli.md) |
 | Engine architecture | [docs/dataset-engine-architecture.md](docs/dataset-engine-architecture.md) |
