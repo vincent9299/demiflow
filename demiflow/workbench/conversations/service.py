@@ -19,7 +19,7 @@ import time
 from demiflow.workbench.conversations.common import private_directory_bytes
 from demiflow.workbench.conversations.common import digest
 from demiflow.workbench.conversations.common import identifier
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import root_identity
 from demiflow.workbench.conversations.common import wire

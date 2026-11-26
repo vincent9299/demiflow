@@ -24,16 +24,16 @@ def perform(name, root, *, authority=None, **arguments):
     if spec is None:
         raise ForgeError('Unknown run operation', code='invalid_request')
     arguments = spec.validate(arguments)
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
     from pathlib import Path
-    from demiflow.workbench.runs.authority import LocalAuthority
+    from demiflow.forge.runs.authority import LocalAuthority
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, spec.permission)
 
     if name in {'start', 'cancel'} and 'expected_attempt' not in arguments:
         # Legacy local CLI: resolve once, then let the real domain CAS reject a
         # race. An explicit null remains a legacy identity, never "current".
-        from demiflow.workbench.runs.view import control_state
+        from demiflow.forge.runs.context import control_state
         _, value = control_state(root, arguments['run_id'])
         arguments['expected_attempt'] = value['state'].get('attempt')
     if name in {'prepare', 'start', 'cancel', 'resume'}:
@@ -58,7 +58,7 @@ def worker_arguments(name, arguments):
         values = OPERATIONS['prepare'].validate(public)
         for key, value in internal.items():
             if key == 'native_deployment':
-                from demiflow.workbench.runs.native_resources import validate
+                from demiflow.forge.runs.native_resources import validate
                 validate(value)
             elif key == 'training_location':
                 from pathlib import Path
@@ -66,13 +66,13 @@ def worker_arguments(name, arguments):
                         or not Path(value).is_absolute() or str(Path(value).resolve()) != value):
                     raise ForgeError('Training deployment requires a canonical absolute file path')
             elif key == 'executable_dirs':
-                from demiflow.workbench.runs.native_resources import executable_directories
+                from demiflow.forge.runs.native_resources import executable_directories
                 executable_directories(value)
             elif key == 'environment_names':
-                from demiflow.workbench.runs.native_resources import environment_names
+                from demiflow.forge.runs.native_resources import environment_names
                 environment_names(value)
             elif key == 'capacity_domain':
-                from demiflow.workbench.runs.native_resources import capacity_domain
+                from demiflow.forge.runs.native_resources import capacity_domain
                 capacity_domain(value)
             else:
                 Field('text', nullable=True).check(key, value)

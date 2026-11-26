@@ -82,7 +82,7 @@ def test_real_process_hooks_survive_cleanup_and_preserve_failures(tmp_path, monk
 def test_declared_payload_limits_are_not_silently_shrunk():
     from demiflow.execution.compiler_support.payload_limits import stream_limits
     from demiflow.execution.seal.plan_facts import operation_facts
-    from demiflow.workbench.pipeline_policy import limits_with
+    from demiflow.forge.pipeline_policy import limits_with
     async def batch(rows): return rows
     flow = data.from_items([{'x':1}]).flat_map(lambda row:[row,row]).batch_map(
         batch, max_batch=2, concurrency=1, queue_depth=1)
@@ -98,7 +98,8 @@ def test_declared_payload_limits_are_not_silently_shrunk():
 
 def test_invalid_run_limits_reach_original_admission_validation(root):
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     with pytest.raises(ForgeError, match='Invalid run argument: limits'):
         runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json', limits=[{}])
 
@@ -114,8 +115,9 @@ from test_forge_runs import base, root
 ])
 def test_partial_default_payload_budget_is_sealed_and_executed(root, overrides, fixed, adjusted, supported):
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.runs import manager as runs
-    from demiflow.workbench.pipeline_policy import limits_with
+    from demiflow.forge.runs import manager as runs
+
+    from demiflow.forge.pipeline_policy import limits_with
     from test_forge_runs import custom, execute, rows
     operators = '''from typing import TypedDict
 class Input(TypedDict):

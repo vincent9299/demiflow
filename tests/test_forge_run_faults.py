@@ -6,7 +6,8 @@ import time
 import pytest
 
 from test_forge_runs import base, root, prepared, custom, execute, wait
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 
 
 def test_join_expansion_stops_without_truncation(root):

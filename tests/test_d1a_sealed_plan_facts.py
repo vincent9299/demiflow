@@ -53,7 +53,7 @@ def test_current_reader_refuses_invalid_old_carriers(original_chain, tmp_path, d
 
 
 def test_v4_workbench_scratch_bytes_counts_carrier_and_staging_released(original_chain, tmp_path):
-    from demiflow.workbench.runs.storage import scratch_bytes
+    from demiflow.forge.runs.storage import scratch_bytes
     target, original = original_chain
     f1 = original["facts"]
     carriers = [target / f1["logical_dag_ref"]["path"],

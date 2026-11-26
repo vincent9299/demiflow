@@ -328,6 +328,6 @@ def update(root,*,authorize,**request):
 
 
 def _table_resolver():
-    from demiflow.workbench.table_bindings import make_resolver
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.table_bindings import make_resolver
+    from demiflow.forge.runs import manager as runs
     return make_resolver(ws.table_binding, runs.result_table)

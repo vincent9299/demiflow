@@ -295,3 +295,6 @@ def register(main: click.Group) -> None:
                 denied_paths=cfg.get('denied_paths') or (),
             )
         _output(root, as_json, perform)
+
+    from .runs.cli import register as register_runs
+    register_runs(forge)

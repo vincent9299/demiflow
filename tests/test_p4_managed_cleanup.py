@@ -5,7 +5,7 @@ import time
 import pytest
 
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.runs.storage import cleanup_deadline, remove_attempt_work
+from demiflow.forge.runs.storage import cleanup_deadline, remove_attempt_work
 
 
 def test_cleanup_deadline_inherits_the_smaller_control_bound():
@@ -83,7 +83,8 @@ def test_directory_replacement_is_rejected_and_replacement_preserved(tmp_path, m
 
 
 def test_supervisor_lease_closes_even_if_initialization_or_finalization_raises(tmp_path, monkeypatch):
-    from demiflow.workbench.runs import worker
+    from demiflow.forge.runs import worker
+
     fd = os.open(tmp_path / 'execution.lock', os.O_RDWR | os.O_CREAT, 0o600)
     def fail(*args, **kwargs):
         raise RuntimeError('finalization failed')
@@ -97,8 +98,10 @@ def test_supervisor_lease_closes_even_if_initialization_or_finalization_raises(t
 @pytest.mark.parametrize('cleanup_failure', [False, True])
 def test_supervisor_publishes_one_final_state_after_cancel_race(tmp_path, monkeypatch, cleanup_failure):
     from demiflow.execution.journal.run_journal import RunJournal
-    from demiflow.workbench.runs import worker, manager
-    from demiflow.workbench.runs import storage
+    from demiflow.forge.runs import worker, manager
+
+    from demiflow.forge.runs import storage
+
     from test_p4_attempt_reservations import managed
     run_id = 'r' + '2' * 24
     journal = managed(manager.directory(tmp_path, run_id))
@@ -139,7 +142,8 @@ def test_supervisor_publishes_one_final_state_after_cancel_race(tmp_path, monkey
 
 
 def test_supervisor_invalid_identity_still_closes_inherited_lease(tmp_path):
-    from demiflow.workbench.runs import worker
+    from demiflow.forge.runs import worker
+
     fd = os.open(tmp_path / 'lease', os.O_RDWR | os.O_CREAT, 0o600)
     with pytest.raises(ForgeError, match='Invalid run identity'):
         worker.supervise(tmp_path, 'run', fd, 1)

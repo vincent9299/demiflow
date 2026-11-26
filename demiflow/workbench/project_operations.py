@@ -4,7 +4,7 @@ import re
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
 
 
 def begin_change_scope(root, *, writes, expected, watch_roots=None, limits=None):
@@ -132,7 +132,7 @@ def register_flow(root, entry, *, params=None, authorize, authority=None):
     """Register an authored flow using the deployment's current authority."""
     from demiflow.forge.project import register_flow as register
     from demiflow.workbench.projects.registry import project_python_and_scope
-    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.forge.table_bindings import make_resolver
 
     authorize()
     python, allowed_roots = project_python_and_scope(root, authority=authority)
@@ -278,7 +278,7 @@ def workspace_changes(root):
     existing bounded author inventory separately reads recent report metadata;
     these hints do not constitute a transaction or an execution authorization.
     """
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
     info = index.status(root)
     return {**ws.project_change_hints(root), **runs.run_change_hints(root, info),
             'reports': content_digest({key: info.get(key) for key in ('epoch', 'reports')}),

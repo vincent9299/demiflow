@@ -383,7 +383,8 @@ def test_reviewer_resets_developer_sandbox_policies_for_readonly_review(tmp_path
 def test_forge_unifies_configs_role_and_keeps_legacy_parameters_compatible(tmp_path):
     from demiflow.forge import pipeline_check, project
     from demiflow.forge.project_rules import ROLE_DIRS
-    from demiflow.workbench.runs import manager as run_manager
+    from demiflow.forge.runs import manager as run_manager
+
     assert {'flows', 'operators', 'prompts', 'configs', 'data_tools', 'notebooks'}.issubset(ROLE_DIRS)
     proj = tmp_path / 'proj'
     project.initialize_project(proj, name='Demo')

@@ -1,13 +1,15 @@
 """Runtime control and the integrated native recovery contract share one journal."""
 
-from demiflow.workbench import host_partition
+from demiflow.forge import host_partition
+
 from contextlib import closing
 import sqlite3
 import time
 import pytest
 
 from demiflow.execution.pipeline.run_context import RunContext
-from demiflow.workbench.runs import domain as run_domain
+from demiflow.forge.runs import domain as run_domain
+
 from test_forge_runtime_review_fixes import control_fixture
 
 
@@ -47,11 +49,11 @@ def test_retained_native_artifacts_are_charged_to_history(tmp_path):
 
 def test_live_native_owner_cannot_be_replaced_by_cleanup(tmp_path):
     import pytest
-    from demiflow.workbench.runs.storage import clean_stopped
-    from demiflow.workbench.runs.storage import owned_objects
-    from demiflow.workbench.runs.storage import scratch_bytes
+    from demiflow.forge.runs.storage import clean_stopped
+    from demiflow.forge.runs.storage import owned_objects
+    from demiflow.forge.runs.storage import scratch_bytes
     from demiflow.errors import ExecutionConflict
-    from demiflow.workbench.runs.manager import execution_stopped
+    from demiflow.forge.runs.manager import execution_stopped
 
     location = tmp_path / "objects"
     _, target, journal = control_fixture(tmp_path / "project", objects=[str(location)])
@@ -76,8 +78,8 @@ def test_native_crash_orphans_keep_slot_until_owned_cleanup(tmp_path, monkeypatc
     import subprocess
     import sys
     import pytest
-    from demiflow.workbench.runs.storage import clean_stopped
-    from demiflow.workbench.runs.storage import owned_objects
+    from demiflow.forge.runs.storage import clean_stopped
+    from demiflow.forge.runs.storage import owned_objects
 
     location = tmp_path / "objects"
     manifest, target, journal = control_fixture(
@@ -125,7 +127,7 @@ with RunContext.attach(RunJournal(Path(sys.argv[1]),attempt=1)) as native:
     assert not run_domain._owner_finished(owner)
     before = run_domain.history_admission(tmp_path / "project", reserve=0)
     from demiflow.execution.journal.run_journal import RunJournal
-    from demiflow.workbench.runs.manager import execution_stopped
+    from demiflow.forge.runs.manager import execution_stopped
     journal = RunJournal(target, attempt=1)
 
     def clean():
@@ -199,7 +201,7 @@ def test_object_devices_are_reserved_before_worker_allocation(tmp_path, monkeypa
 @pytest.mark.parametrize("damage", ["path", "run_id"])
 def test_object_owner_record_cannot_redirect_accounting(tmp_path, damage):
     import pytest
-    from demiflow.workbench.runs.storage import owned_objects
+    from demiflow.forge.runs.storage import owned_objects
     from demiflow.forge.schema import ForgeError
 
     location = tmp_path / "objects"

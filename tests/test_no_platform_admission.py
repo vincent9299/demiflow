@@ -150,7 +150,8 @@ def test_resume_rejects_unknown_durable_protocol_before_attempt(tmp_path,changes
 @pytest.mark.parametrize('changes',[{'format':999},{'stream_protocol':'unknown'}])
 def test_manager_rejects_unknown_protocol_before_dispatch_or_attempt(tmp_path,monkeypatch,changes):
     from types import SimpleNamespace
-    from demiflow.workbench.runs import manager
+    from demiflow.forge.runs import manager
+
     import demiflow.workbench.worker as worker
     run_id='r'+'4'*24
     target=manager.directory(tmp_path,run_id);target.mkdir(parents=True)

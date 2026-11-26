@@ -19,7 +19,7 @@ import lance
 import pyarrow as pa
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench import reader as workspace_reader
 from demiflow.workbench.reader import Reader

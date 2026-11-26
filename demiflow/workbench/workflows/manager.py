@@ -16,7 +16,7 @@ from demiflow.forge.workflow import (
     validate_workflow_inputs,
     workflow_spec_digest,
 )
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
 from demiflow.workbench.workflows import store
 from demiflow.workbench.workflows.resolver import (
     build_project_resolver,

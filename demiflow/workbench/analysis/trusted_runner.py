@@ -10,7 +10,7 @@ import signal
 import subprocess
 import time
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.resources.process_observation import descendants
 from demiflow.resources.process_observation import signal_owned
 from demiflow.resources.process_observation import drain_owned

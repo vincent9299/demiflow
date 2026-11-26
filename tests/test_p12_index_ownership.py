@@ -9,8 +9,11 @@ import pytest
 from demiflow.forge import operation_budget
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench import directory_operations
-from demiflow.workbench.projects import index, workspace as ws
-from demiflow.workbench.runs import manager as runs, domain
+from demiflow.forge import index
+
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.runs import manager as runs, domain
+
 from test_forge_runtime_review_fixes import control_fixture
 from test_forge_index import report
 
@@ -22,7 +25,7 @@ def prepared(tmp_path, monkeypatch):
     with runs.execution_lock(root) as lease:
         runs._claim_lease(lease, None)
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'domain'))
-    monkeypatch.setattr('demiflow.workbench.worker.operation', lambda *a, **k: {'status': 'checked'})
+    monkeypatch.setattr('demiflow.forge.runs.inspector.run_operation', lambda *a, **k: {'status': 'checked'})
     return root, manifest, target, journal
 
 
@@ -149,9 +152,10 @@ def test_summary_failure_is_inside_owner_boundary_and_not_missing(prepared, monk
         module, reader, publish = runs, 'run_index_entry', runs.publish_run_index
         marker = marker_for(root, manifest)
     else:
+        from demiflow.forge import project_workspace as forge_ws
         (root / '.forge/inspections').mkdir()
         _, marker = report(root, 1, publish=False)
-        module, reader, publish = ws, 'report_index_entry', ws.publish_report_index
+        module, reader, publish = forge_ws, 'report_index_entry', forge_ws.publish_report_index
     def unreadable(*a, **k): raise PermissionError('cannot read owner facts')
     monkeypatch.setattr(module, reader, unreadable)
     monkeypatch.setattr(index, 'publish', lambda *a: pytest.fail('unreadable must not publish Missing'))

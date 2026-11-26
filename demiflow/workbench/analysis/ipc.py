@@ -16,7 +16,7 @@ import stat
 import struct
 import time
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.forge.io import no_symlinks
 from demiflow.workbench.analysis import contracts as c
 

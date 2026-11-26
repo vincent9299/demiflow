@@ -4,7 +4,8 @@ import time
 import lance
 import pytest
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_forge_runs import base, root, prepared, custom, execute, wait
 from test_forge_run_faults import _slow, _first_committed
 

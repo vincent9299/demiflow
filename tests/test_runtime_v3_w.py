@@ -816,7 +816,8 @@ def test_w013(tmp_path, monkeypatch):
 # --- W014 manager.resume admission -----------------------------------------
 
 def test_w014(tmp_path, monkeypatch):
-    from demiflow.workbench.runs import manager
+    from demiflow.forge.runs import manager
+
     from demiflow.forge.schema import ForgeError
     run_id = "r" + "1" * 24
     target = manager.directory(tmp_path, run_id)
@@ -836,7 +837,7 @@ def test_w014(tmp_path, monkeypatch):
     # checks forwarding only, real recovery lives in the native integration cases.
     # Downstream lifecycle is doubled here.
     import demiflow.workbench.worker as worker
-    import demiflow.workbench.runs.domain as domain
+    import demiflow.forge.runs.domain as domain
     from contextlib import contextmanager
     @contextmanager
     def fake_lock():
@@ -867,7 +868,8 @@ def test_w015(tmp_path, monkeypatch):
     from demiflow.workbench.graph import logical
     from demiflow.workbench.graph import parameters
     import demiflow.workbench.projects.workspace as ws
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     run_id = "r" + "1" * 24
     report = {"digest": "digest-x", "status": "checked", "entry": "entry-x",
               "binding": {"entry": "entry-x", "parameter_path": "params-x", "sources": {}, "parameters": {}},
@@ -897,7 +899,8 @@ def test_w016(tmp_path, monkeypatch):
     from demiflow.workbench.runs import facts
     from demiflow.workbench.graph import parameters
     import demiflow.workbench.projects.workspace as ws
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     run_id = "r" + "1" * 24
     report = {"digest": "digest-x", "entry": "entry-x", "actions": ["a0", "a1"],
               "binding": {"entry": "entry-x", "parameter_path": "params-x", "sources": {}, "parameters": {}},
@@ -1162,7 +1165,8 @@ def _real_obs_run(tmp_path, *, action_id="a0", v3=True, nodes=("n0",), scoped=Tr
     """
     import time
     from demiflow import data
-    from demiflow.workbench.runs import manager
+    from demiflow.forge.runs import manager
+
     from demiflow.forge.platform import content_digest
     from demiflow.execution.pipeline.run_context import RunContext
     from demiflow.planning.dataflow_policy import execution_limits

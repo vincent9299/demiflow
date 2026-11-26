@@ -7,9 +7,12 @@ import pytest
 
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench import directory_operations, project_operations
-from demiflow.workbench.projects import index, workspace as ws
-from demiflow.workbench.runs import manager as runs
-from demiflow.workbench.table_bindings import make_resolver
+from demiflow.forge import index
+
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.runs import manager as runs
+
+from demiflow.forge.table_bindings import make_resolver
 from test_forge_runs import base, root, prepared, execute
 from test_forge_resume import stopped
 from test_workbench_native_submission import native_flow

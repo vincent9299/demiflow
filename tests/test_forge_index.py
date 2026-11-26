@@ -6,7 +6,8 @@ import sqlite3
 
 import pytest
 
-from demiflow.workbench.projects import index
+from demiflow.forge import index
+
 from demiflow.workbench import directory_operations
 from demiflow.workbench.projects import workspace as ws
 from demiflow.forge.platform import content_digest

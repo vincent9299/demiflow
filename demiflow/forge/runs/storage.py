@@ -23,7 +23,7 @@ def object_locations(*, report=None, manifest=None, target=None):
             and target is not None
             and (target / "inspection.json").exists()
         ):
-            from demiflow.workbench.runs.manager import _report
+            from demiflow.forge.runs.manager import _report
 
             report = _report(target, manifest)
         # The launcher still verifies the required checked seal before execute.

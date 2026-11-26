@@ -6,7 +6,8 @@ import pytest
 import time
 
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench import project_operations as project_ops
 from test_forge_runs import base, root, execute
 from test_forge_resume import stopped

@@ -82,7 +82,7 @@ def convert(row: Row) -> Result:
     from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.forge.flow_check import FlowChecker
     from demiflow.forge.platform import inspect_modules, LIMITS
-    from demiflow.workbench.runs.manager import DEFAULT_LIMITS
+    from demiflow.forge.runs.manager import DEFAULT_LIMITS
     from pathlib import Path
     from test_forge_native_semantics import native
     import lance

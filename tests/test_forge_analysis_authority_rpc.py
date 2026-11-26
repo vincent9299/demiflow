@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.analysis.authority_rpc import Exchange
 from demiflow.workbench.analysis.framing import Frames
 from demiflow.workbench.analysis.ipc import Peer

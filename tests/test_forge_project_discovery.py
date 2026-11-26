@@ -78,8 +78,9 @@ def test_project_check_tracks_the_checker_revision(tmp_path, monkeypatch):
     from demiflow.forge import project_rules
     from demiflow.forge.project import register_flow
     from demiflow.workbench.projects import checks as project_check
-    from demiflow.workbench.runs import manager as runs
-    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.forge.runs import manager as runs
+
+    from demiflow.forge.table_bindings import make_resolver
     initialize_project(tmp_path)
     (tmp_path / 'flows').mkdir()
     (tmp_path / 'flows/counts.py').write_text('from demiflow import data\ndef run():\n    return data.range(2).count()\n')

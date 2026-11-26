@@ -7,7 +7,8 @@ from urllib.parse import urlencode
 import pytest
 
 from playwright.sync_api import expect
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_forge_panel_browser import panel, open_panel, demo, isolated
 from test_forge_public_api import request
 

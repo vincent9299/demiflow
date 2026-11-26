@@ -1,7 +1,7 @@
 """Common registered-input admission; preparation remains the execution gate."""
 
-from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.pipeline_policy import limits_with
+from demiflow.forge import project_workspace as ws
+from demiflow.forge.pipeline_policy import limits_with
 from demiflow.forge.project_bindings import extract_arguments, resolve_arguments
 from demiflow.forge.schema import ForgeError
 
@@ -20,8 +20,8 @@ def inputs(root, workspace, entry, params, limits):
 
 
 def describe(root, entry, *, params, limits=None):
-    from demiflow.workbench.worker import operation
-    from demiflow.workbench.runs.domain import preparation_lock
+    from demiflow.forge.runs.inspector import operation
+    from demiflow.forge.runs.domain import preparation_lock
 
     with preparation_lock() as lease:
         return operation(
@@ -34,7 +34,7 @@ def describe(root, entry, *, params, limits=None):
         )
 
 
-def _describe(root, entry, *, table_resolver, params, limits=None):
+def describe_in_worker(root, entry, *, table_resolver, params, limits=None):
     root, workspace, _ = ws.load_workspace(root)
     admitted, path = inputs(root, workspace, entry, params, limits)
     parameters = ws.read_control(path) if path else params

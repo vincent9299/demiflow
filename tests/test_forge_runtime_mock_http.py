@@ -5,7 +5,8 @@ import threading
 import time
 from pathlib import Path
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 from test_map_prompt_async import PACK, server
 from test_forge_runs import base, root, custom, execute, rows, wait

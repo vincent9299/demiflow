@@ -160,7 +160,8 @@ def test_flat_params_and_direct_uri_tables_and_outputs(tmp_path, reference, monk
         resolve_arguments(proj, control, {'src': {'uri': '/etc/fake.lance'}}, table_resolver=None)
 
     # End-to-end managed local run with flat params + direct URI input & output (no tables/, no locations).
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from test_forge_runs import wait as wait_run
     prepared = runs.prepare(proj, 'flows/filter_flow.py:run', params='configs/filter.json')
     runs.start(proj, prepared['run_id'], expected=prepared['digest'])

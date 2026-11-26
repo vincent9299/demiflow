@@ -18,7 +18,8 @@ from demiflow.execution.pipeline.training_deployment import TrainingDeployment
 from demiflow.execution.worker.training_job import ManagedFitContext, execute_training_job
 from demiflow.forge.pipeline_check import check_project
 from demiflow.forge.project import initialize_project, register_flow
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_forge_runs import execute, rows
 from test_training_domain import setup_request
 from training_action_programs import (

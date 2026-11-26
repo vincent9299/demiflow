@@ -12,7 +12,7 @@ if __name__ == '__main__' and sys.argv[1:2] == ['execute']:
     if _spec is None or not _spec.origin or Path(_spec.origin).resolve() != _PLATFORM_ROOT / 'demiflow/__init__.py':
         raise RuntimeError('Execution loaded DemiFlow outside the sealed platform source')
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 
 
 def allocation_guard(limits, *, native_execution=None):
@@ -27,7 +27,7 @@ def allocation_guard(limits, *, native_execution=None):
     baseline = int(Path('/proc/self/statm').read_text().split()[0]) * os.sysconf('SC_PAGE_SIZE')
     ceiling = baseline + min(limits['max_rss_bytes'] // 2, 4 * limits['memory_bytes'])
     if native_execution is not None:
-        from demiflow.workbench.runs.native_resources import validate
+        from demiflow.forge.runs.native_resources import validate
         # CUDA reserves large virtual mappings even for a tiny tensor. This
         # finite sealed ceiling does not alter real RSS/device/disk admission
         # or the supervisor's whole-descendant-tree accounting and termination.
@@ -43,7 +43,7 @@ def allocation_guard(limits, *, native_execution=None):
 
 
 def execute(root, run_id, attempt=None):
-    from demiflow.workbench.runs.manager import directory
+    from demiflow.forge.runs.manager import directory
     from demiflow.execution.host.control import RunJournal
     # Callbacks and stop polls own separate bounded connections from the engine
     # driver. Keep them for the process lifetime, without retaining transactions.
@@ -55,7 +55,7 @@ def _execute(root, run_id, run, attempt=None):
     import importlib
     import signal
     import time
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
     from demiflow.forge.platform_worker import bind_parent
     from demiflow.execution.host.control import RunJournal
     from demiflow.execution.host.control import CheckedExecution
@@ -146,7 +146,7 @@ def _execute(root, run_id, run, attempt=None):
             operators=report['operators'], source_root=source, resource_root=target, work_root=work, limits=limits,
             record=record, check_stop=check_stop, observe=run.observe_nodes,
             targets=report['binding']['targets'], report_digest=manifest['report_digest'])
-        from demiflow.workbench.pipeline_policy import native_limits
+        from demiflow.forge.pipeline_policy import native_limits
         # Use the unified bounded host default; the manifest still owns all resource ceilings.
         with RunContext.attach(run, entry_identity=manifest.get('source_digest'), training_project_root=root,
                 limits=manifest['limits'], explicit_limits=manifest.get('limits_explicit'), check_stop=check_stop), local_execution(
@@ -299,7 +299,7 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
     import signal
     import subprocess
     import time
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
     from demiflow.execution.host.control import RunJournal
     from demiflow.resources.process_observation import inherited_unit
     from demiflow.resources.process_observation import signal_owned
@@ -309,9 +309,9 @@ def _supervise(root, run_id, lease, attempt=None, *, run):
     manifest = value['manifest']
     limits = runs.remaining_limits(manifest['limits'], value['state'])
     prior_usage = value['state'].get('usage', {})
-    from demiflow.workbench.runs.storage import object_locations
-    from demiflow.workbench.runs.storage import scratch_bytes
-    from demiflow.workbench.runs.storage import clean_stopped, cleanup_deadline, remove_attempt_work
+    from demiflow.forge.runs.storage import object_locations
+    from demiflow.forge.runs.storage import scratch_bytes
+    from demiflow.forge.runs.storage import clean_stopped, cleanup_deadline, remove_attempt_work
     object_roots = object_locations(manifest=manifest, target=target)
     run.execution_status()
     work = runs.attempt_directory(target, 'work', attempt)
@@ -578,7 +578,7 @@ def supervise(root, run_id, lease, attempt=None):
     # The inherited execution lease covers initialization and every finalization
     # failure, including accounting, cleanup and index publication.
     try:
-        from demiflow.workbench.runs.manager import directory
+        from demiflow.forge.runs.manager import directory
         from demiflow.execution.host.control import RunJournal
         with RunJournal(directory(root, run_id), attempt=attempt).connection_scope() as run:
             return _supervise(root, run_id, lease, attempt, run=run)
@@ -604,7 +604,7 @@ if __name__ == '__main__':
     if mode == 'supervise':
         from contextlib import redirect_stderr
         import traceback
-        from demiflow.workbench.runs.manager import directory
+        from demiflow.forge.runs.manager import directory
         attempt = int(sys.argv[5]) if len(sys.argv)>5 else None
         logger = SupervisorLog(directory(root,run_id)/'supervisor-logs'/str(attempt))
         try:
@@ -618,7 +618,7 @@ if __name__ == '__main__':
             logger.close()
     elif mode == 'observe':
         from demiflow.forge.platform_worker import bind_parent
-        from demiflow.workbench.runs.manager import directory
+        from demiflow.forge.runs.manager import directory
         from demiflow.execution.host.control import observe
         bind_parent()
         observe(directory(root,run_id),int(sys.argv[4]),int(sys.argv[5]),float(sys.argv[6]))

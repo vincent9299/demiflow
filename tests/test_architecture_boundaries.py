@@ -10,7 +10,8 @@ from click.testing import CliRunner
 
 from demiflow.forge.bridge import run_tools as tools
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.runs import context
+from demiflow.forge.runs import context
+
 from test_forge_runtime_review_fixes import control_fixture
 
 
@@ -44,7 +45,8 @@ def test_forge_guidance_and_check_use_the_same_public_catalogue(tmp_path):
 
 
 def test_run_context_is_project_read_only_and_does_not_reconcile(tmp_path, monkeypatch):
-    from demiflow.workbench.runs import manager
+    from demiflow.forge.runs import manager
+
     manifest, target, journal = control_fixture(tmp_path)
     journal.transition({'prepared'}, 'starting', launch_phase='spawning', execution_stopped=False)
     def forbidden(*a, **kw): raise AssertionError('Read must not reconcile or initialize')

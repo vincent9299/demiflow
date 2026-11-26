@@ -17,11 +17,11 @@ import sys
 import time
 import uuid
 
-from demiflow.workbench.projects import workspace as ws
+from demiflow.forge import project_workspace as ws
 from demiflow.forge.runtime import bound_files, sealed_root, source_digest
-from demiflow.workbench.process import process_identity
-from demiflow.workbench.runs.authority import LocalAuthority
-from demiflow.workbench.runs.admission import inputs as admit_inputs
+from demiflow.forge.process import process_identity
+from demiflow.forge.runs.authority import LocalAuthority
+from demiflow.forge.runs.admission import inputs as admit_inputs
 from demiflow.forge import audit
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform import bounded_json
@@ -31,8 +31,8 @@ from demiflow.forge.platform_environment import environment_inventory
 from demiflow.forge.project_bindings import extract_arguments, is_direct_table_ref, resolve_arguments, resolve_output_uri
 from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
-from demiflow.workbench.pipeline_policy import DEFAULT_LIMITS
-from demiflow.workbench.pipeline_policy import limits_with
+from demiflow.forge.pipeline_policy import DEFAULT_LIMITS
+from demiflow.forge.pipeline_policy import limits_with
 from demiflow.execution.host.control import RunJournal, RunContext
 from demiflow.execution.host.inspection import read_run, RunReadError
 from demiflow.errors import ExecutionConflict
@@ -105,6 +105,8 @@ def _run_ids(root, *, maximum=4096):
         for entry in entries:
             if len(values) >= maximum or entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
                 raise ForgeError('Run store entry/count limit exceeded')
+            if re.fullmatch(r'r[0-9a-f]{24}-driver-resources', entry.name):
+                continue
             directory(root, entry.name)
             values.append(entry.name)
     return sorted(values)
@@ -164,7 +166,7 @@ def run_index_entry(root, run_id, *, deadline=None):
 
 def publish_run_index(root, marker, *, deadline=None):
     """Optional cache work never undoes source publication or the original error."""
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
     try:
         operation_budget.check(deadline)
         entry = run_index_entry(root, marker['identity'], deadline=deadline)
@@ -191,6 +193,8 @@ def run_index_entries(root, *, check, deadline):
                 check()
                 if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
                     raise ForgeError('Invalid run directory entry')
+                if re.fullmatch(r'r[0-9a-f]{24}-driver-resources', entry.name):
+                    continue
                 value = run_index_entry(root, entry.name, deadline=deadline)
                 if value is None:
                     raise ForgeError('Directory source is incomplete: ' + entry.name)
@@ -199,7 +203,7 @@ def run_index_entries(root, *, check, deadline):
 
 def refresh_index(root, run_id, *, deadline=None):
     """Best-effort activity hint; source journal and execution lease own state."""
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
     current = operation_budget.current_deadline()
     deadline = current if deadline is None else deadline if current is None else min(deadline, current)
     try:
@@ -300,14 +304,13 @@ def durable_tree(target):
 @operation_budget.controlled
 def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None, inputs=None,
             overrides=None, output_prefix=None, request_id=None, telemetry=True, authority=None, python=None):
-    from demiflow.workbench.worker import operation
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()), python=str(python) if python else None)
     authority.require(root, "run_submit")
-    from demiflow.workbench.runs.domain import preparation_lock
+    from demiflow.forge.runs.domain import preparation_lock
     from functools import partial
     args = dict(params=params, outputs=outputs, new_outputs=new_outputs, limits=limits, inputs=inputs,
                 overrides=overrides, output_prefix=output_prefix, telemetry=telemetry)
-    from demiflow.workbench.runs.native_resources import trusted_deployment, capacity_domain, trusted_process_environment
+    from demiflow.forge.runs.native_resources import trusted_deployment, capacity_domain, trusted_process_environment
     args['capacity_domain'] = capacity_domain()
     args.update(trusted_process_environment(workspace=root))
     if os.environ.get('DEMIFLOW_TRAINING_DEPLOYMENT'):
@@ -316,9 +319,9 @@ def prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None,
     if native_deployment is not None:
         args['native_deployment'] = native_deployment
     with preparation_lock() as lease:
-        perform=partial(operation,_pass_fds=(lease,), _authority=authority.bootstrap())
+        perform=partial(authority.inspector_operation,_pass_fds=(lease,), _authority=authority.bootstrap())
         if request_id is not None:
-            from demiflow.workbench.runs.requests import prepare as with_receipt
+            from demiflow.forge.runs.requests import prepare as with_receipt
             return with_receipt(root, entry, args, perform, request_id)
         return perform('run_prepare', root, entry=entry, **args)
 
@@ -350,12 +353,11 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     output_prefix = _validate_output_prefix(output_prefix)
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, 'run_submit')
-    from demiflow.workbench.projects.registry import project_dependencies
-    dependencies = project_dependencies(root, authority=authority.bootstrap(), verify_files=True, require_environment=True)
+    dependencies = authority.resolve_dependencies(root, verify_files=True, require_environment=True)
     root, workspace, platform = ws.load_workspace(root)
     platform = ws.current_platform_snapshot(platform)
     change_scope = workspace.get('audit', {}).get('change_scope')
-    audit.require_scope(ws._check_change_scope(root), expected_scope=change_scope)
+    audit.require_scope(ws.check_change_scope(root), expected_scope=change_scope)
     requested_limits = limits
     limits, parameter_path = admit_inputs(root, workspace, entry, params, limits)
     explicit_limits = sorted(set(requested_limits or ()) | set(workspace.get('budgets') or ()))
@@ -462,12 +464,12 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                 visit(child, (*names, str(i)))
 
     visit(eff_args)
-    from demiflow.workbench.runs import native_submission
+    from demiflow.forge.runs import native_submission
     native_flow = not output_specs
     if native_flow:
         report, output_specs = native_submission.prepare(root, entry, parameters=effective, limits=limits,
                                                          metadata=metadata, explicit_limits=explicit_limits, source_modules=source_modules,
-                                                         dependencies=dependencies)
+                                                         dependencies=dependencies, inspector_op=authority.inspector_operation)
         ledgers, budgets, credentials = [], {}, set(report['native_contract']['credential_names'])
         observation_instances = report['observation_instances']
     else:
@@ -477,7 +479,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         if dependencies is not None:
             from demiflow.forge.runtime import SharedSources
             shared = SharedSources(root, source_modules or {}, dependencies=dependencies).binding()
-        report = ws._inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver(),
+        report = ws.inspect_flow(root, entry, params=effective, save=True, table_resolver=_table_resolver(),
                                   shared_sources=shared, dependencies=dependencies)
         if report.get('status') != 'checked':
             raise ForgeError('Flow is not checked: ' + json.dumps(report.get('diagnostics', []), ensure_ascii=False)[:4096])
@@ -573,8 +575,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                               schema_identity=sink['normalized_parameters']['schema']['identity'])
         if sum(t['row_count'] for t in report['binding']['tables'].values()) > limits['max_input_rows']:
             raise ForgeError('Input row admission budget exceeded')
-    from demiflow.workbench.runs.domain import MANAGEMENT_RESERVE, SEALED_BYTES
-    from demiflow.workbench.runs import native_resources
+    from demiflow.forge.runs.domain import MANAGEMENT_RESERVE, SEALED_BYTES
+    from demiflow.forge.runs import native_resources
     from demiflow.execution.host.control import training_deployment_reference
     training_deployment = None
     if any(node.get('kind') == 'fit' for node in report['nodes']):
@@ -586,7 +588,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
                                                 training_deployment=training_deployment)
     if native_execution and native_execution['resource_root'] != capacity_domain:
         raise ForgeError('Native deployment and capacity domain differ')
-    from demiflow.workbench.runs.native_resources import environment_names as validate_environment_names
+    from demiflow.forge.runs.native_resources import environment_names as validate_environment_names
     credentials.update(validate_environment_names(environment_names or []))
     executable_dirs = native_resources.executable_directories(executable_dirs or [], workspace=root)
     platform_root = Path(__file__).resolve().parents[2]
@@ -618,12 +620,12 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
     if shutil.disk_usage(root).free < (limits['max_scratch_bytes'] + limits['max_output_bytes']
             + limits['max_evidence_bytes'] + python_bytes + other_bytes + 64 * 1024**2):
         raise ForgeError('Insufficient workspace disk headroom')
-    from demiflow.workbench.runs.storage import object_locations
+    from demiflow.forge.runs.storage import object_locations
     store = root / '.forge/runs'
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
     with ws.control_lock(root):
         operation_budget.check()
-        from demiflow.workbench.projects.index import initialize_if_empty
+        from demiflow.forge.index import initialize_if_empty
         initialize_if_empty(root)
         store.mkdir(exist_ok=True)
         marker = index.begin(root, 'run', run_id)
@@ -632,9 +634,9 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
         try:
             target.mkdir()
             created = True
-            from demiflow.workbench.runs.domain import history_admission
-            from demiflow.workbench.host_partition import policy
-            from demiflow.workbench.host_partition import location
+            from demiflow.forge.runs.domain import history_admission
+            from demiflow.forge.host_partition import policy
+            from demiflow.forge.host_partition import location
             history_admission(root, ceiling=policy(location())['history_bytes'],
                               reserve=MANAGEMENT_RESERVE + max(0, python_bytes + other_bytes - SEALED_BYTES))
             (target / 'work').mkdir()
@@ -644,7 +646,7 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             ws.write_control(target / 'inspection.json', report, create=True)
             ws.write_control(target / 'effective-params.json', effective, create=True)
             if change_scope is not None:
-                ws.write_control(target / 'change-baseline.json', ws._scope_baseline(root, workspace), create=True)
+                ws.write_control(target / 'change-baseline.json', ws.scope_baseline(root, workspace), create=True)
             manifest = dict(format=FORMAT, run_id=run_id, root=str(root), entry=entry,
                 runtime_contract='demiflow_forge_runtime_v1', native_submission=native_flow, prepare_request_id=prepare_request_id, telemetry_enabled=telemetry,
                 change_scope=change_scope,
@@ -674,8 +676,8 @@ def _prepare(root, entry, *, params, outputs=None, new_outputs=True, limits=None
             operation_budget.check()
             # Expensive freshness checks precede the authorization commit guard.
             if dependencies is not None:
-                current_dependencies = project_dependencies(
-                    root, authority=authority.bootstrap(), verify_files=True, require_environment=True,
+                current_dependencies = authority.resolve_dependencies(
+                    root, verify_files=True, require_environment=True,
                 )
                 if current_dependencies is None or current_dependencies['digest'] != dependencies['digest']:
                     raise ForgeError('Project dependencies changed during preparation', code='conflict')
@@ -774,7 +776,7 @@ def _describe(run_id, value):
 
 
 def list_runs(root, *, offset=0, limit=20, cursor=None):
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 100:
         raise ForgeError('Invalid run page')
     info = index.status(root)
@@ -815,7 +817,7 @@ def process_matches(identity):
 
 def verify_seal(target, manifest, *, environment=True):
     report = _report(target, manifest)
-    from demiflow.workbench.runs.native_resources import verify
+    from demiflow.forge.runs.native_resources import verify
     verify(target, manifest.get('native_execution'))
     if manifest.get('format') not in {FORMAT, PREVIOUS_FORMAT, LEGACY_EXECUTABLE_FORMAT} or report.get('format') not in {'demiflow_forge_flow_inspection_v3', 'demiflow_forge_native_inspection_v1'}:
         raise ForgeError('Historical execution records are read-only; prepare a newly inspected run')
@@ -879,7 +881,6 @@ def _launch_unit(target, attempt):
 
 @operation_budget.controlled
 def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authority=None, python=None):
-    from demiflow.workbench.worker import operation
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()), python=str(python) if python else None)
     authority.require(root, "run_submit")
     root = Path(root).absolute()
@@ -890,7 +891,7 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
     expected_attempt = _attempt(existing['attempt'], expected_attempt)
     if existing['status'] != 'prepared':
         return existing
-    from demiflow.workbench.runs import domain as run_domain
+    from demiflow.forge.runs import domain as run_domain
     from demiflow.resources.process_observation import require_pidfds
     require_pidfds()
     operation_budget.check()
@@ -908,11 +909,11 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
             raise ForgeError('Older prepared seals have no managed runtime contract; prepare a new run')
         attempt = value['state'].get('attempt')
         run = RunJournal(target, attempt=attempt)
-        from demiflow.workbench.projects import index
+        from demiflow.forge import index
         with ws.control_lock(root):
             operation_budget.check()
             with run_domain.preparation_lock() as preparation_lease:
-                preflight = operation('run_preflight', root, run_id=run_id, expected=expected,_pass_fds=(preparation_lease,), _authority=authority.bootstrap())
+                preflight = _inspector_operation(authority, 'run_preflight', root, run_id=run_id, expected=expected,_pass_fds=(preparation_lease,), _authority=authority.bootstrap())
             if preflight['status'] != 'checked':
                 raise ForgeError('Run changed before admission', code='conflict')
             run_domain.history_admission(root, reserve=0, admitting=run_id, ceiling=capacity['history_bytes'])
@@ -952,7 +953,7 @@ def start(root, run_id, *, expected, expected_attempt=_CURRENT_ATTEMPT, authorit
                             else:
                                 raise ForgeError('Launch state changed', code='conflict')
                             worker_path = next((item['path'] for item in value['manifest']['platform']['files']
-                                                if item['path'] in {'workbench/runs/worker.py', 'forge/run_worker.py'}), None)
+                                                if item['path'] in {'forge/runs/worker.py', 'workbench/runs/worker.py', 'forge/run_worker.py'}), None)
                             if worker_path is None:
                                 raise ForgeError('Sealed run has no supported supervisor entry', code='operation_rejected')
                             command = [sys.executable, '-I', '-B', str(target / 'runtime/demiflow' / worker_path), 'supervise', str(root), run_id, str(lease)]
@@ -1008,7 +1009,7 @@ def _preflight(root, run_id, *, expected, authority=None):
         return {'status': value['state']['status']}
     identity = m.get('prepare_request_id')
     if identity and not value['state'].get('preparation_ready'):
-        from demiflow.workbench.runs.requests import read
+        from demiflow.forge.runs.requests import read
         receipt = read(root, identity)
         if receipt['status'] != 'ready' or receipt.get('digest') != m['digest']:
             raise ForgeError('Preparation receipt is not durably ready', code='conflict')
@@ -1052,17 +1053,33 @@ def _dependency_matches_live(root, expected, live):
     return True
 
 
+def _inspector_operation(authority, name, root, **kwargs):
+    fn = getattr(authority, 'inspector_operation', None)
+    if fn is not None:
+        return fn(name, root, **kwargs)
+    from demiflow.forge.runs.inspector import run_operation
+    return run_operation(name, root, **kwargs)
+
+
+def _resolve_dependencies(authority, root, *, python=None, verify_files=True, require_environment=False):
+    fn = getattr(authority, 'resolve_dependencies', None)
+    if fn is not None:
+        return fn(root, python=python, verify_files=verify_files, require_environment=require_environment)
+    from demiflow.forge.dependencies import binding as dependency_binding
+    return dependency_binding(root, python=python, verify_files=verify_files, require_environment=require_environment)
+
+
 def _verify_dependency_commit(root, manifest, authority):
     """Recheck live pyproject.toml declaration & Python scope under the admission lock."""
     expected = manifest.get('project_dependencies')
-    from demiflow.workbench.projects.registry import project_dependencies
-    boot = authority.bootstrap() if authority is not None else None
+    auth = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
+    boot = auth.bootstrap() if hasattr(auth, 'bootstrap') else {}
     fallback_py = (
         expected['environment']['interpreter']['path']
-        if expected and boot and boot.get('kind') == 'trusted_local' and not boot.get('python')
+        if expected and boot.get('kind') == 'trusted_local' and not boot.get('python')
         else None
     )
-    current = project_dependencies(root, authority=boot, python=fallback_py, verify_files=False)
+    current = _resolve_dependencies(auth, root, python=fallback_py, verify_files=False)
     if expected is None and current is None:
         return
     if expected is None or current is None:
@@ -1080,15 +1097,15 @@ def _check_basis(root, target, m, *, phase='preflight', authority=None):
         if phase == 'resume':
             historical_modules = dependencies['modules']
         else:
-            from demiflow.workbench.projects.registry import project_dependencies
-            boot = authority.bootstrap() if authority is not None else None
+            auth = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
+            boot = auth.bootstrap()
             fallback_py = (
                 dependencies['environment']['interpreter']['path']
-                if boot and boot.get('kind') == 'trusted_local' and not boot.get('python')
+                if boot.get('kind') == 'trusted_local' and not boot.get('python')
                 else None
             )
-            live = project_dependencies(
-                root, authority=boot, python=fallback_py,
+            live = auth.resolve_dependencies(
+                root, python=fallback_py,
                 verify_files=True, require_environment=True,
             )
             if not _dependency_matches_live(root, dependencies, live):
@@ -1112,18 +1129,18 @@ def _check_basis(root, target, m, *, phase='preflight', authority=None):
         if actual_cmp != expected_env:
             raise ForgeError('Sealed project Python environment changed', code='conflict')
     if m.get('native_submission'):
-        from demiflow.workbench.runs.native_submission import verify_basis
+        from demiflow.forge.runs.native_submission import verify_basis
         verify_basis(root, m, _report(target, m), sealed_packages=historical_modules)
     else:
         verify_run_basis(root, m)
         if dependencies is not None:
-            from demiflow.workbench.runs.native_submission import verify_shared_sources
+            from demiflow.forge.runs.native_submission import verify_shared_sources
             verify_shared_sources(_report(target, m)['binding'], sealed_packages=historical_modules)
 
 
 def _output_metadata(uri, version):
     """Keep output IO in the existing bounded metadata worker."""
-    from demiflow.workbench.worker import operation
+    from demiflow.forge.runs.inspector import operation
     return operation('metadata', uri, version=version)
 
 
@@ -1190,7 +1207,6 @@ def remaining_limits(limits, state):
 
 @operation_budget.controlled
 def resume(root, run_id, *, expected, expected_attempt, authority=None):
-    from demiflow.workbench.worker import operation
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, "run_submit")
     # Original-contract admission with a concrete reason before any business start.
@@ -1200,9 +1216,9 @@ def resume(root, run_id, *, expected, expected_attempt, authority=None):
     if binding is None:
         raise ForgeError('该运行没有统一恢复契约，不能恢复历史；请新建运行。', code='conflict')
     RunContext.validate_recovery_identity(binding)
-    from demiflow.workbench.runs.domain import preparation_lock
+    from demiflow.forge.runs.domain import preparation_lock
     with preparation_lock() as lease:
-        prepared = operation('run_resume', root, run_id=run_id, expected=expected, expected_attempt=expected_attempt,_pass_fds=(lease,), _authority=authority.bootstrap())
+        prepared = authority.inspector_operation('run_resume', root, run_id=run_id, expected=expected, expected_attempt=expected_attempt,_pass_fds=(lease,), _authority=authority.bootstrap())
     return start(root, run_id, expected=expected, expected_attempt=prepared['attempt'], authority=authority)
 
 
@@ -1237,13 +1253,13 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
                                           deadline=operation_budget.current_deadline())
             if facts['recovery_restricted']:
                 raise ForgeError('该执行的资源 actor 未声明状态恢复钩子，不能从中断处恢复；请新建运行。')
-        from demiflow.workbench.runs.storage import reconcile_training
-        from demiflow.workbench.runs.storage import cleanup_deadline
+        from demiflow.forge.runs.storage import reconcile_training
+        from demiflow.forge.runs.storage import cleanup_deadline
         reconcile_training(RunJournal(target, attempt=expected_attempt), manifest, expected_attempt=expected_attempt,
             expected_revision=state['revision'], deadline=cleanup_deadline(), project_root=root,
             confirm_stopped=lambda snapshot: execution_stopped(target, snapshot))
         _check_basis(root, target, manifest, phase='resume', authority=authority)
-        from demiflow.workbench.runs.storage import cleanup_deadline, clean_stopped
+        from demiflow.forge.runs.storage import cleanup_deadline, clean_stopped
         deadline = cleanup_deadline()
         errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
         if errors:
@@ -1263,7 +1279,7 @@ def _resume(root, run_id, *, expected, expected_attempt, authority=None):
             raise ForgeError('Native maintenance is not settled', code='conflict')
         validate_output_targets(value, deadline=deadline)
         control = RunJournal(target)
-        from demiflow.workbench.projects import index
+        from demiflow.forge import index
         with ws.control_lock(root):
             _check_basis(root, target, manifest, phase='resume')
             operation_budget.check(deadline)
@@ -1299,7 +1315,7 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
         MALLOC_ARENA_MAX='2',
         TOKIO_WORKER_THREADS='2', LANCE_CPU_THREADS='2', CUDA_VISIBLE_DEVICES='',
         LANCE_MEM_POOL_SIZE=str(limits['memory_bytes']), LANCE_MAX_TEMP_DIRECTORY_SIZE=str(limits['max_scratch_bytes']))
-    from demiflow.workbench.runs.native_resources import environment, executable_directories
+    from demiflow.forge.runs.native_resources import environment, executable_directories
     if training_deployment:
         result.update(DEMIFLOW_TRAINING_DEPLOYMENT=training_deployment['path'],
                       DEMIFLOW_TRAINING_DEPLOYMENT_SHA256=training_deployment['sha256'])
@@ -1307,7 +1323,7 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
     result['PATH'] = os.pathsep.join([os.path.dirname(sys.executable), *paths, '/usr/bin', '/bin'])
     result.update(environment(target, native_execution))
     if capacity_domain is not None:
-        from demiflow.workbench.runs.native_resources import capacity_domain as validate_domain
+        from demiflow.forge.runs.native_resources import capacity_domain as validate_domain
         root = validate_domain(capacity_domain)
         if result.get('DEMIFLOW_RESOURCE_ROOT', root) != root:
             raise ForgeError('Native deployment and capacity domain differ')
@@ -1339,8 +1355,8 @@ def worker_environment(target, limits=None, credential_names=(), *, native_execu
 def evidence(root, run_id, reference):
     """Read one native evidence reference from this run's declared ledger."""
     target, value = _load(root, run_id)
-    from demiflow.workbench.catalog import validate_reference
-    from demiflow.workbench.catalog import read_evidence
+    from demiflow.forge.evidence import validate_reference
+    from demiflow.forge.evidence import read_evidence
     validate_reference(reference)
     path = Path(reference['journal_path'])
     path = path if path.is_absolute() else target / path
@@ -1358,8 +1374,7 @@ def cancel(root, run_id, *, expected_attempt=_CURRENT_ATTEMPT,compact=False, aut
     authority = authority if authority is not None else LocalAuthority(str(Path(root).absolute()))
     authority.require(root, "run_control")
     if type(compact) is not bool:raise ForgeError('compact must be boolean',code='invalid_request')
-    from demiflow.workbench.runs.view import control_state
-    from demiflow.workbench.runs.view import snapshot
+    from demiflow.forge.runs.context import control_state, snapshot
     target, value = control_state(root,run_id)
     attempt = _attempt(value['state'].get('attempt'), expected_attempt)
     run = RunJournal(target, attempt=attempt)
@@ -1447,7 +1462,7 @@ def register_results(root, run_id, *, recover=False, attempt=None, maintenance_d
     selected = value['state'].get('attempt')
     run = RunJournal(target, attempt=selected)
     if recover and maintenance_deadline is None:
-        from demiflow.workbench.runs.storage import cleanup_deadline
+        from demiflow.forge.runs.storage import cleanup_deadline
         maintenance_deadline = cleanup_deadline()
     deadline = maintenance_deadline if recover else operation_budget.current_deadline()
     errors = []
@@ -1503,15 +1518,15 @@ def execution_stopped(target, state):
         # Only a positively recorded pre-spawn failure can lack a unit file.
         return state.get('status')=='prepared' or state.get('execution_stopped') is True and state.get('reason') == 'launch_failed'
 def reconcile(root, run_id, *, expected_attempt=_CURRENT_ATTEMPT):
-    from demiflow.workbench.worker import operation
-    from demiflow.workbench.runs.domain import preparation_lock
+    from demiflow.forge.runs.inspector import operation
+    from demiflow.forge.runs.domain import preparation_lock
     expected_attempt = _attempt(show(root, run_id)['attempt'], expected_attempt)
     with preparation_lock() as lease:
         return operation('run_reconcile', root, run_id=run_id, expected_attempt=expected_attempt,_pass_fds=(lease,))
 
 
-def _reconcile(root, run_id, *, expected_attempt):
-    from demiflow.workbench.runs.storage import cleanup_deadline, remove_attempt_work, clean_stopped
+def reconcile_in_worker(root, run_id, *, expected_attempt):
+    from demiflow.forge.runs.storage import cleanup_deadline, remove_attempt_work, clean_stopped
     with execution_lock(root):
         target, value = _load(root, run_id)
         state = value['state']
@@ -1527,7 +1542,7 @@ def _reconcile(root, run_id, *, expected_attempt):
         if completed and os.path.lexists(work):
             raise ForgeError('Completed cleanup contradicts remaining private work', code='conflict')
         if not completed:
-            from demiflow.workbench.runs.domain import reserved
+            from demiflow.forge.runs.domain import reserved
             if state['status'] == 'prepared' and reserved(root, run_id, state.get('attempt')):
                 run.transition({'prepared'}, 'failed', reason='launch_failed',
                                recoverable=True, execution_stopped=True)
@@ -1554,7 +1569,7 @@ def _reconcile(root, run_id, *, expected_attempt):
         try:
             errors = register_results(root, run_id, recover=True, maintenance_deadline=deadline)
             current = run.execution_status()
-            from demiflow.workbench.runs.storage import reconcile_training
+            from demiflow.forge.runs.storage import reconcile_training
             reconcile_training(run, value['manifest'], expected_attempt=expected_attempt, expected_revision=current['revision'],
                                    deadline=deadline, confirm_stopped=stopped, project_root=root)
             clean_stopped(run, preserve_jobs=current['status'] != 'cancelled', expected_revision=current['revision'],
@@ -1580,6 +1595,9 @@ def _reconcile(root, run_id, *, expected_attempt):
     result = show(root, run_id)
     result['reconciliation_errors'] = errors
     return result
+
+
+_reconcile = reconcile_in_worker
 
 
 def compare(root, left, right):
@@ -1689,8 +1707,55 @@ def logs(root, run_id, *, offset=0, limit=65536, attempt=None):
 
 
 def _table_resolver():
-    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.forge.table_bindings import make_resolver
     return make_resolver(ws.table_binding, result_table)
+
+
+def synchronize_index(root):
+    """Synchronize pending run and report index markers into `.forge/index.sqlite`."""
+    from demiflow.forge import index
+    errors = []
+    with ws.control_lock(root):
+        operation_budget.check()
+        index._ensure(root)
+        for name, marker, error in index.pending_markers(root):
+            if error is None:
+                publish = publish_run_index if marker['kind'] == 'run' else ws.publish_report_index
+                error = publish(root, marker)
+            if error:
+                errors.append(name + ': ' + error)
+    return {**index.status(root), 'errors': errors}
+
+
+def rebuild_index(root, *, max_entries=None, timeout_s=300):
+    """Rebuild the single-project .forge/index.sqlite from authoritative .forge/runs & .forge/inspections."""
+    from itertools import chain
+    from demiflow.forge import index
+    if max_entries is None:
+        max_entries = index.MAX_ENTRIES
+    if type(max_entries) is not int or not 1 <= max_entries <= index.MAX_ENTRIES or type(timeout_s) is not int or not 1 <= timeout_s <= 300:
+        raise ForgeError('Invalid index rebuild budget')
+    deadline = time.monotonic() + timeout_s
+    current = operation_budget.current_deadline()
+    if current is not None:
+        deadline = min(deadline, current)
+    count = 0
+
+    def check():
+        nonlocal count
+        count += 1
+        if count > max_entries or time.monotonic() >= deadline:
+            raise ForgeError('Index rebuild exceeded its entry/time budget')
+
+    with ws.control_lock(root):
+        run_entries = run_index_entries(root, check=check, deadline=deadline)
+        report_entries = ws.report_index_entries(root, check=check, deadline=deadline)
+        try:
+            return index.rebuild_from_entries(root, chain(run_entries, report_entries),
+                                              max_entries=max_entries, deadline=deadline)
+        finally:
+            run_entries.close()
+            report_entries.close()
 
 
 def verify_run_basis(root, manifest):
@@ -1698,8 +1763,8 @@ def verify_run_basis(root, manifest):
     root, project, _ = ws.load_workspace(root)
     if manifest['format'] == 'demiflow_forge_run_manifest_v3' and project['format'] == ws.FORMAT_V3:
         raise ForgeError('Workspace audit contract changed; prepare a new run', code='conflict')
-    audit.require_scope(ws._check_change_scope(root), expected_scope=manifest.get('change_scope'))
-    report = ws._report_status(root, manifest['report_digest'], table_resolver=_table_resolver(), platform_check=False)
+    audit.require_scope(ws.check_change_scope(root), expected_scope=manifest.get('change_scope'))
+    report = ws.report_status(root, manifest['report_digest'], table_resolver=_table_resolver(), platform_check=False)
     if report['status'] != 'checked' or not report['verification']['complete']:
         raise ForgeError('Prepared basis is stale: ' + ', '.join(report.get('changes', [])), code='conflict')
     if manifest['parameter_path'] and ws.read_control(ws.relative_path(root, manifest['parameter_path'])) != manifest['original_parameters']:

@@ -99,9 +99,9 @@ def preview(root, *, entry, params=None, table_resolver=None, source_modules=Non
     from contextlib import redirect_stdout
     from demiflow.execution.host.inspection import capture_pipeline, build_logical_plan_view
     from demiflow.workbench.projects.discovery import discover
-    from demiflow.workbench.pipeline_policy import limits_with
+    from demiflow.forge.pipeline_policy import limits_with
     from demiflow.forge.runtime import PythonSources, SharedSources
-    from demiflow.workbench.graph.preview_guard import enter_readonly
+    from demiflow.forge.readonly_guard import enter_readonly
 
     root, control, _ = ws.load_workspace(root)
     project = discover(root, control)

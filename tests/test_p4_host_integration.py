@@ -6,7 +6,8 @@ import pytest
 from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.execution.host.control import RunJournal
-from demiflow.workbench.runs import manager, storage
+from demiflow.forge.runs import manager, storage
+
 from demiflow.errors import ExecutionConflict
 
 
@@ -96,7 +97,8 @@ def test_stale_reconcile_cannot_clean_current_attempt(stopped_run):
 
 def test_refresh_expiry_after_begin_keeps_recovery_marker(tmp_path, monkeypatch):
     from contextlib import nullcontext
-    from demiflow.workbench.projects import index
+    from demiflow.forge import index
+
     calls = []
     clock = iter([0.0, 0.0, 2.0])
     monkeypatch.setattr(manager.time, 'monotonic', lambda: next(clock))

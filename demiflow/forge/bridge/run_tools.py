@@ -197,8 +197,9 @@ def validate_tool_call(name, arguments):
 
 
 def invoke(name, root, arguments, *, authority=None, perform=None):
-    """Validate a run.* tool call and dispatch once through the supplied perform callback."""
+    """Validate a run.* tool call and dispatch once through Forge (or supplied) perform."""
     operation, validated = validate_tool_call(name, arguments)
     if perform is None:
-        raise ForgeError('Run operation dispatcher callback is required', code='operation_rejected')
+        from demiflow.forge.runs import operations as run_operations
+        perform = run_operations.perform
     return perform(operation, root, authority=authority, **validated)

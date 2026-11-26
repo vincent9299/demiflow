@@ -87,7 +87,8 @@ def test_real_sealed_physical_facts_are_visible_in_browser(isolated, browser, mo
     from test_forge_public_api import service
     from test_forge_workbench_browser import page_for
     from test_workbench_execution_binding_browser import select_registered_flow
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from demiflow.workbench.graph import model
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path/'domain'))
     with service(isolated,enable_runs=True) as app, page_for(browser,app) as (page,errors):

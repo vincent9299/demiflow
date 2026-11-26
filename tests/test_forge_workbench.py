@@ -8,7 +8,8 @@ from urllib.parse import urlencode
 import pytest
 
 from demiflow.workbench.projects import registry as console
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.runs import view as run_view
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
@@ -386,7 +387,8 @@ def test_observation_revision_detects_add_update_rollback_and_cleanup(isolated):
 
 
 def test_observation_cursor_rejects_same_run_reference_in_another_project(isolated,tmp_path):
-    from demiflow.workbench.runs import domain as run_domain
+    from demiflow.forge.runs import domain as run_domain
+
     from demiflow.workbench.runs.authority import LocalAuthority
     from demiflow.workbench.worker import operation
     first=runs.prepare(isolated,ENTRY,params=PARAMS)

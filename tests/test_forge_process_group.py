@@ -9,7 +9,7 @@ import sys
 def test_supervisor_reaps_an_orphan_even_after_the_group_leader_exits(tmp_path):
     source = '''
 import json, os, subprocess, sys, time
-from demiflow.workbench.runs.worker import _adopt_descendants, _drain_descendants
+from demiflow.forge.runs.worker import _adopt_descendants, _drain_descendants
 _adopt_descendants()
 process = subprocess.Popen([sys.executable, '-c', "import os,time; pid=os.fork(); print(os.getpid(), flush=True); time.sleep(60) if pid==0 else None"], stdout=subprocess.PIPE, start_new_session=True)
 first = int(process.stdout.readline())

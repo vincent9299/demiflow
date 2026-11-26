@@ -6,7 +6,7 @@ import pytest
 
 from demiflow.forge.project_bindings import resolve_arguments
 from demiflow.forge.schema import ForgeError
-from demiflow.workbench.table_bindings import make_resolver
+from demiflow.forge.table_bindings import make_resolver
 from demiflow.workbench.projects import workspace as ws, checks
 
 

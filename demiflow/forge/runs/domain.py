@@ -26,7 +26,7 @@ from demiflow.forge.io import read_json
 from demiflow.forge.io import fsync_directory
 from demiflow.forge.schema import ForgeError
 from demiflow.forge import operation_budget
-from demiflow.workbench import host_partition
+from demiflow.forge import host_partition
 
 MiB = 1024**2
 CONTROL_RSS = 384 * MiB
@@ -82,12 +82,12 @@ def _allocated(owner, *, deadline, include_outputs=True):
     since admission avoids charging already allocated bytes against free space
     twice. Unknown coverage refuses new admission, never releases live owners.
     """
-    from demiflow.workbench.runs.manager import directory
+    from demiflow.forge.runs.manager import directory
 
     target = directory(owner["root"], owner["run_id"])
     roots = [target]
     if owner.get("object_locations"):
-        from demiflow.workbench.runs.storage import owned_objects
+        from demiflow.forge.runs.storage import owned_objects
         roots.extend(owned_objects(target, owner["object_locations"]))
     if include_outputs:
         roots.extend(Path(o["path"]) for o in owner["outputs"])
@@ -188,7 +188,7 @@ def _overlap(a, b):
 
 
 def _owner_finished(owner):
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
     from demiflow.execution.host.inspection import RunReadError
 
     try:
@@ -214,8 +214,8 @@ def reserve(path, config, root, manifest, attempt):
     if len(outputs) > 32:
         raise ForgeError("Output lease budget exceeded")
     limits = manifest["limits"]
-    from demiflow.workbench.runs.manager import directory
-    from demiflow.workbench.runs.storage import object_locations
+    from demiflow.forge.runs.manager import directory
+    from demiflow.forge.runs.storage import object_locations
     target = directory(root, manifest["run_id"])
     object_paths = object_locations(manifest=manifest, target=target)
     object_targets = [_target(p) for p in object_paths]
@@ -243,7 +243,7 @@ def reserve(path, config, root, manifest, attempt):
     for d in {o["device"] for o in outputs}:
         devices[str(d)] = devices.get(str(d), 0) + limits["max_output_bytes"]
     own["devices"] = devices
-    from demiflow.workbench.host_partition import load
+    from demiflow.forge.host_partition import load
     load(path, config, root=root, devices=devices, admit=True)
     live, free = [], []
     for number in range(16):
@@ -720,7 +720,7 @@ class _HistoryScan:
 
     def run(self, parent, name, expected, target, admitting):
         """One independent reader/FD stack; only scalar billing leaves the job."""
-        from demiflow.workbench.runs.storage import history_objects
+        from demiflow.forge.runs.storage import history_objects
 
         before = after = roots = None
         try:
@@ -827,7 +827,7 @@ def history_admission(root, *, reserve=MANAGEMENT_RESERVE, ceiling=None, admitti
             scan.check()
             domain = host_partition.location()
             if (domain / "host-budget.json").exists():
-                from demiflow.workbench.host_partition import load
+                from demiflow.forge.host_partition import load
                 load(domain, host_partition.policy(domain), root=root, admit=True)
             scan.check()
             with scan.directory(Path(root).absolute()) as workspace:

@@ -27,7 +27,8 @@ from playwright.sync_api import expect
 from d19_fixtures import WEB, owned_fixture
 from test_forge_markdown_reading import browser
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.graph import model
 
 TABS = ['开发', '管道', '数据', 'Readme']

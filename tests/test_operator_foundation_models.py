@@ -15,7 +15,7 @@ from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.execution.pipeline.run_context import RunContext
 from demiflow.forge.flow_check import FlowChecker
 from demiflow.forge.platform import inspect_modules, LIMITS
-from demiflow.workbench.runs.manager import DEFAULT_LIMITS
+from demiflow.forge.runs.manager import DEFAULT_LIMITS
 from demiflow.forge.project_bindings import resolve_flow_resources
 from demiflow.execution.pipeline.local_kernel import local_execution
 from demiflow.operator_llm.call_ref import PromptRecordRef

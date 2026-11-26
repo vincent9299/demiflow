@@ -77,7 +77,8 @@ def test_author_without_workbench_then_open_compile_and_run(tmp_path, browser, m
         dataset_id='numbers', schema_name='numbers', schema_version='1')
     subprocess.run([sys.executable, '-B', '-c', second, str(root)], env=author_env, check=True)
     from demiflow.workbench.projects import registry
-    from demiflow.workbench.runs import manager
+    from demiflow.forge.runs import manager
+
     from test_forge_runs import execute
     console = tmp_path / 'projects.json'
     registry.add(console, root)

@@ -136,7 +136,7 @@ def test_guard_denies_mutation_network_and_processes_in_real_child(tmp_path):
     kept = tmp_path / 'keep'
     kept.write_text('unchanged')
     script = '''import os, pathlib, socket, subprocess, sys, threading
-from demiflow.workbench.graph.preview_guard import enter_readonly
+from demiflow.forge.readonly_guard import enter_readonly
 p=pathlib.Path(sys.argv[1])
 ready=threading.Event()
 blocked=[]

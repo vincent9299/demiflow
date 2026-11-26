@@ -7,7 +7,8 @@ from demiflow.forge.platform_snapshot import _seal,write_snapshot
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as ops
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_forge_runs import base,root,prepared,execute
 
 

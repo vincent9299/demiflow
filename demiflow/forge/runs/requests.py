@@ -127,7 +127,7 @@ def prepare(root, entry, arguments, operation, identity):
                     + "; inspect/reconcile the same request ID",
                     code="conflict",
                 )
-            from demiflow.workbench.runs.manager import show
+            from demiflow.forge.runs.manager import show
 
             return show(root, value["run_id"], include_report=True)
         if not -300 <= time.time() - created <= DAY:
@@ -159,7 +159,7 @@ def prepare(root, entry, arguments, operation, identity):
         except Exception as exc:
             # A timeout/crashed inspector may have produced a sealed directory.
             # Retain pending for explicit reconciliation; never destroy execution.
-            from demiflow.workbench.runs.manager import directory
+            from demiflow.forge.runs.manager import directory
 
             value.update(
                 status=(
@@ -176,16 +176,16 @@ def prepare(root, entry, arguments, operation, identity):
 
 
 def _ready(root, value):
-    from demiflow.workbench.runs.manager import directory
-    from demiflow.workbench.runs.manager import RunJournal
+    from demiflow.forge.runs.manager import directory
+    from demiflow.forge.runs.manager import RunJournal
 
     journal = RunJournal(directory(root, value["run_id"]), attempt=1)
     journal.transition({"prepared"}, "prepared", preparation_ready=True)
 
 
 def reconcile(root, identity):
-    from demiflow.workbench.worker import operation
-    from demiflow.workbench.runs.domain import preparation_lock
+    from demiflow.forge.runs.inspector import operation
+    from demiflow.forge.runs.domain import preparation_lock
 
     with preparation_lock() as lease:
         return operation(
@@ -222,8 +222,8 @@ def _incomplete_seal(target, identity, run_id, root):
     return True
 
 
-def _reconcile(root, identity):
-    from demiflow.workbench.runs import manager as runs
+def reconcile_in_worker(root, identity):
+    from demiflow.forge.runs import manager as runs
 
     # Public reconcile holds the inherited deployment preparation lease. The
     # receipt and workspace execution locks also exclude prepare/start races.
@@ -281,3 +281,6 @@ def _reconcile(root, identity):
         atomic_write_json(parent / (identity + ".json"), value)
         _ready(root, value)
         return value
+
+
+_reconcile = reconcile_in_worker

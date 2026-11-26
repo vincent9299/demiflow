@@ -159,7 +159,7 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
             return {**result,'availability':'unavailable','reason':'no_bound_prompt_source','kind':'prompt'}
         path,expected=chosen['path'],chosen['sha256']
         if historical:
-            from demiflow.workbench.runs.manager import source
+            from demiflow.forge.runs.manager import source
             raw=source(root,graph_binding['run_id'],path)['text'].encode()
         else:
             raw=read_bounded(ws.relative_path(root,path),1024**2)
@@ -182,7 +182,7 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
         return {**result,'kind':actual_kind,'availability':'unavailable',
                 'reason':'implementation_outside_bound_author_closure'}
     if historical:
-        from demiflow.workbench.runs.manager import source
+        from demiflow.forge.runs.manager import source
         text=source(root,graph_binding['run_id'],path)['text']
         if hashlib.sha256(text.encode()).hexdigest()!=expected:
             raise ForgeError('Sealed source digest differs',code='conflict')
@@ -195,7 +195,7 @@ def get(root,*,graph_binding,node_id,kind,resource=None,logical_node_id=None,occ
         # A historical API is read from authenticated, sealed platform bytes.
         # Never fill missing historical contracts with the current SDK.
         if historical and address is not None:
-            from demiflow.workbench.runs import manager as runs
+            from demiflow.forge.runs import manager as runs
             target_dir, value = runs._load(root, graph_binding['run_id'], detail='identity', attempt=graph_binding['attempt'])
             facts = value['manifest'].get('platform', {})
             evidence = next((item for item in facts.get('files', []) if item['path'] == address[0]), None)
@@ -224,7 +224,7 @@ def pipeline(root, *, graph_binding):
     from .plan_details import material
     graph = from_binding(root, graph_binding)
     if graph_binding['basis_kind'] == 'run':
-        from demiflow.workbench.runs import manager as runs
+        from demiflow.forge.runs import manager as runs
         target, value = runs._load(root, graph_binding['run_id'], detail='identity', attempt=graph_binding['attempt'])
         report = runs._report(target, value['manifest'])
         if report.get('pipeline_detail') is not None:
@@ -239,7 +239,7 @@ def pipeline(root, *, graph_binding):
         raise ForgeError('Pipeline entry is outside this graph source closure', code='not_found')
     historical = graph_binding['basis_kind'] == 'run'
     if historical:
-        from demiflow.workbench.runs.manager import source
+        from demiflow.forge.runs.manager import source
         text = source(root, graph_binding['run_id'], path)['text']
     else:
         text = ws.source_text(root, path, expected_sha256=expected)['text']

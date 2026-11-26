@@ -10,8 +10,11 @@ from urllib.parse import urlsplit
 from playwright.sync_api import expect
 
 import demiflow
-from demiflow.workbench.projects import workspace as ws, index
-from demiflow.workbench.runs import manager as runs, domain
+from demiflow.forge import index
+
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.runs import manager as runs, domain
+
 from demiflow.workbench import project_operations
 from test_forge_runs import base, root, prepared
 from test_forge_resume import stopped

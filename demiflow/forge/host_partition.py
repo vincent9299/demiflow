@@ -78,19 +78,32 @@ def _ancestor(path):
     raise ForgeError('Host partition path exceeds ancestor budget')
 
 
-def _analysis(value, development, workspaces):
+_ANALYSIS_PROFILE_PROVIDER = None
+
+
+def register_analysis_profile_provider(provider) -> None:
+    """Allow the optional Workbench analysis module to register its v2 resource profile."""
+    global _ANALYSIS_PROFILE_PROVIDER
+    _ANALYSIS_PROFILE_PROVIDER = provider
+
+
+def _analysis(value, development, workspaces, *, require_profile=False):
     """A v2 reservation in this same host authority, not a parallel budget."""
-    from demiflow.workbench.analysis.resource_profile import profile
-    resource, profile_sha = profile()
     fields = {'memory_bytes', 'state_root', 'state_disk_bytes', 'image_roots', 'profile_sha256'}
-    if type(value) is not dict or set(value) != fields or value['profile_sha256'] != profile_sha:
+    if type(value) is not dict or set(value) != fields or type(value['profile_sha256']) is not str:
         raise ForgeError('Analysis host reservation requires this exact resource profile')
     for key in ('memory_bytes', 'state_disk_bytes'):
         if type(value[key]) is not int or not 0 < value[key] <= 2**60:
             raise ForgeError('Analysis host reservation requires positive bounded resources')
-    minimum_disk = resource['payload_limits']['global_artifact_bytes'] + resource['database']['region_reserved_bytes'] + 256*MiB + 64*MiB
-    if value['memory_bytes'] < resource['memory']['analysis'] or value['state_disk_bytes'] < minimum_disk:
-        raise ForgeError('Analysis host reservation is below its state/memory profile', code='resource_limit')
+    if _ANALYSIS_PROFILE_PROVIDER is not None:
+        resource, profile_sha = _ANALYSIS_PROFILE_PROVIDER()
+        if value['profile_sha256'] != profile_sha:
+            raise ForgeError('Analysis host reservation requires this exact resource profile')
+        minimum_disk = resource['payload_limits']['global_artifact_bytes'] + resource['database']['region_reserved_bytes'] + 256*MiB + 64*MiB
+        if value['memory_bytes'] < resource['memory']['analysis'] or value['state_disk_bytes'] < minimum_disk:
+            raise ForgeError('Analysis host reservation is below its state/memory profile', code='resource_limit')
+    elif require_profile:
+        raise ForgeError('Analysis host reservation requires Workbench analysis resource profile', code='operation_rejected')
     state = _path(value['state_root'])
     if str(state) != value['state_root'] or '..' in state.parts:
         raise ForgeError('Analysis state must be a normalized physical path')
@@ -116,7 +129,7 @@ def _analysis(value, development, workspaces):
                 state_device=_ancestor(state).stat().st_dev)
 
 
-def load(domain, capacity, *, required=False, root=None, devices=(), admit=False):
+def load(domain, capacity, *, required=False, root=None, devices=(), admit=False, require_analysis_profile=False):
     path = Path(domain) / 'host-budget.json'
     if not path.exists():
         if required: raise ForgeError('Combined development requires an explicit host-budget.json')
@@ -150,7 +163,7 @@ def load(domain, capacity, *, required=False, root=None, devices=(), admit=False
             raise ForgeError('Runtime workspace is outside the fixed host history partition', code='resource_limit')
     state = _path(value['development_state_root'])
     state_device = _ancestor(state).stat().st_dev
-    analysis = _analysis(value['analysis'], value['development_state_root'], roots) if v2 else None
+    analysis = _analysis(value['analysis'], value['development_state_root'], roots, require_profile=require_analysis_profile) if v2 else None
     run_memory = capacity['max_rss_bytes']
     # The domain RSS ceiling already includes its control/preparation trees.
     memory = run_memory + value['development_memory_bytes'] + value['other_memory_bytes'] + (analysis['memory_bytes'] if analysis else 0)
@@ -207,7 +220,7 @@ def load(domain, capacity, *, required=False, root=None, devices=(), admit=False
 
 def load_analysis(domain, capacity, *, state_root, image_root, admit=False):
     """Static/admission accounting only; no cgroup or execution authorization."""
-    partition = load(domain, capacity, required=True, admit=admit)
+    partition = load(domain, capacity, required=True, admit=admit, require_analysis_profile=True)
     if partition['value']['format'] != FORMAT_V2:
         raise ForgeError('Analysis requires an explicitly installed host-budget v2; v1 remains unchanged', code='operation_rejected')
     value = partition['value']['analysis']

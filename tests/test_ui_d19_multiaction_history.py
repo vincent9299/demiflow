@@ -16,7 +16,9 @@ import sqlite3
 import subprocess
 
 from demiflow.workbench.graph import model
-from demiflow.workbench.runs import manager as runs, view
+from demiflow.forge.runs import manager as runs
+
+from demiflow.workbench.runs import view
 
 from test_forge_runs import custom, execute
 

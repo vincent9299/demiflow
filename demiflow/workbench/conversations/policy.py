@@ -226,7 +226,7 @@ class Deployment:
         if domain is None:
             if required: reject('Combined service requires an explicit runtime_domain and shared host partition')
             return None
-        from demiflow.workbench import host_partition
+        from demiflow.forge import host_partition
         path = Path(text(domain, 2048))
         if not path.is_absolute() or path != path.resolve(): reject('Runtime domain must be a physical absolute path')
         partition = host_partition.load(path, host_partition.policy(path), required=True, admit=admit)

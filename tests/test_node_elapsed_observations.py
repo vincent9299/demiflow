@@ -17,7 +17,7 @@ def _checked_write(tmp_path, observed):
     from demiflow.execution.pipeline.checked import CheckedExecution
     from demiflow.forge.flow_check import FlowChecker
     from demiflow.forge.platform import inspect_modules, LIMITS
-    from demiflow.workbench.runs.manager import DEFAULT_LIMITS
+    from demiflow.forge.runs.manager import DEFAULT_LIMITS
     from test_forge_native_semantics import native
     (tmp_path / 'operators').mkdir()
     (tmp_path / 'operators/__init__.py').write_text('')

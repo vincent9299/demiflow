@@ -17,7 +17,7 @@ import struct
 import threading
 import time
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.projects import registry as console
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.analysis import contracts as c

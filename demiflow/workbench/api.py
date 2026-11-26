@@ -27,7 +27,7 @@ from urllib.parse import urlsplit
 from demiflow.workbench.projects import workspace as api
 from demiflow.workbench import project_operations as project_ops
 from demiflow.workbench.projects import registry as console
-from demiflow.workbench.runs import operations as run_operations
+from demiflow.forge.runs import operations as run_operations
 from demiflow.workbench.runs.authority import for_http as run_authority
 from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform_environment import read_bounded
@@ -309,7 +309,7 @@ class WorkspaceServer(ThreadingHTTPServer):
             try:
                 partition = self.development.deployment.validate_runtime(required=self.enable_runs or self.control_only)
                 if partition is not None:
-                    from demiflow.workbench.host_partition import location
+                    from demiflow.forge.host_partition import location
                     if str(location()) != self.development.deployment.value['runtime_domain']:
                         raise ForgeError('HTTP runtime domain differs from development host partition')
             except BaseException:
@@ -785,7 +785,7 @@ class Handler(BaseHTTPRequestHandler):
                     value['analysis_execution_profile']=self.server.analysis_execution_profile()
                     value['analysis_features']={'annotation_definitions':True,'case_cursor':True,'catalog_profile':True,'case_media':getattr(self.server.analysis,'features',{}).get('case_media') is True,'annotation_media_basis':getattr(self.server.analysis,'features',{}).get('annotation_media_basis') is True,'case_output_groups':getattr(self.server.analysis,'features',{}).get('case_output_groups') is True,'case_review_filter':getattr(self.server.analysis,'features',{}).get('case_review_filter') is True,'notebook_history':getattr(self.server.analysis,'features',{}).get('notebook_history') is True}
                 elif url.path == '/api/run-context':
-                    from demiflow.workbench.runs.context import query as run_context
+                    from demiflow.forge.runs.context import query as run_context
                     value = run_context(root, query['run_id'],
                                         attempt=int(query['attempt']) if 'attempt' in query else None,
                                         authority=run_authority(self.server, self.path, root, 'read'))
@@ -821,7 +821,7 @@ class Handler(BaseHTTPRequestHandler):
                         if key in args:args[key]=int(args[key])
                     value=(self.server.snapshot(root,**args) if url.path=='/api/run-snapshot' else {'/api/run-events':run_view.events,'/api/run-metrics':run_view.metrics}[url.path](root,**args))
                 elif url.path == '/api/run-request':
-                    from demiflow.workbench.runs.requests import read
+                    from demiflow.forge.runs.requests import read
                     value=read(root,query['request_id'])
                 elif url.path == '/api/project-status':
                     from demiflow.workbench.runs.authority import for_http
@@ -892,7 +892,7 @@ class Handler(BaseHTTPRequestHandler):
                     value = run_operations.perform(spec.name, root,
                         authority=run_authority(self.server, self.path, root, spec.permission), **query)
                 elif url.path in {'/api/run-compare', '/api/run-source', '/api/run-evidence'}:
-                    from demiflow.workbench.runs import manager as runs
+                    from demiflow.forge.runs import manager as runs
                     if url.path == '/api/run-compare':
                         value = runs.compare(root, query['left'], query['right'])
                     elif url.path == '/api/run-source':
@@ -1169,10 +1169,10 @@ class Handler(BaseHTTPRequestHandler):
                     value = run_operations.perform(spec.name, root,
                         authority=run_authority(self.server, self.path, root, spec.permission), **request)
                 elif name == 'run-admission':
-                    from demiflow.workbench.runs.admission import describe
+                    from demiflow.forge.runs.admission import describe
                     value=describe(root,**request)
                 elif name == 'run-request-reconcile':
-                    from demiflow.workbench.runs.requests import reconcile
+                    from demiflow.forge.runs.requests import reconcile
                     value=reconcile(root,request['request_id'])
                 elif name == 'inspect':
                     from demiflow.workbench.runs.authority import for_http
@@ -1227,7 +1227,7 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         value = wf_mgr.reconcile_workflow_run(root, request['wf_run_id'])
                 else:
-                    from demiflow.workbench.runs import manager as runs
+                    from demiflow.forge.runs import manager as runs
                     if name == 'run-reconcile':
                         value = runs.reconcile(root, **request)
                     else:

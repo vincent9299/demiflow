@@ -27,9 +27,9 @@ def operation(name, root, *, _pass_fds=(), _authority=None, _source_modules=None
     from demiflow.forge.platform_worker import capture
     from demiflow.forge.platform import limits_with
     from demiflow.forge.schema import ForgeError
-    from demiflow.workbench.host_partition import PREPARATION_RSS
-    from demiflow.workbench.host_partition import location
-    from demiflow.workbench.host_partition import READONLY_RSS
+    from demiflow.forge.host_partition import PREPARATION_RSS
+    from demiflow.forge.host_partition import location
+    from demiflow.forge.host_partition import READONLY_RSS
 
     from demiflow.workbench.reader import current
     from demiflow.workbench.reader import ALLOWED
@@ -106,8 +106,8 @@ def _inspection_inputs(root, request):
     from demiflow.forge.project_rules import ROLE_DIRS
     from demiflow.forge.schema import ForgeError
     from demiflow.workbench.projects import workspace as ws
-    from demiflow.workbench.runs import manager as runs
-    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.forge.runs import manager as runs
+    from demiflow.forge.table_bindings import make_resolver
 
     _, workspace = ws.load_workspace_control(root)
     supplied = request['arguments']
@@ -218,8 +218,8 @@ def dispatch(request):
 
     no_symlinks(root)
     from demiflow.workbench.projects import workspace as ws
-    from demiflow.workbench.runs import manager as runs
-    from demiflow.workbench.table_bindings import make_resolver
+    from demiflow.forge.runs import manager as runs
+    from demiflow.forge.table_bindings import make_resolver
     from demiflow.workbench.projects.registry import project_python_and_scope
     table_resolver = make_resolver(ws.table_binding, runs.result_table)
     if 'dependencies' in request:
@@ -290,8 +290,31 @@ def dispatch(request):
             from demiflow.workbench.graph.preview import preview as compile_preview
             value = compile_preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
         elif op == 'native_submission_inspect':
-            from demiflow.workbench.runs.native_submission import inspect_submission
-            value = inspect_submission(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
+            from demiflow.forge.runs.inspector import register_material_observer
+            from demiflow.forge.runs.native_submission import inspect_submission
+            from demiflow.workbench.graph.plan_callsite import PlanCallsites, pipeline_material
+            from demiflow.workbench.graph.plan_details import build_plan_details
+
+            def _wb_material_observer(root_path, target_path, source_digests, shared, capture_fn):
+                with PlanCallsites(root_path, source_digests) as callsites:
+                    captured = capture_fn(callsites.bind_compilation)
+                shared_binding = shared.binding()
+                details = build_plan_details(
+                    captured.compiled, sources=source_digests, root=root_path,
+                    callsites=callsites, bounds=captured.bounds, shared_sources=shared_binding,
+                )
+                pipeline = pipeline_material(root_path, target_path, source_digests)
+                return captured, shared_binding, details, pipeline
+
+            register_material_observer(_wb_material_observer)
+            try:
+                value = inspect_submission(
+                    root, table_resolver=table_resolver,
+                    source_modules=request.get('source_modules'),
+                    dependencies=request.get('dependencies'), **args,
+                )
+            finally:
+                register_material_observer(None)
         elif op == 'workbench_source':
             from demiflow.workbench.graph.model import _source_tree
             value=_source_tree(root,**args)
@@ -299,23 +322,23 @@ def dispatch(request):
             from demiflow.workbench.graph.parameters import _entry_arguments
             value=_entry_arguments(root,**args)
         elif op == 'run_prepare_reconcile':
-            from demiflow.workbench.runs.requests import _reconcile
-            value=_reconcile(root,**args)
+            from demiflow.forge.runs.requests import reconcile_in_worker
+            value=reconcile_in_worker(root,**args)
         elif op == 'run_admission':
-            from demiflow.workbench.runs.admission import _describe
-            value=_describe(root,table_resolver=table_resolver, **args)
+            from demiflow.forge.runs.admission import describe_in_worker
+            value=describe_in_worker(root,table_resolver=table_resolver, **args)
         elif op in {"run_prepare", "run_preflight", "run_resume"}:
-            from demiflow.workbench.runs import manager as run_manager
+            from demiflow.forge.runs import manager as run_manager
             from demiflow.workbench.runs.authority import from_bootstrap
-            from demiflow.workbench.runs.operations import worker_arguments
+            from demiflow.forge.runs.operations import worker_arguments
             authority = from_bootstrap(request.get('bootstrap'), root)
             handler = {'run_prepare': run_manager._prepare, 'run_preflight': run_manager._preflight,
                        'run_resume': run_manager._resume}[op]
             trusted = {'source_modules': request.get('source_modules')} if op == 'run_prepare' else {}
             value = handler(root, **worker_arguments(op, args), authority=authority, **trusted)
         elif op == 'run_reconcile':
-            from demiflow.workbench.runs import manager as runs
-            value = runs._reconcile(root, **args)
+            from demiflow.forge.runs import manager as runs
+            value = runs.reconcile_in_worker(root, **args)
         elif op == "status":
             from demiflow.workbench.projects.workspace import _report_status
 

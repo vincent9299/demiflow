@@ -27,7 +27,7 @@ from demiflow.resources.process_observation import require_pidfds
 from demiflow.resources.process_observation import signal_owned
 from demiflow.workbench.conversations.common import digest
 from demiflow.workbench.conversations.common import directory_bytes
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.conversations.common import read_file
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import snapshot

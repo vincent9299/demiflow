@@ -520,7 +520,8 @@ def test_workbench_legacy_registry_preview_and_shared_sources_conflict(tmp_path,
 
 def test_workbench_sealed_run_and_resume_preserve_original_package_bytes(tmp_path, monkeypatch):
     from demiflow.workbench.projects import registry
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from demiflow.workbench.runs.authority import WebAuthority
     from test_forge_runs import wait
     from test_forge_resume import stopped
@@ -691,7 +692,8 @@ def test_notebook_old_kernel_keeps_frozen_bytes_while_new_kernel_gets_v2(tmp_pat
 
 def test_cpu_trainer_and_predictor_import_b_class_package_and_read_weights(tmp_path, monkeypatch):
     from demiflow.workbench.projects import registry
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from demiflow.workbench.runs.authority import WebAuthority
     from test_forge_runs import wait
     from test_training_domain import setup_request
