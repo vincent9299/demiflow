@@ -305,6 +305,7 @@
         signal
       }).catch(err => {
         if(!write&&!cleanup&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();
+        if (path === 'workflow-start') throw Object.assign(new Error('启动响应未确认，请查看编排运行记录。'), {outcomeUnknown:true});
         if (err.name === 'AbortError') throw err;
         throw new Error(write ? '未收到服务响应，请先检查连接并核对操作结果。' : '无法连接工作区服务，请确认服务和连接可用后重试。');
       });
@@ -319,14 +320,15 @@
         err.resetRequired = value.reset_required === true;
         if (response.status === 403 && path === 'capabilities') authFailed = true;
         if (err.code === 'unauthorized') authFailed = true;
-        // Keep transient admission contention inside the original project read.
-        // Result-source selection and all writes retain their explicit recovery.
+        if (path === 'workflow-start' && response.status >= 500 && err.operationStarted !== false) err.outcomeUnknown = true;
         const projectRead=err.operationStarted===false&&(
           !body&&['projects','capabilities','context','changes','runs','graph','graph-source','table','sample','project-data-tools','data-tool-definition','project-operators','operator-definition','operator-history','flow-arguments','project-file-text','project-files','project-documents','project-markdown','workflows','workflow-inspect','workflow-runs','workflow-run'].includes(path)
           ||!!body&&['plan-preview','plan-node-detail','plan-pipeline-source'].includes(path));
-        if(projectRead&&!write&&!cleanup&&err.code==='busy'&&!signal.aborted&&attempts<12&&Date.now()-started<20000){
+        const unstartedWorkflow = path === 'workflow-start' && err.operationStarted === false && epoch === viewEpoch;
+        if((projectRead && !write || unstartedWorkflow) && !cleanup && err.code==='busy' && !signal.aborted && attempts<12 && Date.now()-started<20000){
           const wait=Math.min(2000,100*2**Math.min(attempts++,5));
           await new Promise((resolve,reject)=>{let timer;const cancel=()=>{clearTimeout(timer);signal.removeEventListener('abort',cancel);reject(staleRequest());};signal.addEventListener('abort',cancel,{once:true});if(signal.aborted){cancel();return;}timer=setTimeout(()=>{signal.removeEventListener('abort',cancel);resolve();},wait);});
+          if (unstartedWorkflow && epoch !== viewEpoch) throw err;
           continue;
         }
         if (authFailed) err.message = '会话授权已失效，请使用当前服务的有效授权入口重新打开。';
@@ -337,7 +339,9 @@
       }
       let value;
       try { value = await response.json(); }
-      catch { if(!write&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();throw new Error(write ? '未能读取操作响应，请先核对操作结果，不要直接重复提交。' : '服务响应无法读取，请刷新后重试。'); }
+      catch { if (path === 'workflow-start') throw Object.assign(new Error('启动回执无法读取，请查看编排运行记录。'), {outcomeUnknown:true});
+        if(!write&&(epoch!==viewEpoch||options.signal?.aborted))throw staleRequest();throw new Error(write ? '未能读取操作响应，请先核对操作结果，不要直接重复提交。' : '服务响应无法读取，请刷新后重试。'); }
+      if (path === 'workflow-start' && !value?.wf_run_id) throw Object.assign(new Error('启动回执缺少运行标识，请查看编排运行记录。'), {outcomeUnknown:true});
       if (!write && !cleanup && epoch !== viewEpoch) throw staleRequest();
       return value;
       }

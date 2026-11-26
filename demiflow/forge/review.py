@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .platform_environment import read_bounded
-from .project_rules import RULES_ID, guidance
+from .project_rules import TOPICS as AUTHORING_TOPICS, RULES_ID, guidance
 from .project_io import relative_path
 from .schema import ForgeError
 
@@ -50,7 +50,7 @@ that actually interprets them. Do not claim a semantic review is a runtime execu
 production run is a material gap only when it is needed to determine the requested behavior.
 If a referenced project source is essential and not supplied, you can request up to four
 project-relative source paths in one additional read: {"request_files":["operators/parser.py"]}.
-The host can return source under flows, operators, prompts, data_tools, configs, parameters
+The host can return source under flows, operators, prompts, data_tools, configs, parameters, workflows
 and tests. When no additional read is available, identify any material gap in the final report."""
 
 
@@ -63,9 +63,11 @@ def _prompt(goal, guide, captured, observations):
             if source is not None:
                 sides[side] = '\n'.join(f'{i} | {line}' for i, line in enumerate(source.splitlines(), 1))
         files[path] = sides
-    rules, _ = guidance(topics=('flow', 'operator', 'prompt'))
+    rules, notes = guidance(topics=AUTHORING_TOPICS)
     request = dict(goal=goal, scope=captured['scope'], evidence_gaps=captured['gaps'],
                    host_observations=observations, files=files)
+    if any(name.startswith('workflows/') for name in files):
+        request['workflow_authoring'] = [note['text'] for note in notes if note['topic'] == 'workflow']
     prompt = '\n\n'.join((RESPONSE_INSTRUCTIONS, guide,
                           '\n'.join(f"{r['id']} {r['text']}" for r in rules),
                           json.dumps(request, ensure_ascii=False)))
@@ -211,7 +213,7 @@ def _requested_sources(response, root, files):
     for idx, path in enumerate(_items(body['request_files'], 4, 'request_files'), 1):
         name = _text(path, 1024, f'request_files[{idx}]')
         relative_path(root, name)
-        if (name.split('/')[0] not in ('flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'tests')
+        if (name.split('/')[0] not in ('flows', 'operators', 'prompts', 'data_tools', 'configs', 'parameters', 'workflows', 'tests')
                 or name in files or name in paths):
             raise ForgeError('补读范围无效或材料已经提供。', code='inspection_incomplete')
         paths.append(name)

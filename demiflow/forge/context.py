@@ -20,7 +20,7 @@ from .io import no_symlinks
 from .platform import content_digest
 from .platform_environment import read_bounded
 from .project_io import relative_path
-from .project_rules import GUIDE_DIGEST, GUIDE_RESOURCE, ROLE_DIRS, RULES_ID, TOPICS, guidance
+from .project_rules import GUIDE_DIGEST, GUIDE_RESOURCE, ROLE_DIRS, ROLE_TOPICS, RULES_ID, TOPICS, guidance
 from .schema import ForgeError, canonical
 
 CONTEXT_BYTES = 64 * 1024
@@ -40,14 +40,14 @@ def _first_doc_line(doc, limit=120):
     return ''
 
 
-def _flow_summary(root, entry, excluded):
+def flow_summary(root, entry, excluded):
     rel, _, symbol = entry.partition(':')
     if not rel or _hidden(rel, excluded):
         return {}
     try:
         raw = read_bounded(relative_path(root, rel), FILE_BYTES)
         tree = ast.parse(raw.decode('utf-8'), filename=rel)
-    except (OSError, ValueError, SyntaxError, UnicodeError):
+    except (OSError, ValueError, SyntaxError, RecursionError):
         return {}
     mod_doc = _first_doc_line(ast.get_docstring(tree))
     fn = next((node for node in tree.body
@@ -229,8 +229,7 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
             code='invalid_request',
         )
     chosen = {topic} if topic in TOPICS else set()
-    roles = dict(zip(ROLE_DIRS, TOPICS))
-    chosen.update(roles[name.split('/')[0]] for name in paths if name.split('/')[0] in roles)
+    chosen.update(ROLE_TOPICS[name.split('/')[0]] for name in paths if name.split('/')[0] in ROLE_TOPICS)
     rules, notes = guidance(topics=chosen)
     coverage = dict(checked=[], unverified=[])
     diagnostics = []
@@ -264,7 +263,7 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
         diagnostics.append(dict(code=exc.code, detail=str(exc)))
         coverage['unverified'].append('项目目录枚举未完成')
         unknown = dict(total=None, items=[])
-        result.update(project=dict(state='unknown', name=root.name), registered_flows=unknown,
+        result.update(project=dict(state='unknown', name=root.name), registered_flows=unknown, workflows=dict(unknown),
                       role_files={role: dict(unknown) for role in ROLE_DIRS},
                       targets=dict(paths=list(paths), entries=[], parameter_paths=[], known_consumers=[]))
     else:
@@ -288,9 +287,18 @@ def build_context(root, *, paths=(), topic=None, api=None, sources=(), reference
             coverage['checked'].append('workspace.json')
         entries = {key: [p for p in configs if not _hidden(p, excluded)]
                    for key, configs in sorted(view['entries'].items()) if not _hidden(key.split(':')[0], excluded)}
-        result.update(project=project,
+        from .workflow import discover_workflows
+        workflow_paths = view['roles']['workflows']
+        workflows = discover_workflows(root, control=control, paths=workflow_paths, exclude=excluded)
+        workflow_summary = _sample([
+            {key: row[key] for key in ('path', 'name', 'registered', 'status', 'node_count',
+                                       'projects', 'involved_projects', 'unverified_projects')}
+            for row in workflows], 6 * 1024)
+        workflow_summary['total'] = len({p for p in (*workflow_paths, *((control or {}).get('workflows') or ()))
+                                         if not _hidden(p, excluded)})
+        result.update(project=project, workflows=workflow_summary,
                       registered_flows=_sample([dict(entry=key, parameters=values[:4], parameter_count=len(values),
-                                                     **_flow_summary(root, key, excluded))
+                                                     **flow_summary(root, key, excluded))
                                                 for key, values in entries.items()], 8 * 1024),
                       role_files={role: _sample([p for p in files if not _hidden(p, excluded)], 2 * 1024)
                                   for role, files in view['roles'].items()},
@@ -364,6 +372,20 @@ def render_context(result):
             if flow.get('summary'):
                 rows.append(f"  摘要：{flow['summary']}")
 
+    def append_workflows():
+        summary = result['workflows']
+        if summary['total'] == 0:
+            return
+        rows.append('项目编排（登记与草稿）')
+        for item in summary['items']:
+            state = '已登记' if item['registered'] else '草稿'
+            projects = '、'.join(f"{p} → {item['projects'][p]}" for p in item['involved_projects']
+                                if p in item['projects'])
+            rows.append(f"- {item['name']} · {item['path']} · {state} · {item['node_count']} 节点"
+                        + (f" · {projects}" if projects else '') + (f" · {item['status']}" if item['status'] != 'passed' else ''))
+        if summary['total'] is None or len(summary['items']) < summary['total']:
+            rows.append(f"已显示 {len(summary['items'])} 项，文件清单见 --topic files。")
+
     def append_environment():
         env_cfg = result.get('environment')
         if not isinstance(env_cfg, dict):
@@ -429,6 +451,7 @@ def render_context(result):
     if overview_only:
         append_project_header()
         append_registered_flows()
+        append_workflows()
         append_environment()
         append_role_counts()
         append_sdk(full=False)
@@ -441,15 +464,19 @@ def render_context(result):
     elif topic == 'files':
         append_project_header()
         append_registered_flows()
+        append_workflows()
         append_role_files()
     elif topic in TOPICS:
-        role_dir = dict(zip(TOPICS, ROLE_DIRS)).get(topic)
+        role_dir = next(role for role, name in ROLE_TOPICS.items() if name == topic)
+        if topic == 'workflow':
+            append_workflows()
         append_rules(include_notes=True)
         append_role_files(only_role=role_dir)
     else:
         # Focused query: --api and/or --path and/or --source
         append_project_header()
         append_registered_flows()
+        append_workflows()
         if api is not None:
             append_sdk(full=True)
         else:

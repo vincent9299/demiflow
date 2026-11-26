@@ -24,7 +24,7 @@ def has_code_changes(changes):
         if not rel:
             continue
         parts = rel.split('/')
-        if parts[0] in code_dirs:
+        if parts[0] in code_dirs or (parts[0] == 'workflows' and Path(rel).suffix == '.json'):
             return True
         if len(parts) == 1 and Path(rel).suffix.lower() in code_exts:
             return True
@@ -125,7 +125,7 @@ def feedback_current(root, options, author):
 def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection=None,
                 auto_review=False, round=0, budget=None, reference=None, exclude=(),
                 reviewer=None, check_cancel=None, source_current=None, protected_violations=(),
-                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None):
+                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=()):
     """Finish one engineering interval and produce a durable, candidate-bound next action.
 
     ``author`` contains provider/session and completed/acknowledged/cleanup facts.
@@ -156,7 +156,7 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
                                   reference=reference, exclude=exclude, include_hygiene=True)
             receipt['checks'] = {key: check[key] for key in (
                 'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id',
-                'source_digest', 'source_count', 'check_digest')}
+                'source_digest', 'source_count', 'check_digest', 'coverage') if key in check}
         except (OSError, ValueError, KeyError, RecursionError) as exc:
             incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
             receipt['checks'] = dict(status='incomplete', native_flow=incomplete, project_layout=incomplete)
@@ -170,7 +170,7 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
                 on_review()
             if reviewer is None:
                 raise ForgeError('独立评审模型尚未配置。', code='inspection_incomplete')
-            observations = []
+            observations = list(observations)
             for key in ('native_flow', 'project_layout'):
                 item = (receipt['checks'] or {}).get(key)
                 if item:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 from demiflow.workbench.conversations.common import reject
@@ -11,6 +12,26 @@ from demiflow.workbench.conversations.common import text
 from demiflow.workbench.conversations.common import wire
 from demiflow.workbench.conversations.policy import proxy_environment
 from demiflow.workbench.conversations.versions import matches_user_agent
+
+
+def native_helper_link(relative, target, executable):
+    """The qualified Linux CLI exposes its own binary under these private argv[0] names."""
+    parts = relative.parts
+    if parts[:1] == ('provider',):
+        parts = parts[1:]
+    if (not executable or parts[:-3] not in {('codex', 'tmp'), ('tool-home', '.codex', 'tmp')}
+            or parts[-3] not in {'arg0', 'arg0-linux'} or not parts[-2].startswith('codex-arg0')
+            or parts[-1] not in {'apply_patch', 'applypatch', 'codex-linux-sandbox'}):
+        return False
+    installed = Path(executable).resolve()
+    if target == installed:
+        return True
+    if installed.suffix != '.js' or target.name != 'codex':
+        return False
+    # npm can put the qualified native dependency inside the package or beside it.
+    package = installed.parent.parent
+    return any(target == binary for modules in (package / 'node_modules/@openai', package.parent)
+               for binary in modules.glob('codex-linux-*/vendor/*/bin/codex'))
 
 
 class Codex:
@@ -90,6 +111,7 @@ class Codex:
         self.transport, self.config, self.project = transport, config, project
         self.thread, self.turn = saved_session, None
         self.items = {}
+        self.mcp_servers = []
 
     def initialize(self):
         return self.transport.request('initialize', {'clientInfo': {'name': 'demiflow-development', 'version': '1'},
@@ -126,6 +148,34 @@ class Codex:
         params.update(ephemeral=False, experimentalRawEvents=False, allowProviderModelFallback=False,
                       dynamicTools=[dict(type='function', **tool) for tool in tools])
         return self.transport.request('thread/start', params)
+
+    def bind_control_tools(self, wait, granted):
+        """Refresh a loaded or newly resumed native thread without replacing its session."""
+        server, = self.mcp_servers
+        scoped = {server['name']: dict(command=server['command'], args=server['args'],
+                  env_vars=['DEMIFLOW_CONTROL_ENDPOINT'], disabled_tools=['read_input'],
+                  default_tools_approval_mode='approve')}
+
+        def configure(value):
+            wait(self.transport.request('config/batchWrite', dict(reloadUserConfig=False, edits=[
+                dict(keyPath='mcp_servers', value=value, mergeStrategy='replace')])))
+
+        try:
+            configure(scoped)
+            wait(self.transport.request('config/mcpServer/reload', {}))
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                state = wait(self.transport.request('mcpServerStatus/list', dict(threadId=self.thread)))
+                services = state.get('data', [])
+                if any(item.get('name') != server['name'] for item in services):
+                    reject('Unexpected development tool server')
+                if services and not services[0].get('toolsError') and set(services[0].get('tools', {})) == granted:
+                    break
+                time.sleep(.1)
+            else:
+                reject('Native provider did not bind the current development tools')
+        finally:
+            configure({})  # The CLI keeps the active runtime binding only until the next refresh.
 
     def opened(self, result):
         if result.get('cwd') != self.project['root'] or result.get('model') != self.config['model']:
@@ -213,6 +263,8 @@ class Codex:
             if len(self.items) >= 128 and item['id'] not in self.items:
                 reject('Provider item count exceeded budget', 'resource_limit')
             safe = {k: v for k, v in item.items() if k in {'id', 'type', 'text', 'status', 'command', 'cwd', 'exitCode', 'durationMs', 'changes', 'name'}}
+            if kind == 'mcpToolCall' and self.mcp_servers and item.get('server') == self.mcp_servers[0]['name']:
+                safe.update(server=item['server'], tool=item.get('tool'))
             # File approvals only need names. Completed command output/text is
             # already in the bounded event store and must not accumulate here.
             remembered = dict(id=item['id'], type=kind)
@@ -224,6 +276,12 @@ class Codex:
             return [(method.replace('/', '.'), safe)]
         if method == 'thread/tokenUsage/updated': return [('usage.observed', params.get('tokenUsage', {}))]
         if method == 'error': return [('provider.error', {k: params[k] for k in ('error', 'willRetry') if k in params})]
+        if (method == 'mcpServer/startupStatus/updated' and self.mcp_servers
+                and params.get('name') == self.mcp_servers[0]['name']
+                and params.get('status') in ('starting', 'ready', 'failed', 'cancelled')):
+            return [('control.tools', {'status': params['status']})]
+        if method == 'account/rateLimits/updated':
+            return []  # Telemetry. Admission and budgets come from the host.
         if method.startswith(('account/', 'mcp', 'permissions/')):
             reject('Unexpected provider identity/integration event: ' + method)
         # Private reasoning and legacy raw-event streams are never persisted.

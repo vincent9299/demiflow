@@ -39,6 +39,7 @@ def test_workflow_dag_ui_cross_project_drilldown_and_live_run(tmp_path, browser,
         page = context.new_page()
         js_errors = []
         workflow_http_errors = []
+        launch_requests = []
         page.on('pageerror', lambda exc: js_errors.append(str(exc)))
         page.on(
             'response',
@@ -93,6 +94,13 @@ def test_workflow_dag_ui_cross_project_drilldown_and_live_run(tmp_path, browser,
             expect(dialog).to_contain_text('proj_a_synth — 已授权运行')
             expect(dialog).to_contain_text('proj_b_eval — 已授权运行')
             dialog.locator('input[data-input-key="multiplier"]').fill('10')
+            def admit(route):
+                launch_requests.append(route.request.post_data)
+                if len(launch_requests) == 1:
+                    route.fulfill(status=503, json={'code':'busy','error':'Busy','operation_started':False})
+                else:
+                    route.continue_()
+            page.route('**/workflow-start', admit)
             dialog.locator('button[type="submit"]').click()
             expect(dialog).to_be_hidden(timeout=10000)
 
@@ -112,7 +120,23 @@ def test_workflow_dag_ui_cross_project_drilldown_and_live_run(tmp_path, browser,
             expect(page.locator('#workflow-return-bar')).to_be_hidden(timeout=10000)
             expect(page.locator('.wf-meta-row .wf-pill')).to_have_text('已完成', timeout=10000)
 
+            assert len(launch_requests) == 2 and launch_requests[0] == launch_requests[1]
+            expect(page.locator('.wf-run-picker option')).to_have_count(2)  # preview and one real run
+
+            # A lost write acknowledgement cannot become a second submit from this dialog.
+            page.unroute('**/workflow-start', admit)
+            unconfirmed = []
+            def unknown(route):
+                unconfirmed.append(route.request.post_data)
+                route.fulfill(status=503, json={'code':'busy','error':'回执未确认'})
+            page.route('**/workflow-start', unknown)
+            page.locator('.wf-btn-run').click()
+            dialog.locator('button[type="submit"]').click()
+            expect(dialog.locator('button[type="submit"]')).to_be_disabled()
+            dialog.get_by_role('button', name='查看运行记录').click()
+            expect(dialog).to_be_hidden()
+            assert len(unconfirmed) == 1
             assert not js_errors, f'Unexpected browser page errors: {js_errors}'
-            assert not workflow_http_errors, f'Unexpected workflow HTTP errors: {workflow_http_errors}'
+            assert [(status, url.rsplit('/', 1)[-1]) for status, url in workflow_http_errors] == [(503, 'workflow-start')] * 2
         finally:
             context.close()

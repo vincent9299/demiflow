@@ -65,7 +65,7 @@ def register(main: click.Group) -> None:
     @forge.command()
     @root_option
     @click.option('--path', 'paths', multiple=True, help='Project-relative target path.')
-    @click.option('--topic', help='Progressive-disclosure topic: sdk, rules, files, flow, operator, prompt.')
+    @click.option('--topic', help='Progressive-disclosure topic: sdk, rules, files, flow, operator, prompt, workflow.')
     @click.option('--api', help='Full public symbol ID in the installed SDK catalogue.')
     @click.option('--source', 'sources', multiple=True, help='Include a specific project document.')
     @json_option

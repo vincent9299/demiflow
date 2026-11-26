@@ -530,8 +530,11 @@
       btns.append(cancelBtn, submitBtn);
       form.append(btns);
 
+      const launchPath = selectedPath;
+      let outcomeUnknown = false;
       form.onsubmit = async ev => {
         ev.preventDefault();
+        if (submitBtn.disabled) return;
         errBox.hidden = true;
         submitBtn.disabled = true;
         try {
@@ -561,11 +564,12 @@
           for (const [nid, sel] of Object.entries(reuseSelects)) {
             if (sel.value) reusePayload[nid] = sel.value;
           }
-          const body = {path: selectedPath};
+          const body = {path: launchPath};
           if (Object.keys(inputsPayload).length) body.inputs = inputsPayload;
           if (Object.keys(reusePayload).length) body.reuse_runs = reusePayload;
           const started = await api('workflow-start', {}, body);
           dialog.close();
+          if (disposed || selectedPath !== launchPath) return;
           selectedRunId = started.wf_run_id;
           currentRun = started;
           await refreshRunsFor(selectedPath);
@@ -576,8 +580,13 @@
         } catch (err) {
           errBox.textContent = err?.message || String(err);
           errBox.hidden = false;
+          if (err.outcomeUnknown) {
+            outcomeUnknown = true;
+            cancelBtn.textContent = '查看运行记录';
+            cancelBtn.onclick = () => { dialog.close(); openWorkflow(launchPath); };
+          }
         } finally {
-          submitBtn.disabled = false;
+          submitBtn.disabled = outcomeUnknown;
         }
       };
 

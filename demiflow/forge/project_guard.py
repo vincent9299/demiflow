@@ -1,6 +1,8 @@
 """Forge protected-file restoration, with explicit trusted control-write provenance."""
 import os
 import base64
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 import stat
 
@@ -12,6 +14,38 @@ from .schema import ForgeError
 
 CONTROL_ENV = 'DEMIFLOW_FORGE_CONTROL_WRITES'
 _CONTROL_FILES = ('workspace.json', '.forge/state.json')
+
+
+_control_publisher = ContextVar('forge_control_publisher', default=None)
+
+
+@contextmanager
+def guarded_control_writes(root, snapshot, authorize):
+    """Bind a trusted caller's protected snapshot to exact publications in this operation."""
+    root = Path(root)
+    def verify():
+        authorize()
+        for name in _CONTROL_FILES:
+            path = no_symlinks(root / name)
+            current = read_bounded(path, 8 * 1024**2) if path.exists() else None
+            previous = snapshot.get(name)
+            if current != (previous[0] if previous else None):
+                raise ForgeError('Protected control changed outside the authorized operation', code='inputs_changed')
+
+    def publish(path, raw, *, create):
+        name = Path(path).relative_to(root).as_posix()
+        if name not in _CONTROL_FILES:
+            raise ForgeError('Unexpected control publication', code='conflict')
+        verify()
+        publish_bytes(path, raw, create=create)
+        snapshot[name] = (raw, 0o600)
+
+    verify()
+    token = _control_publisher.set(publish)
+    try:
+        yield
+    finally:
+        _control_publisher.reset(token)
 
 
 def prepare_control_writes(root, path, nonce):
@@ -33,6 +67,9 @@ def publish_project_control(path, raw, *, create=False):
     This is cooperative provenance for trusted local CLIs, not a same-UID
     security boundary. Restricted hosts retain their own trusted control bridge.
     """
+    publisher = _control_publisher.get()
+    if publisher is not None:
+        return publisher(path, raw, create=create)
     location = os.environ.get(CONTROL_ENV)
     if not location:
         return publish_bytes(path, raw, create=create)
@@ -166,7 +203,7 @@ def capture_protected_files(project_root) -> dict[str, tuple[bytes, int]]:
             info = path.lstat()
         except OSError:
             return
-        if not stat.S_ISREG(info.st_mode) or info.st_size > _PROTECTED_GUARD_MAX_BYTES:
+        if not stat.S_ISREG(info.st_mode) or info.st_size > (8 * 1024**2 if rel in _CONTROL_FILES else _PROTECTED_GUARD_MAX_BYTES):
             return
         try:
             snap[rel] = (path.read_bytes(), info.st_mode & 0o777)

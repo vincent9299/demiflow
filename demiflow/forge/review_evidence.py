@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 from collections import deque
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -360,7 +361,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         targets = explicit
         history = _baseline(root, revision, excluded, targets) if revision else {}
 
-    view = discover_project_sources(root, exclude=excluded, include_roles=False)
+    view = discover_project_sources(root, exclude=excluded, role_names=('workflows',))
     entries = view['entries']
     known_before = history.keys() | (prior_sources or {}).keys()
     deleted = {name for name in targets if name in known_before and not (root / name).exists()}
@@ -388,13 +389,69 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         selected_entries = []
         for declared, bindings in entries.items():
             flow = declared.partition(':')[0]
-            if not (root / flow).is_file():
+            if not (root / flow).is_file() and flow not in deleted:
                 continue
-            dependencies = project.closure([flow])
+            dependencies = {flow} if flow in deleted else project.closure([flow])
             if dependencies.intersection(targets) or set(bindings).intersection(targets):
                 selected_entries.append(declared)
                 related.update(dependencies)
                 groups.insert(0, sorted(dependencies | set(bindings)))
+    # A workflow and each affected local node form a review unit. A changed
+    # binding only pulls consumers of that binding, even when one Flow has several.
+    from .workflow import MAX_WORKFLOW_BYTES, local_workflow_bindings
+    node_groups = []
+    workflow_targets = {p for p in targets if p.startswith('workflows/') and p.endswith('.json')}
+    consumers = view['roles']['workflows'] if selected_entries or any(p.endswith('.py') for p in deleted) else ()
+    for workflow in sorted(set(consumers) | workflow_targets):
+        if not _permitted(workflow, excluded):
+            continue
+        texts = []
+        if (root / workflow).is_file():
+            if workflow in workflow_targets:
+                texts.append(project.read(workflow))
+            else:
+                # Discover consumers under the same scan budget. Only an actual dependency must
+                # fit the tighter review-file limit, so a large unrelated draft cannot block review.
+                raw = read_bounded(_check_path(root, workflow, excluded), min(MAX_WORKFLOW_BYTES, SCAN_BYTES - project.scanned))
+                project.scanned += len(raw)
+                texts.append(raw)
+        if workflow in workflow_targets:
+            old = (prior_sources or {}).get(workflow, {}).get('before')
+            if old is None and workflow in history:
+                old = _git(root, 'cat-file', 'blob', history[workflow], maximum=FILE_BYTES).decode()
+            if old is not None and old not in texts:
+                texts.append(old)
+        bindings = set()
+        for raw in texts:
+            try:
+                bindings.update(local_workflow_bindings(json.loads(raw), entries))
+            except (ValueError, RecursionError):
+                continue  # The raw target and the static WF diagnostic remain available.
+        for declared, bound in sorted(bindings, key=lambda pair: (pair[0], pair[1] or '')):
+            flow = declared.partition(':')[0]
+            if workflow not in workflow_targets and declared not in selected_entries and flow not in deleted:
+                continue
+            deps = set()
+            for path in (flow, bound):
+                if not path:
+                    continue
+                candidate = project._lookup(path)
+                if candidate is not None and candidate.is_file():
+                    deps.update(project.closure([path]))
+                elif path in targets and path in known_before:
+                    deps.add(path)
+                else:
+                    project._note(workflow, f'{workflow}: local node material unavailable: {path}')
+            if (workflow not in workflow_targets and
+                    (params and bound != params or not entry and not deps.intersection(targets))):
+                continue
+            deps.add(workflow)
+            group = sorted(deps)
+            if group not in node_groups:
+                node_groups.append(group)
+                related.update(deps)
+    primary_count = len(selected_entries)
+    groups[primary_count:primary_count] = node_groups
     selected_params = {params} if params else {p for key in selected_entries for p in entries.get(key, ())}
     related.update(selected_params)
     for name in targets:
@@ -438,7 +495,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
         files[name] = dict(role=role, after=after, before=before)
     scope = dict(mode=mode, base=revision, entry=entry, params=params, paths=list(paths),
                  entries=selected_entries, changed=changed, evidence=list(evidence))
-    result = dict(scope=scope, files=files, groups=groups,
+    result = dict(scope=scope, files=files, groups=groups, required_groups=primary_count + len(node_groups),
                   gaps=[detail for name in files for detail in project.gaps.get(name, ())])
     result['identity'] = digest(result)
     return result
@@ -482,7 +539,7 @@ def review_units(captured):
     # every affected Flow; unregistered sources and deleted files remain targets.
     for index, group in enumerate(captured.get('groups', ())):
         names = set(group) & files.keys()
-        if index >= len(captured['scope']['entries']) and not (names & (targets - covered)):
+        if index >= captured.get('required_groups', len(captured['scope']['entries'])) and not (names & (targets - covered)):
             continue
         add(names)
     for name in sorted(targets - covered):
