@@ -116,6 +116,12 @@ def above_threshold(row: ScoredRow, *, minimum: float) -> bool:
 
 助手写代码很快，判断结果对不对仍然要靠人。工作台是给人用的浏览器界面，打开的是和 Forge 同一个项目目录，没有第二份状态。
 
+<p align="center">
+  <img src="docs/assets/workbench-demo.gif" alt="DemiFlow 工作台实机演示：真实 Python 生成的算子 DAG、节点接口与源码、并排代码阅读、封存运行与输出表、项目 Notebook 与语义化数据工具" width="100%" />
+  <br />
+  <sub>基于 <a href="examples/forge_workspace/README.md"><code>examples/forge_workspace</code></a> 实机录制：真实代码生成算子 DAG → 节点数据流、示例与源码 → 管线源码并排对照 → 封存运行与版本化输出 → 项目 Notebook 与语义化 <code>data_tools</code>。</sub>
+</p>
+
 **看懂管线**
 
 - **算子图来自真实代码。** 图从 Python 入口生成，不需要手工维护。节点上直接显示算子的业务说明。
