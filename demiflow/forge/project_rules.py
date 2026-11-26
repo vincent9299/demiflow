@@ -405,6 +405,53 @@ def _boundary_import_issues(root: Path, path: Path, *, check_cross_project: bool
     return sdk_issues, cross_issues
 
 
+_BOUNDARY_IMPORT_DIRS = frozenset(('flows', 'operators', 'data_tools', 'tests'))
+
+
+def _boundary_import_diagnostics(root: Path, rel: str, *, check_cross_project: bool = True) -> tuple[dict | None, dict | None]:
+    sdk_bad, cross_bad = _boundary_import_issues(root, root / rel, check_cross_project=check_cross_project)
+    sdk_diag = cross_diag = None
+    if sdk_bad:
+        first_line, first_mod = sdk_bad[0]
+        extra = f' 等 {len(sdk_bad)} 处' if len(sdk_bad) > 1 else ''
+        sdk_diag = diagnostic(
+            'DF-02', rel,
+            f'导入了非公开或已移除的 DemiFlow 内部模块 {first_mod}{extra}；业务项目仅允许依赖 DemiFlow 公开 SDK（运行 demiflow forge context --root . --topic sdk 查看当前公开接口，或用 --api <模块>:<符号> 查看目标接口完整契约与返回值说明）。',
+            line=first_line,
+        )
+    if cross_bad:
+        first_line, first_mod = cross_bad[0]
+        extra = f' 等 {len(cross_bad)} 处' if len(cross_bad) > 1 else ''
+        cross_diag = diagnostic(
+            'DF-02', rel,
+            f'跨项目导入了外部业务源码 {first_mod}{extra}；按 Forge 独立项目规范，项目源码须自包含，仅依赖标准库、已安装三方包、DemiFlow 公开 SDK 及本项目自身模块，请将所需纯计算/辅助逻辑迁入本项目并解耦外部源码依赖。',
+            line=first_line,
+        )
+    return sdk_diag, cross_diag
+
+
+def check_source_import_boundaries(root: Path, rel_paths) -> tuple[set[str], list[dict]]:
+    """Verify public-SDK and project self-containment import boundaries on specific traced source files."""
+    inspected: set[str] = set()
+    issues: list[dict] = []
+    for rel in sorted(set(rel_paths)):
+        p = Path(rel)
+        if not p.parts or p.parts[0] not in _BOUNDARY_IMPORT_DIRS:
+            continue
+        if p.suffix != '.py' or p.name == '__init__.py':
+            continue
+        if not (root / rel).is_file():
+            continue
+        sdk_diag, cross_diag = _boundary_import_diagnostics(root, rel, check_cross_project=(p.parts[0] != 'tests'))
+        if sdk_diag is not None:
+            inspected.add(rel)
+            issues.append(sdk_diag)
+        if cross_diag is not None:
+            inspected.add(rel)
+            issues.append(cross_diag)
+    return inspected, issues
+
+
 def _operator_import_targets(root: Path, tree: ast.AST, *, in_operators: bool) -> list[tuple[int, str, bool]]:
     """Return [(lineno, op_stem, is_private)] for every import of an operators/<stem>.py module (including nested)."""
     prefixes = _project_import_prefixes(root)
@@ -1508,25 +1555,13 @@ def check_project_hygiene(root: Path, control: dict, *, checked_sources: dict, p
             p = Path(rel)
             if p.suffix != '.py' or p.name == '__init__.py':
                 continue
-            sdk_bad, cross_bad = _boundary_import_issues(root, root / rel, check_cross_project=check_cross)
-            if sdk_bad:
-                first_line, first_mod = sdk_bad[0]
-                extra = f' 等 {len(sdk_bad)} 处' if len(sdk_bad) > 1 else ''
+            sdk_diag, cross_diag = _boundary_import_diagnostics(root, rel, check_cross_project=check_cross)
+            if sdk_diag is not None:
                 inspected.add(rel)
-                by_category.setdefault('internal_sdk_import', []).append(
-                    diagnostic('DF-02', rel,
-                               f'导入了非公开或已移除的 DemiFlow 内部模块 {first_mod}{extra}；业务项目仅允许依赖 DemiFlow 公开 SDK（运行 demiflow forge context --root . --topic sdk 查看当前公开接口）。',
-                               line=first_line)
-                )
-            if cross_bad:
-                first_line, first_mod = cross_bad[0]
-                extra = f' 等 {len(cross_bad)} 处' if len(cross_bad) > 1 else ''
+                by_category.setdefault('internal_sdk_import', []).append(sdk_diag)
+            if cross_diag is not None:
                 inspected.add(rel)
-                by_category.setdefault('cross_project_import', []).append(
-                    diagnostic('DF-02', rel,
-                               f'跨项目导入了外部业务源码 {first_mod}{extra}；按 Forge 独立项目规范，项目源码须自包含，仅依赖标准库、已安装三方包、DemiFlow 公开 SDK 及本项目自身模块，请将所需纯计算/辅助逻辑迁入本项目并解耦外部源码依赖。',
-                               line=first_line)
-                )
+                by_category.setdefault('cross_project_import', []).append(cross_diag)
 
     # 5c. Dangling project-local imports in tests/*.py (catches broken tests after cleanup/moves).
     for rel in _iter_tree_files(root, 'tests', exclude=exclude):

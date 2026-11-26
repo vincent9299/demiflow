@@ -102,7 +102,8 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
                     p.pop('identity', None)
                 cloned['providers']['deepseek']['effort'] = 'low'
                 review_deployment = Deployment(cloned)
-            spec = replace(author_spec, role='readonly', seconds=timeout, private_home=temporary, write_paths=(),
+            spec = replace(author_spec, role='readonly', read_policy='scoped', write_policy='scoped',
+                direct_network=False, seconds=timeout, private_home=temporary, write_paths=(),
                 runtime_paths=tuple(path for path in author_spec.runtime_paths if Path(path).exists()),
                 denied_paths=(*author_spec.denied_paths, author_spec.private_home),
                 read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))

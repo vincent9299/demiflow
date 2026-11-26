@@ -80,8 +80,10 @@ def _has_code_changes(changes):
     return False
 
 
-def _project_has_business_python(project_root) -> bool | None:
-    """Return True/False if workspace.json declares/omits a project Python, or None if unavailable."""
+def _project_has_business_python(project_root, *, project_python=None) -> bool | None:
+    """Return True if a business Python is configured in workbench or workspace.json, False if omitted, None if unavailable."""
+    if isinstance(project_python, str) and project_python.strip():
+        return True
     if not project_root:
         return None
     ws_file = Path(project_root) / 'workspace.json'
@@ -276,7 +278,8 @@ def _enforce_protected_files(project_root, before_snapshot: dict[str, tuple[byte
     return violations
 
 
-def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, protected_violations=()):
+def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, project_python=None,
+                         protected_violations=()):
     """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
     issues = []
     for rel in (protected_violations or ()):
@@ -317,7 +320,7 @@ def _build_rework_prompt(pipeline_checks, review_report, *, project_root=None, p
                 break
     if not issues:
         return None
-    has_python = _project_has_business_python(project_root)
+    has_python = _project_has_business_python(project_root, project_python=project_python)
     if has_python is False:
         header = '[Forge 自动返工 1/1] 上一轮静态检查或独立评审发现以下阻断项，请直接修复并复跑 demiflow forge check --root . --json 确认清零后直接交付（该项目未配置业务 Python，无需探测宿主机环境或强行运行 pytest）：\n'
     else:
@@ -1556,6 +1559,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         and not saved['stop_at'] and not requested and turn.get('operation') == 'message'):
                     rework_prompt = _build_rework_prompt(result.get('pipeline_checks'), report,
                                                          project_root=project['root'],
+                                                         project_python=effective_project_python(project),
                                                          protected_violations=protected_violations)
                     if rework_prompt:
                         try:

@@ -19,7 +19,14 @@ from .platform_worker import describe_fixed_table
 from .project import discover_project_sources, inspect_prompt_source, load_project, validate_entry, validate_parameter_path
 from .project_bindings import resolve_arguments, resolve_flow_resources, table_binding, table_identity
 from .project_io import decode_control, relative_path
-from .project_rules import ROLE_DIRS, RULES_ID, check_layout, check_project_hygiene, diagnostic
+from .project_rules import (
+    ROLE_DIRS,
+    RULES_ID,
+    check_layout,
+    check_project_hygiene,
+    check_source_import_boundaries,
+    diagnostic,
+)
 from .schema import ForgeError
 from .source import Definition, InspectionError, SOURCE_LIMITS, SourceTree
 
@@ -455,6 +462,10 @@ def _check(root, view, paths, entry, params, reference, table_resolver, table_de
             exclude=exclude, structural_only=(scope['kind'] != 'project'))
         layout_paths.update(hygiene_paths)
         layout.extend(hygiene_issues)
+    elif sources:
+        boundary_paths, boundary_issues = check_source_import_boundaries(root, sources)
+        layout_paths.update(boundary_paths)
+        layout.extend(boundary_issues)
     basis = dict(sdk_revision=reference['sdk_revision'], catalog_id=reference['catalog_id'], rules_id=RULES_ID,
                  manifest_sha256=manifest_hash, sources=sources, parameter_digests=parameter_digests, controls=table_files)
     verify_check_inputs(root, basis, deadline=deadline, max_bytes=max_bytes)

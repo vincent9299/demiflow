@@ -275,3 +275,14 @@ def test_forge_auto_rework_deduplicates_and_respects_python_config(tmp_path):
     )
     assert '项目测试验证' in prompt_with_py
     assert '未配置业务 Python' not in prompt_with_py
+
+    # Slimmed workspace.json without "python" still honors workbench-configured project_python.
+    (proj / 'workspace.json').write_text('{"entries": {}}\n')
+    prompt_with_registry_py = _build_rework_prompt(
+        {'native_flow': {'status': 'failed', 'diagnostics': repeated[:1]}},
+        None,
+        project_root=proj,
+        project_python='/opt/workbench/venv/bin/python',
+    )
+    assert '项目测试验证' in prompt_with_registry_py
+    assert '未配置业务 Python' not in prompt_with_registry_py
