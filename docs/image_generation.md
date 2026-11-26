@@ -1,11 +1,8 @@
-# Native image generation
+# 图片生成
 
-Image output uses `Dataset.map_prompt_async`, the existing `PromptActor`, and one
-complete `demiflow_prompt_pack_v2` configuration. A call produces one image; it
-does not run a tool loop, select a fallback provider, or cache model results.
-The managed local contract supports a fixed synchronous HTTP endpoint with an
-explicit provider revision. Real model quality, managed services, Diffusers/GPU,
-remote object stores, and asynchronous provider jobs require separate adapters.
+图片生成沿用 `Dataset.map_prompt_async`，没有单独的 API：在 prompt pack 里把 `response_format` 设为 `image`，每次调用产出一张图片，写入对象目录，行里得到这张图片的引用 `{uri, sha256}`。
+
+## 快速开始
 
 ```json
 {
@@ -16,7 +13,7 @@ remote object stores, and asynchronous provider jobs require separate adapters.
       "response_format": "image",
       "model": {
         "backend": "modelhub",
-        "model": "your-declared-image-model",
+        "model": "your-image-model",
         "api": "images_json",
         "base_url": "http://127.0.0.1:8016/v1",
         "api_key_env": "IMAGE_API_KEY",
@@ -31,126 +28,100 @@ remote object stores, and asynchronous provider jobs require separate adapters.
 
 ```python
 images = rows.map_prompt_async(
-    'generate', config='flows/images.json',
-    inputs={'instruction': 'instruction', 'references': 'references'},
-    output='image', call_output='call', error_output='error',
+    "generate", config="flows/images.json",
+    inputs={"instruction": "instruction", "references": "references"},
+    output="image", call_output="call", error_output="error",
     max_requests=8, concurrency=1, queue_depth=1,
     options={
-        'object_store': 'assets/images', 'image_encoding': 'preserve',
-        'prepare_workers': 1, 'response_workers': 1, 'io_workers': 1,
-        'limits': {
-            'max_images': 3, 'max_image_bytes': 1024 * 1024,
-            'max_pixels': 1024 * 1024, 'max_total_pixels': 3 * 1024 * 1024,
-            'max_text_bytes': 16384,
-            'max_request_bytes': 8 * 1024 * 1024,
-            'max_response_bytes': 2 * 1024 * 1024,
+        "object_store": "assets/images",
+        "image_encoding": "preserve",
+        "limits": {
+            "max_images": 3, "max_image_bytes": 1024 * 1024,
+            "max_pixels": 1024 * 1024, "max_total_pixels": 3 * 1024 * 1024,
+            "max_text_bytes": 16384,
+            "max_request_bytes": 8 * 1024 * 1024,
+            "max_response_bytes": 2 * 1024 * 1024,
         },
     },
 )
-images.read_object(reference='image', output='pixels', root='assets/images',
-    layout='sha256_prefix2', max_bytes=1024 * 1024
-).select_columns(['image', 'pixels']).write_lance('datasets/generated.lance', mode='create')
+images.write_lance("/data/generated.lance", mode="create")
 ```
 
-The launcher's declared memory, output, scratch and request limits must admit the
-node's explicit ceilings. In Forge, register the logical object destination as a
-writable location. Parsing/checking reads configuration and resource declarations;
-it does not open a client, read credentials, create objects, or start a service.
-Paths resolve against the configured project/resource root.
+`references` 列是参考图的字节列表（`list[bytes]`），顺序和重复都会保留；没有参考图时模板里去掉这个占位符即可。
 
-## Protocols and values
+## 必须给出的参数
 
-| Explicit `model.api` | Native request |
-| --- | --- |
-| `images_json` | JSON `/images/generations` or `/images/edits` with ordered data URLs |
-| `images` | Native multipart image API, preserving reference bytes and MIME types |
-| `chat` | `/chat/completions`, text followed by ordered image parts |
-| `chat_interleaved` | `/chat/completions`, template image/text part order preserved |
-| `openrouter_images` | `/images` with ordered `input_references` |
+图片输出比文本输出多几项强制要求：
 
-This is protocol compatibility, not a claim about every vendor endpoint. Each
-response must contain exactly one complete raster image. Reference placeholders
-bind `list[bytes]`; reference order and duplicates are retained. `preserve` keeps
-JPEG/PNG/WebP encoding after validation; other supported raster formats convert
-to bounded PNG. `{% text_segment %}` preserves explicit adjacent text boundaries
-for the interleaved protocol. Rendering does not reinterpret braces in input text.
+| 参数 | 要求 |
+|---|---|
+| `output`（或 `outputs={"image": "列名"}`） | 存放图片引用的列 |
+| `call_output`、`error_output` | 必须都给出 |
+| `max_requests` | 必须是有限值 |
+| `options["object_store"]` | 图片写入的目录 |
+| `concurrency` | 1 到 8；`queue_depth` 默认 1，最多 8 |
 
-`image` is `{uri: str, sha256: str}` or null on an ordinary row error. `call` is the
-native trace or null; `error` is a string or null. `outputs={'image': 'destination'}`
-is equivalent to `output='destination'`. `when=False` returns the original row
-without a call or added columns. Storage, resource, cancellation and recovery
-contract failures stop the action. There is no new image-specific Dataset API.
+图片输出不支持 `routes`、`request_policy`、`token_budget` 和 `schema_retries`。
 
-## Ownership, commit and delivery
+## 接口协议
 
-The logical destination remains stable across incremental runs. The platform
-allocates `logical/.demiflow-objects/<run>/<action>/<sink>/<prefix>/<sha256>` and
-returns that real immutable URI. Callers do not pass a run id, change technical
-paths, claim roots or manage GC. An existing nonempty logical destination is
-valid; previous runs and foreign files remain untouched. Only registered files in
-this run's own namespace participate in cleanup. Same-content storage reuse does
-not suppress a model request.
+用 `model.api` 明确选择模型服务的协议：
 
-| Native terminal | Resource and commit boundary | Delivery / recovery |
-| --- | --- | --- |
-| `materialize()` | Bounded native stream batches; objects and row references share one prepared record | Durable handle; inspect objects before restoring source progress |
-| `write_lance()` / durable `write_datasink()` | One native stream; internal bounded row spool and writer batches; standard final sink commit includes objects | Native receipt; recovery of a prepared sink bypasses model generation |
-| Bounded `take()` | Bounded stream queue and driver result; internal object/row handoff commits | Readable committed image before return; no replay/consumer-ACK promise |
-| `iter_rows()` / `iter_batches()` | One queued handoff, at most 16 rows per handoff and byte ceiling; public batches also obey their byte limit | Readable committed image before yield; early close drains work and cleans unprepared artifacts; no replay promise |
-| `run_stream()` | Existing native callbacks; object participants commit after the graph drains | Callback side effects remain delivery-only; no replay promise |
+| `model.api` | 发出的请求 |
+|---|---|
+| `images_json` | JSON 形式的 `/images/generations` 或 `/images/edits`，参考图按顺序以 data URL 传入 |
+| `images` | multipart 形式的图片接口，保留参考图原始字节和类型 |
+| `chat` | `/chat/completions`，文本在前，图片按顺序在后 |
+| `chat_interleaved` | `/chat/completions`，保持模板里图文的先后顺序 |
+| `openrouter_images` | `/images`，参考图按顺序放在 `input_references` |
 
-No terminal requires business code to add `materialize()` for correctness.
-Standard `Datasink.prepare/commit/inspect/abort`, the existing RunJournal and its
-single CommitCoordinator remain the lifecycle. A bounded object manifest and one
-native object receipt per root/commit accompany row publication. This introduces
-no object executor, request-result journal, selectable recovery mode, or provider
-fallback.
+这些是协议形式上的兼容，具体厂商的接口是否可用需要自行验证。每次响应必须正好包含一张完整的图片。
 
-The returned URI is physically readable during the graph. Generation can feed
-`read_object`, vision scoring, or a subsequent edit directly. Before durable row
-publication, the object participant rechecks the owner, encoded byte size and
-SHA-256. Recovery inspects even confirmed objects; missing/corrupt committed
-images and unknown native receipt outcomes block recovery instead of regenerating.
+## 输出
 
-An external request charged without a prepared result also blocks automatic
-regeneration on recovery. This uses one action-level request watermark in existing
-prepared object metadata and the existing run budget counters; no per-request
-response index is stored. Prepared objects and row references are recovered using
-the same RunRef, fixed implementation and original limits. Delivery terminals do
-not replay a previously delivered prefix.
+| 列 | 内容 |
+|---|---|
+| `output` 列 | `{uri, sha256}`；这一行出错时为 null |
+| `call_output` 列 | 这次调用的记录；出错时可能为 null |
+| `error_output` 列 | 错误说明字符串；成功时为 null |
 
-## Resource bounds and failures
+- `image_encoding="preserve"` 保留模型返回的 JPEG、PNG、WebP 编码；其他格式转成 PNG。
+- `when=函数` 返回 `False` 的行不调用模型，也不增加这些列。
+- 返回的 `uri` 在同一条管线里立即可读，可以直接接后续节点，例如读取像素、打分或再次编辑：
 
-Actual `object_bytes` count encoded immutable files once per physical artifact;
-`row_bytes` count the native row output. Both consume the same `output_bytes`
-ceiling. Object manifest/receipt and namespace-owner metadata have separate bounded
-control counters. Arrow reference bytes never stand in for image bytes.
+```python
+images.read_object(reference="image", output="pixels", root="assets/images",
+                   layout="sha256_prefix2", max_bytes=1024 * 1024)
+```
 
-Before HTTP, `output_admission_bytes` reserves
-`max_requests * max_image_bytes`. Scratch admission reserves the conservative
-encoded/staging/decode allowance `max_requests * (3 * max_image_bytes + 65536) +
-1024`, shared with native row/state/output scratch. These are conservative capacity
-ceilings; actual byte counters stay distinct. Unknown external work is not refunded.
-The finite manifest, allocation and commit count ceilings also apply to large runs.
+## 文件放在哪里
 
-Stream payload admission includes request/response/base64 copies, reference and
-output pixels, workers, queues and completed results waiting downstream. It is a
-payload bound, not a process RSS measurement. Output validation reuses the existing
-restricted decoder subprocess with byte/pixel/frame, address-space, CPU and wall
-limits. Parent death terminates that decoder. Native library allocations still need
-the enclosing process limit. Public iterator batches that cannot retain their
-requested grouping within the byte budget fail explicitly before conversion.
+- `object_store` 是一个逻辑目录，多次运行可以一直用同一个；已有内容不会被动。
+- 平台在其下的 `.demiflow-objects/` 里按运行分配实际路径，并在行里返回真实、不可变的 `uri`。不需要自己传运行编号或管理清理。
+- 内容相同的图片会复用存储，但不会因此少调一次模型。
 
-HTTP sends `Accept-Encoding: identity` and rejects compressed image responses
-before HTTPX decompression. Bodies and downloads are incrementally byte bounded;
-image downloads have no model authorization, redirects or file URL support.
-Malformed Base64, truncated/animated/oversized images and unsupported response
-cardinality do not publish an image. ENOSPC and cancellation drain started native
-work; cleanup removes only registered unprepared artifacts and retains prepared,
-committed and foreign data.
+## 失败与恢复
 
-The runnable synthetic HTTP, same-graph, terminal and process-loss regressions are
-`tests/test_managed_image_execution.py`, `tests/test_object_participant.py`,
-`tests/test_prompt_image.py` and `tests/test_prompt_without_journal.py`. They require
-no model weights or GPU. Hardware power-loss durability and real provider behavior
-are separate validation scopes.
+- 单行的模型或图片错误（返回不是图片、图片被截断、是动图、超出大小）写入 `error_output`，不会产出图片。
+- 存储错误、资源超限、取消会终止整个动作。清理只删除本次运行尚未提交的文件。
+- 恢复时会重新检查已提交的图片。图片丢失或损坏、或者某次已经计费但结果不明的请求，会阻止自动恢复，而不是悄悄重新生成。
+
+## 资源上限
+
+`options["limits"]` 里的各项都是硬上限，超出即失败：
+
+| 项 | 含义 |
+|---|---|
+| `max_images` | 单次请求的参考图数量 |
+| `max_image_bytes` | 单张图片（参考图和产出图）的字节数 |
+| `max_pixels` / `max_total_pixels` | 单张图片 / 单次请求全部图片的像素数 |
+| `max_text_bytes` | 提示文本的字节数 |
+| `max_request_bytes` / `max_response_bytes` | 单个请求 / 响应的字节数 |
+
+运行前平台按 `max_requests × max_image_bytes` 预留输出空间，所以这两个值不要设得远大于实际需要。这些上限约束的是请求和图片本身，不是进程内存的硬上限。
+
+## 需要知道的限制
+
+- 只支持一次调用返回一张图片的同步接口；异步任务式的接口、多图返回不支持。
+- 不会在失败时自动换另一个模型或服务。
+- 目前只支持本地执行。
