@@ -58,16 +58,26 @@ for line in sys.stdin:
         message=params['input'][0]['text']
         if '## 当前版本 DemiFlow 原生 API' in instructions or '# DemiForge 项目开发' in instructions:
             (Path.home() / 'received-request.txt').write_text(message)
-        if message == 'generate notebook widget fixture':
+        if message.startswith('generate notebook widget fixture'):
             assert 'ipywidgets' in instructions and '当前 Notebook' in instructions
-            assert (project_root/'notes.py').read_text()=='# fixture note\n'
+            # Strict cell-only isolation (commit 2be73c09): notebook_cell runs in its
+            # private provider home with neither read nor write access to the project root.
+            assert project_root.resolve() == Path.home().resolve(), (project_root, Path.home())
+            parts = message.split(' ', 4)
+            target_note = Path(parts[4]) if len(parts) == 5 else (project_root / 'notes.py')
             try:
-                (project_root/'notes.py').open('ab').close()
+                target_note.read_text()
+            except PermissionError:
+                pass
+            else:
+                raise AssertionError('Notebook generation unexpectedly received project read access')
+            try:
+                target_note.open('ab').close()
             except PermissionError:
                 pass
             else:
                 raise AssertionError('Notebook generation received write access')
-            answer = '已找到 notes.py。\n```python\nfrom ipywidgets import IntSlider\nIntSlider()\n```'
+            answer = '已生成隔离 Notebook 卡片。\n```python\nfrom ipywidgets import IntSlider\nIntSlider()\n```'
             event('item/completed',{'threadId':thread,'turnId':turn,'item':{'id':'answer','type':'agentMessage','text':answer}})
             event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
             continue

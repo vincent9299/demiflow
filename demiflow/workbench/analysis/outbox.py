@@ -15,7 +15,7 @@ import stat
 import time
 import threading
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.resources.process_observation import unit_stopped
 from demiflow.workbench.projects.registry import identity as project_identity
 from demiflow.forge.io import atomic_write_json

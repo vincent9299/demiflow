@@ -6,9 +6,10 @@ from pathlib import Path
 import pytest
 
 from demiflow.execution.host.control import local_capacity, local_capacity_domain
-from demiflow.workbench.runs import native_resources
-from demiflow.workbench.runs.manager import worker_environment
-from demiflow.workbench.runs.operations import OPERATIONS, worker_arguments
+from demiflow.forge.runs import native_resources
+
+from demiflow.forge.runs.manager import worker_environment
+from demiflow.forge.runs.operations import OPERATIONS, worker_arguments
 from demiflow.forge.schema import ForgeError
 
 

@@ -40,7 +40,7 @@ def execution_facts(mode, *, sandbox_backend=None):
         return dict(available=True, filesystem_enforcement='unsupported',
             anti_tamper=False,
             reason='可信本地模式：使用宿主权限，无 OS 文件/进程隔离。应用范围检查不能阻止同 UID 工具越界或联网。')
-    from demiflow.workbench.conversations.sandbox_backends import select_backend
+    from demiflow.forge.sandbox.backends import select_backend
     backend = select_backend(sandbox_backend)
     facts = backend.readiness()
     enforcement = ('landlock_seccomp' if backend.name == 'linux_landlock' else facts['backend']) if facts['available'] else 'unverified'
@@ -67,8 +67,8 @@ The inherited unit FD preserves the existing cooperative ownership protocol;
 it is not proof that hostile descendants stopped and cannot authorize L2.
 """
     if mode == 'restricted':
-        from demiflow.workbench.conversations.sandbox import SandboxSpec, specification
-        from demiflow.workbench.conversations.sandbox_backends import select_backend, validate_spec_portable
+        from demiflow.forge.sandbox import SandboxSpec, specification
+        from demiflow.forge.sandbox.backends import select_backend, validate_spec_portable
         if type(sandbox_spec) is not SandboxSpec:
             reject('Restricted provider execution requires an explicit controller sandbox scope')
         if Path(home).resolve() != Path(sandbox_spec.private_home).resolve():
@@ -90,7 +90,7 @@ it is not proof that hostile descendants stopped and cannot authorize L2.
                        if key not in {'native_credentials', 'credential_env', 'inherit_proxy'}}
         command, environment = adapter.launch(private, home, root)
         if config.get('_cell_bin') and adapter.name == 'codex':
-            wrapper = Path(__file__).parents[1] / 'notebooks/data_cli.py'
+            wrapper = Path(__file__).parents[2] / 'forge/bridge/notebook_cli.py'
             command = [sys.executable, '-IB', str(wrapper), '--provider', *command]
         process = backend.launch(command, spec=sandbox_spec, env=environment, cwd=root,
             lease_fd=lease_fd, control_socket=control_socket, model_socket=model_socket)

@@ -15,11 +15,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS = 'demiflow.workbench.projects'
-CORE = {'workspace', 'checks', 'discovery', 'definitions', 'documents', 'io', 'index'}
+CORE = {'workspace', 'checks', 'discovery', 'definitions', 'documents', 'io'}
 APPLICATION = {'registry', 'watch', 'flow_arguments'}
-RUN_MODULES = {'admission', 'authority', 'cli', 'context', 'domain', 'facts', 'manager',
-    'native_resources', 'native_stages', 'native_submission', 'operations', 'requests',
-    'storage', 'tools', 'view', 'worker'}
+RUN_MODULES = {'authority', 'cli', 'facts', 'http', 'view'}
 FORBIDDEN = {PROJECTS + '.' + name for name in APPLICATION} | {
     'demiflow.workbench.worker', 'demiflow.workbench.api',
     'demiflow.workbench.project_operations', 'demiflow.workbench.directory_operations'}
@@ -76,16 +74,16 @@ def test_core_has_no_transitive_run_worker_or_application_dependency(graph, name
 
 
 def test_index_cannot_reach_domain_source_or_platform_readers(graph):
-    path = forbidden_path(graph, PROJECTS + '.index', lambda module:
-        module == PROJECTS + '.workspace' or module.startswith('demiflow.workbench.runs')
+    path = forbidden_path(graph, 'demiflow.forge.index', lambda module:
+        module == PROJECTS + '.workspace' or module.startswith(('demiflow.workbench.runs', 'demiflow.forge.runs'))
         or module == 'demiflow.execution.host' or module.startswith('demiflow.execution.host.'))
     assert path is None, ' -> '.join(path or [])
 
 
 @pytest.mark.parametrize('module', ['table_bindings', 'pipeline_policy'])
 def test_neutral_modules_do_not_depend_on_domain_owners(graph, module):
-    path = forbidden_path(graph, 'demiflow.workbench.' + module, lambda target:
-        target.startswith((PROJECTS, 'demiflow.workbench.runs')) or target in FORBIDDEN)
+    path = forbidden_path(graph, 'demiflow.forge.' + module, lambda target:
+        target.startswith((PROJECTS, 'demiflow.workbench.runs', 'demiflow.forge.runs')) or target in FORBIDDEN)
     assert path is None, ' -> '.join(path or [])
 
 

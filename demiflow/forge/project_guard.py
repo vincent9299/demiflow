@@ -57,8 +57,30 @@ def prepare_control_writes(root, path, nonce):
         raw = read_bounded(target, 1024**2) if target.exists() else None
         files[name] = dict(source=base64.b64encode(raw).decode() if raw is not None else None,
                            mode=stat.S_IMODE(target.stat().st_mode) if raw is not None else 0o600)
-    record = dict(root=physical_root(root), nonce=nonce, files=files)
+    record = dict(root=physical_root(root), nonce=nonce, files=files, authorized_paths=[])
     publish_bytes(path, bounded_json(record, 4 * 1024**2), create=not path.exists())
+
+
+def record_authorized_tree_write(root, rel_path: str) -> None:
+    """Record an authorized tree mutation (e.g. `forge dep vendor/remove` on `packages/<name>`) for trusted local CLI."""
+    location = os.environ.get(CONTROL_ENV)
+    if not location:
+        return
+    from .development_state import physical_root
+    record_path = no_symlinks(Path(location))
+    if not record_path.is_file():
+        return
+    record = read_control(record_path, 4 * 1024**2)
+    if physical_root(root) != record['root']:
+        return
+    rel = str(rel_path).strip('/')
+    if not rel:
+        return
+    authorized = list(record.get('authorized_paths') or ())
+    if rel not in authorized:
+        authorized.append(rel)
+    record['authorized_paths'] = authorized
+    publish_bytes(record_path, bounded_json(record, 4 * 1024**2), create=False)
 
 
 def publish_project_control(path, raw, *, create=False):
@@ -118,9 +140,10 @@ def apply_control_writes(root, path, nonce, snapshot):
                 raise ForgeError('Control publication outcome is unknown; automatic continuation stopped', code='inspection_incomplete')
         if raw is not None:
             snapshot[name] = (raw, item['mode'])
+    return list(record.get('authorized_paths') or ())
 
-_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md', '.forge/deps.lock.json')
-_PROTECTED_GUARD_TREES = ('data_tools',)
+_PROTECTED_GUARD_STATIC = ('.env', '.env.local', '.forge/state.json', 'workspace.json', 'AGENTS.md', 'PIPELINE_SPEC.md')
+_PROTECTED_GUARD_TREES = ('data_tools', 'packages')
 _PROTECTED_GUARD_MAX_BYTES = 512 * 1024
 _PROTECTED_TREE_MAX_ENTRIES = 2048
 _PROTECTED_TREE_MAX_BYTES = 16 * 1024**2
@@ -180,8 +203,6 @@ def _authorized_by_host(rel: str, authorized) -> bool:
 def _protected_guard_paths(root: Path) -> list[str]:
     """Return relative paths of project-internal secret/governance files guarded by Forge hooks."""
     paths = list(_PROTECTED_GUARD_STATIC)
-    if (root / '.forge/deps.lock.json').is_file():
-        paths.append('pyproject.toml')
     try:
         with os.scandir(root) as entries:
             for entry in entries:
@@ -214,8 +235,7 @@ def capture_protected_files(project_root) -> dict[str, tuple[bytes, int]]:
 
     for rel in _protected_guard_paths(root):
         remember(rel)
-    guarded_trees = (*_PROTECTED_GUARD_TREES, 'packages') if 'pyproject.toml' in snap else _PROTECTED_GUARD_TREES
-    for top in guarded_trees:
+    for top in _PROTECTED_GUARD_TREES:
         listing = _tree_listing(root, top)
         if listing is None:
             continue

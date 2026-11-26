@@ -46,7 +46,8 @@ def test_declared_case_text_and_historical_origin_are_visible(panel):
 
 
 def test_historical_attempt_survives_node_navigation_and_reload(panel):
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     root, app, page, errors = panel
     run = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
     control = runs.journal(root, run['run_id'])

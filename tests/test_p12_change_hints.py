@@ -6,8 +6,11 @@ import pytest
 
 from demiflow.forge.platform import content_digest
 from demiflow.workbench import project_operations
-from demiflow.workbench.projects import workspace as ws, index
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge import index
+
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.runs import manager as runs
+
 
 
 def test_application_reads_status_once_and_passes_same_owned_object(tmp_path, monkeypatch):

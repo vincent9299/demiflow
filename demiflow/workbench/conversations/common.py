@@ -1,33 +1,25 @@
-"""Bounded data and stable files for development chat."""
+"""Bounded data and stable files for development chat (shared primitives owned by Forge bridge)."""
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
-import json
 import os
 from pathlib import Path
 import re
 import stat
 import time
 
-from demiflow.forge.schema import ForgeError
-from demiflow.agent_transport import encode
 from demiflow.agent_transport import strict_json
-
-
-def reject(message, code='operation_rejected'):
-    raise ForgeError(message, code=code)
-
-
-def wire(value, maximum=1024 * 1024):
-    try:
-        return encode(value, maximum)
-    except ValueError as exc:
-        raise ForgeError(str(exc), code='resource_limit') from exc
-
-
-def digest(value):
-    return hashlib.sha256(wire(value)).hexdigest()
+from demiflow.forge.bridge.common import (
+    digest,
+    integer,
+    plain_path,
+    read_file,
+    reject,
+    safe_path,
+    text,
+    wire,
+)
 
 
 def identifier(value):
@@ -36,63 +28,12 @@ def identifier(value):
     return value
 
 
-def text(value, maximum=32768):
-    if type(value) is not str or not value.strip() or len(value.encode()) > maximum:
-        reject('Text is empty or exceeds byte budget', 'invalid_request')
-    return value
-
-
-def integer(value, low, high):
-    if type(value) is not int or not low <= value <= high:
-        reject('Integer outside development budget', 'invalid_request')
-    return value
-
-
-def plain_path(value):
-    if type(value) is not str or not value or len(value) > 2048:
-        reject('Invalid scoped path')
-    if value.startswith('/') or '\\' in value or any(p in {'', '.', '..'} for p in value.split('/')):
-        reject('Scoped paths must be normalized relative paths')
-    return value
-
-
-def safe_path(root, relative, *, missing=False):
-    path = Path(root)
-    for component in plain_path(relative).split('/'):
-        path = path / component
-        try:
-            info = path.lstat()
-        except FileNotFoundError:
-            if missing:
-                continue
-            raise
-        if stat.S_ISLNK(info.st_mode) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
-            reject('Symbolic links and special files are outside the development scope')
-        if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
-            reject('Hard-linked files are outside the development scope')
-    return path
-
-
 def root_identity(root):
     path = Path(root).absolute()
     if path != path.resolve(strict=True) or not path.is_dir():
         reject('Development root must be a physical directory', 'conflict')
     info = path.stat()
     return dict(path=str(path), device=info.st_dev, inode=info.st_ino)
-
-
-def read_file(path, maximum=1024 * 1024):
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd, 'rb') as stream:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
-            reject('Context file exceeds budget or is not regular', 'resource_limit')
-        raw = stream.read(maximum + 1)
-        after = os.fstat(fd)
-        keys = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
-        if len(raw) > maximum or any(getattr(before, k) != getattr(after, k) for k in keys):
-            reject('File changed during bounded reading', 'conflict')
-        return raw
 
 
 def snapshot(root, paths, *, max_files=4096, max_bytes=64 * 1024**2, exclude=()):

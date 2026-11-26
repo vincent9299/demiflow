@@ -10,16 +10,6 @@ import time
 from .common import plain_path, reject, wire
 
 
-REVIEW_TOOL = dict(name='request_pipeline_review',
-    description='Request an independent read-only delivery review after this author turn finishes. '
-                'By default review the source changes observed in this development session. '
-                'Supply an entry (and optional params) to review a particular flow.',
-    inputSchema=dict(type='object', additionalProperties=False, properties={
-        'entry': dict(type='string', description='Project-relative flow.py:function'),
-        'params': dict(type='string', description='Project-relative parameter file'),
-    }))
-
-
 class DeliveryReview:
     """One idempotent request in the active worker, using its existing execution slot."""
 
@@ -66,11 +56,11 @@ class DeliveryReview:
                         'turn_id': self.turn['id'], 'status': item.get('status'),
                         'diagnostic_count': item.get('diagnostic_count')}).decode()})
         check_cancel()
-        from demiflow.forge.dependencies import host_approval
-        with host_approval(self.project['root'], self.project.get('dependency_lock'), self.project.get('python')):
-            review = review_project(self.project['root'], goal=goal, **self.selection,
-                paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
-                observations=observations, reviewer=reviewer)
+        from demiflow.workbench.projects.registry import project_python_and_scope
+        _, allowed_roots = project_python_and_scope(self.project['root'], project=self.project)
+        review = review_project(self.project['root'], goal=goal, **self.selection,
+            paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
+            observations=observations, reviewer=reviewer, allowed_roots=allowed_roots)
         check_cancel()
         return review
 
@@ -96,14 +86,16 @@ def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broke
         home = Path(temporary)
         spec = broker = channel = None
         if deployment.mode == 'restricted':
+            from demiflow.forge.sandbox import build_review_sandbox_spec
             from .model_broker import start_model_broker
             from .execution import runtime_paths
-            review_runtime = tuple(dict.fromkeys((*author_spec.runtime_paths, *runtime_paths(config))))
-            spec = replace(author_spec, role='readonly', read_policy='scoped', write_policy='scoped',
-                direct_network=False, seconds=timeout, private_home=temporary, write_paths=(),
-                runtime_paths=tuple(path for path in review_runtime if Path(path).exists()),
-                denied_paths=(*author_spec.denied_paths, author_spec.private_home),
-                read_paths=tuple(path for path in author_spec.read_paths if path == '/etc/ssl/openssl.cnf'))
+            spec = build_review_sandbox_spec(
+                author_spec,
+                private_home=temporary,
+                seconds=timeout,
+                extra_runtime_paths=runtime_paths(config),
+                direct_network=False,
+            )
             # Both brokers debit the existing turn quota under this control directory.
             broker = start_model_broker(deployment, turn, session, broker_home.with_name('review-model'),
                                         defer_handshake=True, request_seconds=timeout, deadline=deadline)

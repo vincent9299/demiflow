@@ -16,8 +16,9 @@ import pyarrow as pa
 import pytest
 
 from demiflow.cli import main
-from demiflow.workbench.table_bindings import make_resolver
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.table_bindings import make_resolver
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as api
 from demiflow.workbench import project_operations as project_ops
 from demiflow.forge.platform import content_digest
@@ -442,7 +443,8 @@ def test_store_quota_and_concurrent_parameter_change(isolated, monkeypatch):
         )
     assert set((root / ".forge/inspections").iterdir()) == before
     monkeypatch.setattr(flow_check.FlowChecker, "inspect", original)
-    from demiflow.workbench.projects import index as catalog
+    from demiflow.forge import index as catalog
+
     with api.control_lock(root):
         for number in range(catalog.MAX_PENDING):
             catalog.begin(root, 'report', format(number, '064x'))

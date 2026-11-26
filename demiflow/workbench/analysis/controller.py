@@ -251,7 +251,7 @@ class Controller:
                 c.reject("Helper deployment status has no project scope")
             c.fields(payload, set(), label="helper status")
             if self.runtime.mode=='trusted_local':
-                from demiflow.workbench.process import process_identity
+                from demiflow.forge.process import process_identity
                 origin=self.reader_environment()
                 self.reply(connection,dict(format='demiflow_analysis_helper_status_v2',mode='production',
                     active=True,execution_mode='trusted_local',helper_identity=process_identity(os.getpid()),

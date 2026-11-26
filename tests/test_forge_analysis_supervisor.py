@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.analysis import supervisor
 from demiflow.workbench.analysis.watchdog import ParentWatch
 from demiflow.forge.schema import ForgeError

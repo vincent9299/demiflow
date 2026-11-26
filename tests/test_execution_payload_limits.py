@@ -338,7 +338,7 @@ def test_explicit_row_allowance_can_exceed_default_estimate_without_raising_othe
     assert explicit['max_row_bytes'] == explicit['max_batch_bytes'] == 16 * 2**20
     assert explicit['memory_bytes'] == defaults['memory_bytes']
     assert explicit['max_rss_bytes'] == defaults['max_rss_bytes']
-    from demiflow.workbench.pipeline_policy import limits_with
+    from demiflow.forge.pipeline_policy import limits_with
     managed = limits_with(policy={'memory_bytes': 128 * 2**20, 'max_row_bytes': 16 * 2**20})
     assert managed['max_row_bytes'] == 16 * 2**20
 
@@ -381,7 +381,8 @@ def test_peak_scope_keeps_durable_cumulative_ceiling_across_resume(tmp_path):
 
 def test_real_forge_resume_delivers_new_output_under_original_cumulative_ceiling(root, monkeypatch):
     import time
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     from test_forge_runs import custom, wait
     from test_forge_run_faults import _first_committed
     from test_forge_resume import stopped

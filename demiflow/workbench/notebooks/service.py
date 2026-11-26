@@ -254,7 +254,13 @@ class Notebooks:
             'write_paths': sandbox['write_paths'],
             'locations': locations,
         }
-        from demiflow.workbench.projects.registry import project_dependencies
+        from demiflow.workbench.projects.registry import project_dependencies, project_python_and_scope
+        private = [self.temp.name]
+        if self.server.registry is not None:
+            private.append(self.server.registry)
+        _, allowed_roots = project_python_and_scope(root, project=item, private=private)
+        payload['allowed_read_roots'] = list(allowed_roots) if allowed_roots is not None else None
+        payload['denied_paths'] = [str(Path(p).resolve()) for p in private]
         try:
             dependencies = project_dependencies(root, project=item, verify_files=False)
         except (OSError, ValueError) as exc:
@@ -263,12 +269,9 @@ class Notebooks:
             payload['dependency_error'] = str(exc)[:512]
         else:
             if dependencies is not None:
-                private = [self.temp.name]
-                if self.server.registry is not None:
-                    private.append(self.server.registry)
                 payload['locations'] = [str(path) for location in locations
                                         if (path := scoped_data_location(root, location, private=private)) is not None]
-                payload['dependency_lock'] = dependencies['digest']
+                payload['dependencies_active'] = True
         temporary = state / 'kernel-config.tmp'
         temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding='utf-8')
         temporary.chmod(0o600)

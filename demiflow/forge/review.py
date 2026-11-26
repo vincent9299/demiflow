@@ -228,7 +228,8 @@ def _requested_sources(response, root, files):
 
 
 def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, base=None, evidence=(),
-                   exclude=(), observations=(), prior_sources=None, budget=None, check_cancel=None, on_budget=None):
+                   exclude=(), observations=(), prior_sources=None, budget=None, check_cancel=None, on_budget=None,
+                   allowed_roots=None, denied_paths=()):
     """Review a fixed candidate with bounded units; preserve verified blockers and coverage separately.
 
     ``budget`` is a mutable delivery-wide remaining allowance. The caller persists
@@ -294,7 +295,8 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
 
     try:
         captured = capture_evidence(root, entry=entry, params=params, paths=paths, base=base,
-                                   evidence=evidence, exclude=exclude, prior_sources=prior_sources)
+                                   evidence=evidence, exclude=exclude, prior_sources=prior_sources,
+                                   allowed_roots=allowed_roots, denied_paths=denied_paths)
         report.update(scope=captured['scope'], evidence_id=captured['identity'],
                       sources=[dict(path=name, role=item['role']) for name, item in captured['files'].items()],
                       gaps=list(captured['gaps']))
@@ -310,8 +312,10 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
                     raise _report_error('本次评审的补读预算已用尽')
                 budget['reads'] -= 1
                 expanded = capture_evidence(root, entry=entry, params=params, paths=paths, base=base,
-                    evidence=(*evidence, *requested), exclude=exclude, prior_sources=prior_sources)
-                if (not verify_evidence(root, captured, exclude=exclude, prior_sources=prior_sources)
+                    evidence=(*evidence, *requested), exclude=exclude, prior_sources=prior_sources,
+                    allowed_roots=allowed_roots, denied_paths=denied_paths)
+                if (not verify_evidence(root, captured, exclude=exclude, prior_sources=prior_sources,
+                                        allowed_roots=allowed_roots, denied_paths=denied_paths)
                         or any(expanded['files'].get(name) != item for name, item in captured['files'].items())):
                     raise ForgeError('补读期间评审材料发生变化。', code='inputs_changed')
                 added = {name: expanded['files'][name] for name in requested}
@@ -369,7 +373,8 @@ def review_project(root, *, goal, reviewer, paths=(), entry=None, params=None, b
     if check_cancel:
         check_cancel()
     if captured is not None:
-        report['current'] = verify_evidence(root, captured, exclude=exclude, prior_sources=prior_sources)
+        report['current'] = verify_evidence(root, captured, exclude=exclude, prior_sources=prior_sources,
+                                            allowed_roots=allowed_roots, denied_paths=denied_paths)
         if not report['current']:
             report['gaps'].append('评审期间源码或材料发生变化，结论仅对应先前版本。')
     report['gaps'] = list(dict.fromkeys(report['gaps']))

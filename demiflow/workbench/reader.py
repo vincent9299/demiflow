@@ -61,7 +61,7 @@ class Reader:
 
     def _spawn(self):
         from demiflow.forge.platform_worker import inspection_environment
-        from demiflow.workbench.process import process_identity
+        from demiflow.forge.process import process_identity
         from demiflow.resources.process_observation import _pidfd
         env,fds=inspection_environment(allow_preparation=False)
         for name in ('TOKIO_WORKER_THREADS','RAYON_NUM_THREADS','LANCE_CPU_THREADS'):
@@ -138,7 +138,7 @@ class Reader:
 
     def _sample(self):
         from demiflow.resources.process_observation import descendants
-        from demiflow.workbench.process import process_identity
+        from demiflow.forge.process import process_identity
         if process_identity(self.process.pid)!=self.identity:
             raise ForgeError('Original native reader exited or changed identity')
         values=descendants(self.process.pid,include_owner=True)
@@ -183,7 +183,7 @@ class Reader:
             if self.scratch is not None:self.scratch.cleanup();self.scratch=None
             self.retirement_pending=False
             return
-        from demiflow.workbench.process import process_identity
+        from demiflow.forge.process import process_identity
         from demiflow.resources.process_observation import _signal_fd
         from demiflow.resources.process_observation import signal_owned
         from demiflow.resources.process_observation import _pidfd

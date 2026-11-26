@@ -120,7 +120,7 @@ SCENARIO_MODULES: dict[str, tuple[tuple[str, str], ...]] = {
     "driver_restart": (('demiflow.execution.journal.dataflow_authority', "H"), ("demiflow.execution.action_driver.dataflow", "E")),
     "history_identity": (("demiflow.execution.journal.dataflow_history", "W"), ('demiflow.execution.seal.program_identity', "W")),
     "workbench_real_plan": (("demiflow.workbench.runs.facts", "W"), ("demiflow.workbench.graph.model", "W")),
-    "product_regression": (("demiflow.workbench.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
+    "product_regression": (("demiflow.forge.runs.manager", "W"), ("demiflow.workbench.graph.model", "W")),
     "bounded_terminal": (('demiflow.execution.outputs.terminals', "T"), ("demiflow.execution.action_driver.dataflow", "E")),
     "artifact_security": (("demiflow.execution.seal.runtime_bundle", "H"), ("demiflow.execution.storage.objects", "H")),
     "performance": (("demiflow.execution.action_driver.dataflow", "E"), ("demiflow.execution.scheduler.placement", "E")),

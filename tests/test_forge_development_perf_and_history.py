@@ -347,7 +347,7 @@ def test_standby_prewarm_existing_session_and_unused_reserved_cleanup(tmp_path):
 
 def test_direct_model_sandbox_enforces_landlock_write_boundary_without_model_broker(tmp_path):
     import socket
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox, specification
+    from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox, specification
     from demiflow.workbench.conversations.policy import Deployment
     from test_forge_development_chat import configuration
 
@@ -423,7 +423,7 @@ def test_notebook_cell_commands_standby_set_turn_and_role_isolation(tmp_path):
     from demiflow.workbench.conversations.service import Service
     from demiflow.workbench.conversations.store import Store
     from demiflow.workbench.conversations.policy import Limits
-    from demiflow.workbench.conversations.control_client import call as control_call
+    from demiflow.forge.control_client import call as control_call
     from test_forge_development_chat import configuration
 
     # 1. CellCommands standby -> set_turn -> park_idle lifecycle

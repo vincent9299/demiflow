@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 
-from demiflow.workbench.conversations.context import assemble
+from demiflow.forge.bridge.agent_context import assemble
 from demiflow.workbench.conversations.policy import Limits
 from demiflow.forge.schema import ForgeError
 

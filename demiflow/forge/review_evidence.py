@@ -333,25 +333,30 @@ def evidence_file_size(item):
 
 
 def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evidence=(), exclude=(),
-                     prior_sources=None):
+                     prior_sources=None, allowed_roots=None, denied_paths=()):
     """Capture actual candidate bytes, their preimages and explicitly attached evidence."""
     root = no_symlinks(Path(root).absolute())
     if '..' in root.parts or not root.is_dir() or entry and paths or params and not entry:
         raise ForgeError('Select a project directory and one valid review scope', code='invalid_request')
     if len(paths) + len(evidence) > MAX_FILES or len(exclude) > 256:
         raise ForgeError('Review path list exceeds its limit', code='resource_limit')
-    from .dependencies import LOCK, binding as dependency_binding, facts as dependency_facts
-    locked_facts = dependency_facts(dependency_binding(root))
+    from .dependencies import inspect_dependencies, redact_declaration_text
+    dep_info = inspect_dependencies(
+        root, allowed_roots=allowed_roots, denied_paths=denied_paths,
+        check_imports=False, check_environment=False, allow_partial=True,
+    )
+    dep_declared = bool(dep_info['declared'] and dep_info['config'] is not None)
+    dep_config = dep_info['config'] or {}
+    declared_packages = set(dep_config.get('packages', ()))
     excluded = tuple(exclude)
-    dependency_paths = {'pyproject.toml', LOCK} if locked_facts else set()
 
-    def is_dependency_path(name):
-        return name in dependency_paths or bool(locked_facts and Path(name).parts[:1] == ('packages',))
+    def is_package_source_path(name):
+        return bool(dep_declared and Path(name).parts[:1] == ('packages',))
 
-    if locked_facts is not None:
-        excluded = (*excluded, 'packages', 'pyproject.toml')
+    if dep_declared:
+        excluded = (*excluded, 'packages')
     for name in (*paths, *evidence):
-        if is_dependency_path(name):
+        if is_package_source_path(name):
             relative_path(root, name)
         else:
             _check_path(root, name, excluded)
@@ -386,18 +391,20 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
     if not revision and mode == 'paths' and any(not (root / name).exists() for name in paths):
         revision = _revision(root, 'HEAD')
     explicit = [filename] if entry else list(dict.fromkeys(paths))
-    changed_controls = {name for name in explicit if is_dependency_path(name)}
+    changed_controls = {name for name in explicit if is_package_source_path(name) or (dep_declared and name == 'pyproject.toml')}
     if mode == 'changes':
         targets, history = _changed_files(root, revision, excluded)
-        if locked_facts is not None:
-            controls = sorted((*dependency_paths, 'packages'))
+        if dep_declared:
+            controls = ['packages', 'pyproject.toml']
             changed = _git(root, '--literal-pathspecs', 'diff', '--no-ext-diff', '--name-only', '-z', revision, '--', *controls)
             untracked = _git(root, '--literal-pathspecs', 'ls-files', '-z', '--others', '--exclude-standard', '--', *controls)
             changed_controls.update(raw.decode() for raw in (changed + untracked).split(b'\0') if raw)
+            if 'pyproject.toml' in changed_controls and 'pyproject.toml' not in targets and (root / 'pyproject.toml').is_file():
+                targets.append('pyproject.toml')
         if not targets and not changed_controls:
             raise ForgeError('No source changes; select an entry, path or another base', code='invalid_request')
     else:
-        targets = [name for name in explicit if name not in changed_controls]
+        targets = [name for name in explicit if not is_package_source_path(name)]
         history = _baseline(root, revision, excluded, targets) if revision else {}
 
     view = discover_project_sources(root, exclude=excluded, role_names=('workflows',))
@@ -406,10 +413,10 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
     declared_entries = control.get('entries', {})
     known_before = history.keys() | (prior_sources or {}).keys()
     deleted = {name for name in targets if name in known_before and not (root / name).exists()}
-    project = _ProjectEvidence(root, excluded, deleted, locked_facts['packages'] if locked_facts else ())
+    project = _ProjectEvidence(root, excluded, deleted, declared_packages)
     affected_packages = {Path(name).parts[1] for name in changed_controls if len(Path(name).parts) > 1
                          and Path(name).parts[0] == 'packages'}
-    all_dependencies_changed = bool(changed_controls & dependency_paths)
+    all_dependencies_changed = 'pyproject.toml' in changed_controls
     imports_by_entry = {}
 
     def dependency_imports(name, files):
@@ -447,7 +454,7 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             closure = {flow} if flow in deleted else project.closure([flow])
             imports = dependency_imports(declared, closure)
             if (closure.intersection(targets) or set(bindings).intersection(targets) or imports & affected_packages
-                    or all_dependencies_changed and (imports or locked_facts['distributions'])):
+                    or all_dependencies_changed and (imports or dep_config.get('requirements'))):
                 selected_entries.append(declared)
                 related.update(closure)
                 groups.insert(0, sorted(closure | set(bindings)))
@@ -514,7 +521,9 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             if _permitted(test, excluded) and relative_path(root, test).is_file():
                 related.add(test)
     roles = dict.fromkeys(sorted(related), 'dependency')
-    roles.update(dict.fromkeys((name for name in evidence if not is_dependency_path(name)), 'evidence'))
+    roles.update(dict.fromkeys((name for name in evidence if not is_package_source_path(name)), 'evidence'))
+    if dep_declared and (root / 'pyproject.toml').is_file() and _permitted('pyproject.toml', excluded):
+        roles.setdefault('pyproject.toml', 'dependency')
     roles.update(dict.fromkeys(targets, 'target'))
     if params:
         roles[params] = 'target'
@@ -543,7 +552,9 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
             before = None
         if after is None and before is None:
             raise ForgeError('Selected material is missing: ' + name, code='invalid_request')
-        item = dict(role=role, after=after, before=before)
+        presented_after = redact_declaration_text(after) if (name == 'pyproject.toml' and after is not None) else after
+        presented_before = redact_declaration_text(before) if (name == 'pyproject.toml' and before is not None) else before
+        item = dict(role=role, after=presented_after, before=presented_before)
         if name.startswith('workflows/') and name.endswith('.json'):
             local = []
             for declared, bound in _local_bindings(after, declared_entries):
@@ -562,20 +573,34 @@ def capture_evidence(root, *, entry=None, params=None, paths=(), base=None, evid
                  entries=selected_entries, changed=changed, evidence=list(evidence))
     result = dict(scope=scope, files=files, groups=groups, required_groups=primary_count + len(node_groups),
                   gaps=[detail for name in files for detail in project.gaps.get(name, ())])
-    if locked_facts is not None:
-        result['dependencies'] = {**locked_facts, 'changed': bool(changed_controls),
-                                  'entries': {name: imports_by_entry[name] for name in selected_entries if name in imports_by_entry}}
+    if dep_declared:
+        pkg_summary = {
+            name: {k: row[k] for k in ('source', 'file_count', 'bytes', 'tree_sha256')}
+            for name, row in sorted(dep_info['packages'].items())
+        }
+        for missing_row in dep_info['missing_packages']:
+            pkg_summary[missing_row['name']] = dict(source=missing_row['source'], status='missing')
+        for invalid_row in dep_info['invalid_packages']:
+            pkg_summary[invalid_row['name']] = dict(source=invalid_row['source'], status='invalid')
+        result['dependencies'] = dict(
+            digest=dep_info['digest'],
+            declaration_sha256=dep_config['sha256'],
+            requirements=list(dep_config['requirements']),
+            packages=pkg_summary,
+            changed=bool(changed_controls),
+            entries={name: imports_by_entry[name] for name in selected_entries if name in imports_by_entry},
+        )
     result['identity'] = digest(result)
     return result
 
 
-def verify_evidence(root, captured, *, exclude=(), prior_sources=None):
+def verify_evidence(root, captured, *, exclude=(), prior_sources=None, allowed_roots=None, denied_paths=()):
     """Recheck the fixed baseline and every selected working file before returning findings."""
     scope = captured['scope']
     try:
         current = capture_evidence(root, entry=scope['entry'], params=scope['params'], paths=scope['paths'],
                                    base=scope['base'], evidence=scope['evidence'], exclude=exclude,
-                                   prior_sources=prior_sources)
+                                   prior_sources=prior_sources, allowed_roots=allowed_roots, denied_paths=denied_paths)
     except (OSError, ValueError, RecursionError):
         return False
     return current['identity'] == captured['identity']

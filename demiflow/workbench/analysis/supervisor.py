@@ -20,7 +20,7 @@ import subprocess
 import threading
 import time
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.forge.io import no_symlinks
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.analysis import contracts as c

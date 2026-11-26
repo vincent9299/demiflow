@@ -1,28 +1,26 @@
-"""Project dependency declaration, bounded inventory and trusted control writes."""
+"""Project dependency declaration (pyproject.toml), unified single-package rules, and dep commands."""
+from __future__ import annotations
 
 import ast
-from contextlib import contextmanager
-from contextvars import ContextVar
 import hashlib
-import json
 import keyword
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 
 from packaging.requirements import InvalidRequirement, Requirement
 
 from . import operation_budget
 from .development_state import physical_root
-from .io import ensure_directory, no_symlinks, publish_bytes
-from .platform import bounded_json, content_digest
-from .platform_environment import environment_inventory, read_bounded
-from .project_io import control_lock, read_control
+from .io import atomic_write_text, ensure_directory, no_symlinks, publish_bytes
+from .platform import content_digest
+from .platform_environment import read_bounded
+from .project_io import control_lock
 from .schema import ForgeError
 
 try:
@@ -31,38 +29,127 @@ except ImportError:
     import tomli as tomllib
 
 
-LOCK = '.forge/deps.lock.json'
-FORMAT = 'demiflow_project_dependencies_v1'
-MAX_LOCK = 512 * 1024
+FORMAT = 'demiflow_project_dependencies_v2'
+MAX_DECLARATION_BYTES = 128 * 1024
+MAX_PACKAGES = 16
+MAX_PKG_FILES = 256
+MAX_PKG_BYTES = 8 * 1024**2
 MAX_FILES = 512
 MAX_BYTES = 16 * 1024**2
 FILE_BYTES = 512 * 1024
+MAX_REQUIREMENTS = 256
+
 _RESERVED = frozenset({
     'demiflow', 'flows', 'operators', 'data_tools', 'tests', 'prompts', 'configs',
-    'packages', 'notebooks', 'sitecustomize', 'usercustomize',
+    'packages', 'notebooks', 'workflows', 'sitecustomize', 'usercustomize',
 })
+_IGNORED_DIRS = frozenset({'__pycache__'})
+_PRIVATE_SEGMENTS = frozenset({
+    '.ssh', '.codex', '.codex-home', '.config', '.aws', '.azure', '.kube',
+    '.git', '.gnupg', '.netrc', '.npmrc', '.pypirc', '.git-credentials',
+    '.env', 'access.token', 'auth.json', 'credentials.json',
+})
+_SYSTEM_DENIED = tuple(Path(p) for p in (
+    '/proc', '/sys', '/dev', '/run', '/etc/shadow', '/etc/gshadow',
+    '/etc/ssh', '/etc/ssl/private', '/etc/sudoers', '/etc/sudoers.d',
+))
 _NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,63}\Z')
-_HASH = re.compile(r'[0-9a-f]{64}\Z')
-_HOST_APPROVAL = ContextVar('project_dependency_approval', default=None)
-_ENV_LIMITS = dict(distributions=256, metadata_file_bytes=4 * 1024**2, metadata_bytes=16 * 1024**2)
+_CREDENTIAL_URL_RE = re.compile(r'([A-Za-z][A-Za-z0-9+.-]*://)([^/@\s"\']+)@')
 
 
-def declaration(root):
-    """Read the opted-in declaration. Other pyproject files keep their old meaning."""
+def _is_within(path: Path, root: Path) -> bool:
+    return path == root or path.is_relative_to(root)
+
+
+def _has_private_segment(path: Path) -> bool:
+    return any(
+        part in _PRIVATE_SEGMENTS or part.startswith('.env.')
+        or (part.startswith('demiflow-') and '-preview-' in part)
+        for part in path.parts
+    )
+
+
+def _canonical_roots(roots) -> tuple[Path, ...]:
+    out: list[Path] = []
+    for raw in roots or ():
+        if raw is None or raw == '':
+            continue
+        p = Path(raw)
+        if not p.is_absolute() or '..' in p.parts:
+            continue
+        try:
+            resolved = p.resolve(strict=False)
+        except OSError:
+            continue
+        if resolved == Path('/'):
+            continue
+        if resolved not in out:
+            out.append(resolved)
+    return tuple(out)
+
+
+def authorize_external_path(project_root: Path, target: Path, *, allowed_roots=None, denied_paths=()) -> Path:
+    """Verify caller-granted directory scope BEFORE any stat/scandir/read/hash of an external source."""
+    root = Path(project_root).absolute()
+    target = Path(target)
+    if not target.is_absolute() or '..' in target.parts or '\x00' in str(target):
+        raise ForgeError('External dependency path must be a clean absolute path', code='operation_rejected')
+    if target == Path('/') or target == root or root.is_relative_to(target) or target.is_relative_to(root):
+        raise ForgeError('External dependency path must be a specific directory outside the project', code='operation_rejected')
+    if _has_private_segment(target) or any(_is_within(target, sys_dir) for sys_dir in _SYSTEM_DENIED):
+        raise ForgeError('External dependency path enters a private or system directory', code='operation_rejected')
+    for denied in _canonical_roots(denied_paths):
+        if _is_within(target, denied):
+            raise ForgeError('External dependency path enters a denied directory', code='operation_rejected')
+    if allowed_roots is not None:
+        granted = _canonical_roots(allowed_roots)
+        if not any(_is_within(target, allowed) for allowed in granted):
+            raise ForgeError(
+                f'External dependency path is outside the host-authorized read scope: {target}',
+                code='operation_rejected',
+            )
+    # Reject symlinks anywhere along the target path after scope check.
+    physical = no_symlinks(target)
+    if _has_private_segment(physical) or any(_is_within(physical, sys_dir) for sys_dir in _SYSTEM_DENIED):
+        raise ForgeError('External dependency path resolves into a private or system directory', code='operation_rejected')
+    for denied in _canonical_roots(denied_paths):
+        if _is_within(physical, denied):
+            raise ForgeError('External dependency path resolves into a denied directory', code='operation_rejected')
+    if allowed_roots is not None:
+        granted = _canonical_roots(allowed_roots)
+        if not any(_is_within(physical, allowed) for allowed in granted):
+            raise ForgeError(
+                f'External dependency path resolves outside the host-authorized read scope: {physical}',
+                code='operation_rejected',
+            )
+    return physical
+
+
+def declaration(root) -> dict | None:
+    """Read the opted-in dependency declaration from pyproject.toml.
+
+    Projects without a ``[tool.demiflow.packages]`` table keep their legacy behavior
+    (returns ``None``). Projects using only A-class installed dependencies can opt in
+    with an empty ``[tool.demiflow.packages]`` table.
+    """
     root = no_symlinks(Path(root).absolute())
+    pyproject = root / 'pyproject.toml'
     try:
-        raw = read_bounded(root / 'pyproject.toml', 128 * 1024)
+        raw = read_bounded(pyproject, MAX_DECLARATION_BYTES)
     except FileNotFoundError:
         return None
     except ForgeError as error:
-        if not (root / LOCK).exists() and (error.code == 'resource_limit' or (root / 'pyproject.toml').is_symlink()):
-            return None
+        if error.code == 'resource_limit' or pyproject.is_symlink():
+            if not (root / 'packages').exists():
+                return None
         raise
+    if not raw.strip():
+        return None
     try:
-        value = tomllib.loads(raw.decode('utf-8'))
+        text = raw.decode('utf-8')
+        value = tomllib.loads(text)
     except (UnicodeError, ValueError, RecursionError) as error:
-        # A standalone project may use pyproject.toml for unrelated tooling.
-        if b'tool.demiflow.packages' not in raw and not (root / LOCK).exists():
+        if b'tool.demiflow.packages' not in raw and not (root / 'packages').exists():
             return None
         raise ForgeError('Invalid dependency declaration in pyproject.toml') from error
     tools = value.get('tool', {})
@@ -70,22 +157,27 @@ def declaration(root):
     if not isinstance(forge, dict) or 'packages' not in forge:
         return None
     packages = forge['packages']
-    if type(packages) is not dict or len(packages) > 16:
-        raise ForgeError('Expected at most 16 packages in [tool.demiflow.packages]')
+    if type(packages) is not dict or len(packages) > MAX_PACKAGES:
+        raise ForgeError(f'Expected at most {MAX_PACKAGES} packages in [tool.demiflow.packages]')
     project = value.get('project', {})
-    requirements = project.get('dependencies', []) if isinstance(project, dict) else None
-    if type(requirements) is not list or len(requirements) > 256:
+    requirements = project.get('dependencies', []) if isinstance(project, dict) else []
+    if type(requirements) is not list or len(requirements) > MAX_REQUIREMENTS:
         raise ForgeError('Invalid [project].dependencies')
+    normalized_reqs = []
+    raw_reqs = []
     try:
-        if any(type(item) is not str or len(item) > 4096 for item in requirements):
-            raise ValueError
-        requirements = [str(Requirement(item)) for item in requirements]
+        for item in requirements:
+            if type(item) is not str or len(item) > 4096:
+                raise ValueError('Requirement must be a bounded string')
+            raw_reqs.append(item)
+            normalized_reqs.append(str(Requirement(item)))
     except (ValueError, InvalidRequirement) as error:
         raise ForgeError('Invalid PEP 508 project dependency') from error
+    clean_packages = {}
     for name, item in packages.items():
-        if (not _NAME.fullmatch(name) or keyword.iskeyword(name)
+        if (not isinstance(name, str) or not _NAME.fullmatch(name) or keyword.iskeyword(name)
                 or name in _RESERVED or name in sys.stdlib_module_names):
-            raise ForgeError('Invalid or reserved dependency package: ' + name[:64])
+            raise ForgeError('Invalid or reserved dependency package: ' + str(name)[:64])
         if type(item) is not dict or set(item) != {'source', 'path'} or type(item['path']) is not str:
             raise ForgeError('A dependency package requires source and path: ' + name)
         raw_path = item['path']
@@ -95,23 +187,165 @@ def declaration(root):
         if item['source'] == 'vendored':
             if path != Path('packages') / name:
                 raise ForgeError('Vendored packages must use packages/' + name)
-        elif item['source'] != 'local_ref' or not path.is_absolute() or path == root or root.is_relative_to(path):
-            raise ForgeError('A local_ref must name a specific outside package directory: ' + name)
-        elif path.is_relative_to(root):
-            raise ForgeError('Project-owned package source must use the vendored declaration: ' + name)
-    return dict(sha256=hashlib.sha256(raw).hexdigest(), packages=packages, requirements=requirements)
+        elif item['source'] == 'local_ref':
+            if not path.is_absolute() or path == root or root.is_relative_to(path):
+                raise ForgeError('A local_ref must name a specific outside package directory: ' + name)
+            if path.is_relative_to(root):
+                raise ForgeError('Project-owned package source must use the vendored declaration: ' + name)
+        else:
+            raise ForgeError('Dependency package source must be vendored or local_ref: ' + name)
+        clean_packages[name] = {'source': item['source'], 'path': raw_path}
+    return dict(
+        sha256=hashlib.sha256(raw).hexdigest(),
+        raw=text,
+        packages=clean_packages,
+        requirements=normalized_reqs,
+        raw_requirements=raw_reqs,
+    )
 
 
-def _source(root, item):
-    return no_symlinks(root / item['path'])
+def declaration_line_map(raw_text: str) -> dict:
+    """Best-effort line lookup for [tool.demiflow.packages] entries and [project].dependencies."""
+    lines = raw_text.splitlines()
+    result: dict = {'packages_table': None, 'dependencies': None, 'packages': {}, 'requirements': {}}
+    section = ''
+    in_deps = False
+    for lineno, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if stripped.startswith('[') and not stripped.startswith('[['):
+            header = stripped.split('#', 1)[0].strip()
+            if header.startswith('[') and header.endswith(']'):
+                section = header[1:-1].strip()
+                in_deps = False
+                if section == 'tool.demiflow.packages' and result['packages_table'] is None:
+                    result['packages_table'] = lineno
+                elif section.startswith('tool.demiflow.packages.'):
+                    pkg = section[len('tool.demiflow.packages.'):].strip().strip('"').strip("'")
+                    if pkg and pkg not in result['packages']:
+                        result['packages'][pkg] = lineno
+                continue
+        if section == 'project' and re.match(r'dependencies\s*=', stripped):
+            result['dependencies'] = lineno
+            in_deps = '[' in stripped and ']' not in stripped.split('#', 1)[0]
+            for m in re.finditer(r'["\']([^"\']+)["\']', stripped):
+                result['requirements'].setdefault(m.group(1), lineno)
+            continue
+        if in_deps:
+            for m in re.finditer(r'["\']([^"\']+)["\']', stripped):
+                result['requirements'].setdefault(m.group(1), lineno)
+            if ']' in stripped.split('#', 1)[0]:
+                in_deps = False
+            continue
+        if section == 'tool.demiflow.packages':
+            m = re.match(r'([A-Za-z_][A-Za-z0-9_]*)\s*=', stripped)
+            if m:
+                result['packages'].setdefault(m.group(1), lineno)
+    return result
 
 
-def _scan(name, source, *, files_left, bytes_left, project_root=None):
-    if not source.is_dir() or not (source / '__init__.py').is_file():
-        raise ForgeError('Expected a regular Python package with __init__.py: ' + name)
+def redact_declaration_text(raw_text: str) -> str:
+    """Redact credentials and host-private local_ref absolute paths while preserving exact line numbers."""
+    out_lines = []
+    section = ''
+    current_pkg = None
+    in_local_ref_table = False
+    for line in raw_text.splitlines(keepends=True):
+        ending = ''
+        body = line
+        if body.endswith('\r\n'):
+            body, ending = body[:-2], '\r\n'
+        elif body.endswith('\n'):
+            body, ending = body[:-1], '\n'
+        stripped = body.strip()
+        header = stripped.split('#', 1)[0].strip()
+        if header.startswith('[') and header.endswith(']') and not header.startswith('[['):
+            section = header[1:-1].strip()
+            if section.startswith('tool.demiflow.packages.'):
+                current_pkg = section[len('tool.demiflow.packages.'):].strip().strip('"').strip("'")
+                in_local_ref_table = True
+            else:
+                current_pkg = None
+                in_local_ref_table = False
+            out_lines.append(body + ending)
+            continue
+        redacted = _CREDENTIAL_URL_RE.sub(r'\1<redacted>@', body)
+        if section == 'tool.demiflow.packages':
+            m = re.match(r'^(\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*=\s*\{.*)$', redacted)
+            if m and re.search(r'source\s*=\s*["\']local_ref["\']', m.group(3)):
+                pkg_name = m.group(2)
+                rest = re.sub(
+                    r'(path\s*=\s*)(["\'])(?:\\.|(?!\2).)*\2',
+                    lambda pm: f'{pm.group(1)}"<local_ref:{pkg_name}>"',
+                    m.group(3),
+                )
+                redacted = m.group(1) + pkg_name + rest
+        elif in_local_ref_table and current_pkg:
+            # Redact absolute path lines under [tool.demiflow.packages.<name>]
+            redacted = re.sub(
+                r'^(\s*path\s*=\s*)(["\'])(/[^"\']*)\2',
+                lambda pm: f'{pm.group(1)}"<local_ref:{current_pkg}>"',
+                redacted,
+            )
+        out_lines.append(redacted + ending)
+    return ''.join(out_lines)
+
+
+def _check_package_imports(raw: bytes, relative: Path, package: str, root: Path) -> None:
+    try:
+        tree = ast.parse(raw, filename=str(relative))
+    except (SyntaxError, ValueError, RecursionError) as error:
+        raise ForgeError(f'Invalid Python in dependency package {package}/{relative}: {error}') from error
+    reverse_roots = _RESERVED - {'sitecustomize', 'usercustomize'}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module, *(node.module + '.' + alias.name for alias in node.names)]
+        else:
+            continue
+        for name in names:
+            parts = name.split('.')
+            qualified_project = any(
+                tuple(parts[:depth]) == root.parts[-depth:] and parts[depth] in reverse_roots
+                for depth in range(1, min(8, len(parts) - 1) + 1)
+            )
+            if parts[0] in reverse_roots or qualified_project:
+                raise ForgeError(
+                    f'Dependency {package}/{relative}:{node.lineno} imports a project role or platform module'
+                )
+
+
+def validate_package_source(
+    name: str,
+    source: Path,
+    *,
+    project_root: Path,
+    files_left: int = MAX_FILES,
+    bytes_left: int = MAX_BYTES,
+    check_imports: bool = True,
+    allowed_roots=None,
+    denied_paths=(),
+    is_external: bool = False,
+) -> dict:
+    """Unified single-package validation rule shared by `forge check`, `forge dep vendor`, `verify`, `runtime`, and `review`."""
+    root = Path(project_root).absolute()
+    if (not isinstance(name, str) or not _NAME.fullmatch(name) or keyword.iskeyword(name)
+            or name in _RESERVED or name in sys.stdlib_module_names):
+        raise ForgeError('Invalid or reserved dependency package: ' + str(name)[:64])
+    if is_external:
+        source = authorize_external_path(root, Path(source), allowed_roots=allowed_roots, denied_paths=denied_paths)
+    else:
+        source = no_symlinks(Path(source).absolute())
+    if not source.is_dir() or source.is_symlink() or not (source / '__init__.py').is_file() or (source / '__init__.py').is_symlink():
+        raise ForgeError('Expected a regular Python package with __init__.py: ' + name, code='not_found')
     pending = [source]
-    count = total = 0
-    files = {}
+    count = 0
+    total = 0
+    files: dict[str, dict] = {}
+    pkg_file_cap = min(MAX_PKG_FILES, files_left)
+    pkg_byte_cap = min(MAX_PKG_BYTES, bytes_left)
     while pending:
         folder = pending.pop()
         operation_budget.check()
@@ -120,24 +354,29 @@ def _scan(name, source, *, files_left, bytes_left, project_root=None):
             raise ForgeError('Non-directory in dependency package: ' + name)
         with os.scandir(folder) as entries:
             for entry in entries:
+                info = entry.stat(follow_symlinks=False)
+                if entry.name in _IGNORED_DIRS:
+                    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                        raise ForgeError('Invalid __pycache__ entry in dependency package: ' + name)
+                    continue
                 count += 1
                 rel = Path(entry.path).relative_to(source)
                 if count > 512 or len(rel.parts) > 12:
                     raise ForgeError('Package tree exceeds its directory budget: ' + name, code='resource_limit')
-                info = entry.stat(follow_symlinks=False)
                 if stat.S_ISDIR(info.st_mode):
                     if not _NAME.fullmatch(entry.name):
                         raise ForgeError('Invalid directory in dependency package: ' + str(rel))
                     pending.append(Path(entry.path))
                     continue
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or rel.suffix != '.py' or not _NAME.fullmatch(rel.stem):
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or rel.suffix != '.py' or not _NAME.fullmatch(rel.stem)):
                     raise ForgeError('Dependency packages accept only direct Python source files: ' + str(rel))
-                if len(files) >= min(256, files_left) or total + info.st_size > min(8 * 1024**2, bytes_left):
+                if len(files) >= pkg_file_cap or total + info.st_size > pkg_byte_cap:
                     raise ForgeError('Dependency package exceeds its file or byte budget: ' + name, code='resource_limit')
-                raw = read_bounded(Path(entry.path), min(FILE_BYTES, min(8 * 1024**2, bytes_left) - total))
+                raw = read_bounded(Path(entry.path), min(FILE_BYTES, pkg_byte_cap - total))
                 total += len(raw)
-                if project_root is not None:
-                    _check_imports(raw, rel, name, project_root)
+                if check_imports:
+                    _check_package_imports(raw, rel, name, root)
                 files[rel.as_posix()] = dict(sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
         if before.st_mtime_ns != folder.lstat().st_mtime_ns:
             raise ForgeError('Dependency package changed while scanning: ' + name, code='inputs_changed')
@@ -149,277 +388,993 @@ def _scan(name, source, *, files_left, bytes_left, project_root=None):
             if (parent / '__init__.py').as_posix() not in files:
                 raise ForgeError('Dependency subpackage needs __init__.py: ' + str(parent))
             parent = parent.parent
-    return files, total
+    return dict(files=files, bytes=total, file_count=len(files), tree_sha256=content_digest(files))
 
 
-def _check_imports(raw, relative, package, root):
-    try:
-        tree = ast.parse(raw, filename=str(relative))
-    except (SyntaxError, ValueError, RecursionError) as error:
-        raise ForgeError('Invalid Python in dependency package: ' + str(relative)) from error
-    reverse_roots = _RESERVED - {'sitecustomize', 'usercustomize'}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names = [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            names = [node.module, *(node.module + '.' + alias.name for alias in node.names)]
-        else:
-            continue
-        for name in names:
-            parts = name.split('.')
-            qualified_project = any(tuple(parts[:depth]) == root.parts[-depth:] and parts[depth] in reverse_roots
-                                    for depth in range(1, min(8, len(parts) - 1) + 1))
-            if parts[0] in reverse_roots or qualified_project:
-                raise ForgeError(f'Dependency {package}/{relative}:{node.lineno} imports a project role or platform module')
-
-
-def _inventory_packages(root, config, *, check_imports=False):
-    result = {}
-    left_files, left_bytes = MAX_FILES, MAX_BYTES
-    for name, item in sorted(config['packages'].items()):
-        path = _source(root, item)
-        files, size = _scan(name, path, files_left=left_files, bytes_left=left_bytes,
-                            project_root=root if check_imports else None)
-        left_files -= len(files)
-        left_bytes -= size
-        result[name] = dict(**item, files=files, tree_sha256=content_digest(files))
-    allowed = {name for name, item in config['packages'].items() if item['source'] == 'vendored'}
+def find_orphan_packages(root: Path, config: dict | None) -> list[dict]:
+    """Find undeclared or invalid entries directly under packages/."""
+    root = Path(root).absolute()
     vendor = root / 'packages'
-    if vendor.exists() or vendor.is_symlink():
-        with os.scandir(no_symlinks(vendor)) as entries:
-            for index, entry in enumerate(entries):
-                if index >= 16 or entry.name not in allowed or not entry.is_dir(follow_symlinks=False):
-                    raise ForgeError('Unregistered content under packages/: ' + entry.name[:80])
-    return result
+    if not (vendor.exists() or vendor.is_symlink()):
+        return []
+    if vendor.is_symlink() or not vendor.is_dir():
+        return [dict(path='packages', detail='packages 必须是项目内的普通目录，不能是软链或文件。')]
+    allowed = {
+        name for name, item in ((config or {}).get('packages') or {}).items()
+        if item.get('source') == 'vendored'
+    }
+    orphans: list[dict] = []
+    with os.scandir(no_symlinks(vendor)) as entries:
+        for index, entry in enumerate(entries):
+            if entry.name.startswith('.vendor-'):
+                continue
+            if index >= MAX_PACKAGES + 16:
+                orphans.append(dict(path='packages', detail='packages/ 下条目数超过预算上限。'))
+                break
+            rel = f'packages/{entry.name}'
+            if entry.name not in allowed:
+                orphans.append(dict(path=rel, detail=f'packages/ 下存在未在 pyproject.toml 声明的孤儿条目：{entry.name}。'))
+            elif not entry.is_dir(follow_symlinks=False):
+                orphans.append(dict(path=rel, detail=f'packages/{entry.name} 必须是普通目录，不能是文件或软链。'))
+    return sorted(orphans, key=lambda item: item['path'])
 
 
-def _interpreter(path):
-    path = Path(path)
-    if not path.is_absolute() or '..' in path.parts or not path.is_file() or not os.access(path, os.X_OK):
-        raise ForgeError('Configure an explicit executable project Python', code='invalid_request')
-    info = path.stat()
-    return dict(path=str(path), binary=str(path.resolve()), device=info.st_dev, inode=info.st_ino,
-                bytes=info.st_size, mtime_ns=info.st_mtime_ns)
-
-
-def interpreter_identity():
-    return dict(**_interpreter(sys.executable), prefix=str(Path(sys.prefix).resolve()),
-                base_prefix=str(Path(sys.base_prefix).resolve()))
-
-
-def current_environment(config, *, check_conflicts=False):
-    """Measure the current approved process environment, without importing business code."""
-    from importlib.machinery import PathFinder
-    descriptor = dict(mode='source', name='project', version='0', extras={},
-                      requires=config['requirements'], project_sha256=content_digest(config['requirements']))
-    inventory = environment_inventory(descriptor, _ENV_LIMITS)
-    if check_conflicts:
-        for name in config['packages']:
-            if name in sys.stdlib_module_names or name in sys.modules or PathFinder.find_spec(name) is not None:
-                raise ForgeError('Dependency source shadows an installed or standard module: ' + name, code='conflict')
-    problems = [row for row in inventory['diagnostics'] if row['code'] != 'direct_requirement_not_attested']
-    if problems:
-        raise ForgeError('Project Python dependency verification failed: ' + problems[0]['name'], code='conflict')
-    return dict(interpreter=interpreter_identity(), inventory=inventory)
-
-
-def verify_interpreter(identity):
-    """Reject a changed approved executable before starting any interpreter code."""
-    actual = _interpreter(identity['path'])
-    if any(identity.get(key) != value for key, value in actual.items()):
-        raise ForgeError('Approved project Python executable changed', code='conflict')
-    return actual['path']
-
-
-def probe_environment(python, config, *, expected=None, identity_only=False):
-    """Inspect an explicitly trusted interpreter in a bounded independent process."""
-    interpreter = _interpreter(python)
-    if expected is not None:
-        if interpreter['path'] != expected['path']:
-            raise ForgeError('Project Python differs from the approved executable', code='conflict')
-        verify_interpreter(expected)
-    script = (
-        'import json,sys;data={"prefix":sys.prefix};'
-        'print(json.dumps({"format":"dep_probe","data":data}))'
-        if identity_only else
-        'import json,sys;from importlib.util import find_spec;from pathlib import Path;'
-        'sys.path.insert(0,sys.argv[1]);spec=find_spec("demiflow");'
-        'assert spec and spec.origin and Path(spec.origin).resolve() == Path(sys.argv[1])/"demiflow/__init__.py";'
-        'from demiflow.forge.dependencies import current_environment;'
-        'data=current_environment(json.load(sys.stdin),check_conflicts=True);'
-        'print(json.dumps({"format":"dep_probe","data":data}))'
-    )
-    # This explicit project interpreter receives no controller channels or credentials.
-    from .platform_worker import capture
-    body = {'requirements': config['requirements'], 'packages': sorted(config['packages'])}
-    result = capture(
-        [interpreter['path'], '-I', '-B', '-c', script, str(Path(__file__).resolve().parents[2])],
-        body, {'timeout_seconds': 30, 'catalog_bytes': MAX_LOCK, 'stderr_bytes': 8192},
-        response_formats={'dep_probe'}, input_limit=128 * 1024, tree_rss_limit=512 * 1024**2,
-        inherit_authority=False,
-    )['data']
-    if not identity_only and any(result['interpreter'].get(key) != val for key, val in interpreter.items()):
-        raise ForgeError('Project interpreter supply differs from the inspected binary', code='conflict')
-    return result
-
-
-def _requirements(config):
+def _requirements_with_platform(config: dict) -> list[str]:
     from .platform_environment import platform_declaration
-    platform = platform_declaration(Path(__file__).resolve().parents[1], _ENV_LIMITS)
+    platform = platform_declaration(Path(__file__).resolve().parents[1], {'distributions': 256, 'metadata_file_bytes': 4 * 1024**2, 'metadata_bytes': 16 * 1024**2})
     return list(dict.fromkeys([*platform['requires'], *config['requirements']]))
 
 
-def _lock_view(root, config, approval):
-    locked = read_control(root / LOCK, MAX_LOCK)
-    if type(locked) is not dict or set(locked) != {'format', 'project', 'declaration', 'packages', 'environment', 'requirements', 'digest'}:
-        raise ForgeError('Invalid dependency lock')
-    digest = content_digest({k: v for k, v in locked.items() if k != 'digest'})
-    if locked['format'] != FORMAT or digest != locked['digest'] or (approval is not None and digest != approval):
-        raise ForgeError('Project dependency lock is unapproved or differs from the approved identity', code='conflict')
-    if (locked['project'] != physical_root(root) or locked['declaration'] != config['sha256']
-            or locked['requirements'] != _requirements(config)):
-        raise ForgeError('Dependency declaration or project changed; refresh the lock', code='conflict')
-    return locked
-
-
-@contextmanager
-def host_approval(root, digest, python):
-    """Scope a trusted host's read admission to this physical project."""
-    token = _HOST_APPROVAL.set((Path(root).absolute(), digest or '', python))
-    try:
-        yield
-    finally:
-        _HOST_APPROVAL.reset(token)
-
-
-def binding(root, *, approval=None, python=None, verify_files=True, check_imports=False):
-    """Read the dependency binding, checking host approval before external files."""
-    scoped = _HOST_APPROVAL.get()
-    if scoped is not None:
-        if Path(root).absolute() != scoped[0]:
-            raise ForgeError('Dependency approval does not cover this project', code='operation_rejected')
-        approval, python = scoped[1:]
-    config = declaration(root)
-    if config is None:
-        if approval:
-            raise ForgeError('Approved dependency declaration is absent', code='conflict')
-        return None
-    if approval is not None and (not isinstance(approval, str) or not _HASH.fullmatch(approval)):
-        raise ForgeError('Project dependency approval is required', code='operation_rejected')
-    root = Path(root).absolute()
-    locked = _lock_view(root, config, approval)
-    runtime = locked['environment']['interpreter']
-    if python is not None and python != runtime['path']:
-        raise ForgeError('Configured project Python differs from the approved dependency lock', code='conflict')
-    if verify_files and locked['packages'] != _inventory_packages(root, config, check_imports=check_imports):
-        raise ForgeError('Dependency source differs from its approved bytes', code='conflict')
-    return locked
-
-
-def verify(root, *, approval=None, python=None):
-    """Verify the declared source and the actual selected Python environment."""
-    locked = binding(root, approval=approval, python=python)
-    if locked is None:
-        return {'status': 'not_applicable', 'dependencies': None}
-    interpreter = locked['environment']['interpreter']
-    if probe_environment(interpreter['path'], locked, expected=interpreter) != locked['environment']:
-        raise ForgeError('Project Python environment differs from its lock', code='conflict')
-    return dict(status='passed', dependencies=facts(locked))
-
-
-def facts(locked):
-    if locked is None:
-        return None
-    return dict(digest=locked['digest'],
-                distributions=[row['name'] for row in locked['environment']['inventory']['dependencies']],
-                packages={name: {field: item[field] for field in ('source', 'tree_sha256')}
-                          for name, item in locked['packages'].items()})
-
-
-def module_files(root, locked):
-    """Project an approved Python inventory onto exact module names and file paths."""
-    result = {}
-    if locked:
-        for name, item in locked['packages'].items():
-            for relative, proof in item['files'].items():
-                path = Path(relative)
-                parts = path.parent.parts if path.name == '__init__.py' else path.with_suffix('').parts
-                qualified = '.'.join((name, *parts))
-                if qualified in result:
-                    raise ForgeError('Two files claim the same dependency module: ' + qualified, code='conflict')
-                result[qualified] = dict(path=str(Path(root) / item['path'] / relative), **proof)
+def module_files(root, binding_or_packages) -> dict[str, dict]:
+    """Project validated B-class package inventory onto exact qualified module names and file paths."""
+    result: dict[str, dict] = {}
+    if not binding_or_packages:
+        return result
+    packages = binding_or_packages.get('packages', binding_or_packages) if isinstance(binding_or_packages, dict) else {}
+    root_path = Path(root).absolute()
+    for name, item in sorted(packages.items()):
+        if not isinstance(item, dict) or 'files' not in item:
+            continue
+        base = Path(item['path']) if Path(item['path']).is_absolute() else (root_path / item['path'])
+        for relative, proof in sorted(item['files'].items()):
+            path = Path(relative)
+            parts = path.parent.parts if path.name == '__init__.py' else path.with_suffix('').parts
+            qualified = '.'.join((name, *parts))
+            if qualified in result:
+                raise ForgeError('Two files claim the same dependency module: ' + qualified, code='conflict')
+            result[qualified] = dict(path=str(base / relative), package=name, **proof)
     return result
 
 
-def update(root, python, *, name=None, vendor=None):
-    """Verify the declaration and atomically publish its approved local inventory."""
+def inspect_dependencies(
+    root,
+    *,
+    python=None,
+    allowed_roots=None,
+    denied_paths=(),
+    check_imports: bool = True,
+    check_environment: bool = False,
+    probe_imports=(),
+    allow_partial: bool = True,
+    confined: bool | None = None,
+) -> dict:
+    """Live inspection of pyproject.toml, B-class packages, orphans, and optional A-class Python environment."""
+    root = no_symlinks(Path(root).absolute())
+    try:
+        config = declaration(root)
+    except ForgeError as exc:
+        if not allow_partial:
+            raise
+        orphans = find_orphan_packages(root, None)
+        return dict(
+            declared=True,
+            config=None,
+            declaration_error=str(exc),
+            packages={},
+            missing_packages=[],
+            invalid_packages=[],
+            orphan_packages=orphans,
+            module_collisions=[],
+            environment=None,
+            environment_skipped=False,
+            environment_error=None,
+            missing_requirements=[],
+            shadowed_packages=[],
+            import_probe=None,
+            digest=None,
+        )
+    orphans = find_orphan_packages(root, config)
+    if config is None:
+        return dict(
+            declared=False,
+            config=None,
+            declaration_error=None,
+            packages={},
+            missing_packages=[],
+            invalid_packages=[],
+            orphan_packages=orphans,
+            module_collisions=[],
+            environment=None,
+            environment_skipped=False,
+            environment_error=None,
+            missing_requirements=[],
+            shadowed_packages=[],
+            import_probe=None,
+            digest=None,
+        )
+    line_map = declaration_line_map(config['raw'])
+    valid_packages: dict[str, dict] = {}
+    missing_packages: list[dict] = []
+    invalid_packages: list[dict] = []
+    left_files, left_bytes = MAX_FILES, MAX_BYTES
+    for name, item in sorted(config['packages'].items()):
+        is_external = item['source'] == 'local_ref'
+        source_path = Path(item['path']) if is_external else (root / item['path'])
+        line = line_map['packages'].get(name) or line_map.get('packages_table')
+        try:
+            if is_external:
+                source_path = authorize_external_path(
+                    root, source_path, allowed_roots=allowed_roots, denied_paths=denied_paths,
+                )
+            if not source_path.exists():
+                entry = dict(name=name, source=item['source'], path=item['path'], line=line,
+                             detail=f'已声明的依赖包 {name} 缺失（期望路径：{item["path"]}）。')
+                if not allow_partial:
+                    raise ForgeError(entry['detail'], code='not_found')
+                missing_packages.append(entry)
+                continue
+            scanned = validate_package_source(
+                name,
+                source_path,
+                project_root=root,
+                files_left=left_files,
+                bytes_left=left_bytes,
+                check_imports=check_imports,
+                allowed_roots=allowed_roots,
+                denied_paths=denied_paths,
+                is_external=is_external,
+            )
+            left_files -= scanned['file_count']
+            left_bytes -= scanned['bytes']
+            valid_packages[name] = dict(source=item['source'], path=item['path'], **scanned)
+        except ForgeError as exc:
+            if not allow_partial:
+                raise
+            entry = dict(name=name, source=item['source'], path=item['path'], line=line, code=exc.code, detail=str(exc))
+            if exc.code == 'not_found':
+                missing_packages.append(entry)
+            else:
+                invalid_packages.append(entry)
+    module_collisions: list[dict] = []
+    try:
+        module_files(root, valid_packages)
+    except ForgeError as exc:
+        if not allow_partial:
+            raise
+        module_collisions.append(dict(detail=str(exc), line=line_map.get('packages_table')))
+    if not allow_partial and orphans:
+        raise ForgeError(orphans[0]['detail'], code='conflict')
+
+    environment = None
+    environment_skipped = False
+    environment_error = None
+    missing_requirements: list[dict] = []
+    shadowed_packages: list[dict] = []
+    import_probe = None
+
+    needs_env_check = bool(config['requirements'] or config['packages'] or probe_imports)
+    if check_environment:
+        if python:
+            from .runtime import probe_environment
+            probe_cfg = dict(
+                requirements=config['requirements'],
+                platform_requirements=_requirements_with_platform(config),
+                packages=sorted(config['packages']),
+            )
+            try:
+                probed = probe_environment(
+                    python,
+                    probe_cfg,
+                    strict=not allow_partial,
+                    check_conflicts=True,
+                    probe_imports=tuple(sorted(set(probe_imports))),
+                    confined=confined,
+                )
+                if 'environment' in probed and 'interpreter' not in probed:
+                    environment = probed['environment']
+                    for item in probed.get('missing_requirements', ()):
+                        req_line = line_map['requirements'].get(item.get('spec')) or line_map.get('dependencies')
+                        missing_requirements.append({**item, 'line': req_line})
+                    for pkg in probed.get('shadowed_packages', ()):
+                        shadowed_packages.append(dict(
+                            name=pkg,
+                            line=line_map['packages'].get(pkg) or line_map.get('packages_table'),
+                            detail=f'B 类依赖包 {pkg} 与项目 Python 环境已安装或内置模块同名冲突。',
+                        ))
+                    import_probe = probed.get('import_probe')
+                else:
+                    environment = probed
+            except ForgeError as exc:
+                if not allow_partial:
+                    raise
+                environment_error = str(exc)
+        elif needs_env_check:
+            environment_skipped = True
+
+    digest_payload = dict(
+        format=FORMAT,
+        project=physical_root(root),
+        declaration=config['sha256'],
+        packages={
+            name: dict(source=item['source'], path=item['path'] if item['source'] == 'vendored' else '<local_ref>',
+                       tree_sha256=item['tree_sha256'], file_count=item['file_count'], bytes=item['bytes'])
+            for name, item in sorted(valid_packages.items())
+        },
+        requirements=config['requirements'],
+    )
+    return dict(
+        declared=True,
+        config=config,
+        declaration_error=None,
+        packages=valid_packages,
+        missing_packages=missing_packages,
+        invalid_packages=invalid_packages,
+        orphan_packages=orphans,
+        module_collisions=module_collisions,
+        environment=environment,
+        environment_skipped=environment_skipped,
+        environment_error=environment_error,
+        missing_requirements=missing_requirements,
+        shadowed_packages=shadowed_packages,
+        import_probe=import_probe,
+        digest=content_digest(digest_payload),
+    )
+
+
+def binding(
+    root,
+    *,
+    python=None,
+    allowed_roots=None,
+    denied_paths=(),
+    verify_files: bool = True,
+    check_imports: bool = False,
+    require_python: bool = False,
+    require_environment: bool = False,
+    confined: bool | None = None,
+) -> dict | None:
+    """Resolve live validated dependency binding directly from pyproject.toml (no lock file)."""
+    root = no_symlinks(Path(root).absolute())
+    config = declaration(root)
+    if config is None:
+        return None
+    if require_python and not python:
+        raise ForgeError('Configure an explicit project Python before admitting dependencies', code='operation_rejected')
+    if verify_files:
+        inspected = inspect_dependencies(
+            root,
+            python=python,
+            allowed_roots=allowed_roots,
+            denied_paths=denied_paths,
+            check_imports=check_imports,
+            check_environment=bool(python and require_environment),
+            allow_partial=False,
+            confined=confined,
+        )
+        packages = inspected['packages']
+        environment = inspected['environment']
+    else:
+        packages = {
+            name: dict(source=item['source'], path=item['path'])
+            for name, item in sorted(config['packages'].items())
+        }
+        environment = None
+        if python and require_environment:
+            from .runtime import probe_environment
+            probed = probe_environment(
+                python,
+                dict(requirements=config['requirements'], platform_requirements=_requirements_with_platform(config),
+                     packages=sorted(config['packages'])),
+                strict=True,
+                check_conflicts=True,
+                confined=confined,
+            )
+            environment = probed
+    requirements = _requirements_with_platform(config)
+    record = dict(
+        format=FORMAT,
+        project=physical_root(root),
+        declaration=config['sha256'],
+        packages=packages,
+        requirements=requirements,
+        declared_requirements=config['requirements'],
+        environment=environment,
+    )
+    if verify_files:
+        module_files(root, record)
+    digest_basis = {
+        k: v for k, v in record.items()
+        if k != 'packages'
+    }
+    digest_basis['packages'] = {
+        name: {k: item[k] for k in ('source', 'path', 'tree_sha256', 'file_count', 'bytes') if k in item}
+        for name, item in sorted(packages.items())
+    }
+    record['digest'] = content_digest(digest_basis)
+    return record
+
+
+def facts(bound: dict | None, *, include_paths: bool = False) -> dict | None:
+    if bound is None:
+        return None
+    packages = {}
+    for name, item in sorted((bound.get('packages') or {}).items()):
+        entry = {'source': item['source']}
+        for field in ('file_count', 'bytes', 'tree_sha256'):
+            if field in item:
+                entry[field] = item[field]
+        if include_paths and item.get('source') == 'vendored':
+            entry['path'] = item['path']
+        packages[name] = entry
+    env = bound.get('environment')
+    distributions = [row['name'] for row in env['inventory']['dependencies']] if isinstance(env, dict) else []
+    return dict(
+        digest=bound['digest'],
+        declaration=bound['declaration'],
+        requirements=list(bound.get('declared_requirements', bound.get('requirements', ()))),
+        distributions=distributions,
+        packages=packages,
+    )
+
+
+def vendor(root, name: str, source, *, allowed_roots=None, denied_paths=()) -> dict:
+    """Validate and vendor one declared B-class package into packages/<name>.
+
+    Allows declaring multiple missing packages and vendoring them one by one,
+    and succeeds even when A-class installed dependencies are not yet installed.
+    Preserves existing content on failure or concurrent edit.
+    """
     root = no_symlinks(Path(root).absolute())
     config = declaration(root)
     if config is None:
         raise ForgeError('Declare [tool.demiflow.packages] in pyproject.toml first')
-    if name is not None and name not in config['packages']:
-        raise ForgeError('Package is absent from the dependency declaration: ' + name)
-    requirements = _requirements(config)
-    environment = probe_environment(python, {**config, 'requirements': requirements})
+    if name not in config['packages']:
+        raise ForgeError(f'Package {name!r} is not declared in [tool.demiflow.packages]', code='not_found')
+    item = config['packages'][name]
+    if item['source'] != 'vendored':
+        raise ForgeError(f'Package {name!r} is declared as {item["source"]!r}; vendor requires source = "vendored"')
+
+    source_path = authorize_external_path(root, Path(source).absolute(), allowed_roots=allowed_roots, denied_paths=denied_paths)
+    # Reuse the single unified package validation rule BEFORE writing anything.
+    scanned = validate_package_source(
+        name,
+        source_path,
+        project_root=root,
+        files_left=MAX_FILES,
+        bytes_left=MAX_BYTES,
+        check_imports=True,
+        allowed_roots=allowed_roots,
+        denied_paths=denied_paths,
+        is_external=True,
+    )
+    # Also ensure total project budget across existing vendored/local_ref packages is respected.
+    existing_files = 0
+    existing_bytes = 0
+    for other_name, other_item in sorted(config['packages'].items()):
+        if other_name == name:
+            continue
+        other_is_ext = other_item['source'] == 'local_ref'
+        other_path = Path(other_item['path']) if other_is_ext else (root / other_item['path'])
+        if not other_path.exists():
+            continue
+        other_scanned = validate_package_source(
+            other_name,
+            other_path,
+            project_root=root,
+            files_left=MAX_FILES - existing_files,
+            bytes_left=MAX_BYTES - existing_bytes,
+            check_imports=False,
+            allowed_roots=allowed_roots,
+            denied_paths=denied_paths,
+            is_external=other_is_ext,
+        )
+        existing_files += other_scanned['file_count']
+        existing_bytes += other_scanned['bytes']
+    if existing_files + scanned['file_count'] > MAX_FILES or existing_bytes + scanned['bytes'] > MAX_BYTES:
+        raise ForgeError('Project dependency packages exceed the project file or byte budget', code='resource_limit')
+    # Check module/package basename collisions within this package.
+    module_files(root, {name: dict(path=item['path'], files=scanned['files'])})
+
     with control_lock(root):
-        if declaration(root) != config:
-            raise ForgeError('Dependency declaration changed during the update', code='inputs_changed')
-        created = None
+        current = declaration(root)
+        if current is None or current['sha256'] != config['sha256']:
+            raise ForgeError('pyproject.toml changed concurrently during vendor; preserving existing content', code='inputs_changed')
+        packages_dir = root / 'packages'
+        if packages_dir.is_symlink():
+            raise ForgeError('packages/ must be a regular directory, not a symlink', code='operation_rejected')
+        ensure_directory(packages_dir)
+        target = packages_dir / name
+        if target.is_symlink():
+            raise ForgeError(f'packages/{name} must not be a symlink', code='operation_rejected')
+        staging = packages_dir / f'.vendor-{name}-{secrets.token_hex(6)}'
+        backup = packages_dir / f'.vendor-backup-{name}-{secrets.token_hex(6)}'
+        moved_existing = False
         try:
-            if vendor is not None:
-                item = config['packages'][name]
-                if item['source'] != 'vendored':
-                    raise ForgeError('Vendor requires a declared vendored package')
-                source = no_symlinks(Path(vendor).absolute())
-                files, _ = _scan(name, source, files_left=MAX_FILES, bytes_left=MAX_BYTES, project_root=root)
-                target = _source(root, item)
-                ensure_directory(target.parent)
-                target.mkdir(mode=0o700)
-                created = target
-                for rel, record in files.items():
-                    raw = read_bounded(source / rel, FILE_BYTES)
-                    if hashlib.sha256(raw).hexdigest() != record['sha256']:
-                        raise ForgeError('Vendor source changed during the copy', code='inputs_changed')
-                    ensure_directory((target / rel).parent)
-                    publish_bytes(target / rel, raw)
-                missing = [other for other, entry in config['packages'].items()
-                           if entry['source'] == 'vendored' and not (root / entry['path']).exists()]
-                if missing:
-                    if declaration(root) != config:
-                        raise ForgeError('Dependency declaration changed during vendoring', code='inputs_changed')
-                    return dict(status='staged', package=name, missing=sorted(missing))
-            packages = _inventory_packages(root, config, check_imports=True)
-            record = dict(format=FORMAT, project=physical_root(root), declaration=config['sha256'],
-                          packages=packages, environment=environment, requirements=requirements)
-            # Module-name collisions also include module/package basename pairs.
-            module_files(root, record)
-            record['digest'] = content_digest(record)
-            if declaration(root) != config:
-                raise ForgeError('Dependency declaration changed before publication', code='inputs_changed')
-            lock = root / LOCK
-            publish_bytes(lock, bounded_json(record, MAX_LOCK), create=not lock.exists())
+            staging.mkdir(mode=0o700)
+            for rel, proof in sorted(scanned['files'].items()):
+                raw = read_bounded(source_path / rel, FILE_BYTES)
+                if hashlib.sha256(raw).hexdigest() != proof['sha256']:
+                    raise ForgeError('Vendor source changed during copy', code='inputs_changed')
+                ensure_directory((staging / rel).parent)
+                publish_bytes(staging / rel, raw)
+            # Re-verify declaration did not change before publishing into place.
+            after_copy = declaration(root)
+            if after_copy is None or after_copy['sha256'] != config['sha256']:
+                raise ForgeError('pyproject.toml changed concurrently during vendor; preserving existing content', code='inputs_changed')
+            if target.exists():
+                os.replace(target, backup)
+                moved_existing = True
+            os.replace(staging, target)
+            if moved_existing:
+                shutil.rmtree(backup, ignore_errors=True)
+            from .project_guard import record_authorized_tree_write
+            record_authorized_tree_write(root, 'packages')
+            record_authorized_tree_write(root, f'packages/{name}')
         except BaseException:
-            if created is not None:
-                shutil.rmtree(created)
+            if moved_existing and not target.exists() and backup.exists():
+                try:
+                    os.replace(backup, target)
+                except OSError:
+                    pass
+            shutil.rmtree(staging, ignore_errors=True)
             raise
-    return dict(status='updated', **facts(record))
+    return dict(
+        status='vendored',
+        package=name,
+        path=item['path'],
+        file_count=scanned['file_count'],
+        bytes=scanned['bytes'],
+        tree_sha256=scanned['tree_sha256'],
+    )
 
 
-def remove(root):
-    """Revoke the local lock. Leave source, installations, and history in place."""
+def _skip_toml_string(text: str, i: int) -> int:
+    """Advance index `i` past a single-line or multiline TOML string literal starting at `text[i]`."""
+    n = len(text)
+    if text[i:i + 3] in ('"""', "'''"):
+        delim = text[i:i + 3]
+        i += 3
+        while i < n:
+            if delim == '"""' and text[i] == '\\':
+                i += 2
+                continue
+            if text[i:i + 3] == delim:
+                run = 3
+                while i + run < n and text[i + run] == delim[0] and run < 5:
+                    run += 1
+                return i + run
+            i += 1
+        return n
+    quote = text[i]
+    i += 1
+    while i < n:
+        if quote == '"' and text[i] == '\\':
+            i += 2
+            continue
+        if text[i] == quote:
+            return i + 1
+        i += 1
+    return n
+
+
+def _strip_toml_comment(line: str) -> str:
+    """Return the code portion of a single-line TOML fragment outside string literals."""
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if ch == '#':
+            return line[:i]
+        if ch in ('"', "'"):
+            i = _skip_toml_string(line, i)
+            continue
+        i += 1
+    return line
+
+
+def _advance_toml_state(line: str, state: dict) -> None:
+    """Update multiline string and bracket/brace nesting state across one TOML line."""
+    i, n = 0, len(line)
+    while i < n:
+        ml = state['ml']
+        if ml is not None:
+            if ml == '"""' and line[i] == '\\':
+                i += 2
+                continue
+            if line[i:i + 3] == ml:
+                run = 3
+                while i + run < n and line[i + run] == ml[0] and run < 5:
+                    run += 1
+                i += run
+                state['ml'] = None
+                continue
+            i += 1
+            continue
+        ch = line[i]
+        if ch == '#':
+            break
+        if line[i:i + 3] in ('"""', "'''"):
+            state['ml'] = line[i:i + 3]
+            i += 3
+            continue
+        if ch in ('"', "'"):
+            i = _skip_toml_string(line, i)
+            continue
+        if ch == '[':
+            state['brackets'] += 1
+        elif ch == ']':
+            state['brackets'] = max(0, state['brackets'] - 1)
+        elif ch == '{':
+            state['braces'] += 1
+        elif ch == '}':
+            state['braces'] = max(0, state['braces'] - 1)
+        i += 1
+
+
+def _extract_single_toml_path(obj) -> tuple[str, ...]:
+    path: list[str] = []
+    cur = obj
+    while isinstance(cur, dict) and len(cur) == 1:
+        key, val = next(iter(cur.items()))
+        path.append(key)
+        cur = val
+        if isinstance(cur, list) and len(cur) == 1 and isinstance(cur[0], dict):
+            cur = cur[0]
+    return tuple(path)
+
+
+def _parse_toml_header(code: str) -> tuple[bool, tuple[str, ...]] | None:
+    stripped = code.strip()
+    if not stripped.startswith('[') or not stripped.endswith(']'):
+        return None
+    is_array = stripped.startswith('[[') and stripped.endswith(']]')
+    try:
+        parsed = tomllib.loads(stripped + '\n')
+    except tomllib.TOMLDecodeError:
+        return None
+    path = _extract_single_toml_path(parsed)
+    return (is_array, path) if path else None
+
+
+def _split_top_level_assignment(stmt: str) -> tuple[str, str] | None:
+    """Split a TOML `lhs = rhs` statement on the first `=` outside quotes."""
+    i, n = 0, len(stmt)
+    while i < n:
+        ch = stmt[i]
+        if ch == '=':
+            return stmt[:i], stmt[i + 1:]
+        if ch in ('"', "'"):
+            i = _skip_toml_string(stmt, i)
+            continue
+        if ch in ('#', '\n', '\r'):
+            return None
+        i += 1
+    return None
+
+
+def _parse_toml_key_path(lhs: str) -> tuple[str, ...] | None:
+    try:
+        parsed = tomllib.loads(lhs.strip() + ' = 0\n')
+    except tomllib.TOMLDecodeError:
+        return None
+    path = _extract_single_toml_path(parsed)
+    return path if path else None
+
+
+def _remove_from_inline_packages_table(stmt: str, name: str) -> tuple[str, bool]:
+    """Remove key `name` from an inline table assignment `...packages = { ... }`."""
+    split = _split_top_level_assignment(stmt)
+    if split is None:
+        return stmt, False
+    lhs, rhs = split
+    brace_start = rhs.find('{')
+    if brace_start < 0:
+        return stmt, False
+    depth = 0
+    brace_end = -1
+    i, n = brace_start, len(rhs)
+    while i < n:
+        ch = rhs[i]
+        if ch == '#':
+            nl = rhs.find('\n', i)
+            i = n if nl < 0 else nl + 1
+            continue
+        if ch in ('"', "'"):
+            i = _skip_toml_string(rhs, i)
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                brace_end = i
+                break
+        i += 1
+    if brace_end < 0:
+        return stmt, False
+
+    inner = rhs[brace_start + 1:brace_end]
+    entries: list[str] = []
+    start = b_depth = k_depth = j = 0
+    m = len(inner)
+    while j < m:
+        ch = inner[j]
+        if ch == '#':
+            nl = inner.find('\n', j)
+            j = m if nl < 0 else nl + 1
+            continue
+        if ch in ('"', "'"):
+            j = _skip_toml_string(inner, j)
+            continue
+        if ch == '{':
+            b_depth += 1
+        elif ch == '}':
+            b_depth -= 1
+        elif ch == '[':
+            k_depth += 1
+        elif ch == ']':
+            k_depth -= 1
+        elif ch == ',' and b_depth == 0 and k_depth == 0:
+            entries.append(inner[start:j])
+            start = j + 1
+        j += 1
+    if inner[start:].strip():
+        entries.append(inner[start:])
+
+    kept: list[str] = []
+    removed = False
+    for entry in entries:
+        item_split = _split_top_level_assignment(entry.strip())
+        if item_split is not None:
+            item_path = _parse_toml_key_path(item_split[0])
+            if item_path and item_path[0] == name:
+                removed = True
+                continue
+        kept.append(entry.strip())
+    if not removed:
+        return stmt, False
+    return lhs + '=' + rhs[:brace_start + 1] + ', '.join(kept) + rhs[brace_end:], True
+
+
+def _normalize_demiflow_packages_for_compare(doc: dict) -> dict:
+    """Prune empty tool.demiflow.packages ancestors ONLY so semantic diff compares every other key."""
+    import copy
+    out = copy.deepcopy(doc)
+    tool = out.get('tool')
+    if isinstance(tool, dict):
+        df = tool.get('demiflow')
+        if isinstance(df, dict):
+            pkgs = df.get('packages')
+            if isinstance(pkgs, dict) and not pkgs:
+                df.pop('packages', None)
+            if not df:
+                tool.pop('demiflow', None)
+        if not tool:
+            out.pop('tool', None)
+    return out
+
+
+def _write_text_preserving_inode(path: Path, text: str) -> None:
+    """Update an existing regular TOML file in place so active Linux Landlock file-inode rules remain valid."""
+    no_symlinks(path)
+    raw = text.encode('utf-8')
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ForgeError('pyproject.toml must be a regular file', code='operation_rejected')
+        os.lseek(fd, 0, os.SEEK_SET)
+        view = memoryview(raw)
+        written = 0
+        while written < len(raw):
+            written += os.write(fd, view[written:])
+        os.ftruncate(fd, len(raw))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _remove_package_from_toml(raw_text: str, name: str) -> tuple[str, bool]:
+    """Surgically remove one package entry from [tool.demiflow.packages] while preserving all other config.
+
+    Fail-closed: parses both before and after with tomllib and verifies that ONLY
+    `tool.demiflow.packages.<name>` changed; refuses to corrupt unrelated config.
+    """
+    before = tomllib.loads(raw_text)
+    before_pkgs = (before.get('tool') or {}).get('demiflow', {}).get('packages')
+    if not (isinstance(before_pkgs, dict) and name in before_pkgs):
+        return raw_text, False
+
+    target = ('tool', 'demiflow', 'packages', name)
+    packages_path = ('tool', 'demiflow', 'packages')
+    lines = raw_text.splitlines(keepends=True)
+    out: list[str] = []
+    current_section: tuple[str, ...] = ()
+    skipping_subtable = False
+    removed = False
+    idx, total = 0, len(lines)
+
+    while idx < total:
+        line = lines[idx]
+        code = _strip_toml_comment(line).strip()
+        if not code:
+            if not skipping_subtable:
+                out.append(line)
+            idx += 1
+            continue
+
+        header = _parse_toml_header(code)
+        if header is not None:
+            is_array, path = header
+            current_section = path
+            if not is_array and len(path) >= 4 and path[:4] == target:
+                skipping_subtable = True
+                removed = True
+                idx += 1
+                continue
+            skipping_subtable = False
+            out.append(line)
+            idx += 1
+            continue
+
+        stmt_lines = [line]
+        state = {'ml': None, 'brackets': 0, 'braces': 0}
+        _advance_toml_state(line, state)
+        idx += 1
+        while idx < total and (state['ml'] is not None or state['brackets'] > 0 or state['braces'] > 0):
+            nxt = lines[idx]
+            stmt_lines.append(nxt)
+            _advance_toml_state(nxt, state)
+            idx += 1
+
+        if skipping_subtable:
+            continue
+
+        stmt = ''.join(stmt_lines)
+        split = _split_top_level_assignment(stmt)
+        if split is not None:
+            rel_path = _parse_toml_key_path(split[0])
+            if rel_path is not None:
+                full_path = current_section + rel_path
+                if len(full_path) >= 4 and full_path[:4] == target:
+                    removed = True
+                    continue
+                if full_path == packages_path:
+                    rebuilt, inline_removed = _remove_from_inline_packages_table(stmt, name)
+                    if inline_removed:
+                        removed = True
+                        out.append(rebuilt)
+                        continue
+
+        out.append(stmt)
+
+    if not removed:
+        raise ForgeError(
+            f'Unable to locate declaration for {name!r} in pyproject.toml for safe removal',
+            code='conflict',
+        )
+
+    updated = ''.join(out)
+    try:
+        after = tomllib.loads(updated)
+    except tomllib.TOMLDecodeError as exc:
+        raise ForgeError(
+            f'Unable to safely remove {name!r} from pyproject.toml: {exc}',
+            code='conflict',
+        ) from exc
+
+    after_pkgs = (after.get('tool') or {}).get('demiflow', {}).get('packages')
+    if isinstance(after_pkgs, dict) and name in after_pkgs:
+        raise ForgeError(f'Unable to cleanly remove {name!r} from pyproject.toml', code='conflict')
+
+    import copy
+    expected = copy.deepcopy(before)
+    del expected['tool']['demiflow']['packages'][name]
+    if _normalize_demiflow_packages_for_compare(after) != _normalize_demiflow_packages_for_compare(expected):
+        raise ForgeError(
+            f'Refusing unsafe pyproject.toml edit while removing {name!r}: unrelated configuration would change',
+            code='conflict',
+        )
+    return updated, True
+
+
+def remove(root, name: str) -> dict:
+    """Remove a single declared package by name and delete ONLY its project-owned vendored copy.
+
+    Atomically rolls back both `pyproject.toml` and `packages/<name>` on any failure,
+    and updates `pyproject.toml` in-place to preserve its inode for active Linux Landlock rules.
+    """
+    if not isinstance(name, str) or not _NAME.fullmatch(name):
+        raise ForgeError('Invalid package name: ' + str(name)[:64], code='invalid_request')
     root = no_symlinks(Path(root).absolute())
-    from .io import directory_handle
-    with control_lock(root), directory_handle(root / '.forge') as directory:
+    with control_lock(root):
+        pyproject = root / 'pyproject.toml'
+        config = declaration(root)
+        declared_source = None
+        updated_text = None
+        removed_declaration = False
+        if config is not None and name in config['packages']:
+            declared_source = config['packages'][name]['source']
+            updated_text, removed_declaration = _remove_package_from_toml(config['raw'], name)
+            if not removed_declaration:
+                raise ForgeError(
+                    f'Unable to remove declaration for {name!r} from pyproject.toml; preserving files',
+                    code='conflict',
+                )
+            current_raw = read_bounded(pyproject, MAX_DECLARATION_BYTES)
+            if hashlib.sha256(current_raw).hexdigest() != config['sha256']:
+                raise ForgeError('pyproject.toml changed concurrently during remove; preserving existing content', code='inputs_changed')
+
+        vendor_dir = root / 'packages'
+        target = vendor_dir / name
+        has_managed_files = (
+            declared_source != 'local_ref'
+            and vendor_dir.is_dir()
+            and not vendor_dir.is_symlink()
+            and target.exists()
+        )
+        if has_managed_files and target.is_symlink():
+            raise ForgeError(f'Refusing to remove symlink under packages/: {name}', code='operation_rejected')
+        if not removed_declaration and not has_managed_files:
+            raise ForgeError(f'Package {name!r} is neither declared nor present under packages/', code='not_found')
+
+        staging = vendor_dir / f'.remove-{name}-{secrets.token_hex(6)}' if has_managed_files else None
+        staged = False
+        toml_written = False
+        removed_files = False
         try:
-            os.unlink('deps.lock.json', dir_fd=directory)
-        except FileNotFoundError:
-            pass
-        os.fsync(directory)
-    return {'status': 'removed'}
+            if has_managed_files and staging is not None:
+                os.replace(target, staging)
+                staged = True
+            if removed_declaration and updated_text is not None:
+                _write_text_preserving_inode(pyproject, updated_text)
+                toml_written = True
+            if staged and staging is not None:
+                if staging.is_dir():
+                    shutil.rmtree(staging)
+                else:
+                    staging.unlink()
+                removed_files = True
+            if removed_files:
+                from .project_guard import record_authorized_tree_write
+                record_authorized_tree_write(root, 'packages')
+                record_authorized_tree_write(root, f'packages/{name}')
+        except BaseException:
+            if toml_written and config is not None:
+                try:
+                    _write_text_preserving_inode(pyproject, config['raw'])
+                except OSError:
+                    pass
+            if staged and staging is not None and staging.exists() and not target.exists():
+                try:
+                    os.replace(staging, target)
+                except OSError:
+                    pass
+            raise
+    return dict(
+        status='removed',
+        package=name,
+        source=declared_source,
+        removed_declaration=removed_declaration,
+        removed_files=removed_files,
+    )
 
 
-def install(root, python):
-    """Install approved A requirements in the explicit user environment."""
+def list_dependencies(root, *, python=None, allowed_roots=None, denied_paths=()) -> dict:
+    """List declared A-class and B-class dependencies along with missing/invalid status."""
+    inspected = inspect_dependencies(
+        root,
+        python=python,
+        allowed_roots=allowed_roots,
+        denied_paths=denied_paths,
+        check_imports=False,
+        check_environment=bool(python),
+        allow_partial=True,
+    )
+    if not inspected['declared']:
+        return dict(status='not_applicable', declared=False, dependencies=None)
+    if inspected['declaration_error']:
+        return dict(
+            status='failed',
+            declared=True,
+            diagnostics=[dict(code='invalid_declaration', path='pyproject.toml', detail=inspected['declaration_error'])],
+        )
+    packages = {}
+    for name, item in sorted(inspected['packages'].items()):
+        packages[name] = dict(
+            source=item['source'],
+            status='present',
+            file_count=item['file_count'],
+            bytes=item['bytes'],
+            tree_sha256=item['tree_sha256'],
+        )
+    for item in inspected['missing_packages']:
+        packages[item['name']] = dict(source=item['source'], status='missing', detail=item['detail'])
+    for item in inspected['invalid_packages']:
+        packages[item['name']] = dict(source=item['source'], status='invalid', detail=item['detail'])
+    return dict(
+        status='passed',
+        declared=True,
+        dependencies=dict(
+            digest=inspected['digest'],
+            declaration=inspected['config']['sha256'],
+            requirements=list(inspected['config']['requirements']),
+            packages=packages,
+            missing_packages=inspected['missing_packages'],
+            invalid_packages=inspected['invalid_packages'],
+            orphan_packages=inspected['orphan_packages'],
+            missing_requirements=inspected['missing_requirements'],
+            shadowed_packages=inspected['shadowed_packages'],
+            environment_skipped=inspected['environment_skipped'],
+            environment_error=inspected['environment_error'],
+        ),
+    )
+
+
+def verify(root, *, python=None, allowed_roots=None, denied_paths=()) -> dict:
+    """Verify pyproject.toml, all B-class packages, packages/ hygiene, and optional explicit Python environment."""
+    inspected = inspect_dependencies(
+        root,
+        python=python,
+        allowed_roots=allowed_roots,
+        denied_paths=denied_paths,
+        check_imports=True,
+        check_environment=bool(python),
+        allow_partial=True,
+    )
+    if not inspected['declared']:
+        return dict(status='not_applicable', dependencies=None)
+    diagnostics: list[dict] = []
+    if inspected['declaration_error']:
+        diagnostics.append(dict(code='invalid_declaration', path='pyproject.toml', detail=inspected['declaration_error']))
+    for item in inspected['missing_packages']:
+        diagnostics.append(dict(code='missing_package', path='pyproject.toml', line=item.get('line'), detail=item['detail']))
+    for item in inspected['invalid_packages']:
+        diagnostics.append(dict(code=item.get('code') or 'invalid_package', path='pyproject.toml', line=item.get('line'), detail=item['detail']))
+    for item in inspected['orphan_packages']:
+        diagnostics.append(dict(code='orphan_package', path=item['path'], detail=item['detail']))
+    for item in inspected['module_collisions']:
+        diagnostics.append(dict(code='module_collision', path='pyproject.toml', line=item.get('line'), detail=item['detail']))
+    for item in inspected['missing_requirements']:
+        diagnostics.append(dict(code='missing_requirement', path='pyproject.toml', line=item.get('line'), detail=item['detail']))
+    for item in inspected['shadowed_packages']:
+        diagnostics.append(dict(code='shadowed_package', path='pyproject.toml', line=item.get('line'), detail=item['detail']))
+    if inspected['environment_error']:
+        diagnostics.append(dict(code='environment_error', path='pyproject.toml', detail=inspected['environment_error']))
+    status = 'failed' if diagnostics else 'passed'
+    summary = None
+    if inspected['config'] is not None:
+        summary = dict(
+            digest=inspected['digest'],
+            declaration=inspected['config']['sha256'],
+            requirements=list(inspected['config']['requirements']),
+            packages={
+                name: {k: item[k] for k in ('source', 'file_count', 'bytes', 'tree_sha256')}
+                for name, item in sorted(inspected['packages'].items())
+            },
+            environment_skipped=inspected['environment_skipped'],
+        )
+    result = dict(status=status, dependencies=summary)
+    if diagnostics:
+        result['diagnostics'] = diagnostics
+    if inspected['environment_skipped']:
+        result['skipped_checks'] = ['未提供 --python，已跳过 A 类环境包版本与已安装模块撞名核验。']
+    return result
+
+
+def install(root, python) -> dict:
+    """Install declared A-class requirements into an explicit separate user-managed Python environment."""
+    from .runtime import probe_environment
+    root = no_symlinks(Path(root).absolute())
     config = declaration(root)
     if config is None:
         raise ForgeError('Declare [tool.demiflow.packages] in pyproject.toml first')
@@ -428,18 +1383,28 @@ def install(root, python):
         prefix = Path(identity['prefix']).resolve()
         if prefix in {Path(sys.prefix).resolve(), Path(sys.base_prefix).resolve()}:
             raise ForgeError('Dependency installation requires a separate user-managed environment')
-        if declaration(root) != config:
+        current = declaration(root)
+        if current is None or current['sha256'] != config['sha256']:
             raise ForgeError('Dependency declaration changed before installation', code='inputs_changed')
         if config['requirements']:
-            index_options = {'PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL', 'PIP_NO_INDEX', 'PIP_FIND_LINKS',
-                             'PIP_TRUSTED_HOST', 'PIP_CERT'}
-            environment = {key: value for key, value in os.environ.items()
-                           if not key.startswith('PIP_') or key in index_options}
+            index_options = {
+                'PIP_INDEX_URL', 'PIP_EXTRA_INDEX_URL', 'PIP_NO_INDEX', 'PIP_FIND_LINKS',
+                'PIP_TRUSTED_HOST', 'PIP_CERT',
+            }
+            environment = {
+                key: value for key, value in os.environ.items()
+                if not key.startswith('PIP_') or key in index_options
+            }
             environment['PIP_CONFIG_FILE'] = os.devnull
             try:
-                subprocess.run([str(python), '-I', '-m', 'pip', '--disable-pip-version-check',
-                                'install', '--no-input', '--', *config['requirements']],
-                               env=environment, timeout=300, check=True, stdout=2)
+                subprocess.run(
+                    [str(python), '-I', '-m', 'pip', '--disable-pip-version-check',
+                     'install', '--no-input', '--', *config['requirements']],
+                    env=environment,
+                    timeout=300,
+                    check=True,
+                    stdout=2,
+                )
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
                 raise ForgeError('Project dependency installation failed', code='operation_failed') from error
-    return {'status': 'installed'}
+    return dict(status='installed', requirements=list(config['requirements']), python=str(python))

@@ -10,7 +10,7 @@ import os
 import select
 import time
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.analysis import contracts as c
 
 

@@ -110,8 +110,25 @@ def candidate_identity(snapshot):
     return content_digest({name: (fact or {}).get('sha256') for name, fact in snapshot.items()})
 
 
-def feedback_current(root, options, author):
-    """Recheck the original author and candidate immediately before feedback transport."""
+def dependency_candidate_digest(root, *, allowed_roots=None, denied_paths=()):
+    """Current content digest for declared project dependencies, including external local_ref trees."""
+    from .dependencies import declaration, inspect_dependencies
+    if declaration(root) is None:
+        return None
+    inspected = inspect_dependencies(
+        root,
+        allowed_roots=allowed_roots,
+        denied_paths=denied_paths,
+        check_imports=False,
+        check_environment=False,
+        allow_partial=True,
+    )
+    return inspected['digest']
+
+
+def feedback_current(root, options, author, *, allowed_roots=None, denied_paths=()):
+    """Recheck the original author, project source tree, and declared dependencies before feedback transport."""
+    from .dependencies import declaration
     from .source_snapshot import capture
     expected = options.get('author') or {}
     if any(expected.get(key) != author.get(key) for key in ('provider', 'session')):
@@ -119,7 +136,24 @@ def feedback_current(root, options, author):
     basis = options.get('candidate')
     if not isinstance(basis, dict):
         return False
-    return candidate_identity(capture(root, basis['watch'], exclude=basis['exclude'])) == basis['digest']
+    if candidate_identity(capture(root, basis['watch'], exclude=basis['exclude'])) != basis['digest']:
+        return False
+    try:
+        if 'dependencies_digest' in basis:
+            current_dep = dependency_candidate_digest(
+                root, allowed_roots=allowed_roots, denied_paths=denied_paths,
+            )
+            if current_dep != basis['dependencies_digest']:
+                return False
+        else:
+            config = declaration(root)
+            if config is not None and any(
+                item.get('source') == 'local_ref' for item in (config.get('packages') or {}).values()
+            ):
+                return False
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _static_review_observation(source, check, definitions, stage):
@@ -143,7 +177,8 @@ def _static_review_observation(source, check, definitions, stage):
 def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection=None,
                 auto_review=False, round=0, budget=None, reference=None, exclude=(),
                 reviewer=None, check_cancel=None, source_current=None, protected_violations=(),
-                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=None):
+                project_python=None, submission=None, on_review=None, inspect=True, on_budget=None, observations=None,
+                allowed_roots=None, denied_paths=()):
     """Finish one engineering interval and produce a durable, candidate-bound next action.
 
     ``author`` contains provider/session and completed/acknowledged/cleanup facts.
@@ -172,11 +207,12 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
     if inspect and (paths or want_review or protected_violations):
         try:
             check = check_project(root, paths=paths if 0 < len(paths) <= 256 else (),
-                                  reference=reference, exclude=exclude, include_hygiene=True)
+                                  reference=reference, exclude=exclude, include_hygiene=True,
+                                  python=project_python, allowed_roots=allowed_roots, denied_paths=denied_paths)
             definitions = check.get('definitions', ())
             receipt['checks'] = {key: check[key] for key in (
                 'status', 'native_flow', 'project_layout', 'catalog_id', 'rules_id',
-                'source_digest', 'source_count', 'check_digest', 'coverage') if key in check}
+                'source_digest', 'source_count', 'check_digest', 'coverage', 'project_dependencies') if key in check}
         except (OSError, ValueError, KeyError, RecursionError) as exc:
             incomplete = check_result([diagnostic('DF-01', '', str(exc), status='incomplete')], ())
             receipt['checks'] = dict(status='incomplete', native_flow=incomplete, project_layout=incomplete)
@@ -199,7 +235,8 @@ def assess_turn(root, *, author, goal, changes=(), prior_sources=None, selection
             receipt['review'] = review_project(root, goal=text, **selected,
                 paths=() if selected else tuple(prior or paths), prior_sources=None if selected else prior,
                 exclude=exclude, observations=observations, reviewer=reviewer, budget=budget,
-                check_cancel=check_cancel, on_budget=on_budget)
+                check_cancel=check_cancel, on_budget=on_budget,
+                allowed_roots=allowed_roots, denied_paths=denied_paths)
         except (OSError, ValueError, RecursionError) as exc:
             receipt['review'] = dict(status='incomplete', current=False, complete=False, findings=[],
                                     diagnostics=[dict(code=getattr(exc, 'code', 'inspection_incomplete'), detail=str(exc)[:2048])])
@@ -247,7 +284,8 @@ def receipt_summary(receipt):
 
 
 def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
-                    seconds=3600, review_seconds=REVIEW_SECONDS, resume=False):
+                    seconds=3600, review_seconds=REVIEW_SECONDS, resume=False, project_python=None,
+                    allowed_roots=None, denied_paths=()):
     """Drive the complete CLI engineering loop, persisting before every author send.
 
     The native author callback executes one harness interval. This function owns
@@ -330,7 +368,8 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
             source_dir = store.directory / ('sources-' + str(state['round']))
             if state['phase'] != 'assessing':
                 if state['phase'] == 'feedback_pending':
-                    if not feedback_current(root, state['feedback'], state['author']):
+                    if not feedback_current(root, state['feedback'], state['author'],
+                                            allowed_roots=allowed_roots, denied_paths=denied_paths):
                         state.update(status='incomplete', phase='finished', reason='修正反馈对应的源码或作者已变化。')
                         store.save(state)
                         break
@@ -357,8 +396,8 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 result = author(root, prompt, binding=binding, session=state['author'].get('session'),
                                 lease_fd=fd, deadline=state['deadline'], notify=notify, control_path=control_path)
                 state['author'] = result
-                apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
-                state['protected_violations'] = enforce_protected_files(root, guarded)
+                authorized_writes = apply_control_writes(root, control_path, state['id'] + '-' + str(state['round']), guarded)
+                state['protected_violations'] = enforce_protected_files(root, guarded, authorized=authorized_writes)
                 if not result.get('completed') or result['cleanup'] != 'complete':
                     state.update(phase='unknown' if state.get('delivery') == 'sending' else 'finished',
                                  status='incomplete', reason=result.get('reason', '作者回合未完成。'))
@@ -382,8 +421,26 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 prior[name] = dict(before=original, after_sha256=(after.get(name) or {}).get('sha256'))
             state['prior'] = prior
             identity = candidate_identity(after)
+            try:
+                dep_digest = dependency_candidate_digest(
+                    root, allowed_roots=allowed_roots, denied_paths=denied_paths,
+                )
+                dep_digest_valid = True
+            except (OSError, ValueError):
+                dep_digest = None
+                dep_digest_valid = False
+
             def current():
-                return candidate_identity(capture(root, watched)) == identity
+                if candidate_identity(capture(root, watched)) != identity:
+                    return False
+                if not dep_digest_valid:
+                    return False
+                try:
+                    return dependency_candidate_digest(
+                        root, allowed_roots=allowed_roots, denied_paths=denied_paths,
+                    ) == dep_digest
+                except (OSError, ValueError):
+                    return False
             review_deadline = min(state['deadline'], state.get('review_deadline', time.time() + state['budget']['seconds']))
             state['review_deadline'] = review_deadline
             state['budget'] = dict(state['budget'], seconds=max(0.0, review_deadline - time.time()))
@@ -404,7 +461,8 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 selection=options['selection'],
                 auto_review=options['auto_review'], round=state['round'], budget=state['budget'],
                 reviewer=review_once, source_current=current, protected_violations=state.get('protected_violations', ()),
-                on_budget=save_budget)
+                project_python=project_python, on_budget=save_budget,
+                allowed_roots=allowed_roots, denied_paths=denied_paths)
             state['budget'] = dict(receipt['budget'])
             state['history'].append(receipt)
             state['status'] = receipt['status']
@@ -413,7 +471,7 @@ def run_development(store, *, goal, binding, author, reviewer, auto_review=True,
                 state['phase'] = 'finished'
                 store.save(state)
                 break
-            feedback['candidate'] = dict(watch=watched, exclude=[], digest=identity)
+            feedback['candidate'] = dict(watch=watched, exclude=[], digest=identity, dependencies_digest=dep_digest)
             # Store a bounded next action before calling the author again.
             state.update(phase='feedback_pending', feedback=feedback, round=feedback['round'])
             store.save(state)

@@ -7,7 +7,8 @@ import threading
 import time
 
 import pytest
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.api import WorkspaceServer
 from test_forge_runs import base, root, wait
 from test_forge_runtime_core_flow import assert_single_run, submit_run

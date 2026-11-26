@@ -2,7 +2,8 @@
 import json
 from click.testing import CliRunner
 from demiflow.cli import main
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from test_forge_runs import base, root
 
 

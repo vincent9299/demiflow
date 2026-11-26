@@ -472,7 +472,9 @@ def test_workbench_bridge_readable_after_run_exit(tmp_path, pidfds, monkeypatch)
     workbench binds. An in-run-only assertion cannot catch carrier pruning.
     """
     import test_upgrade_business_acceptance as acc
-    from demiflow.workbench.runs import facts, manager as runs
+    from demiflow.forge.runs import manager as runs
+
+    from demiflow.workbench.runs import facts
 
     monkeypatch.setenv("DEMIFLOW_FORGE_DOMAIN", str(tmp_path / "runtime-domain"))
     fixture = acc.build_owned_fixture(tmp_path, scenario="workbench")

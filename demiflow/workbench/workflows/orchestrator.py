@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from demiflow.forge.schema import ForgeError
 from demiflow.forge.workflow import resolve_node_overrides
-from demiflow.workbench.process import process_identity
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.process import process_identity
+from demiflow.forge.runs import manager as runs
 from demiflow.workbench.workflows import store
 from demiflow.workbench.workflows.resolver import build_target_authority
 

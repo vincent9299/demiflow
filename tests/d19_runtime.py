@@ -29,7 +29,7 @@ def _write(path, value):
 @contextmanager
 def private_runtime(tree, workspace, evidence):
     """Start only the production controller and bind its original PID to Web."""
-    from demiflow.workbench.process import process_identity
+    from demiflow.forge.process import process_identity
     from demiflow.workbench.analysis.trusted_local import default_limits
     root = Path(tempfile.mkdtemp(prefix='demiflow-d19-kernel-', dir='/tmp'))
     root.chmod(0o700)

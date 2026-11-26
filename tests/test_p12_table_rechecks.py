@@ -7,8 +7,9 @@ from demiflow.forge.platform import content_digest
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench import project_operations
 from demiflow.workbench.projects import workspace as ws
-from demiflow.workbench.runs import manager as runs
-from demiflow.workbench.table_bindings import make_resolver
+from demiflow.forge.runs import manager as runs
+
+from demiflow.forge.table_bindings import make_resolver
 from demiflow.workbench.analysis import catalog_versions, source_query, media_source_export, web_sources
 from test_forge_workspace import demo, isolated
 from test_forge_analysis_media_source_export import declared, fixed

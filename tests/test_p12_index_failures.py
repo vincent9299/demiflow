@@ -6,8 +6,11 @@ import pytest
 
 from demiflow.forge import operation_budget
 from demiflow.workbench import directory_operations
-from demiflow.workbench.projects import index, workspace as ws
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge import index
+
+from demiflow.workbench.projects import workspace as ws
+from demiflow.forge.runs import manager as runs
+
 from test_forge_index import root, report
 
 

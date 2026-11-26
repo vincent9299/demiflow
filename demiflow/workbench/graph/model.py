@@ -275,7 +275,7 @@ def get(root, *, basis_kind, entry=None, params=None, report_digest=None,
         else:
             if not run_id or report_digest is not None or type(attempt) is not int:
                 raise ForgeError('Run graph requires an exact run and attempt', code='invalid_request')
-            from demiflow.workbench.runs import manager as runs
+            from demiflow.forge.runs import manager as runs
             run = runs.show(root, run_id, include_report=True, attempt=attempt,compact=True)
             if run['attempt'] != attempt:
                 raise ForgeError('Run attempt differs', code='conflict')
@@ -512,7 +512,7 @@ def bound_source(root, binding, node_id, *, include_parameters=True, logical_nod
         report = ws.load_report(root, binding['basis_digest'])
         digest = report['digest']
     else:
-        from demiflow.workbench.runs import manager as runs
+        from demiflow.forge.runs import manager as runs
         target, value = runs._load(root, binding['run_id'], detail='identity', attempt=binding['attempt'])
         if value['state']['attempt'] != binding['attempt']:
             raise ForgeError('Run attempt differs', code='conflict')

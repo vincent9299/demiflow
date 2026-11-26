@@ -4,7 +4,7 @@ import pytest
 
 from demiflow.forge.pipeline_check import check_project
 from demiflow.forge.project import initialize_project, register_flow
-from demiflow.workbench.conversations.context import _run_project_layout
+from demiflow.forge.bridge.tools import run_project_layout as _run_project_layout
 
 
 def _make_clean_project(root):

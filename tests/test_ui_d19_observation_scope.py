@@ -7,7 +7,9 @@ import sqlite3
 import pytest
 
 from demiflow.execution.journal.run_journal import _node_document
-from demiflow.workbench.runs import facts, manager, view
+from demiflow.forge.runs import manager
+
+from demiflow.workbench.runs import facts, view
 from demiflow.workbench.graph import model
 
 SCOPE = ('plan_id', 'dag_id', 'plan_revision', 'occurrence_id')

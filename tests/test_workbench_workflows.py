@@ -19,7 +19,8 @@ from demiflow.forge.platform import content_digest
 from demiflow.forge.project import initialize_project, register_flow
 from demiflow.forge.workflow import WORKFLOW_FORMAT
 from demiflow.workbench.projects import registry as console
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.workflows import manager as wf_mgr
 from demiflow.workbench.workflows import store as wf_store
 

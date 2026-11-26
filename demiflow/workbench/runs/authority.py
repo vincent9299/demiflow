@@ -1,36 +1,34 @@
-"""Trusted local and registry-backed run authorities, without WebService types.
-
-Registry mutation and admission commit use the same nonblocking lock. Runtime
-locks precede this guard; a parent must never hold it while waiting on an
-inspector. Bootstrap data is host-generated, separate from business arguments.
-It is not an authentication mechanism against another process of the same OS
-user. Single-workspace deployments retain their fixed service configuration.
-"""
+"""Workbench registry-backed WebAuthority built on Forge's run authority protocol."""
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from demiflow.forge.runs.authority import (
+    ACTIONS,
+    LocalAuthority,
+    VERSION,
+    from_bootstrap as _forge_from_bootstrap,
+    register_bootstrap_kind,
+)
 from demiflow.forge.schema import ForgeError
-
-VERSION = 'demiflow_run_authority_v1'
-ACTIONS = {'read', 'run_submit', 'run_control', 'attach'}
 
 
 @dataclass(frozen=True)
-class LocalAuthority:
-    root: str
+class WorkbenchLocalAuthority(LocalAuthority):
+    """Trusted-local Workbench CLI authority that uses Workbench's worker for graph source materials."""
 
-    def require(self, root, action):
-        if str(Path(root).absolute()) != self.root or action not in ACTIONS:
-            raise PermissionError('Run authority target or action differs')
+    def inspector_operation(self, name, root, *, _pass_fds=(), _authority=None, _source_modules=None, _dependencies=None, **arguments):
+        from demiflow.workbench.worker import operation
+        return operation(
+            name, root, _pass_fds=_pass_fds, _authority=_authority,
+            _source_modules=_source_modules, _dependencies=_dependencies, **arguments,
+        )
 
-    @contextmanager
-    def guard(self, root, action):
-        self.require(root, action)
-        yield
 
-    def bootstrap(self):
-        return dict(format=VERSION, kind='trusted_local', root=self.root)
+def local_authority(root: Path, python: Path | None = None, read_roots: tuple[Path, ...] = ()):
+    py = str(python) if python is not None else None
+    rr = tuple(str(Path(p).resolve()) for p in read_roots) if read_roots else None
+    return WorkbenchLocalAuthority(str(Path(root).absolute()), python=py, read_roots=rr)
 
 
 @dataclass(frozen=True)
@@ -73,17 +71,26 @@ class WebAuthority:
                 self.require(root, action)
                 yield
 
+    def resolve_dependencies(self, root, *, python=None, verify_files=True, require_environment=False):
+        from demiflow.workbench.projects.registry import project_dependencies
+        return project_dependencies(
+            root, authority=self.bootstrap(), python=python,
+            verify_files=verify_files, require_environment=require_environment,
+        )
+
+    def inspector_operation(self, name, root, *, _pass_fds=(), _authority=None, _source_modules=None, _dependencies=None, **arguments):
+        from demiflow.workbench.worker import operation
+        return operation(
+            name, root, _pass_fds=_pass_fds, _authority=_authority,
+            _source_modules=_source_modules, _dependencies=_dependencies, **arguments,
+        )
+
     def bootstrap(self):
         return dict(format=VERSION, kind='web', root=self.root, workspace_id=self.workspace_id,
                     registry=self.registry, action=self.action, ceiling=self.ceiling, single_grant=self.single_grant)
 
 
-def from_bootstrap(value, root):
-    """Closed internal protocol. No callable, import path or client grant flag."""
-    if type(value) is not dict or value.get('format') != VERSION or value.get('root') != str(Path(root).absolute()):
-        raise ForgeError('Missing or invalid trusted run bootstrap', code='operation_rejected')
-    if value.get('kind') == 'trusted_local' and set(value) == {'format', 'kind', 'root'}:
-        return LocalAuthority(value['root'])
+def _from_web_bootstrap(value, root):
     keys = {'format', 'kind', 'root', 'workspace_id', 'registry', 'action', 'ceiling', 'single_grant'}
     if (set(value) != keys or value['kind'] != 'web' or value['action'] not in ACTIONS
             or type(value['ceiling']) is not bool or type(value['single_grant']) is not bool
@@ -93,6 +100,16 @@ def from_bootstrap(value, root):
     from demiflow.workbench.projects.registry import identity
     identity(value['workspace_id'])
     return WebAuthority(**{key: value[key] for key in keys - {'format', 'kind'}})
+
+
+register_bootstrap_kind('web', _from_web_bootstrap)
+
+
+def from_bootstrap(value, root):
+    auth = _forge_from_bootstrap(value, root)
+    if type(auth) is LocalAuthority:
+        return WorkbenchLocalAuthority(auth.root, python=auth.python, read_roots=auth.read_roots)
+    return auth
 
 
 def for_http(server, path, root, action):

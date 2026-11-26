@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import stat
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.forge.io import atomic_write_text
 from demiflow.forge.io import no_symlinks
 from demiflow.workbench.analysis import contracts as c

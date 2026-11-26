@@ -5,7 +5,8 @@ import time
 
 import lance
 import pytest
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 
 

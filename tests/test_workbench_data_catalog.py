@@ -54,7 +54,7 @@ def test_discovered_project_and_external_lance_and_installed_modules(native_proj
 
 def test_cell_cli_uses_turn_channel_and_claims_once(tmp_path):
     from demiflow.workbench.conversations.execution import runtime_paths
-    from demiflow.workbench.conversations.sandbox import SandboxSpec, launch_sandbox
+    from demiflow.forge.sandbox.sandbox import SandboxSpec, launch_sandbox
     root=tmp_path/'project'; root.mkdir()
     home=tmp_path/'home';home.mkdir(mode=0o700)
     store=Store(tmp_path/'state',Limits(control_reserve=4096),initialize=True)

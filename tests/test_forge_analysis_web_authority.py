@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.projects import registry as console
 from demiflow.workbench.analysis.web_service import WebService
 from demiflow.workbench.analysis.web_service import credentials

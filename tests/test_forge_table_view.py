@@ -159,7 +159,8 @@ def test_table_versions_list_registered_facts_and_preview_without_moving_binding
 
 def test_table_versions_run_product_is_a_sealed_single_version(isolated, tmp_path, monkeypatch):
     import time
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'g1-runtime-domain'))
     root = isolated
     prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')

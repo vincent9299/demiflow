@@ -9,7 +9,7 @@ import sys
 import time
 from types import SimpleNamespace
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.analysis import contracts as c
 from demiflow.workbench.analysis import leases
 from demiflow.workbench.analysis import priority_control

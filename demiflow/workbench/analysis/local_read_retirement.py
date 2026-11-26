@@ -11,7 +11,7 @@ from pathlib import Path
 import re
 import stat
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.resources.process_observation import unit_stopped
 from demiflow.forge.io import no_symlinks
 from demiflow.workbench.analysis import contracts as c

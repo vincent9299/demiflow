@@ -10,7 +10,8 @@ import pytest
 from test_forge_panel_browser import panel, open_panel, demo, isolated
 from demiflow.workbench.projects import workspace as ws
 from demiflow.workbench import project_operations as project_ops
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 
 
 def test_saved_changes_refresh_overview_without_host_or_writes(panel):

@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.projects.registry import identity as project_identity
 from demiflow.forge.io import atomic_write_json
 from demiflow.forge.io import no_symlinks

@@ -106,7 +106,7 @@ def test_inline_prompt_accepts_bounded_anchors_and_rejects_recursive_input(candi
 
 
 def test_project_and_product_check_same_native_budget_fields(candidate):
-    from demiflow.workbench.pipeline_policy import limits_with
+    from demiflow.forge.pipeline_policy import limits_with
     manifest = candidate / 'workspace.json'
     control = project.load_project(candidate)[1]
     control['budgets'] = {'typo': 1}

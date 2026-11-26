@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.analysis import leases
 from demiflow.workbench.analysis.runtime import Runtime
 from demiflow.forge.schema import ForgeError

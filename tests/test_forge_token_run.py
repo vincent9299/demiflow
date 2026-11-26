@@ -1,7 +1,8 @@
 """The sealed worker can count with a custom local encoding, fully offline."""
 import pytest
 
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 from test_forge_runs import base, root, custom, execute, rows
 from test_map_prompt_async import server

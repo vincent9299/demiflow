@@ -16,6 +16,9 @@ from test_forge_development_runtime import combined_configuration
 def test_restricted_cli_reads_external_input_without_user_path_or_registration(tmp_path, monkeypatch):
     root = tmp_path / "orders"
     root.mkdir()
+    # Enable scoped reads on this project so native CLI cannot read host paths outside root
+    # while the trusted read_input bridge still grants scoped read-only access to external inputs.
+    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n', encoding='utf-8')
     external = root.with_name(root.name + '-inputs')
     external.mkdir()
     try:
@@ -75,7 +78,7 @@ def test_notebook_turn_generates_a_cell_with_read_only_project_access(tmp_path,m
         service=server.development
         assert service.capabilities(workspace,root)['notebook_cells']
         sid=service.create_project(workspace,root,'create','codex',new_conversation=True)['id']
-        args=(workspace,root,sid,'cell-1',0,'generate notebook widget fixture')
+        args=(workspace,root,sid,'cell-1',0,f'generate notebook widget fixture {root / "notes.py"}')
         started=service.start_project(*args,operation='notebook_cell')
         assert service.start_project(*args,operation='notebook_cell')['id']==started['id']
         saved=wait_turn(service,started['id'])

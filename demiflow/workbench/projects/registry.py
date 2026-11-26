@@ -85,8 +85,37 @@ def notebook_sandbox(item):
     return {'mode': 'off', 'write_paths': []}
 
 
+def validate_read_roots(value, *, project_root=None):
+    """Validate optional user-granted external read directories for local_ref / vendor sources."""
+    if value is None:
+        return []
+    if type(value) not in (list, tuple) or len(value) > 32:
+        raise ForgeError('授权只读目录最多 32 项。', code='invalid_request')
+    cleaned = []
+    proj = Path(project_root).resolve() if project_root else None
+    for item in value:
+        if type(item) is not str or not item.strip() or len(item.encode('utf-8')) > 2048 or any(ord(c) < 32 for c in item):
+            raise ForgeError('授权只读目录必须是规范绝对路径。', code='invalid_request')
+        raw = item.strip()
+        if len(raw) > 1:
+            raw = raw.rstrip('/')
+        p = Path(raw)
+        if not p.is_absolute() or str(p) != raw or '..' in p.parts or p == Path('/'):
+            raise ForgeError('授权只读目录必须是具体的绝对路径：' + raw, code='invalid_request')
+        if proj is not None and (p == proj or proj.is_relative_to(p)):
+            raise ForgeError('授权只读目录不能是项目本身或其祖先目录：' + raw, code='invalid_request')
+        if raw not in cleaned:
+            cleaned.append(raw)
+    return cleaned
+
+
 def dev_network(item):
     return bool(item.get('dev_network', False)) if isinstance(item, dict) else False
+
+
+def read_roots(item):
+    raw = item.get('read_roots') if isinstance(item, dict) else None
+    return list(raw) if isinstance(raw, list) else []
 
 
 def load_registry(path):
@@ -100,15 +129,18 @@ def load_registry(path):
     for key, item in value['projects'].items():
         identity(key)
         fields = {'root','name','allow_runs'} if value['format']==FORMAT else {'root','name','permissions'}
-        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox', 'dev_network', 'dependency_lock'} != fields:
+        # Tolerate legacy `dependency_lock` field on read for backward compatibility.
+        if type(item) is not dict or set(item) - {'python', 'notebook_sandbox', 'dev_network', 'read_roots', 'dependency_lock'} != fields:
             raise ForgeError('Invalid console project')
         if 'python' in item:
             py = item['python']
             if py != '' and (type(py) is not str or not Path(py).is_absolute() or str(Path(py)) != py or '..' in Path(py).parts):
                 raise ForgeError('Invalid project python configuration')
+        if 'read_roots' in item:
+            validate_read_roots(item['read_roots'])
         if 'dependency_lock' in item and (
                 type(item['dependency_lock']) is not str or not re.fullmatch(r'[0-9a-f]{64}', item['dependency_lock'])):
-            raise ForgeError('Invalid approved dependency lock digest')
+            raise ForgeError('Invalid legacy dependency lock digest')
         if 'notebook_sandbox' in item:
             validate_notebook_sandbox(item['notebook_sandbox'])
         if 'dev_network' in item and type(item['dev_network']) is not bool:
@@ -226,6 +258,8 @@ def projects(value):
         row['python'] = item.get('python')
         row['notebook_sandbox'] = notebook_sandbox(item)
         row['dev_network'] = dev_network(item)
+        row['read_roots'] = read_roots(item)
+        row.pop('dependency_lock', None)
         try:
             resolve_workspace(value, key)
             row['status'] = 'available'
@@ -326,7 +360,7 @@ def set_permissions(path, workspace_id, *, expected, run_submit, run_control, at
 
 
 def set_python(path, workspace_id, *, expected, python):
-    """Configure optional per-project read-only Python interpreter for dev sandbox testing."""
+    """Configure optional per-project explicit Python interpreter."""
     identity(workspace_id)
     cleaned = validate_python(python)
     with _locked(path) as path:
@@ -335,8 +369,7 @@ def set_python(path, workspace_id, *, expected, python):
             raise ForgeError('Registry changed before python environment update', code='conflict')
         if workspace_id not in value['projects']:
             raise ForgeError('Workspace is not registered', code='not_found')
-        if cleaned != value['projects'][workspace_id].get('python'):
-            value['projects'][workspace_id].pop('dependency_lock', None)
+        value['projects'][workspace_id].pop('dependency_lock', None)
         if cleaned is None:
             value['projects'][workspace_id].pop('python', None)
         else:
@@ -345,65 +378,86 @@ def set_python(path, workspace_id, *, expected, python):
     return dict(status='updated', workspace_id=workspace_id, python=cleaned, digest=content_digest(value))
 
 
-def project_dependencies(root, *, authority=None, project=None, verify_files=True):
-    """Resolve trusted local or registry-approved dependency input before use."""
-    from demiflow.forge.dependencies import binding, declaration
-
-    if authority is not None and authority.get('kind') == 'web':
-        registry = authority.get('registry')
-        project = load_registry(registry)['projects'].get(authority['workspace_id'], {}) if registry else {}
-    if project is None:
-        return binding(root, verify_files=verify_files)
-    if project.get('root') is not None and Path(project['root']).absolute() != Path(root).absolute():
-        raise ForgeError('Dependency approval belongs to another project', code='conflict')
-    if declaration(root) is not None and not project.get('python'):
-        raise ForgeError('Configure an explicit project Python before admitting dependencies', code='operation_rejected')
-    return binding(root, approval=project.get('dependency_lock') or '', python=project.get('python'),
-                   verify_files=verify_files)
-
-
-def dependency_scope(root, *, authority=None, project=None):
-    """Give a Forge authoring use case the approval provided by its Workbench host."""
-    from contextlib import nullcontext
-    from demiflow.forge.dependencies import host_approval
-
-    if project is None and (authority is None or authority.get('kind') != 'web'):
-        return nullcontext()
-    locked = project_dependencies(root, authority=authority, project=project, verify_files=False)
-    return host_approval(root, locked['digest'], locked['environment']['interpreter']['path']) if locked else host_approval(root, None, None)
-
-
-def approve_dependencies(path, workspace_id, *, expected, digest):
-    """Approve the supplied candidate digest for the registered project Python."""
-    from demiflow.forge.dependencies import binding, probe_environment
+def set_read_roots(path, workspace_id, *, expected, read_roots):
+    """Configure optional user-granted external read directories for a registered project."""
     identity(workspace_id)
-    value = load_registry(path)
-    if content_digest(value) != expected:
-        raise ForgeError('Registry changed before dependency approval', code='conflict')
-    item = value['projects'].get(workspace_id)
-    if item is None:
-        raise ForgeError('Workspace is not registered', code='not_found')
-    if digest is not None:
-        if not item.get('python'):
-            raise ForgeError('An explicit registered project Python is required')
-        locked = binding(item['root'], approval=digest, python=item['python'], check_imports=True)
-        if locked is None:
-            raise ForgeError('The project has no dependency lock to approve')
-        runtime = locked['environment']['interpreter']
-        if probe_environment(item['python'], locked, expected=runtime) != locked['environment']:
-            raise ForgeError('Project Python environment differs from its lock', code='conflict')
     with _locked(path) as path:
         value = load_registry(path)
         if content_digest(value) != expected:
-            raise ForgeError('Registry changed before dependency approval', code='conflict')
-        current = value['projects'][workspace_id]
-        if digest is None:
-            current.pop('dependency_lock', None)
+            raise ForgeError('Registry changed before read_roots update', code='conflict')
+        if workspace_id not in value['projects']:
+            raise ForgeError('Workspace is not registered', code='not_found')
+        item = value['projects'][workspace_id]
+        cleaned = validate_read_roots(read_roots, project_root=item['root'])
+        item.pop('dependency_lock', None)
+        if cleaned:
+            item['read_roots'] = cleaned
         else:
-            current['dependency_lock'] = digest
+            item.pop('read_roots', None)
         ws.write_control(path, value, expected=expected)
-    return dict(status='approved' if digest is not None else 'revoked', workspace_id=workspace_id,
-                dependency_lock=digest, digest=content_digest(value))
+    return dict(status='updated', workspace_id=workspace_id, read_roots=cleaned, digest=content_digest(value))
+
+
+def project_python_and_scope(root, *, authority=None, project=None, extra_read_roots=(), private=()):
+    """Resolve explicit project Python and caller-granted external directory scope for Forge consumers."""
+    root_path = Path(root).absolute()
+    resolved_project = project
+    if authority is not None and authority.get('kind') == 'web':
+        reg_path = authority.get('registry')
+        if reg_path:
+            resolved_project = load_registry(reg_path)['projects'].get(authority['workspace_id'], {})
+            private = (*private, reg_path)
+    if resolved_project is not None and resolved_project.get('root') is not None:
+        if Path(resolved_project['root']).absolute() != root_path:
+            raise ForgeError('Project scope belongs to another workspace', code='conflict')
+    python = (resolved_project or {}).get('python') or None
+    if python is None and authority is not None and authority.get('kind') == 'trusted_local':
+        python = authority.get('python') or None
+    if python == '':
+        python = None
+    if resolved_project is None:
+        # Trusted local (non-registry) invocation: allow caller-provided extra roots or unrestricted local read.
+        allowed = tuple(str(Path(p).resolve()) for p in extra_read_roots if p) if extra_read_roots else None
+        return python, allowed
+    granted: list[str] = [str(root_path.resolve())]
+    for raw in (*(resolved_project.get('read_roots') or ()), *extra_read_roots):
+        if raw:
+            p = ws.scoped_data_location(root_path, raw, private=private)
+            if p is not None and str(p) not in granted:
+                granted.append(str(p))
+    try:
+        _, workspace = ws.load_workspace_control(root_path)
+        for loc in (workspace.get('locations') or {}).values():
+            if isinstance(loc, dict) and not loc.get('writable', False) and loc.get('root'):
+                p = ws.scoped_data_location(root_path, loc['root'], private=private)
+                if p is not None and str(p) not in granted:
+                    granted.append(str(p))
+    except Exception:
+        pass
+    return python, tuple(granted)
+
+
+def project_dependencies(root, *, authority=None, project=None, python=None, verify_files=True,
+                         require_environment=False, extra_read_roots=(), confined=None):
+    """Resolve live validated project dependencies directly from pyproject.toml (no lock/approval)."""
+    from demiflow.forge.dependencies import binding, declaration
+    resolved_py, allowed_roots = project_python_and_scope(
+        root, authority=authority, project=project, extra_read_roots=extra_read_roots,
+    )
+    effective_py = str(python) if python else resolved_py
+    if declaration(root) is None:
+        return None
+    if not effective_py:
+        raise ForgeError('Configure an explicit project Python before admitting dependencies', code='operation_rejected')
+    return binding(
+        root,
+        python=effective_py,
+        allowed_roots=allowed_roots,
+        verify_files=verify_files,
+        require_python=True,
+        require_environment=require_environment,
+        confined=confined,
+    )
 
 
 def set_notebook_sandbox(path, workspace_id, *, expected, mode, write_paths=()):
@@ -490,17 +544,6 @@ def register(forge):
     @click.pass_obj
     def update_permissions(registry, workspace_id, expected, submit, control, attach):
         output(lambda:set_permissions(registry,workspace_id,expected=expected,run_submit=submit,run_control=control,attach=attach),True)
-
-    @console.command('approve-dependencies')
-    @click.argument('workspace_id')
-    @click.option('--expected', required=True)
-    @click.option('--digest')
-    @click.option('--revoke', is_flag=True)
-    @click.pass_obj
-    def approve_project_dependencies(registry, workspace_id, expected, digest, revoke):
-        if bool(digest) == revoke:
-            raise click.UsageError('Supply one of --digest or --revoke')
-        output(lambda: approve_dependencies(registry, workspace_id, expected=expected, digest=digest), True)
 
     @console.command('serve')
     @click.option('--port', type=click.IntRange(0, 65535), default=0)

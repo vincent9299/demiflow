@@ -8,7 +8,7 @@ from demiflow.data.sources import MaterializedSource
 from demiflow.data.runtime_contract import RuntimeContractError
 from demiflow.execution.pipeline.checked import CheckedExecution
 from demiflow.execution.executors.local import LocalDatasetExecutor
-from demiflow.workbench.runs.manager import DEFAULT_LIMITS
+from demiflow.forge.runs.manager import DEFAULT_LIMITS
 from demiflow.forge.schema import ForgeError
 from demiflow.forge.project_bindings import resolve_flow_resources
 

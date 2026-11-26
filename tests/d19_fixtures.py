@@ -347,7 +347,8 @@ def _create_real_run(root: Path, producer_tree: Path | None = None) -> dict:
         script = """
 import json, pathlib, sys, time, subprocess
 import demiflow
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.projects import workspace as ws
 tree, root = map(pathlib.Path, sys.argv[1:])
 assert pathlib.Path(demiflow.__file__).resolve().is_relative_to(tree)
@@ -383,7 +384,8 @@ print(json.dumps(dict(run_id=prepared['run_id'], attempt=run['attempt'], status=
                                      params=f'flows/select_{variant}.json')
             assert report['status'] == 'checked', report
         return facts
-    from demiflow.workbench.runs import manager as runs
+    from demiflow.forge.runs import manager as runs
+
     prepared = runs.prepare(root, 'flows/questions.py:select', params='flows/select_a.json')
     runs.start(root, prepared['run_id'], expected=prepared['digest'])
     deadline = time.monotonic() + 120

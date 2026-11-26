@@ -16,7 +16,7 @@ import pytest
 
 from demiflow.workbench.analysis.runtime import Runtime
 from demiflow.workbench.analysis.watchdog import JobWatch
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.forge.schema import ForgeError
 
 ID = 'j' + 'a'*32

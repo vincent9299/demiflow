@@ -16,7 +16,7 @@ import urllib.request
 
 import pytest
 
-from demiflow.workbench.process import process_identity
+from demiflow.forge.process import process_identity
 from demiflow.workbench.conversations import http as routes
 from demiflow.workbench.conversations.common import root_identity
 from demiflow.workbench.conversations.common import wire

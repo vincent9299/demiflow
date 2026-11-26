@@ -7,7 +7,8 @@ import pytest
 
 from demiflow.forge.project import register_flow
 from demiflow.workbench.graph.model import get
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.runs.view import snapshot
 from test_forge_runs import base, execute, root
 from test_training_domain import setup_request

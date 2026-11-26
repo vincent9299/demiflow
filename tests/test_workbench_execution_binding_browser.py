@@ -29,7 +29,8 @@ from playwright.sync_api import expect
 
 import demiflow
 from demiflow.workbench.graph import model
-from demiflow.workbench.runs import manager as runs
+from demiflow.forge.runs import manager as runs
+
 from demiflow.workbench.runs import facts
 from test_forge_workspace import demo, isolated
 from test_forge_markdown_reading import browser

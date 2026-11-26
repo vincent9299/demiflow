@@ -14,8 +14,59 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 WORKBENCH = REPO / 'demiflow/workbench'
+FORGE_RUNS = REPO / 'demiflow/forge/runs'
+HOST_CONSUMERS = (WORKBENCH, FORGE_RUNS)
+FORGE_HOST_FILES = (
+    REPO / 'demiflow/forge/pipeline_policy.py',
+    REPO / 'demiflow/forge/table_bindings.py',
+    REPO / 'demiflow/forge/host_partition.py',
+    REPO / 'demiflow/forge/process.py',
+    REPO / 'demiflow/forge/index.py',
+    REPO / 'demiflow/forge/readonly_guard.py',
+)
 HOST = REPO / 'demiflow/execution/host'
 SURFACE = ast.literal_eval(ast.parse((HOST / '_surface.py').read_text()).body[1].value)
+
+
+# Exact minimal independent-import allowlist for Forge's standalone run inspector
+# (strictly narrower than workbench/worker.py — e.g. NO Catalog access).
+FORGE_INSPECTOR_PATH = 'demiflow/forge/runs/inspector.py'
+FORGE_INSPECTOR_IMPORTS = {
+    'demiflow.errors': {'DemiflowError', 'ExecutionConflict'},
+    'demiflow.lance': {'preview'},
+}
+FORGE_INSPECTOR_MODULE_MEMBERS = {
+    'demiflow.lance.preview': {'snapshot_metadata'},
+}
+
+
+def _surface_path(path):
+    """Map ONLY files moved 1-to-1 from workbench/runs -> forge/runs (never duplicate an existing file)."""
+    text = str(path)
+    if text.startswith('demiflow/forge/runs/') and text != FORGE_INSPECTOR_PATH:
+        old = 'demiflow/workbench/runs/' + text.removeprefix('demiflow/forge/runs/')
+        if not (REPO / old).exists():
+            return old
+    return text
+
+
+def _actual_path(path):
+    text = str(path)
+    if (REPO / text).is_file():
+        return text
+    if text.startswith('demiflow/workbench/runs/'):
+        return 'demiflow/forge/runs/' + text.removeprefix('demiflow/workbench/runs/')
+    return text
+
+
+def _surface_module(name):
+    if name.startswith('demiflow.forge.runs.'):
+        return 'demiflow.workbench.runs.' + name.removeprefix('demiflow.forge.runs.')
+    return name
+
+
+def _host_consumer_files():
+    return [*(path for base in HOST_CONSUMERS for path in sorted(base.rglob('*.py'))), *FORGE_HOST_FILES]
 
 
 def _module(path):
@@ -48,8 +99,13 @@ def _import_errors(tree, path):
         side = module.removeprefix('demiflow.execution.host.')
         if side in SURFACE['exports'] and name in SURFACE['exports'][side]:
             continue
+        if str(path) == FORGE_INSPECTOR_PATH:
+            if name in FORGE_INSPECTOR_IMPORTS.get(module, ()):
+                continue
+            errors.append((node.lineno, 'unapproved import', module, name))
+            continue
         allowed = SURFACE['independent_imports'].get(module, {}).get(name, [])
-        if str(path) in allowed:
+        if str(path) in allowed or _surface_path(path) in allowed:
             continue
         errors.append((node.lineno, 'unapproved import', module, name))
     return errors
@@ -58,16 +114,16 @@ def _import_errors(tree, path):
 class Uses(ast.NodeVisitor):
     """Small origin interpreter, deliberately scoped to approved platform types."""
     def __init__(self, tree, path):
-        self.path, self.function = str(path), '<module>'
+        self.path, self.function = _surface_path(path), '<module>'
         self.env = {alias: SURFACE['reexport_origins'].get(
-                        module if name == '<module>' else module + '.' + name,
-                        module if name == '<module>' else module + '.' + name)
+                        _surface_module(module if name == '<module>' else module + '.' + name),
+                        _surface_module(module if name == '<module>' else module + '.' + name))
                     for _, module, name, alias in _imports(tree, path)}
         self.parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
         self.errors = []
         for function in ast.walk(tree):
             if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                self.env.setdefault(function.name, _module(path) + '.' + function.name)
+                self.env.setdefault(function.name, _surface_module(_module(path)) + '.' + function.name)
                 results = [self.origin(n.value) for n in ast.walk(function)
                            if isinstance(n, ast.Return) and n.value is not None]
                 if results and len(set(results)) == 1 and results[0] in SURFACE['objects']:
@@ -200,8 +256,14 @@ class Uses(ast.NodeVisitor):
     def visit_Attribute(self, node):
         base = self.origin(node.value)
         module_members = SURFACE['independent_module_members'].get(base)
-        if module_members is not None and node.attr not in module_members.get(self.path, []):
-            self.problem(node, 'unapproved independent module member: ' + node.attr)
+        if module_members is not None:
+            allowed_members = (
+                FORGE_INSPECTOR_MODULE_MEMBERS.get(base, ())
+                if self.path == FORGE_INSPECTOR_PATH
+                else module_members.get(self.path, ())
+            )
+            if node.attr not in allowed_members:
+                self.problem(node, 'unapproved independent module member: ' + node.attr)
         base = SURFACE['result_origins'].get(base, base)
         if base in SURFACE['record_fields'] and node.attr != 'get':
             self.problem(node, 'native projection requires a named field: ' + node.attr)
@@ -258,7 +320,7 @@ def _member_errors(tree, path):
 
 def test_workbench_imports_are_classified_by_exact_surface_and_consumer():
     errors = []
-    for path in sorted(WORKBENCH.rglob('*.py')):
+    for path in _host_consumer_files():
         relative = str(path.relative_to(REPO))
         tree = ast.parse(path.read_text(), filename=relative)
         errors.extend((relative, *error) for error in _import_errors(tree, relative))
@@ -267,7 +329,7 @@ def test_workbench_imports_are_classified_by_exact_surface_and_consumer():
 
 def test_approved_objects_do_not_leak_members_or_opaque_configuration():
     errors = []
-    for path in sorted(WORKBENCH.rglob('*.py')):
+    for path in _host_consumer_files():
         relative = str(path.relative_to(REPO))
         tree = ast.parse(path.read_text(), filename=relative)
         errors.extend((relative, *error) for error in _member_errors(tree, relative))
@@ -379,7 +441,7 @@ def test_native_storage_layout_is_not_reinterpreted_in_workbench():
     forbidden = {'run.sqlite', 'run.sqlite-wal', 'run.sqlite-journal', '_demiflow_commit',
                  'runtime_sources', 'runtime_actions', 'runtime_commits'}
     errors = []
-    for path in WORKBENCH.rglob('*.py'):
+    for path in _host_consumer_files():
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in forbidden:
                 errors.append((str(path.relative_to(REPO)), node.lineno, node.value))
@@ -388,7 +450,7 @@ def test_native_storage_layout_is_not_reinterpreted_in_workbench():
 
 def test_every_index_export_has_an_actual_workbench_consumer():
     used = {side: set() for side in SURFACE['exports']}
-    for path in WORKBENCH.rglob('*.py'):
+    for path in _host_consumer_files():
         for _, module, name, _ in _imports(ast.parse(path.read_text()), str(path.relative_to(REPO))):
             side = module.removeprefix('demiflow.execution.host.')
             if side in used:
@@ -397,8 +459,8 @@ def test_every_index_export_has_an_actual_workbench_consumer():
 
 
 @pytest.mark.parametrize('path,function,statement', [
-    ('demiflow/workbench/runs/requests.py', '_ready', 'journal.claim_execution({}, "unexpected")'),
-    ('demiflow/workbench/runs/native_stages.py', 'admit_prepared', 'journal.claim_execution({}, "unexpected")'),
+    ('demiflow/forge/runs/requests.py', '_ready', 'journal.claim_execution({}, "unexpected")'),
+    ('demiflow/forge/runs/native_stages.py', 'admit_prepared', 'journal.claim_execution({}, "unexpected")'),
 ])
 def test_real_journal_consumers_cannot_hide_private_calls(path, function, statement):
     tree = ast.parse((REPO / path).read_text())
@@ -411,16 +473,16 @@ def test_real_journal_consumers_cannot_hide_private_calls(path, function, statem
 
 @pytest.mark.parametrize('prefix', [
     'from demiflow.execution.host.control import RunJournal\n',
-    'from demiflow.workbench.runs.manager import RunJournal\n',
+    'from demiflow.forge.runs.manager import RunJournal\n',
 ])
 @pytest.mark.parametrize('arguments', ['target, _maintenance_deadline=1', 'target, **options'])
 def test_private_constructor_options_cannot_bypass_reexport_contract(prefix, arguments):
     tree = ast.parse(prefix + 'run = RunJournal(' + arguments + ')')
-    assert any('constructor keyword' in str(error) for error in _member_errors(tree, 'demiflow/workbench/runs/requests.py'))
+    assert any('constructor keyword' in str(error) for error in _member_errors(tree, 'demiflow/forge/runs/requests.py'))
 
 
 def test_real_registration_rejects_decoding_native_recording():
-    path = 'demiflow/workbench/runs/manager.py'
+    path = 'demiflow/forge/runs/manager.py'
     tree = ast.parse((REPO / path).read_text())
     class InsertDecode(ast.NodeTransformer):
         def visit_Assign(self, node):
@@ -438,11 +500,11 @@ def test_publication_recording_is_not_another_host_protocol(producer, use):
     prefix = ('from demiflow.execution.host.inspection import ' + producer + '\n'
               if producer != '_verified_output' else 'def _verified_output(*args, **kwargs):\n    pass\n')
     code = prefix + 'verified = ' + producer + '(target, action)\nrecording = verified.get("recording")\nraw = recording.get("value")\n' + use
-    assert _member_errors(ast.parse(code), 'demiflow/workbench/runs/manager.py')
+    assert _member_errors(ast.parse(code), 'demiflow/forge/runs/manager.py')
 
 
 def test_native_recording_can_only_be_aliased_and_forwarded_unchanged():
-    code = '''from demiflow.workbench.runs.manager import RunJournal
+    code = '''from demiflow.forge.runs.manager import RunJournal
 from demiflow.execution.host.inspection import verify_write_receipt
 run = RunJournal(target, attempt=1)
 verified = verify_write_receipt(target, action, expected_uri=uri)
@@ -452,13 +514,21 @@ if recording is not None:
     emit = run.action_event
     emit(action, recording['kind'], payload)
 '''
-    assert not _member_errors(ast.parse(code), 'demiflow/workbench/runs/manager.py')
+    assert not _member_errors(ast.parse(code), 'demiflow/forge/runs/manager.py')
 
 
 def test_approved_reexport_matches_its_real_import():
     for reexport, original in SURFACE['reexport_origins'].items():
         module, name = reexport.rsplit('.', 1)
-        path = module.replace('.', '/') + '.py'
+        path = _actual_path(module.replace('.', '/') + '.py')
         imported = {(owner + '.' + symbol, alias) for _, owner, symbol, alias in
                     _imports(ast.parse((REPO / path).read_text()), path)}
         assert (original, name) in imported
+
+
+def test_forge_inspector_does_not_inherit_workbench_worker_only_imports():
+    # workbench/worker.py is authorized for Catalog and preview.describe_table,
+    # while forge/runs/inspector.py must NOT inherit those extra consumer grants.
+    assert _import_errors(ast.parse('from demiflow.lance.registry import Catalog\n'), FORGE_INSPECTOR_PATH)
+    assert _member_errors(ast.parse('from demiflow.lance import preview\npreview.describe_table(x)\n'), FORGE_INSPECTOR_PATH)
+    assert not _member_errors(ast.parse('from demiflow.lance import preview\npreview.snapshot_metadata(x, 1)\n'), FORGE_INSPECTOR_PATH)
