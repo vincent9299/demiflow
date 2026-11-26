@@ -1,80 +1,176 @@
-# 用 Forge 开发 DemiFlow 项目
+# Forge 与工作台
 
-在终端选定一个项目根，Agent 就能按规范编写 Flow、算子和 Prompt。需要使用产品时，在工作台打开同一目录。Flow 是否可见取决于项目声明中登记的入口。项目中的源码、参数与测试描述业务事实，无需维护一份项目专用的开发规范。
+- **Forge** 是命令行工具：在一个项目目录里创建标准文件、查询当前 SDK、做静态检查、登记可运行的入口。人和 coding agent 用同一套命令。
+- **工作台（Workbench）** 是浏览器界面：打开同一个项目目录，查看 Flow 的图、数据表和运行记录，并在授权后运行。
 
-| 开发时需要知道什么 | 由谁提供 | 怎样使用 |
-|---|---|---|
-| 下一步做什么 | [demiforge Skill](../demiflow/forge/skills/demiforge/SKILL.md) | Agent 按任务选用下列命令。纯解读通常只需要 context |
-| Pipeline 规范和实践经验 | [Forge 开发指南](../demiflow/forge/standards/pipeline-authoring.md) | context 默认提供核心规则，按 flow、operator、prompt 取相关章节。经验用于选方案 |
-| 当前 SDK 实际支持什么 | 已安装 SDK 的公开符号和原生语义声明 | context 默认提供摘要，按完整符号查询签名和来源 |
-| 项目有哪些入口和定义、本次会影响谁 | 根目录里的 workspace.json、源码、参数和显式选择的资料 | context 默认返回目录概况，按相对路径定位入口和消费者 |
-| 是否满足静态契约，业务结果是否正确 | Forge 原生静态检查、项目自己的业务测试 | 分别记录静态诊断与实际运行的测试结果 |
-| 业务选择是否在合适的接线处，交付证据是否充分 | 独立的 DeepSeek CLI 会话及[《Forge Pipeline 评审指南》](../demiflow/forge/standards/pipeline-review.md) | 用 `review` 评审当前候选的源码和证据，按定位修正，再复核 |
-| 数据、执行权限、实际执行结果 | 工作台和原生运行服务 | 工作台读取同一份登记信息，按部署授权解析、操作、运行和展示 |
+两者读的是同一份项目声明 `workspace.json`，没有第二份状态。
 
-## 开发命令
-
-以下命令可在工作台关闭时使用。对已有源码目录执行 init 时加 `--existing`。init 写入项目身份、空入口清单及 SDK 快照。add 按需建立各自角色目录。对于已初始化的项目，从 context 开始即可。
+## 快速开始：从空目录到登记一个 Flow
 
 ```bash
 demiflow forge init --root ./experiment
-demiflow forge context --root ./experiment
-demiflow forge context --root ./experiment --api demiflow.data:Dataset.filter
 demiflow forge add flow counts --root ./experiment
 demiflow forge add operator is_even --root ./experiment
 ```
 
-Agent 根据用户目标填写 `flows/counts.py` 和 `operators/is_even.py`。需要模型时先查 `context --topic prompt`，再用 `add prompt NAME --root DIR --from FILE` 创建原生定义，FILE 为项目相对路径，也可通过 `-` 读取标准输入。需要有状态的代码算子时可用 `add operator NAME --actor`。
+`init` 写入项目声明和一份 SDK 快照；`add` 创建带占位内容的标准文件。然后填入业务逻辑：
+
+```python
+# operators/is_even.py
+def is_even(row):
+    return row["value"] % 2 == 0
+
+
+__demiflow_operators__ = ["is_even"]
+```
+
+```python
+# flows/counts.py
+import pyarrow as pa
+from demiflow import data
+
+from operators.is_even import is_even
+
+
+def run(*, output: str, limit: int = 10):
+    """Keep even values and write them to a Lance table."""
+    rows = data.from_items([{"value": value} for value in range(limit)])
+    rows.filter(is_even).write_lance(output, mode="create",
+                                     schema=pa.schema([("value", pa.int64())]))
+```
+
+Flow 的参数放在配置文件里：
+
+```json
+// configs/counts.json
+{"output": "/abs/path/experiment/data/evens.lance", "limit": 10}
+```
+
+检查，通过后登记：
 
 ```bash
-demiflow forge check --root ./experiment --entry flows/counts.py:run
+demiflow forge check --root ./experiment --entry flows/counts.py:run --params configs/counts.json
+demiflow forge add flow --root ./experiment --register --entry flows/counts.py:run --params configs/counts.json
+```
+
+登记成功后，这个入口就会出现在工作台的管道列表里。
+
+## 项目目录
+
+| 路径 | 内容 |
+|---|---|
+| `workspace.json` | 项目声明：身份、已登记的入口和配置、数据位置 |
+| `flows/` | Flow：用 Dataset API 把算子接起来的入口函数 |
+| `operators/` | 算子：普通函数或类 |
+| `prompts/` | 提示词定义 |
+| `configs/` | Flow 参数和业务配置 |
+| `data_tools/`、`notebooks/` | 数据工具和 Notebook |
+| `data/` | 数据表和运行产物 |
+| `logs/` | 运行日志 |
+
+目录按需创建。已有代码的目录用 `demiflow forge init --root DIR --existing` 初始化，原有文件保留。
+
+## Forge 命令
+
+| 命令 | 作用 |
+|---|---|
+| `forge init --root DIR` | 创建项目声明和 SDK 快照 |
+| `forge context --root DIR` | 查看编码规则、SDK 签名和这个项目的现状 |
+| `forge context --root DIR --api demiflow.data:Dataset.filter` | 查询某个接口的签名和来源 |
+| `forge context --root DIR --topic prompt` | 查看某一类主题的规则 |
+| `forge add flow NAME --root DIR` | 新建一个 Flow 文件 |
+| `forge add operator NAME --root DIR` | 新建一个算子；加 `--actor` 创建有状态的算子 |
+| `forge add prompt NAME --root DIR --from FILE` | 新建一个提示词定义；`FILE` 为 `-` 时读标准输入 |
+| `forge check --root DIR [--entry F:FN] [--params configs/X.json]` | 静态检查，不执行业务代码 |
+| `forge add flow --root DIR --register --entry F:FN [--params ...]` | 登记一个通过检查的入口 |
+| `forge review --root DIR --entry F:FN --goal "..."` | 发起一次独立的只读评审 |
+
+`context`、`check`、`review` 支持 `--json`，输出一份 JSON 文档。
+
+退出码：
+
+| 码 | `check`、`add` 等 | `review` |
+|---|---|---|
+| 0 | 完成，或检查明确不适用 | 评审完成，没有影响交付的问题 |
+| 1 | 发现已知违规或内容冲突 | 发现影响交付的问题 |
+| 2 | 调用方式错误 | 调用无效 |
+| 3 | 依据不足、范围未覆盖或达到预算 | 评审未完成 |
+
+### 检查能说明什么
+
+`forge check` 读源码和声明做静态核对：入口是否存在、参数是否齐全、用到的 SDK 接口是否受支持、目录是否符合约定。它不导入也不执行你的业务代码。
+
+所以检查通过只说明接线合规，不说明业务结果正确。业务行为由项目自己的测试验证；两类结果请分别记录。
+
+- 只检查受影响的部分：`--path 相对路径`，可重复给出。
+- 有参数的 Flow 必须给 `--params`，检查和登记要用同一份配置。
+
+### 独立评审
+
+`forge review` 让另一个模型会话只读地评审当前改动：业务选择是否放在合适的位置、交付证据是否充分。
+
+```bash
 demiflow forge review --root ./experiment --entry flows/counts.py:run --goal "统计通过筛选的记录数"
-demiflow forge add flow --root ./experiment --register --entry flows/counts.py:run
-demiflow forge check --root ./experiment
 ```
 
-有业务参数时，将 Flow 参数与业务配置文件统一放在 `configs/`（未传 `--params` 时默认创建并绑定 `configs/<flow>.json`；存量项目已登记的 `parameters/` 继续兼容），标准角色目录为 `flows/`、`operators/`、`prompts/`、`configs/`、`data_tools/`、`notebooks/`；数据表与运行产物统一平铺到 `data/`，可读运行日志落到 `logs/`，并在定向检查和登记命令上指定相同的 `--params configs/REL.json`。已登记的配置在同一路径编辑。检查受影响的入口和定义可用 `--path REL`，可重复给出。实际业务行为由用户项目的测试验证。例如标量 count 可在项目的 SDK 测试中直接断言返回值。工作台托管执行要求受支持的本地写出终点，运行结果依照实际回执。
+- 运行前把环境变量 `DEMIFLOW_FORGE_REVIEW_CONFIG` 指向评审模型的配置文件（JSON）。
+- 默认评审本项目相对 HEAD 的实际改动；`--base REF` 指定对比基线。
+- `--evidence 相对路径` 附上测试或小样本结果，可重复给出。
+- 默认时限 180 秒，`--timeout` 可调。
 
-在终端运行独立评审前，将 `DEMIFLOW_FORGE_REVIEW_CONFIG` 指向本机的 DeepSeek provider JSON 配置文件，也可以指定含 `providers.deepseek` 的开发部署文件。配置项 `executable` 与 `node` 是已安装的 dsh 和 Node 的绝对路径，`version` 为已验收的 dsh 版本（首版为 `0.2.1-rc.2`），`model` 选择模型。`deepseek-official` 使用 `credential_env` 命名的 API key 环境变量；`deepseek-account` 使用配置中的本机认证文件引用。账户材料由本机管理。
+## 在工作台里打开项目
 
-评审可以按当前入口或文件进行，也可用 `--base REF` 比较本地基线与当前业务源码（含未提交改动、新文件和删除项）。无显式范围时默认选择本项目相对 HEAD 的实际改动。可重复使用 `--evidence REL` 附上测试或小样本结果。输出区分变更前后的行号、影响交付的问题、建议和需要补充的依据。默认总评审时限为 1800 秒，可用 `--timeout 3600` 延长至一小时；默认推理档为 high。所有分片、一次补读和一次格式修复共用剩余预算。报告同时给出完整度和源码是否仍是当前候选，已验真的阻断不会因其他条目格式错误而丢失。使用 `--json` 可保留完整报告。终端退出码 0 表示评审完成，1 表示发现影响交付的问题，2 表示调用无效，3 表示评审未完成。
-
-## 不依赖工作台的完整工程闭环
-
-`develop` 将需求交给原生 coding CLI，在作者回合完成并清理后调用与工作台相同的 Forge 检查、评审和反馈逻辑。发现当前候选的有效阻断时，反馈发回同一个作者 session，最多自动修正一次，再按原范围复核。原生 CLI 继续负责自己的模型和工具循环。
+工作台按一份登记文件管理多个项目：
 
 ```bash
-demiflow forge develop --root ./experiment --state-dir ../forge-receipts/counts \
-  --agent codex --goal "实现并验证筛选计数流程" --json
-demiflow forge develop --root ./experiment --state-dir ../forge-receipts/counts --status --json
-demiflow forge develop --root ./experiment --state-dir ../forge-receipts/counts --agent codex --resume --json
+# 新建，或登记已有项目（都用服务器上的绝对路径）
+demiflow workbench console --registry /abs/console.json create /abs/new-project --name my-project
+demiflow workbench console --registry /abs/console.json add /abs/experiment
+demiflow workbench console --registry /abs/console.json list
+
+# 启动界面
+demiflow workbench console --registry /abs/console.json serve --port 59865
 ```
 
-作者可选 `codex` 或 `deepseek`，使用本机已有 CLI 配置；`--executable`、`--profile` 可显式指定原生安装与配置。DeepSeek 默认 profile 为 `headless`。命令不会自动提升作者权限，可信本地模式不能替代 OS 沙箱。独立评审仍使用上文的 `DEMIFLOW_FORGE_REVIEW_CONFIG`，与作者会话分离且不提供工具。
+- 服务只监听本机回环地址。通过 SSH 连接服务器时做端口转发：`ssh -N -L 59865:127.0.0.1:59865 user@server`，然后在本机浏览器打开命令输出的地址。
+- 登记只记录目录位置和权限上限，不复制、不改动你的代码和数据。`remove` 只取消登记，目录和历史结果都保留。
+- **运行默认是关闭的。** 要在界面里运行，登记时加 `--allow-runs`，启动服务时加 `--enable-runs`，两者都要有。每次运行仍会单独核对。
+- 一个登记文件最多 128 个项目。
 
-`--state-dir` 必须是项目源码之外、本 UID 独占的私有目录。回执记录目标、候选、原作者身份、工程结果与反馈投递状态。`--status` 只读；`--resume` 只推进确认尚未派发的动作，并核对原根、可执行文件、配置和清理事实。输入已发送但接收结果未知时会保留 unknown，不自动重发，也不接受任意外部 session 冒充本闭环的原作者。
+界面里每个项目有总览、数据表、Flows 与检查、运行记录等视图。Flow 视图显示接线图、每个节点的字段和参数、诊断位置和源码。
 
-默认工程总时限 `--timeout 3600`，默认独立评审总时限 `--review-timeout 1800`；可分别延长至 7200 和 3600 秒。评审与自动修正不会重置剩余调用预算。`--no-review` 关闭自动付费评审，免费规范检查与有限修正继续适用。项目测试使用项目明确声明的命令和业务解释器，不猜测宿主 Python。已有 Agent 也可主动调用 `forge check/review`，同步从 CLI 输出获得结果。
+## 数据表
 
-终端和工作台共享本 UID 的物理根写入准入，同根及父子根不能同时启动作者。工作台保留原授权、对话、人工队列和进程生命周期，通过回合结束钩子调用 Forge；人工新要求优先，旧候选反馈会明确等待或被取代。Forge 自己的受控入口登记保留，作者直接修改受保护文件仍由 Forge 保护钩子核对。
+把一张固定版本的 Lance 表挂到项目里，之后可以按名字查看和取样：
 
-各命令支持 `--json`。退出码 0 表示所选操作完成或静态检查明确不适用，1 表示已知违规或内容冲突，2 表示调用错误，3 表示必要依据不足、范围未覆盖或达到预算。检查结果给出实际覆盖的内容。登记成功后再从工作台的管道列表选取该入口。
-
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant F as Forge CLI
-    participant P as 项目文件
-    participant W as 工作台
-    participant E as DemiFlow SDK 与引擎
-    A->>F: context 读取规则及当前事实
-    F->>E: 查询安装的 SDK
-    F->>P: 读取声明与相关源码
-    A->>F: init 或 add 创建所需文件
-    A->>P: 编写业务逻辑和测试
-    A->>F: check 定向检查
-    A->>F: add flow --register 登记
-    F->>P: 复核检查输入，提交入口与参数
-    W->>P: 发现并展示同一项目
-    W->>E: 按所选配置和授权运行
+```bash
+demiflow workbench location ./experiment corpus /abs/read-only-root
+demiflow workbench table attach ./experiment candidates --location-id corpus \
+    --uri candidates.lance --version 3 \
+    --dataset-id questions --schema-name questions --schema-version 1
+demiflow workbench table list ./experiment --json
+demiflow workbench table sample ./experiment candidates --column case_id --column question --limit 20 --json
 ```
+
+- 表名只是别名；真正的身份是位置、表地址和固定的版本号。之后的读取不会自动跟随新版本。
+- 外部位置默认只读；需要写入时在声明位置时加 `--writable`。
+
+## 从命令行运行
+
+登记过的入口也可以不经界面运行，分两步：先准备（固定源码、配置和数据版本），再启动。
+
+```bash
+demiflow workbench run prepare ./experiment flows/counts.py:run --params configs/counts.json --json
+demiflow workbench run start ./experiment RUN_ID --expected DIGEST --wait
+demiflow workbench run show ./experiment RUN_ID
+```
+
+`RUN_ID` 和 `DIGEST` 取自 `prepare` 的输出。其他子命令：`list`、`logs`、`cancel`、`resume`。
+
+受管运行对 Flow 有额外要求，不满足时 `prepare` 会拒绝并说明原因。例如写 Lance 表必须用 `mode="create"` 并给出显式 `schema`（上面的例子已经这样写）；项目目录还需要位于部署允许的运行分区内。
+
+## 需要知道的限制
+
+- Forge 的检查和登记不提供沙箱：绕过 Forge 直接用 Python 执行的代码不受它约束。
+- 检查报告不是运行许可；运行前平台仍会重新核对源码、配置和数据版本是否与检查时一致。
+- 工作台是单机服务，面向本机或经 SSH 转发访问，不是多租户的对外服务。
