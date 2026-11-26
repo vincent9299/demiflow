@@ -129,13 +129,13 @@ def _add_declared_members(target, sources):
             sources[name] = source
 
 
-def business_sources(kind, value):
+def business_sources(kind, value, *, lazy_absolute=False):
     from ...data.plan import LogicalPlan, MapOp
     if kind == 'callable':
-        sources = business_dependency_modules(LogicalPlan((MapOp(callable=value),)))
+        sources = business_dependency_modules(LogicalPlan((MapOp(callable=value),)), lazy_absolute=lazy_absolute)
         _add_declared_members(value.target, sources)
     elif kind == 'source':
-        sources = business_dependency_modules(LogicalPlan(()), source=value)
+        sources = business_dependency_modules(LogicalPlan(()), source=value, lazy_absolute=lazy_absolute)
     else:
         sources = {}
     # A package initializer executes before its member; pin it as actual code.
@@ -737,7 +737,7 @@ def source_callable_roots(source):
     return tuple(roots)
 
 
-def _ast_import_dependencies(module_name: str, path: Path):
+def _ast_import_dependencies(module_name: str, path: Path, *, lazy_absolute=False):
     """Passively discover business module imports from a module's AST.
 
     Runtime object traversal misses two common valid patterns:
@@ -749,7 +749,14 @@ def _ast_import_dependencies(module_name: str, path: Path):
     Never imports or executes code. Resolves relative imports directly against the
     module's own filesystem directory (so driver and worker see identical results
     after `mount_sources`), and checks already-loaded `sys.modules` for absolute
-    imports.
+    imports that run when the module itself is imported.
+
+    An absolute import inside a function body is not a static dependency: it runs
+    later, in whichever process calls the function, so whether the sealing process
+    happens to have loaded that module says nothing about a worker and must not
+    change the pin. ``lazy_absolute=True`` reproduces the discovery of seals
+    written from eafb549a until this rule, which did count such an import when it
+    was already loaded; it serves only to authenticate one of those seals.
     """
     import ast
     try:
@@ -785,6 +792,13 @@ def _ast_import_dependencies(module_name: str, path: Path):
             seen.add(cand_name)
             discovered.append((cand_name, mod))
 
+    deferred = set()
+    if not lazy_absolute:
+        for scope in ast.walk(tree):
+            if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                deferred.update(id(inner) for inner in ast.walk(scope)
+                                if isinstance(inner, (ast.Import, ast.ImportFrom)))
+
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             if node.level >= 1:
@@ -806,18 +820,18 @@ def _ast_import_dependencies(module_name: str, path: Path):
                     for alias in node.names:
                         if alias.name != '*':
                             add_rel([*anchor_parts, alias.name], anchor_dir / alias.name)
-            elif node.module:
+            elif node.module and id(node) not in deferred:
                 add_loaded(node.module)
                 for alias in node.names:
                     if alias.name != '*':
                         add_loaded(f'{node.module}.{alias.name}')
-        elif isinstance(node, ast.Import):
+        elif isinstance(node, ast.Import) and id(node) not in deferred:
             for alias in node.names:
                 add_loaded(alias.name)
     return tuple(discovered)
 
 
-def business_dependency_modules(plan, *, source=None):
+def business_dependency_modules(plan, *, source=None, lazy_absolute=False):
     """Transitive closure of business modules a plan's pure UDF maps import.
 
     ``describe`` binds a UDF's own source/bytecode/closure but never ``__globals__``,
@@ -925,7 +939,7 @@ def business_dependency_modules(plan, *, source=None):
         found[name] = SourceFile.capture(path)
         if module is not None:
             pending.extend(candidates(vars(module)))
-        for dep_name, dep_target in _ast_import_dependencies(name, path):
+        for dep_name, dep_target in _ast_import_dependencies(name, path, lazy_absolute=lazy_absolute):
             if dep_name in visited:
                 continue
             if isinstance(dep_target, Path):
@@ -935,17 +949,17 @@ def business_dependency_modules(plan, *, source=None):
     return {name: found[name] for name in sorted(found)}
 
 
-def _business_dependency_manifest(plan, *, source=None):
+def _business_dependency_manifest(plan, *, source=None, lazy_absolute=False):
     """Code-pin dependency digest: business module source identities, no paths.
 
     Paths are excluded so the driver-sealed and worker-recomputed manifests are
     identical for unedited code regardless of how each side resolved the module.
     """
     return {name: {"sha256": file.digest, "bytes": file.size}
-            for name, file in business_dependency_modules(plan, source=source).items()}
+            for name, file in business_dependency_modules(plan, source=source, lazy_absolute=lazy_absolute).items()}
 
 
-def plan_code_pin(plan, *, source=None):
+def plan_code_pin(plan, *, source=None, lazy_absolute=False):
     """Code-sensitive identity of the plan's actually-executed operations.
 
     Mirrors ``plan_identity``'s operation identity: native domain facts for native
@@ -963,4 +977,4 @@ def plan_code_pin(plan, *, source=None):
     from demiflow.execution.seal.program_identity import operation_identity
     operations = [operation_identity(operation) for operation in plan.operations]
     return {"operations": stable_code_identity(operations),
-            "dependencies": _business_dependency_manifest(plan, source=source)}
+            "dependencies": _business_dependency_manifest(plan, source=source, lazy_absolute=lazy_absolute)}

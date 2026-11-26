@@ -214,3 +214,76 @@ def test_ast_relative_constant_and_lazy_imports_are_bundled(tmp_path, monkeypatc
         for name in list(sys.modules):
             if name == 'ast_dep_pkg' or name.startswith('ast_dep_pkg.'):
                 sys.modules.pop(name, None)
+
+
+@pytest.fixture
+def lazy_absolute_graph(tmp_path, monkeypatch):
+    """A business module whose row function imports a sibling module inside its body.
+
+    Returns the module names and the imported entry module. The helper is left
+    unloaded; both this process and a managed worker can import it by name.
+    """
+    import uuid
+    tag = uuid.uuid4().hex[:8]
+    names = {key: f'lazyabs_{tag}_{key}' for key in ('entry', 'top', 'helper')}
+    folder = tmp_path / 'business'
+    folder.mkdir()
+    (folder / (names['top'] + '.py')).write_text('TAG = "v1"\n')
+    (folder / (names['helper'] + '.py')).write_text('def scale(value):\n    return value * 10\n')
+    (folder / (names['entry'] + '.py')).write_text(
+        f'from {names["top"]} import TAG\n'
+        'def transform(row):\n'
+        f'    import {names["helper"]} as helper\n'
+        '    return {"x": helper.scale(row["x"]), "tag": TAG}\n')
+    monkeypatch.syspath_prepend(str(folder))
+    monkeypatch.setenv('PYTHONPATH', str(folder) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    importlib.invalidate_caches()
+    try:
+        yield names, importlib.import_module(names['entry']), folder
+    finally:
+        for name in names.values():
+            sys.modules.pop(name, None)
+
+
+def test_absolute_import_in_a_function_body_is_not_a_static_dependency(lazy_absolute_graph):
+    """Whether the sealing process happens to have loaded a module that a row function
+    imports inside its body must not change the pin: a fresh worker has not loaded it."""
+    names, entry, _ = lazy_absolute_graph
+    plan = data.from_items([{'x': 1}]).map(entry.transform)._plan
+    unloaded = business_sources.plan_code_pin(plan)
+    # The import that runs when the module is imported is a dependency; the lazy one is not.
+    assert set(unloaded['dependencies']) == {names['entry'], names['top']}
+    importlib.import_module(names['helper'])
+    assert business_sources.plan_code_pin(plan) == unloaded
+    # Seals written before this rule counted the loaded helper; that discovery stays readable.
+    earlier = business_sources.plan_code_pin(plan, lazy_absolute=True)
+    assert set(earlier['dependencies']) == {names['entry'], names['top'], names['helper']}
+
+
+def test_seal_that_counted_a_loaded_lazy_import_still_authenticates(lazy_absolute_graph):
+    from demiflow.data.plan import CallableSpec
+    from demiflow.execution.seal.plan import _code_identity_from_value, _matches_original_program
+    names, entry, folder = lazy_absolute_graph
+    importlib.import_module(names['helper'])
+    spec = CallableSpec.create(entry.transform)
+    earlier = _code_identity_from_value('callable', spec, lazy_absolute=True)
+    current = _code_identity_from_value('callable', spec)
+    assert names['helper'] in earlier['dependencies'] and names['helper'] not in current['dependencies']
+    assert _matches_original_program('callable', spec, current)
+    assert _matches_original_program('callable', spec, earlier)
+    # The earlier seal pinned the helper it lists: editing it is still refused.
+    (folder / (names['helper'] + '.py')).write_text('def scale(value):\n    return value * 99\n')
+    assert not _matches_original_program('callable', spec, earlier)
+    # Editing the sealed module itself is refused under either discovery.
+    (folder / (names['entry'] + '.py')).write_text((folder / (names['entry'] + '.py')).read_text() + '# edited\n')
+    assert not _matches_original_program('callable', spec, current)
+
+
+@pytest.mark.parametrize('preloaded', [False, True])
+def test_process_worker_runs_a_row_function_with_a_lazy_absolute_import(lazy_absolute_graph, tmp_path, preloaded):
+    names, entry, _ = lazy_absolute_graph
+    if preloaded:
+        importlib.import_module(names['helper'])    # the driver uses the helper too
+    with RunContext.start(tmp_path / 'run'), data.local_execution(workers=1, worker_mode='process'):
+        rows = data.from_items([{'x': 1}, {'x': 2}]).map(entry.transform).take_all()
+    assert sorted(row['x'] for row in rows) == [10, 20] and {row['tag'] for row in rows} == {'v1'}
