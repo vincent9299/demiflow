@@ -250,6 +250,7 @@ class RunContext:
         self.entry_identity = entry_identity
         self.requested_limits = limits
         self.explicit_limits = declared_limit_keys(limits, explicit_limits)
+        self.unconfirmed_window = 'hard'
         self.resuming = resume
         self.training_project_root = None
         self.training = training
@@ -357,12 +358,17 @@ class RunContext:
                 configuration = dict(format=1, stream_protocol="aligned-barrier-v2", run_id=uuid.uuid4().hex,
                     entry_identity=self.entry_identity, limits=execution_limits(self.requested_limits),
                     platform_revision=revision, started_at=time.time(),
-                    limits_explicit=sorted(self.explicit_limits))
+                    limits_explicit=sorted(self.explicit_limits),
+                    # Its default unconfirmed source window is a target (see the
+                    # driver's source shares); a run recorded without this
+                    # keeps the hard window it was created with.
+                    unconfirmed_window='target')
             self.ref = RunRef(str(self.directory), configuration["run_id"])
             if self.resuming and self.ref.run_id != self.expected_run_id:
                 raise RecoveryContractError("RunRef identity does not match its directory")
             self.limits = configuration["limits"]
             self.explicit_limits = frozenset(configuration.get("limits_explicit", ()))
+            self.unconfirmed_window = configuration.get('unconfirmed_window', 'hard')
             self.deadline = configuration["started_at"] + self.limits["timeout_s"]
             if not self.external_control:
                 if not self.resuming:

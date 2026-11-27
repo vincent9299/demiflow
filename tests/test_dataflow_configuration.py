@@ -97,6 +97,7 @@ def test_every_key_a_reader_asks_for_is_explained():
     # What remains is not a kernel configuration: the scan also sees other objects' '.configuration'
     # (the run record, a sink declaration) and the inner mapping of graph_result.
     assert unexplained == {'limits', 'limits_explicit', 'run_id', 'started_at',     # run record
+                           'unconfirmed_window',                                    # run record
                            'stream_protocol',                                       # run recovery format
                            'partition_id', 'sink_id',                                # sink declaration
                            'ancestor', 'targets'}                                    # inside graph_result

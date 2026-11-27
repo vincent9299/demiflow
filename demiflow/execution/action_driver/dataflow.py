@@ -1629,7 +1629,7 @@ class DataflowExecution:
         self._resume_workers()
 
     def _resume_workers(self, *, publishing=False):
-        # Shares sum to the original run ceilings, never one full allowance per
+        # Shares divide the original run ceilings, never one full allowance per
         # worker. Extremely small windows rotate the admitted source owners at
         # ACK boundaries; zero-share owners stay paused and still contribute.
         sources = sorted(key for key, endpoint in self._endpoints.items()
@@ -1639,12 +1639,20 @@ class DataflowExecution:
         rows, size = limits['checkpoint_unconfirmed_rows'], limits['checkpoint_unconfirmed_bytes']
         shares = dict(getattr(self, '_source_credit_shares', {})) if publishing else {}
         if sources and not publishing:
+            # An owner reserves max_row_bytes before reading its next record. A
+            # run created with a target default window gives each share that
+            # reservation on top, so an owner reads until its actual bytes pass
+            # the share and any row within max_row_bytes fits. A declared window,
+            # and the window of a run recorded before targets, stay hard bounds.
+            context = self._action.context
+            headroom = (0 if 'checkpoint_unconfirmed_bytes' in context.explicit_limits
+                        or context.unconfirmed_window != 'target' else self._bounds.max_row_bytes)
             count = min(len(sources), rows, size)
             offset = self._source_credit_rotation % len(sources)
             owners = (sources[offset:] + sources[:offset])[:count]
             for index, owner in enumerate(owners):
                 shares[owner] = {'rows': rows // count + (index < rows % count),
-                                 'bytes': size // count + (index < size % count)}
+                                 'bytes': size // count + (index < size % count) + headroom}
             if not publishing and count < len(sources):
                 self._source_credit_rotation += count
         for key in sources:
