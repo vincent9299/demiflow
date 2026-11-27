@@ -32,7 +32,6 @@ class PromptRecordRef:
         return cls(**value)
 
     def read(self, root=None, *, max_bytes=None, restore_inputs=True, resolve_locations=True):
-        column = {'request': 'request_json', 'response': 'response_json', 'error': 'error_json'}[self.kind]
         if max_bytes is not None and (type(max_bytes) is not int or not 1 <= max_bytes <= 16 * 1024**2):
             raise ValueError('Invalid call evidence byte budget')
         path = Path(self.journal_path)
@@ -49,35 +48,40 @@ class PromptRecordRef:
                 db.execute('PRAGMA mmap_size=0')
                 db.execute('PRAGMA trusted_schema=OFF')
             db.execute('BEGIN')
-            if type(self.attempt) is not int or self.attempt < 1:
-                raise ValueError('A call reference attempt must be positive')
-            archives = db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_events'").fetchone()
-            archived = (db.execute('SELECT 1 FROM recovery_events WHERE request_key=? AND attempt=?',
-                                  (self.request_id, self.attempt)).fetchone() if archives else None)
-            if archived is not None:
-                selected = _archived_response_column(db) if self.kind == 'response' else column
-                query = ' FROM recovery_events WHERE request_key=? AND attempt=?'
-                parameters = (self.request_id, self.attempt)
-            else:
-                current = (db.execute('SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
-                    'WHERE request_key=?', (self.request_id,)).fetchone()[0] if archives else 1)
-                if current != self.attempt:
-                    raise KeyError(self.request_id + '/' + self.kind)
-                selected, query, parameters = column, ' FROM calls WHERE request_key=?', (self.request_id,)
-            if max_bytes is not None:
-                size = db.execute('SELECT length(CAST(' + selected + ' AS BLOB))' + query, parameters).fetchone()
-                if size and size[0] is not None and size[0] > max_bytes:
-                    raise ValueError('Call evidence exceeds byte budget')
-            row = db.execute('SELECT ' + selected + query, parameters).fetchone()
-            if row is None or row[0] is None:
-                raise KeyError(self.request_id + '/' + self.kind)
-            value = json.loads(row[0])
+            value = self.stored_document(db, max_bytes=max_bytes)
             if restore_inputs:
                 from .sqlite_offline import restore
                 return restore(value)
             return value
         finally:
             db.close()
+
+    def stored_document(self, db, *, max_bytes):
+        """Read one stored attempt through an already-open read transaction."""
+        column = {'request': 'request_json', 'response': 'response_json', 'error': 'error_json'}[self.kind]
+        if type(self.attempt) is not int or self.attempt < 1:
+            raise ValueError('A call reference attempt must be positive')
+        archives = db.execute("SELECT 1 FROM sqlite_master WHERE name='recovery_events'").fetchone()
+        archived = (db.execute('SELECT 1 FROM recovery_events WHERE request_key=? AND attempt=?',
+                              (self.request_id, self.attempt)).fetchone() if archives else None)
+        if archived is not None:
+            selected = _archived_response_column(db) if self.kind == 'response' else column
+            query = ' FROM recovery_events WHERE request_key=? AND attempt=?'
+            parameters = (self.request_id, self.attempt)
+        else:
+            current = (db.execute('SELECT COALESCE(MAX(attempt),0)+1 FROM recovery_events '
+                'WHERE request_key=?', (self.request_id,)).fetchone()[0] if archives else 1)
+            if current != self.attempt:
+                raise KeyError(self.request_id + '/' + self.kind)
+            selected, query, parameters = column, ' FROM calls WHERE request_key=?', (self.request_id,)
+        if max_bytes is not None:
+            size = db.execute('SELECT length(CAST(' + selected + ' AS BLOB))' + query, parameters).fetchone()
+            if size and size[0] is not None and size[0] > max_bytes:
+                raise ValueError('Call evidence exceeds byte budget')
+        row = db.execute('SELECT ' + selected + query, parameters).fetchone()
+        if row is None or row[0] is None:
+            raise KeyError(self.request_id + '/' + self.kind)
+        return json.loads(row[0])
 
 
 def read_call(ref, root=None):

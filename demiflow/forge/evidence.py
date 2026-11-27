@@ -47,5 +47,9 @@ def read_evidence(reference, path):
     validate_reference(reference)
     document = PromptRecordRef(**{**reference, 'journal_path': str(path)}).read(
         max_bytes=1024**2, restore_inputs=False, resolve_locations=False)
+    return display_evidence(document)
+
+
+def display_evidence(document):
     bounded_json(document, 1024**2)
     return redact(document)
