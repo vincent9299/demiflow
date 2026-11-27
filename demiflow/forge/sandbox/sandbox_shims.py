@@ -412,14 +412,19 @@ class SandboxShims:
 
         # 1. Always write Forge runtime configuration + restricted `demiflow` CLI shim.
         runtime_cfg_path = self.directory / 'forge_runtime.json'
+        project_root_write = (
+            project.get('kind', 'pipeline') == 'pipeline'
+            and project.get('phase', 'implementation') == 'implementation'
+        )
         runtime_cfg = {
             'root': str(self.root),
             'execution_mode': execution_mode,
             'read_policy': 'scoped' if self.allowed_read_roots is not None else 'inherit_os',
+            'write_policy': 'project_root' if project_root_write else 'scoped',
             'python': self.project_python,
             'allowed_read_roots': list(self.allowed_read_roots) if self.allowed_read_roots is not None else None,
             'denied_paths': list(self.denied_paths),
-            'writes': list(project.get('writes') or []),
+            'writes': [] if project_root_write else list(project.get('writes') or []),
             'shared_sources': shared_roots,
             'input_access': bool(input_access),
             'dev_network': bool(project.get('dev_network', False)),

@@ -115,10 +115,8 @@ def test_developer_sandbox_includes_declared_readonly_external_locations_only(tm
 
     assert str(ext_ro.resolve()) in dev_spec.read_paths
     assert str(ext_ro.resolve()) not in dev_spec.write_paths
-    assert str((proj / 'flows').resolve()) in dev_spec.write_paths
-    assert str(proj.resolve()) not in dev_spec.write_paths
-    assert dev_spec.write_policy == 'scoped'
-    assert str((proj / 'moved_root_script.py').resolve()) not in dev_spec.write_paths
+    assert dev_spec.write_paths == (str(proj.resolve()),)
+    assert dev_spec.write_policy == 'project_root'
     assert str(ext_rw.resolve()) not in dev_spec.read_paths
     assert str(tmp_path.resolve()) not in dev_spec.read_paths
     assert str(state.resolve()) not in dev_spec.read_paths
@@ -428,12 +426,18 @@ def test_dev_sandbox_and_grant_keep_data_tools_readonly(tmp_path):
             'processes': 32, 'provider_bytes': 64 * 1024**2, 'private_total_bytes': 128 * 1024**2,
         })(),
     })()
-    project = {'root': str(proj), 'kind': 'pipeline', 'writes': ['flows', 'data_tools'], 'protected': []}
+    project = {'root': str(proj), 'kind': 'pipeline', 'phase': 'implementation', 'writes': ['flows', 'data_tools'], 'protected': []}
     spec = sandbox_spec(deployment, project, {'id': 's1', 'provider': 'deepseek'},
                         {'operation': 'message', 'created': 10**12}, {'sources': []}, {'executable': str(fake_exec)}, priv_home)
-    assert str((proj / 'flows').resolve()) in spec.write_paths
-    assert str((proj / 'data_tools').resolve()) not in spec.write_paths
+    assert spec.write_policy == 'project_root'
+    assert spec.write_paths == (str(proj.resolve()),)
     assert str((proj / 'data_tools').resolve()) in spec.protected_paths
+    scoped_spec = sandbox_spec(deployment, {**project, 'phase': 'design'}, {'id': 's1', 'provider': 'deepseek'},
+                               {'operation': 'message', 'created': 10**12}, {'sources': []}, {'executable': str(fake_exec)}, priv_home)
+    assert scoped_spec.write_policy == 'scoped'
+    assert str((proj / 'flows').resolve()) in scoped_spec.write_paths
+    assert str((proj / 'data_tools').resolve()) not in scoped_spec.write_paths
+    assert str((proj / 'data_tools').resolve()) in scoped_spec.protected_paths
 
 
 def test_approved_notebook_kernel_uses_dependency_snapshot(tmp_path):

@@ -245,12 +245,6 @@ class Service:
             return dict(status='unsupported')
         project = self.project(workspace, root)
         deployment, revision, _ = self.binding(workspace, root, seal=True)
-        if (session_kind == 'development' and deployment.mode == 'restricted'
-                and project['kind'] == 'pipeline' and project['phase'] == 'implementation'
-                and 'pyproject.toml' not in project.get('protected', ())
-                and not os.path.lexists(Path(root) / 'pyproject.toml')):
-            # This standby would lack the single-file grant assigned when the author turn starts.
-            return dict(status='skipped')
         caps = self.capabilities(workspace, root)
         available_providers = [p['id'] for p in caps['providers'] if p['available']]
         if not caps['start'] or not available_providers:

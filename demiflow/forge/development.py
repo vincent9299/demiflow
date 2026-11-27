@@ -57,7 +57,7 @@ def build_rework_prompt(pipeline_checks, review_report, *, project_root=None, pr
     """Construct a bounded, deduplicated structured rework prompt for hard check failures or blocking findings."""
     issues = []
     for rel in (protected_violations or ()):
-        issues.append(f"- [受保护文件钩子] `{rel}` 属于 Forge 受保护范围（`.env*` / `.forge/state.json` / `workspace.json` / `AGENTS.md` / `PIPELINE_SPEC.md` / `data_tools/`），开发助手不能直接修改，钩子已自动还原；登记入口请使用 `demiflow forge add flow --root DIR --register --entry FILE:FUNCTION`，其他目录操作查询 `demiflow forge add --help`。保留未获授权的项目规范、环境及数据工具内容。")
+        issues.append(f"- [受保护文件钩子] `{rel}` 属于 Forge 受保护范围（`.env*` / `.forge/state.json` / `workspace.json` / `AGENTS.md` / `PIPELINE_SPEC.md` / `packages/` / `data_tools/`），开发助手不能直接修改，钩子已自动还原；登记入口请使用 `demiflow forge add flow --root DIR --register --entry FILE:FUNCTION`，受管源码包请使用 `demiflow forge dep vendor/remove`，其他目录操作查询 `demiflow forge add --help`。保留未获授权的项目规范、环境、受管依赖及数据工具内容。")
     if isinstance(pipeline_checks, dict):
         for key, label in (('native_flow', '原生数据流检查'), ('project_layout', '项目目录检查')):
             item = pipeline_checks.get(key)

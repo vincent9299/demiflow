@@ -1249,14 +1249,13 @@ except PermissionError:
 else:
     assert not {scoped!r}, "Explicit scope should exclude this sibling"
 
-# 2. Direct writes to packages/ and .forge/ MUST be blocked by OS Landlock
-for forbidden in (root / 'packages' / 'rogue.py', root / '.forge' / 'rogue.txt'):
-    try:
-        forbidden.write_text('bad', encoding='utf-8')
-    except PermissionError:
-        pass
-    else:
-        raise AssertionError(f'Direct write to {{forbidden}} was not blocked by OS Landlock!')
+# 2. Direct writes outside project_root MUST be blocked by OS Landlock
+try:
+    Path({str(ext_allowed / 'rogue.py')!r}).write_text('bad', encoding='utf-8')
+except PermissionError:
+    pass
+else:
+    raise AssertionError('Direct write outside project_root was not blocked by OS Landlock!')
 
 # 3. Editing pyproject.toml directly MUST succeed
 (root / 'pyproject.toml').write_text(
@@ -1338,13 +1337,22 @@ for ev in (
         {'executable': str(fake_author)}, priv_home,
     )
     assert wb_spec.read_policy == ('scoped' if scoped else 'inherit_os')
-    assert wb_spec.write_policy == 'scoped'
-    assert str((proj / 'pyproject.toml').resolve()) in wb_spec.write_paths
+    assert wb_spec.write_policy == 'project_root'
+    assert wb_spec.write_paths == (str(proj.resolve()),)
     if scoped:
         assert str(ext_allowed.resolve()) in wb_spec.read_paths
     for forbidden_parts in FORBIDDEN_DIRECT_WRITE_ROOTS:
-        assert str((proj / forbidden_parts[0]).resolve()) not in wb_spec.write_paths
         assert str((proj / forbidden_parts[0]).resolve()) in wb_spec.protected_paths
+    # Scoped non-implementation specs still exclude FORBIDDEN_DIRECT_WRITE_ROOTS from write_paths.
+    scoped_spec = wb_sandbox_spec(
+        deployment, {**wb_project, 'phase': 'design'}, {'id': 's1', 'provider': 'codex'},
+        {'operation': 'message', 'created': 10**12}, {'sources': []},
+        {'executable': str(fake_author)}, priv_home,
+    )
+    assert scoped_spec.write_policy == 'scoped'
+    for forbidden_parts in FORBIDDEN_DIRECT_WRITE_ROOTS:
+        assert str((proj / forbidden_parts[0]).resolve()) not in scoped_spec.write_paths
+        assert str((proj / forbidden_parts[0]).resolve()) in scoped_spec.protected_paths
 
     rev_home = wb_state / 'rev'
     rev_home.mkdir(mode=0o700)
@@ -1481,7 +1489,8 @@ def test_visibility_decoupled_from_dependencies_and_no_workbench_read_roots_conf
         {'operation': 'message', 'created': 10**12}, {'sources': []},
         {'executable': sys.executable}, priv_home,
     )
-    assert spec_before.read_policy == 'inherit_os' and spec_before.write_policy == 'scoped'
+    assert spec_before.read_policy == 'inherit_os' and spec_before.write_policy == 'project_root'
+    assert spec_before.write_paths == (str(proj.resolve()),)
 
     (proj / 'pyproject.toml').write_text(
         f'[tool.demiflow.packages]\nvisible_ext_lib = {{source = "local_ref", path = "{ext_pkg}"}}\n',
@@ -1493,20 +1502,23 @@ def test_visibility_decoupled_from_dependencies_and_no_workbench_read_roots_conf
         {'executable': sys.executable}, priv_home,
     )
     assert spec_after.read_policy == 'inherit_os', 'Declaring pyproject.toml must NOT flip sandbox read visibility!'
-    assert spec_after.write_policy == 'scoped'
-    assert str((proj / 'pyproject.toml').resolve()) in spec_after.write_paths
+    assert spec_after.write_policy == 'project_root'
+    assert spec_after.write_paths == (str(proj.resolve()),)
     assert str((proj / 'packages').resolve()) in spec_after.protected_paths
 
-    # 2. Live OS Landlock developer sandbox (inherit_os + scoped writes, allowed_read_roots=None):
-    #    reads external pkg, imports local_ref & vendors external pkg via bridge, while OS blocks direct
-    #    writes to packages/.forge/external AND bridge rejects denied_paths!
+    # 2. Live OS Landlock developer sandbox (inherit_os + project_root writes, allowed_read_roots=None):
+    #    reads external pkg, imports local_ref & vendors external pkg via bridge, OS blocks external writes,
+    #    and Forge post-turn guard restores unauthorized direct writes to packages/ while keeping bridge writes!
     if sys.platform == 'linux' and backend_readiness().get('available'):
+        from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
+
         class _Active:
             tid = 't-decoupled'
             epoch = 'e-1'
             def require_active(self):
                 return None
 
+        before_guard = capture_protected_files(proj)
         bridge = BridgeServer(_Active(), project_root=proj, allowed_read_roots=None, denied_paths=(secret_state,))
         shims = SandboxShims(
             wb_project, execution_mode='restricted', project_python=sys.executable,
@@ -1521,21 +1533,21 @@ def test_visibility_decoupled_from_dependencies_and_no_workbench_read_roots_conf
                 extra_read_paths=shims.read_paths, extra_runtime_paths=shims.runtime_paths,
             )
             assert live_spec.read_policy == 'inherit_os'
+            assert live_spec.write_policy == 'project_root'
             script = (
                 'import os, subprocess, sys\n'
                 'from pathlib import Path\n'
                 f'ext = Path({str(ext_pkg)!r})\n'
                 f'secret = Path({str(secret_pkg)!r})\n'
                 'root = Path.cwd()\n'
-                # External dir is readable under inherit_os, NOT writable under write_policy=scoped
+                # External dir is readable under inherit_os, NOT writable under write_policy=project_root
                 'assert "v1" in (ext / "__init__.py").read_text()\n'
-                'for bad in (ext / "hack.py", root / "packages" / "hack.py", root / ".forge" / "hack.txt"):\n'
-                '    try:\n'
-                '        bad.write_text("nope")\n'
-                '    except PermissionError:\n'
-                '        pass\n'
-                '    else:\n'
-                '        raise AssertionError(f"Unexpected write succeeded: {bad}")\n'
+                'try:\n'
+                '    (ext / "hack.py").write_text("nope")\n'
+                'except PermissionError:\n'
+                '    pass\n'
+                'else:\n'
+                '    raise AssertionError("External write unexpectedly succeeded")\n'
                 # Python shim imports local_ref directly without any Workbench read_roots config
                 'r = subprocess.run(["python", "-c", "import visible_ext_lib; assert visible_ext_lib.VERSION == \'v1\'"], check=True)\n'
                 # `demiflow forge context` succeeds and sees visible_ext_lib
@@ -1547,11 +1559,17 @@ def test_visibility_decoupled_from_dependencies_and_no_workbench_read_roots_conf
                 'assert v_ok.returncode == 0, (v_ok.stdout, v_ok.stderr)\n'
                 'v_bad = subprocess.run(["demiflow", "forge", "dep", "vendor", "leaked_pkg", str(secret), "--root", str(root), "--json"], capture_output=True, text=True)\n'
                 'assert v_bad.returncode != 0, (v_bad.stdout, v_bad.stderr)\n'
+                # Simulate an unauthorized direct edit in packages/; Forge post-turn guard must clean it up.
+                '(root / "packages" / "hack.py").write_text("unauthorized")\n'
             )
             env = {'PATH': f'{shims.bin}:/usr/bin:/bin', 'LANG': 'C.UTF-8'}
             proc = launch_sandbox([sys.executable, '-c', script], spec=live_spec, env=env, cwd=str(proj), control_socket=bridge.path)
             out, err = proc.communicate(timeout=30)
             assert proc.returncode == 0, (out.decode('utf-8', 'replace'), err.decode('utf-8', 'replace'))
+            authorized_paths = bridge.finish_turn()
+            violations = enforce_protected_files(proj, before_guard, authorized=authorized_paths)
+            assert 'packages/hack.py' in violations
+            assert not (proj / 'packages' / 'hack.py').exists()
             assert (proj / 'packages' / 'vend' / '__init__.py').is_file()
             assert not (proj / 'packages' / 'leaked_pkg').exists()
         finally:

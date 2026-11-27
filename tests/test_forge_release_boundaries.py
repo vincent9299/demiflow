@@ -94,7 +94,7 @@ def test_restricted_terminal_network_is_off_without_a_model_channel(tmp_path, mo
     seen = []
     def author(*args, sandbox_spec, channel, **kwargs):
         assert channel is None
-        assert declaration.is_file()
+        assert not declaration.exists()
         seen.append(sandbox_spec)
         return dict(kwargs['binding'], completed=True, acknowledged=True, cleanup='complete', session='fixture')
 
@@ -106,6 +106,8 @@ def test_restricted_terminal_network_is_off_without_a_model_channel(tmp_path, mo
     assert result.exit_code == 0, result.output
     spec, = seen
     assert not spec.direct_network and spec.read_policy == ('scoped' if limited else 'inherit_os')
+    assert spec.write_policy == 'project_root'
+    assert str(root.resolve()) in spec.write_paths
     assert {str(credential), str(reviewer)} <= set(spec.denied_paths)
     if limited:
         assert str(reference) in spec.read_paths
@@ -139,7 +141,8 @@ def test_readonly_planning_then_edit_in_same_restricted_conversation(tmp_path, m
     try:
         service = server.development
         if not existing:
-            assert service.prewarm(workspace, root, provider_id='codex')['status'] == 'skipped'
+            assert service.prewarm(workspace, root, provider_id='codex')['status'] != 'skipped'
+            assert not declaration.exists()
         sid = service.create_project(workspace, root, 'create', 'codex')['id']
         assert service.capabilities(workspace, root)['start'], service.capabilities(workspace, root)
         plan = service.start_project(workspace, root, sid, 'plan', 0, 'Plan the migration.', auto_review=True)
@@ -157,9 +160,9 @@ def test_readonly_planning_then_edit_in_same_restricted_conversation(tmp_path, m
         changes = [item for e in events if e['turn_id'] == edit['id'] and e['type'] == 'change.observed'
                    for item in e['data']['files']]
         assert [item['path'] for item in changes] == ['pyproject.toml']
+        assert any(e['data'].get('warm_reused') for e in events if e['type'] == 'provider.bound')
         if existing:
             assert changes[0]['before']['bytes'] == len(original)
-            assert any(e['data'].get('warm_reused') for e in events if e['type'] == 'provider.bound')
         else:
             assert changes[0]['before'] is None
     finally:
@@ -197,6 +200,8 @@ def test_private_paths_and_public_project_commands(tmp_path, monkeypatch, scoped
         runtime_paths=default_runtime_paths(project_python=sys.executable),
         denied_paths=(state, later), host_state_root=state, read_roots=(reference,) if scoped else (), seconds=30,
     )
+    assert spec.write_policy == 'project_root'
+    assert str((project / '.env').resolve()) in spec.protected_paths
     script = '''
 import json, sys
 from pathlib import Path
@@ -208,7 +213,7 @@ assert 'workspace.json' in {p.name for p in project.iterdir()}
 assert {p.name for p in reference.iterdir()} == {'model.py'}
 assert (reference / 'model.py').read_text() == 'example'
 assert (project / '.env.example').read_text() == 'template'
-for private in (project / '.env', state / 'receipt', state / 'late-session' / 'receipt',
+for private in (state / 'receipt', state / 'late-session' / 'receipt',
                 account / '.ssh' / 'fixture', later / 'receipt'):
     try:
         private.read_bytes()
@@ -245,6 +250,29 @@ print(json.dumps(['context', 'check']))
         if proc.poll() is None:
             proc.kill()
             proc.communicate(timeout=5)
+    # Readonly turns still kernel-deny project-local .env in addition to host/account private paths.
+    ro_spec = build_development_sandbox_spec(
+        project, private_home=home, readonly=True,
+        runtime_paths=default_runtime_paths(project_python=sys.executable),
+        denied_paths=(state, later), host_state_root=state, read_roots=(reference,) if scoped else (), seconds=20,
+    )
+    assert ro_spec.write_policy == 'scoped' and ro_spec.write_paths == ()
+    assert str((project / '.env').resolve()) in ro_spec.denied_paths
+    ro_script = '''import sys
+from pathlib import Path
+env_file = Path(sys.argv[1])
+try:
+    env_file.read_bytes()
+except PermissionError:
+    print('ENV_DENIED')
+else:
+    raise AssertionError('Readonly turn read project .env')
+'''
+    ro_proc = launch_sandbox([sys.executable, '-I', '-B', '-c', ro_script, str(project / '.env')],
+                             spec=ro_spec, env={'PATH': '/usr/bin:/bin'}, cwd=project)
+    ro_out, ro_err = ro_proc.communicate(timeout=20)
+    assert ro_proc.returncode == 0, ro_err.decode(errors='replace')
+    assert ro_out.strip() == b'ENV_DENIED'
 
 
 def test_partial_deletion_keeps_all_original_bytes(tmp_path, monkeypatch):

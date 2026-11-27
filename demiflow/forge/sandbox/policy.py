@@ -7,7 +7,6 @@ Single source of truth for:
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -139,50 +138,6 @@ def _unique_abs(paths) -> tuple[str, ...]:
     return tuple(sorted({str(Path(path).absolute()) for path in paths}))
 
 
-def declaration_identity(root):
-    """Identify the directory entry to which the author's single-file grant was bound."""
-    try:
-        entry = (Path(root) / 'pyproject.toml').lstat()
-    except FileNotFoundError:
-        return None
-    return entry.st_dev, entry.st_ino
-
-
-@contextmanager
-def writable_project_declaration(root):
-    """Prepare the single-file grant only while an author is running, between source snapshots."""
-    path = Path(root) / 'pyproject.toml'
-    try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-    except FileExistsError:
-        yield
-        return
-    try:
-        # Distinguish an intentional empty save even on filesystems with coarse timestamps.
-        os.utime(fd, ns=(os.fstat(fd).st_atime_ns, 0))
-        original = os.fstat(fd)
-    finally:
-        # dep remove takes a write lease on this inode during the author's turn.
-        os.close(fd)
-
-    def untouched():
-        try:
-            current = path.lstat()
-        except FileNotFoundError:
-            return False
-        return (os.path.samestat(original, current) and current.st_size == 0 and current.st_mtime_ns == 0
-                and current.st_ctime_ns == original.st_ctime_ns)
-
-    try:
-        yield untouched
-    finally:
-        if untouched():
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-
-
 def build_development_sandbox_spec(
     root: str | Path,
     *,
@@ -209,12 +164,19 @@ def build_development_sandbox_spec(
 ) -> SandboxSpec:
     """Build the single canonical Forge OS SandboxSpec for developer / readonly sessions.
 
-    Visibility (`read_policy`) and dependencies are strictly decoupled:
-      - `packages/`, `.forge/`, `data_tools/` are ALWAYS protected against direct writes.
-      - Pipeline implementation turns may create/edit/save `pyproject.toml` (single-file grant).
-      - Read visibility is controlled solely by the sandbox (`readonly` turns or explicit
-        sandbox-level `read_roots` use `scoped`; normal developer sessions use `inherit_os`
-        regardless of whether `pyproject.toml` declares dependencies).
+    All OS read/write boundaries belong exclusively to Forge (independent of Workbench
+    directory scans or dependency declarations):
+      - Pipeline implementation turns grant ``write_policy='project_root'`` on the project
+        root itself (plus ``private_home``), while Forge's post-turn protected-file/tree
+        hooks guard ``.env*``, ``.forge/``, ``workspace.json``, ``packages/``, ``data_tools/``,
+        ``AGENTS.md``, and ``PIPELINE_SPEC.md`` (and non-Linux backends enforce read-only
+        overlays for protected paths).
+      - External paths outside ``project_root`` and ``private_home`` are NEVER writable.
+      - Readonly / review / notebook turns and design/platform turns use ``write_policy='scoped'``
+        (with zero write paths when ``readonly=True`` and project-local ``.env*`` denied).
+      - Read visibility defaults to ``inherit_os`` for developer sessions (blocking host and
+        account private paths and non-ambient shared ``/tmp``), narrowing to ``scoped`` only
+        for readonly turns or explicit sandbox-level ``read_roots``.
     """
     root_path = Path(root).absolute()
     read: list[Path] = []
@@ -239,21 +201,23 @@ def build_development_sandbox_spec(
                 active_cred = cred_path
                 read.append(cred_path)
 
+    project_root_write = (
+        not readonly
+        and not notebook_op
+        and kind == 'pipeline'
+        and phase == 'implementation'
+    )
     write_list: list[Path] = []
     if not readonly:
-        for name in writes:
-            if Path(name).parts[:1] in FORBIDDEN_DIRECT_WRITE_ROOTS:
-                continue
-            target = root_path / name
-            if target.exists():
-                write_list.append(target)
-
-    if not readonly and not notebook_op and kind == 'pipeline' and phase == 'implementation':
-        pyproject = root_path / 'pyproject.toml'
-        if (pyproject.is_file() and not pyproject.is_symlink()
-                and 'pyproject.toml' not in (protected or ())
-                and pyproject not in write_list):
-            write_list.append(pyproject)
+        if project_root_write:
+            write_list.append(root_path)
+        else:
+            for name in writes:
+                if Path(name).parts[:1] in FORBIDDEN_DIRECT_WRITE_ROOTS:
+                    continue
+                target = root_path / name
+                if target.exists():
+                    write_list.append(target)
 
     protected_list: list[Path] = []
     private_files: list[Path] = []
@@ -279,7 +243,8 @@ def build_development_sandbox_spec(
             and active_cred.is_relative_to(Path(private_home).resolve())) for path in denied_list):
         raise ValueError('Selected model credential overlaps a host-denied path')
     denied_list.extend(default_private_read_paths())
-    denied_list.extend(private_files)
+    if not project_root_write:
+        denied_list.extend(private_files)
     if not notebook_op:
         for granted_str in authorized_read_roots(
             root_path, read_roots=read_roots, denied_paths=denied_list, private_home=private_home,
@@ -306,7 +271,7 @@ def build_development_sandbox_spec(
         private_bytes=private_bytes,
         direct_network=direct_network,
         read_policy='scoped' if scoped_reads else 'inherit_os',
-        write_policy='scoped',
+        write_policy='project_root' if project_root_write else 'scoped',
     )
 
 
