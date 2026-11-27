@@ -306,8 +306,8 @@ class NativePromptRecovery:
             raise RecoveryContractError('Native asynchronous recovery needs a journal-capable transport')
         client.journal = _BorrowedJournal(self.journal)
         self.actor._runtime.coordinator._native_group_journal = True
-        bound = (128 * 1024 if client.model.provider else
-                 client.options.get('max_response_bytes', 8 * 1024**2) + 64 * 1024)
+        from demiflow.operator_llm.http_options import response_record_bytes
+        bound = 128 * 1024 if client.model.provider else response_record_bytes(client.options)
         if bound > self.journal.max_record_bytes:
             raise RecoveryContractError('Native response ceiling exceeds the admitted journal record budget')
         record = client.record

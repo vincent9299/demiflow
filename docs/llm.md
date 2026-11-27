@@ -155,6 +155,7 @@ options={"sqlite_journal": {"path": "/abs/path/review.sqlite", "max_requests": 1
 | `max_connections` | 等于 `concurrency` | 连接池上限 |
 | `request_options` | — | 透传给模型接口的额外参数 |
 | `gateway` | 无 | 设为 `litellm` 时明确关闭网关的重试和回退 |
+| `max_response_bytes` | 8MiB | 单个回复的字节上限，超出即失败。调小可以减少每个调用的内存预留，提高同时进行的调用数，见流式 map 文档“调用窗口” |
 
 `request_policy={"initial_concurrency": 2, "max_concurrency": 4}` 让节点按延迟和错误自动调节同时进行的请求数，上限不超过 `concurrency`。
 

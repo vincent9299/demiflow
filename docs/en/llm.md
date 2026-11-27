@@ -155,6 +155,7 @@ Passed through `options`:
 | `max_connections` | same as `concurrency` | Connection pool limit |
 | `request_options` | — | Extra parameters passed through to the model API |
 | `gateway` | none | `litellm` explicitly turns off the gateway's retries and fallbacks |
+| `max_response_bytes` | 8 MiB | Byte cap of one reply; a larger reply fails. A smaller cap reduces each call's memory reservation and raises how many calls run at once; see the call window in the streaming map guide |
 
 `request_policy={"initial_concurrency": 2, "max_concurrency": 4}` lets the node adapt the number of requests in flight to latency and errors, never above `concurrency`.
 

@@ -125,6 +125,8 @@ A per-row node with concurrency above 1 (a `map` with concurrency, `map_async`, 
 
 The platform `fetch` node is the exception: it appends only one receipt to the row, checked against `max_receipt_bytes` (at most 16 KiB) before it is returned, while the object bytes stay in the object store. Each fetch call therefore reserves only what that receipt can take (about 160 KiB), and under the default budget all declared calls run at once. The row `search_web` returns is checked against 1 MiB (within the row limit) when it is committed, so each search call reserves about 10 MiB. An output beyond its reservation fails with `BUDGET_EXCEEDED` instead of using more memory.
 
+`map_prompt_async` can shrink its reservation the same way. Without `call_output`, `error_output` or a multi-turn environment, with a non-image reply, and without offline replay, codex, CLI or a private cache, the node appends only one parsed result taken from a reply capped by `max_response_bytes`. Each call then reserves about 10 × (`max_response_bytes` + 64 KiB). Under the default 8 MiB this exceeds a full row, so nothing changes; with a smaller `max_response_bytes` (for example `65536`) all 32 concurrent calls run at once under the default budget.
+
 With the default 256 MB budget and 16 MB row limit, a pipeline of the form "read → one concurrent node → output" runs at most 7 calls at once; the more stages run together, the fewer calls fit. For more, raise `memory_bytes` or lower the row limit `max_row_bytes`. The concurrency actually reached is `call_concurrency` in the statistics below.
 
 When rows are large, lower `concurrency` and `queue_depth`, or project the fields you need first. The platform does not set a hard memory limit for arbitrary Python objects.
