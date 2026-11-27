@@ -5,7 +5,7 @@
 业务项目以根目录的 `pyproject.toml` 作为唯一依赖声明，直接运行在显式配置的项目 Python 环境中（不创建隐藏 `.forge/venv/`，也不维护独立的 `.forge/deps.lock.json` 锁文件或手工摘要审批）。
 
 - **A 类依赖（`[project].dependencies`）**：安装到项目显式 Python 环境中的标准 PEP 508 分发包。
-- **B 类依赖（`[tool.demiflow.packages]`）**：只读的外部 Python 源码包，支持 `vendored`（受管副本位于 `packages/<包名>`）和 `local_ref`（指向宿主已授权读范围内的外部绝对包目录）。
+- **B 类依赖（`[tool.demiflow.packages]`）**：只读的外部 Python 源码包，支持 `vendored`（受管副本位于 `packages/<包名>`）和 `local_ref`（指向当前沙箱可读的非敏感外部绝对包目录）。
 - 无 `[tool.demiflow.packages]` 表的旧项目沿用原行为；仅使用 A 类包的新项目可通过空 `[tool.demiflow.packages]` 表启用依赖管理。
 
 ```toml
@@ -46,7 +46,7 @@ demiflow forge dep install --root /project --python /project-env/bin/python [--j
 
 ## 沙箱、评审、运行与 Notebook
 
-受限开发会话生成初始上下文时，Forge 按本回合获准的参考目录核验外部包。沙箱内的 `demiflow forge context` 使用同一读范围。独立评审使用脱敏声明和检查摘要，依赖 URL 中的身份凭据、查询参数和片段不会发送给评审模型。轮换凭据也会使旧评审回执失效。
+文件可读性与可见性完全由沙箱策略控制，与依赖声明正交：工作台开发会话默认继承 OS 只读可见性（仍拒绝系统私密目录、宿主状态/凭据路径与软链），不需要额外配置工作台只读目录白名单，且新建或编辑 `pyproject.toml` 不会改变沙箱的读可见性；终端或只读沙箱显式限定读范围时，Forge 上下文、依赖解析与受限 `dep vendor` 严格按该沙箱范围核验。独立评审使用脱敏声明和检查摘要，依赖 URL 中的身份凭据、查询参数和片段不会发送给评审模型。轮换凭据也会使旧评审回执失效。
 
-- **开发与评审沙箱**：开发 Agent 可直接新建、编辑和保存 `pyproject.toml`，可正常 `import` 已声明包，OS 拒绝其直接写入 `packages/` 和 `.forge/`。受限会话中的 `demiflow forge dep vendor/remove` 经受控宿主通道执行并同回合生效；在已授权读范围内直接修改 `local_ref` 路径，下一条 `python`/`pytest` 即自动加载新版本。独立评审保持只读，使用脱敏且保留行号的 `pyproject.toml` 及包摘要，不展开大包正文，并将原文哈希与包树哈希纳入 `evidence_id`。
+- **开发与评审沙箱**：开发 Agent 可直接新建、编辑和保存 `pyproject.toml`，可正常 `import` 已声明包，OS 拒绝其直接写入 `packages/` 和 `.forge/`。受限会话中的 `demiflow forge dep vendor/remove` 经受控宿主通道执行并同回合生效；在当前沙箱可读范围内直接修改 `local_ref` 路径，下一条 `python`/`pytest` 即自动加载新版本。独立评审保持只读，使用脱敏且保留行号的 `pyproject.toml` 及包摘要，不展开大包正文，并将原文哈希与包树哈希纳入 `evidence_id`。
 - **预览、受管运行与 Notebook**：控制服务留在宿主 Python，业务子进程由 `demiflow.forge.runtime` 按显式项目 Python 与单包精确加载器启动（同级目录不可见）。正式运行首次启动核对当前声明与环境，中断后即使外部包升级，恢复也严格读取原封存字节并校验原 Python 环境。Notebook 新内核读取最新核验版本，已打开内核保持启动时固定的快照版本，只读内核写保护继续生效。

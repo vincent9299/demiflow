@@ -45,7 +45,10 @@ def read_runtime_config(root):
         raise ForgeError('Cannot read the Forge runtime configuration', code='operation_rejected') from exc
     if not isinstance(config, dict) or config.get('root') != str(root):
         raise ForgeError('Forge runtime configuration belongs to another project', code='operation_rejected')
-    if config.get('execution_mode') != 'trusted_local' and config.get('allowed_read_roots') is None:
+    read_policy = config.get('read_policy')
+    if read_policy is not None and read_policy not in {'inherit_os', 'scoped'}:
+        raise ForgeError('Invalid Forge runtime read policy', code='operation_rejected')
+    if read_policy != 'inherit_os' and config.get('execution_mode') != 'trusted_local' and config.get('allowed_read_roots') is None:
         config['allowed_read_roots'] = []
     for paths in (config.get('allowed_read_roots', []), config.get('denied_paths', [])):
         if paths is None:
@@ -410,6 +413,7 @@ class SandboxShims:
         runtime_cfg = {
             'root': str(self.root),
             'execution_mode': execution_mode,
+            'read_policy': 'scoped' if self.allowed_read_roots is not None else 'inherit_os',
             'python': self.project_python,
             'allowed_read_roots': list(self.allowed_read_roots) if self.allowed_read_roots is not None else None,
             'denied_paths': list(self.denied_paths),

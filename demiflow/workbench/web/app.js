@@ -288,7 +288,7 @@
     const write=!!body&&!['plan-preview','plan-node-detail','plan-pipeline-source','analysis-source-register','analysis-case-group-bindings','analysis-case-page','analysis-annotation-heads','analysis-annotation-definitions','analysis-field-preview','analysis-source-from-handle','analysis-case-media','analysis-artifact-media-current','analysis-media'].includes(path);
     const cleanup=false;
     const epoch = viewEpoch;
-    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities','project-python','project-read-roots','project-notebook-sandbox','project-dev-network'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
+    const url = (['projects','capabilities','project-create','project-register','project-remove','project-permissions','project-capabilities','project-python','project-notebook-sandbox','project-dev-network'].includes(path) ? '/api/' + path : '/api/workspaces/' + projectId + '/' + path) + (Object.keys(query).length ? '?' + new URLSearchParams(query) : '');
     if (url.length > 8192) throw new Error('查询链接超出长度限制，请缩小字段投影');
     const payload=body?V.boundedJSON(body,65536):null;
     const signal=cleanup?AbortSignal.timeout(5000):write?AbortSignal.timeout(65000):AbortSignal.any([readController.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(65000)]);
@@ -1134,29 +1134,6 @@
       },pySection);
       pySection.insertBefore(modeSelect,savePy);pySection.insertBefore(pyInput,savePy);pySection.insertBefore(pyHint,savePy);pySection.append(pyMsg);
       dialog.append(pySection);
-
-      const rrSection=$('section',undefined,'project-python-settings');
-      rrSection.append($('strong','授权外部只读参考目录（local_ref / vendor 源码范围）'));
-      const rrInput=$('textarea',undefined,'project-python-input');rrInput.rows=3;rrInput.setAttribute('aria-label','外部只读参考目录列表');
-      rrInput.placeholder='/path/to/shared-libs（每行一个绝对目录路径）';
-      rrInput.value=Array.isArray(project.read_roots)?project.read_roots.join('\n'):'';
-      const rrHint=$('p','每行填写一个服务器绝对目录。开发会话、独立评审、预览、运行与 Notebook 仅读取此处显式授予的外部源码范围。','muted small project-python-hint');
-      const rrMsg=$('p','','small project-python-msg');rrMsg.hidden=true;
-      const saveRr=button('保存外部参考目录',async()=>{
-        const roots=rrInput.value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-        saveRr.disabled=true;rrMsg.hidden=true;
-        try{
-          const saved=await api('project-read-roots',{},{workspace_id:project.workspace_id,expected:projectDigest,read_roots:roots});
-          if(Array.isArray(saved?.read_roots))rrInput.value=saved.read_roots.join('\n');
-          await refreshProjects();
-          rrMsg.textContent=roots.length?'已保存 '+roots.length+' 个外部只读目录，下一回合开发会话与新 Notebook 内核将使用最新授权范围。':'已清空外部参考目录授权。';
-          rrMsg.dataset.tone='ok';rrMsg.hidden=false;
-        }catch(err){
-          rrMsg.textContent=err?.message||'保存失败';rrMsg.dataset.tone='error';rrMsg.hidden=false;
-        }finally{saveRr.disabled=false;}
-      },rrSection);
-      rrSection.insertBefore(rrInput,saveRr);rrSection.insertBefore(rrHint,saveRr);rrSection.append(rrMsg);
-      dialog.append(rrSection);
     }
     if(projectRemovalEnabled)button('移除项目 '+project.name,()=>{dialog.close();removeProjectDialog(project);},dialog);
     else dialog.append($('p','此服务未授予项目管理权限。','notice'));

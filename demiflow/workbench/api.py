@@ -161,7 +161,6 @@ POST_FIELDS = {
     'project-remove': ({'workspace_id', 'expected'}, set()),
     'project-permissions': ({'workspace_id', 'expected', 'run_submit', 'run_control', 'attach'}, set()),
     'project-python': ({'workspace_id', 'expected', 'python'}, set()),
-    'project-read-roots': ({'workspace_id', 'expected', 'read_roots'}, set()),
     'project-notebook-sandbox': ({'workspace_id', 'expected', 'mode'}, {'write_paths'}),
     'project-dev-network': ({'workspace_id', 'expected', 'enabled'}, set()),
     'flow-register': ({'entry'}, {'params'}),
@@ -680,10 +679,6 @@ class Handler(BaseHTTPRequestHandler):
                 if value is not None and (type(value) is not str or len(value.encode()) > 2048):
                     raise ForgeError('Invalid python field', code='invalid_request')
                 continue
-            if name == 'project-read-roots' and key == 'read_roots':
-                if type(value) is not list or len(value) > 32 or any(type(v) is not str or len(v.encode()) > 2048 for v in value):
-                    raise ForgeError('Invalid read_roots field', code='invalid_request')
-                continue
             if name == 'project-notebook-sandbox' and key == 'write_paths':
                 if type(value) is not list or len(value) > 16 or any(type(v) is not str for v in value):
                     raise ForgeError('Invalid write_paths field', code='invalid_request')
@@ -1015,7 +1010,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ForgeError('当前服务尚未安装可配置的本地开发代理。', code='operation_rejected')
                 with self._work(): value = self.server.development_settings.save(request)
                 self._send(value); return
-            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python','/api/project-read-roots','/api/project-notebook-sandbox','/api/project-dev-network'}:
+            if self.path in {'/api/project-create', '/api/project-register', '/api/project-remove', '/api/project-permissions','/api/project-capabilities','/api/project-python','/api/project-notebook-sandbox','/api/project-dev-network'}:
                 if self.server.registry is None:
                     raise ForgeError('Project management requires a console registry', code='operation_rejected')
                 request = self._body(self.path.removeprefix('/api/'))
@@ -1084,15 +1079,14 @@ class Handler(BaseHTTPRequestHandler):
                                   '/api/project-permissions': console.set_permissions,
                                   '/api/project-capabilities':console.set_capabilities,
                                   '/api/project-python': console.set_python,
-                                  '/api/project-read-roots': console.set_read_roots,
                                   '/api/project-notebook-sandbox': console.set_notebook_sandbox,
                                   '/api/project-dev-network': console.set_dev_network}[self.path]
                         value = action(self.server.registry, **request, **({'analysis_service':self.server.analysis or self.server.notebooks}
                             if self.path=='/api/project-capabilities' else {}))
-                    if self.path in {'/api/project-python', '/api/project-read-roots', '/api/project-dev-network'} and self.server.development_settings is not None:
+                    if self.path in {'/api/project-python', '/api/project-dev-network'} and self.server.development_settings is not None:
                         with self.server.development_settings.service.lock:
                             self.server.development_settings.bindings.clear()
-                    if self.path in {'/api/project-python', '/api/project-read-roots', '/api/project-notebook-sandbox'} and self.server.notebooks is not None:
+                    if self.path in {'/api/project-python', '/api/project-notebook-sandbox'} and self.server.notebooks is not None:
                         self.server.notebooks.refresh_kernel_config(request['workspace_id'])
                 self._send(value)
                 return
