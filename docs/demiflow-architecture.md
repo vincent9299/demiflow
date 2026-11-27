@@ -138,9 +138,9 @@ sequenceDiagram
 | Agent 受控工具 `bridge` | 定义工具发现、参数、鉴权与分发，覆盖开发会话、Notebook 助手命令和 `run.*`。 | 开发与 Notebook 工具按当前回合开放，宿主注入输入、登记与 Cell 执行回调。开发工具包括 `manage_project_layout`、`request_pipeline_review`、`read_input`、`list_registered_projects`。`run.*` 按请求及 attempt 身份交给 `runs` 核验项目操作权限。 宿主持有凭据，作者和评审分别使用当前回合授予的模型通道。 | [工程工具](../demiflow/forge/bridge/tools.py)、[控制桥](../demiflow/forge/bridge/server.py)、[Notebook 命令](../demiflow/forge/bridge/notebook_commands.py)、[Run 工具](../demiflow/forge/bridge/run_tools.py)、[模型通道](../demiflow/forge/bridge/model_channel.py) |
 | 开发与评审沙箱 `sandbox` | 依项目契约、操作角色和显式授权上限推导并执行 OS 读写边界，负责命令包装器、隔离进程与回收。 | 文件可见性与可写范围归 Forge。普通开发按 OS 权限读取并屏蔽敏感路径，只读或显式收窄回合按范围访问。作者可写 pyproject.toml，对 packages/ 与 .forge/ 只读。受控 vendor/remove 离线执行，包更新在下一条 Python 命令生效。超出显式范围须重新授权并启动沙箱，进程复用核验实际权限。终端默认受限，可信本地模式显式选择。watch 只观察变更，依赖声明不授予权限。 | [沙箱策略](../demiflow/forge/sandbox/policy.py)、[执行后端](../demiflow/forge/sandbox/backends/)、[命令包装器](../demiflow/forge/sandbox/sandbox_shims.py) |
 | 独立评审 `review` | 对照需求和固定候选审查业务实现，核对引用、覆盖范围和阻断项，签发与候选绑定的评审回执。 | 独立于作者的只读、无工具模型会话。输入含保留行号的脱敏 TOML 和包摘要，源码展开止于外部包边界。声明原文与包树哈希计入 evidence_id。核对引用的文件、前后版本、行号和摘录，空文件按对应版本举证。候选变化须重核，旧回执可查。补读由 Forge 执行并与返工共用剩余预算，结论交给开发交付。 | [评审](../demiflow/forge/review.py)、[评审证据](../demiflow/forge/review_evidence.py)、[候选取证](../demiflow/forge/source_snapshot.py)、[评审指南](../demiflow/forge/standards/pipeline-review.md) |
-| 开发交付 `development` | 依据用户需求组织原作者回合，固定候选、检查范围、独立评审、返工和交付回执。 | 讨论回合无业务改动时仅按显式请求评审。实施交付须有符合需求的候选或已核实的既有结果。检查和付费评审分别按策略启用。两入口共用重叠项目根的写入准入，清理未确认时保留所有权与租约。主动和自动检查共用去重，按受影响 Flow、共享依赖及未归属变更确定范围，保留删除、无 Git、参数与工作流依据。有效反馈连同发送身份交回原作者，返工后按原范围复核。 | [开发回合](../demiflow/forge/development.py) |
+| 开发交付 `development` | 依据用户需求组织原作者回合，固定候选、检查范围、独立评审、返工和交付回执。 | 讨论回合无业务改动时仅按显式请求评审。实施交付须有符合需求的候选或已核实的既有结果。检查和付费评审分别按策略启用。两入口共用重叠项目根的写入准入，清理未确认时保留所有权与租约。主动和自动检查共用去重，按受影响 Flow、共享依赖及未归属变更确定范围，保留删除、无 Git、参数与工作流依据。有效反馈连同发送身份交回原作者，返工后按原范围复核。各开发入口分别记录发送、投递确认和完成，ACK 未知时先核实，禁止自动重发。过期反馈保留被替代、取消或待核验状态。 | [开发回合](../demiflow/forge/development.py) |
 | 项目 Python `runtime` | 使用终端显式传入或 Workbench 已选定的同一个项目 Python，提供受限启动、精确源码加载及依赖快照。业务操作需要 Python 时，解释器缺失或无效须在启动前报错。 | 解释器配置由调用方持有。加载范围限于所选包，外部父目录不加入 `sys.path`。实时或封存版本由调用场景指定。Run attempt 归 `runs`，预览和 Notebook 内核生命周期归 Workbench。 | [解释器与源码加载](../demiflow/forge/runtime.py) |
-| 单项目受管运行 `runs` | 独立管理单项目的应用封存、幂等请求、槽位租约与设备配额、启停、恢复及产物和训练对账。 | Forge 是单项目受管 Run 的唯一控制方，终端和 Workbench 操作同一 run_id。prepare 按 request_id 去重，首次启动核验声明、源码和环境，秘密只存引用。后续操作核对授权、身份和适用的封存摘要，恢复核验原环境、剩余预算、前次清理及原生恢复依据。外部包升级后仍读原封存，依据不足时保留旧结果可读并提示新开运行。解释器与包加载归 runtime，原生执行、检查点与提交归底座。Workbench 注入授权和索引回调。 | [Run 生命周期](../demiflow/forge/runs/manager.py)、[运行授权](../demiflow/forge/runs/authority.py)、[受管命令](../demiflow/forge/runs/cli.py)、[PipelineBundleRef 入口](../demiflow/cli.py) |
+| 单项目受管运行 `runs` | 独立管理单项目的应用封存、幂等请求、槽位租约与设备配额、启停、恢复及产物和训练对账。 | Forge 是单项目受管 Run 的唯一控制方，终端和 Workbench 操作同一 run_id。prepare 按 request_id 去重，首次启动核验声明、源码和环境，秘密只存引用。后续操作核对授权、run/attempt、操作身份及适用的预期版本、期限与封存摘要，恢复核验原环境、剩余预算、前次清理及原生恢复依据。外部包升级后仍读原封存，依据不足时保留旧结果可读并提示新开运行。解释器与包加载归 runtime，原生执行、检查点与提交归底座。Workbench 注入授权和索引回调。 | [Run 生命周期](../demiflow/forge/runs/manager.py)、[运行授权](../demiflow/forge/runs/authority.py)、[受管命令](../demiflow/forge/runs/cli.py)、[PipelineBundleRef 入口](../demiflow/cli.py) |
 
 #### 2.1.2 子模块时序图
 
@@ -162,7 +162,7 @@ sequenceDiagram
     C-->>A: 返回适用规范与当前 SDK 的公开符号索引
     A->>C: 用 forge context 提交项目根和选定的公开符号
     C-->>A: 返回签名、返回契约与来源，或符号查询错误
-    Note over A,C: 查询示例 forge context --root . --api demiflow.data:Dataset.fit
+    Note over A,C: 查询示例 demiflow forge context --root . --api demiflow.data:Dataset.fit
     A->>A: 依据公开契约编写业务代码
 ```
 
@@ -271,7 +271,7 @@ sequenceDiagram
 | API 与传输 | 管理 HTTP 认证、路由、序列化、流式连接与取消传递。 | 路由调用所属领域的操作，状态变更归该领域。 | [API](../demiflow/workbench/api.py) |
 | Web 界面 | 提供 项目导航、四个 tab、共享选择、响应式布局与错误提示。 | 算子图、源码、配置、历史和日志按用户选择的对象读取。 | [Web 入口](../demiflow/workbench/web/app.js) |
 | 通用展示组件 | 依固定引用呈现表格、消息、文本、代码、JSON、HTML、图像和音视频，处理不可信内容、分页、缩放、展开与订阅。 | 答案、数据修改与运行控制由对应领域持有。 | [展示组件](../demiflow/workbench/web/workbench-presentation.js) |
-| 开发会话 `conversations` | 持有会话 HTTP、SQLite 记录、Provider 传输、人工队列和回合恢复，向 Forge 传递用户要求、投递、作者完成和清理事实。 | 返工反馈返回原作者，工程回执交给发起者。重连按当前回合核权。工程上下文、工具契约、沙箱策略和交付回执归 Forge。会话、算子内 Agent 和 Pipeline attempt 各自使用原身份。 分别记录发送、投递确认和完成，ACK 未知时先核实。保留人工队列顺序，过期反馈记录为被替代、取消或待核验。 | [会话调度](../demiflow/workbench/conversations/worker.py)、[会话存储](../demiflow/workbench/conversations/store.py) |
+| 开发会话 `conversations` | 持有会话 HTTP、SQLite 记录、Provider 传输、人工队列和回合恢复，向 Forge 传递用户要求、投递、作者完成和清理事实。 | 返工反馈返回原作者，工程回执交给发起者。重连按当前回合核权。工程上下文、工具契约、沙箱策略和交付回执归 Forge。会话、算子内 Agent 和 Pipeline attempt 各自使用原身份。 持久保存投递事实及人工队列顺序，按 Forge 的决定处理过期反馈。 | [会话调度](../demiflow/workbench/conversations/worker.py)、[会话存储](../demiflow/workbench/conversations/store.py) |
 | 预览与算子图 `worker / graph` | 固定表输入，调度只读业务子进程构图，关联算子、参数与源码。 | 控制进程使用宿主 Python。业务预览统一通过 `forge.runtime` 使用显式项目 Python，在解释器启动配置生效前施加隔离。既有 `shared-sources.json` 与 `DEMIFLOW_WORKBENCH_SHARED_SOURCES` 沿原合同使用，包名冲突须报告。 | [预览调度](../demiflow/workbench/worker.py)、[算子图](../demiflow/workbench/graph/preview.py) |
 | 受管运行入口 `runs` | 持有多项目授权、历史索引接入、HTTP 与视图，展示单项目 Run 的状态、attempt、产物与历史。 | Web 和 `demiflow workbench run` 按入口核验调用方的当前授权，将单项目操作统一委托 `forge.runs`。运行 supervisor 使用宿主 Python。Forge 从项目记录重建 `.forge/index.sqlite`，Workbench 读取索引。 | [运行授权](../demiflow/workbench/runs/authority.py)、[产品视图](../demiflow/workbench/runs/view.py)、[项目索引](../demiflow/forge/index.py) |
 | 工作流编排 `workflows` | 管理本项目或跨项目工作流的 `wf_run_id`、编排 attempt、节点依赖和子 Run 引用。 | 子 Run 按其项目授权提交，下游按上游实际提交的产物读取。查询、日志和停止各自核权，严格运行准入须显式启用。 | [工作流调度](../demiflow/workbench/workflows/manager.py)、[项目解析](../demiflow/workbench/workflows/resolver.py) |
@@ -429,7 +429,7 @@ sequenceDiagram
 
 | 子模块 | 职责 | 边界 | 代码入口 |
 |---|---|---|---|
-| 01　Pipeline 入口与运行上下文 | 绑定业务入口、运行参数、run 与 attempt，管理 RunContext、RunAction 和取消请求。 | 一个 run 可以包含多个 action。受管入口提供已准入的 attempt，原生上下文绑定其运行身份。 应用核验总预算，运行上下文保留调用方获准的上限。控制操作核对授权、run/attempt、操作身份及适用的预期版本与期限，停止受理、实际退出和资源清理分别确认。 | [run 上下文](../demiflow/execution/pipeline/run_context.py)、[pipeline 入口](../demiflow/execution/pipeline/driver.py) |
+| 01　Pipeline 入口与运行上下文 | 绑定业务入口、运行参数、run 与 attempt，管理 RunContext、RunAction 和取消请求。 | 一个 run 可以包含多个 action。受管入口提供已准入的 attempt，原生上下文绑定其运行身份。 应用核验总预算，运行上下文保留调用方获准的上限。受管入口核验项目授权，原生上下文核验运行身份与租约。停止受理、实际退出和资源清理分别确认。 | [run 上下文](../demiflow/execution/pipeline/run_context.py)、[pipeline 入口](../demiflow/execution/pipeline/driver.py) |
 | 02　Dataset API 与执行端口 P1 | 定义 Dataset、数据与类型、函数与 Actor 的声明、Pipeline 配置和终结动作，记录 source 与 LogicalPlan，经 P1 交给所选 executor。 | SDK 交付公开 API 约定的行、迭代器、标量或回执。引擎一侧将带类型的动作声明组装为 ActionRequest。 executor 按需装配，SDK 冷导入独立于 Forge 和 Workbench。take 限制交付行数。 | [Dataset](../demiflow/data/dataset.py)、[动作契约](../demiflow/data/execution_contract.py)、[执行端口](../demiflow/execution/executors/base.py)、[动作入口](../demiflow/execution/executors/dataflow_api.py) |
 | 03　Action driver | 处理一个 ActionRequest，协调阶段、整批准入截止、逐项放置重试和终止，持有 ActionHandle。 | 等待与重试截止归 driver，单项选机与租约归 07，物理分配和实际退出归 08。 | [DataflowExecution](../demiflow/execution/action_driver/dataflow.py) |
 | 04　编译器 | 完成逻辑降级，再依据真实分片与策略选择 stage、融合及 exchange，生成逻辑和物理计划。 按实际同时驻留的阶段核算窗口和资源请求。 | 物理规划消费实际 splits、主机描述和常量引用。读取源元数据归 05，发布封存归 06。 内存交接须容纳同时驻留的上下游，持久化交接可分时启动。资源请求按执行方式推导，无法可靠推导的共享实例或自定义恢复任务保留固定需求。 | [逻辑编译](../demiflow/planning/dataflow_compile.py)、[物理规划](../demiflow/planning/dataflow_place.py)、[算子登记](../demiflow/planning/dataflow_registry.py) |
