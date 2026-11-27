@@ -42,8 +42,10 @@ def execution(metrics, *, previous=None, source_rows=0, threshold=10):
     driver._source_done = set()
     driver._source_credit_needs_rotation = False
     driver._cancelled = False
-    driver._action = NS(context=NS(limits={'checkpoint_timeout_s': 30,
-        'checkpoint_unconfirmed_rows': 4096, 'checkpoint_unconfirmed_bytes': 64*1024**2}))
+    limits = {'checkpoint_timeout_s': 30,
+        'checkpoint_unconfirmed_rows': 4096, 'checkpoint_unconfirmed_bytes': 64*1024**2}
+    # As RunContext.start(limits=...) records them: every given limit is declared.
+    driver._action = NS(context=NS(limits=limits, explicit_limits=frozenset(limits)))
     driver._checkpoint_at = time.monotonic()
     driver._policy = NS(checkpoint_rows=threshold, checkpoint_interval_ms=60000, provider='thread')
     driver._bounds = NS(max_pending_events=16)
