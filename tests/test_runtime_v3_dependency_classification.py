@@ -322,3 +322,81 @@ def test_process_worker_runs_a_row_function_with_a_lazy_absolute_import(lazy_abs
     with RunContext.start(tmp_path / 'run'), data.local_execution(workers=1, worker_mode='process'):
         rows = data.from_items([{'x': 1}, {'x': 2}]).map(entry.transform).take_all()
     assert sorted(row['x'] for row in rows) == [10, 20] and {row['tag'] for row in rows} == {'v1'}
+
+
+@pytest.mark.parametrize('worker', ['process', 'thread'])
+def test_resume_after_driver_script_import_edit(tmp_path, worker):
+    helper = tmp_path / 'driver_scale.py'
+    helper.write_text('def scale(n):\n    return n * 10\n')
+    driver = tmp_path / 'driver.py'
+    driver.write_text("""\
+from pathlib import Path
+import sys
+from demiflow import data
+from demiflow.execution.pipeline.run_context import RunContext, RunRef
+from demiflow.execution.journal.run_journal import RunJournal
+
+def transform(row):
+    def apply(n):
+        import driver_scale
+        return driver_scale.scale(n)
+    if row['n'] >= 6 and not Path('resume').exists():
+        raise RuntimeError('interrupted after checkpoint')
+    return {'value': apply(row['n'])}
+
+path = Path('run').resolve()
+if sys.argv[1] == 'start':
+    context = RunContext.start(path, limits={'checkpoint_rows': 2, 'checkpoint_interval_ms': 60000})
+else:
+    context = RunContext.resume(RunRef(str(path), RunJournal(path).recovery_identity()['run_id']))
+with context, data.local_execution(workers=1, worker_mode=sys.argv[2]):
+    rows = data.from_items([{'n': n} for n in range(10)]).map(transform).take_all()
+print(sorted(row['value'] for row in rows))
+""")
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]), PYTHONDONTWRITEBYTECODE='1',
+               DEMIFLOW_RESOURCE_ROOT=str(tmp_path / 'resources'))
+
+    def run(phase):
+        return subprocess.run([sys.executable, '-B', driver, phase, worker], cwd=tmp_path,
+                              env=env, capture_output=True, text=True, timeout=90)
+
+    interrupted = run('start')
+    assert interrupted.returncode and 'RuntimeError: interrupted after checkpoint' in interrupted.stderr
+    helper.write_text('def scale(n):\n    return n * 99\n')
+    (tmp_path / 'resume').touch()
+    resumed = run('resume')
+    if resumed.returncode:
+        assert 'differs from the sealed pin' in resumed.stderr, resumed.stderr
+    else:
+        assert resumed.stdout.strip() == str(list(range(0, 100, 10)))
+
+
+def test_named_imports_from_a_cell_with_a_package_and_no_source_file(tmp_path, monkeypatch):
+    # A -m entry and a packaged notebook cell both carry __package__ when serialized.
+    import cloudpickle
+    package = tmp_path / 'cell_business'
+    package.mkdir()
+    (package / '__init__.py').write_text('')
+    (package / 'helper.py').write_text("raise AssertionError('sealing must not execute this module')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    namespace = {'__name__': '__main__', '__package__': 'cell_business'}
+    exec(compile('def transform(row):\n    from . import helper\n    return row\n', '<cell>', 'exec'), namespace)
+    transform = cloudpickle.loads(cloudpickle.dumps(namespace['transform']))
+    assert dict(business_sources._by_value_import_paths(transform)) == {
+        'cell_business': package / '__init__.py', 'cell_business.helper': package / 'helper.py'}
+
+
+def test_legacy_driver_seal_cannot_prove_a_disappeared_optional_import():
+    from demiflow.execution.contracts.dataflow_errors import DataflowError
+
+    def transform(row):
+        try:
+            import missing_optional_business_rules
+        except ImportError:
+            return row
+        return missing_optional_business_rules.transform(row)
+
+    assert not dict(business_sources._by_value_import_paths(transform))
+    with pytest.raises(DataflowError, match='missing_optional_business_rules') as failure:
+        dict(business_sources._by_value_import_paths(transform, audit=True))
+    assert failure.value.code == 'INCOMPATIBLE_HISTORY'

@@ -31,7 +31,7 @@ from time import time_ns
 
 from ...data.datasink import Datasink
 from ...data.plan import CallableSpec, LogicalPlan, MapOp
-from .business_sources import EAGER_IMPORTS, LOADED_IMPORTS, PROJECT_IMPORTS, stable_code_identity, plan_code_pin
+from .business_sources import EAGER_IMPORTS, LOADED_IMPORTS, MODULE_IMPORTS, PROJECT_IMPORTS, stable_code_identity, plan_code_pin
 from ..contracts.dataflow import (
     ArtifactRef, Bounds, CompiledDataflow, DataflowGraph, LoadedProgram,
     PhysicalDataflow, ProgramDeclaration, SealedExecution, thaw_json,
@@ -182,7 +182,7 @@ def _code_identity_from_value(kind, value, *, sources=None, discovery=PROJECT_IM
     from .business_sources import business_sources, source_identity
     if sources is None:
         sources = business_sources(kind, value, discovery=discovery)
-    policy = {'import_policy': discovery} if discovery == PROJECT_IMPORTS else {}
+    policy = {'import_policy': discovery} if discovery in (MODULE_IMPORTS, PROJECT_IMPORTS) else {}
     return {**policy, **_base_code_identity_from_value(kind, value, discovery=discovery),
             'imports': source_identity(sources)}
 
@@ -190,8 +190,9 @@ def _code_identity_from_value(kind, value, *, sources=None, discovery=PROJECT_IM
 def _matches_original_program(kind, value, expected):
     """Recompute exactly the discovery policy bound by the original pin."""
     if 'import_policy' in expected:
-        return (expected['import_policy'] == PROJECT_IMPORTS
-                and identity(_code_identity_from_value(kind, value)) == identity(expected))
+        policy = expected['import_policy']
+        return (policy in (MODULE_IMPORTS, PROJECT_IMPORTS)
+                and identity(_code_identity_from_value(kind, value, discovery=policy)) == identity(expected))
     if any(identity(_code_identity_from_value(kind, value, discovery=policy)) == identity(expected)
            for policy in (EAGER_IMPORTS, LOADED_IMPORTS)):
         return True
@@ -765,13 +766,13 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
             live_binding = owner(action)
         program = verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
                                           bounds=bounds, live_binding=live_binding)
-        if missing_import is None and 'import_policy' not in expected and expected.get('imports'):
-            from .business_sources import business_sources
+        if missing_import is None and expected.get('import_policy') != PROJECT_IMPORTS:
+            from .business_sources import HISTORY_IMPORTS, business_sources
             # The historical pin above still authenticates the original record.
             # Only continuing computation requires proof for its local imports.
             try:
-                sources = business_sources(program.kind, program.value)
-                missing_import = next((name for name in sources if name not in expected['imports']), None)
+                sources = business_sources(program.kind, program.value, discovery=HISTORY_IMPORTS)
+                missing_import = next((name for name in sources if name not in expected.get('imports', {})), None)
             except (RecoveryContractError, DataflowError, OSError) as exc:
                 missing_import = str(exc)
     return pending, missing_import

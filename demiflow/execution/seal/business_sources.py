@@ -12,7 +12,9 @@ from demiflow.execution.contracts.recovery_contract import RecoveryContractError
 
 SOURCE_MEDIA = 'text/x-python'
 MAX_SOURCES = 64
-PROJECT_IMPORTS = 'project-python-v1'
+PROJECT_IMPORTS = 'project-python-v2'
+MODULE_IMPORTS = 'project-python-v1'
+HISTORY_IMPORTS = 'audit-unversioned-imports'
 EAGER_IMPORTS = 'legacy-eager'
 LOADED_IMPORTS = 'legacy-loaded'
 
@@ -278,9 +280,6 @@ def _classify_dependency_module(module):
     import inspect
     import os
     import sys
-    import site
-    import sysconfig
-    from pathlib import Path
     name = getattr(module, "__name__", "") or ""
     if name.split(".", 1)[0] in sys.stdlib_module_names:
         return None
@@ -293,38 +292,44 @@ def _classify_dependency_module(module):
     module_filename = getattr(module, "__file__", None)
     filename = filename or module_filename
     if filename:
-        path = Path(filename)
-        try:
-            resolved = path.resolve()
-        except OSError:
-            resolved = path
-        if resolved.is_relative_to(Path(__file__).resolve().parents[2]):
-            return None
-        # A virtual environment may explicitly inherit its base installation.
-        # Only accept active interpreter installation roots, never arbitrary
-        # PYTHONPATH directories that merely end in "site-packages".
-        roots = {sysconfig.get_path(key) for key in ('purelib', 'platlib')}
-        roots.update(path for path in site.getsitepackages() if path in sys.path)
-        for base in roots:
-            if base and resolved.is_relative_to(Path(base).resolve()):
-                return None
-            if base and module_filename:
-                # An installation may link a package to shared wheel files.
-                # Keep its original installation ownership before following
-                # that link; arbitrary sys.path entries are not installation
-                # roots. Both source and module metadata must agree. Editable
-                # sources outside this root remain business code to be pinned.
-                installed = Path(os.path.abspath(base))
-                if all(Path(os.path.abspath(value)).is_relative_to(installed)
-                       for value in (filename, module_filename)):
-                    return None
-        if resolved.suffix == ".py" and resolved.is_file():
-            return resolved
-        return None
+        return _business_source_path(filename, module_filename)
     if getattr(module, "__path__", None) is not None:
         return None
     raise RecoveryContractError(
         "Business dependency module has no resolvable source; code-pin refuses (fail-closed): " + name)
+
+
+def _business_source_path(filename, module_filename):
+    import site
+    import sysconfig
+    path = Path(filename)
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    if resolved.is_relative_to(Path(__file__).resolve().parents[2]):
+        return None
+    # A virtual environment may explicitly inherit its base installation.
+    # Only accept active interpreter installation roots, never arbitrary
+    # PYTHONPATH directories that merely end in "site-packages".
+    roots = {sysconfig.get_path(key) for key in ('purelib', 'platlib')}
+    roots.update(path for path in site.getsitepackages() if path in sys.path)
+    for base in roots:
+        if base and resolved.is_relative_to(Path(base).resolve()):
+            return None
+        if base and module_filename:
+            # An installation may link a package to shared wheel files.
+            # Keep its original installation ownership before following
+            # that link; arbitrary sys.path entries are not installation
+            # roots. Both source and module metadata must agree. Editable
+            # sources outside this root remain business code to be pinned.
+            installed = Path(os.path.abspath(base))
+            if all(Path(os.path.abspath(value)).is_relative_to(installed)
+                   for value in (filename, module_filename)):
+                return None
+    if resolved.suffix == ".py" and resolved.is_file():
+        return resolved
+    return None
 
 
 def _module_registered_by_value(module_name):
@@ -540,7 +545,94 @@ def _is_walkable_value(value):
     return bool(_declared_slots(type(value)))
 
 
-def _by_value_business_modules(function):
+def _bytecode_import_names(function):
+    """Yield statically named imports, including those in nested functions."""
+    import dis
+    import types
+    from importlib.util import resolve_name
+
+    package = function.__globals__.get('__package__') or (function.__module__ or '').rpartition('.')[0]
+    pending = [function.__code__]
+    while pending:
+        code = pending.pop()
+        pending.extend(item for item in code.co_consts if type(item) is types.CodeType)
+        # Python compiles an import statement as LOAD_CONST level,
+        # LOAD_CONST fromlist, IMPORT_NAME. No import or user hook is run.
+        level = fromlist = None
+        for instruction in dis.get_instructions(code):
+            if instruction.opname in ('CACHE', 'EXTENDED_ARG'):
+                continue
+            if instruction.opname == 'IMPORT_NAME':
+                if type(level) is not int or (fromlist is not None and type(fromlist) is not tuple):
+                    raise DataflowError('INVALID_CONTRACT', 'Cannot seal a nonliteral import instruction')
+                name = instruction.argval
+                if level:
+                    try:
+                        name = resolve_name('.' * level + name, package)
+                    except (ImportError, ValueError) as exc:
+                        raise DataflowError('INVALID_CONTRACT', 'Relative import has no defining package') from exc
+                yield name, True
+                for member in fromlist or ():
+                    if member != '*':
+                        yield name + '.' + member, False
+            level, fromlist = fromlist, instruction.argval if instruction.opname in ('LOAD_CONST', 'LOAD_SMALL_INT') else None
+
+
+def _file_import_chain(name, roots, *, require_origin=False):
+    """Follow Python file/package precedence without invoking import hooks."""
+    from importlib.machinery import EXTENSION_SUFFIXES
+    parts = name.split('.')
+    if parts[0] == 'demiflow' or parts[0] in sys.stdlib_module_names:
+        return
+    for index, part in enumerate(parts):
+        if not part.isidentifier():
+            return
+        namespaces = []
+        for root in roots:
+            stem = root / part
+            directory = stem.is_dir()
+            bases = (stem / '__init__', stem) if directory else (stem,)
+            # A native extension can take precedence over an adjacent .py.
+            file = next((path for base in bases for suffix in (*EXTENSION_SUFFIXES, '.py', '.pyc')
+                         if (path := base.with_suffix(suffix)).is_file()), None)
+            if file is None:
+                if directory:
+                    namespaces.append(stem)
+                continue
+            source = _business_source_path(file, file)
+            if source is None:
+                return
+            yield '.'.join(parts[:index + 1]), source
+            if file.parent != stem:
+                return
+            roots = (stem,)
+            break
+        else:
+            roots = namespaces
+            if not roots:
+                if require_origin and name not in sys.modules:
+                    raise DataflowError('INCOMPATIBLE_HISTORY', 'Cannot establish the original import origin: ' + name)
+                return
+
+
+def _by_value_import_paths(function, *, audit=False):
+    """Find script and cell imports on the worker's actual roots, including mounted code."""
+    roots = [Path(entry).absolute() for entry in sys.path if type(entry) is str]
+    found, seen = {}, set()
+    for name, explicit in _bytecode_import_names(function):
+        if (name, explicit) in seen:
+            continue
+        seen.add((name, explicit))
+        if len(seen) > _DEP_MAX_NODES:
+            raise RecoveryContractError('Business import walk exceeds its name budget')
+        for module_name, path in _file_import_chain(name, roots, require_origin=audit and explicit):
+            found[module_name] = path
+            if len(found) > MAX_SOURCES:
+                raise DataflowError('BUDGET_EXCEEDED', 'Business imports exceed their source count budget')
+    return found.items()
+
+
+def _by_value_business_modules(function, *, discovery=PROJECT_IMPORTS):
     """Business modules reachable from a by-value UDF's captured state (gap④ R2).
 
     cloudpickle carries a by-value closure's captured modules BY NAME (the worker
@@ -606,6 +698,8 @@ def _by_value_business_modules(function):
                 if module is not None:
                     pending.append(module)
             else:
+                if discovery in (PROJECT_IMPORTS, HISTORY_IMPORTS):
+                    modules.extend(_by_value_import_paths(value, audit=discovery == HISTORY_IMPORTS))
                 enqueue(_by_value_reachable(value))
             continue
         if issubclass(kind, type):
@@ -779,7 +873,7 @@ def _ast_import_dependencies(module_name: str, path: Path, *, discovery=PROJECT_
             return
         py_file = target_dir.with_suffix('.py')
         init_file = target_dir / '__init__.py'
-        choices = (init_file, py_file) if discovery == PROJECT_IMPORTS else (py_file, init_file)
+        choices = (init_file, py_file) if discovery in (MODULE_IMPORTS, PROJECT_IMPORTS, HISTORY_IMPORTS) else (py_file, init_file)
         chosen = next((file for file in choices if file.is_file()), None)
         if chosen is not None:
             if absolute:
@@ -822,9 +916,9 @@ def _ast_import_dependencies(module_name: str, path: Path, *, discovery=PROJECT_
             if (top / '__init__.py').is_file() or top.with_suffix('.py').is_file():
                 raise DataflowError('INVALID_CONTRACT', 'Project import is shadowed: ' + '.'.join(parts))
 
-    def add_absolute(name, delayed):
+    def add_absolute(name, delayed, *, explicit=True):
         parts = name.split('.')
-        if discovery == PROJECT_IMPORTS and project_root is not None:
+        if discovery in (MODULE_IMPORTS, PROJECT_IMPORTS, HISTORY_IMPORTS) and project_root is not None:
             if parts[0] == 'demiflow' or parts[0] in sys.stdlib_module_names:
                 return
             for length in range(1, len(parts) + 1):
@@ -832,6 +926,14 @@ def _ast_import_dependencies(module_name: str, path: Path, *, discovery=PROJECT_
                 add_rel(prefix, project_root.joinpath(*prefix), absolute=True)
             if name in seen:
                 return
+        if discovery == HISTORY_IMPORTS and explicit:
+            roots = [Path(entry).absolute() for entry in sys.path if type(entry) is str]
+            # A deleted optional helper can otherwise select a different
+            # ImportError branch when continuing an old, incomplete seal.
+            for candidate, file in _file_import_chain(name, roots, require_origin=True):
+                if candidate not in seen:
+                    seen.add(candidate)
+                    discovered.append((candidate, file))
         if not delayed:
             add_loaded(name)
 
@@ -860,7 +962,7 @@ def _ast_import_dependencies(module_name: str, path: Path, *, discovery=PROJECT_
                 add_absolute(node.module, id(node) in deferred)
                 for alias in node.names:
                     if alias.name != '*':
-                        add_absolute(f'{node.module}.{alias.name}', id(node) in deferred)
+                        add_absolute(f'{node.module}.{alias.name}', id(node) in deferred, explicit=False)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 add_absolute(alias.name, id(node) in deferred)
@@ -936,7 +1038,7 @@ def business_dependency_modules(plan, *, source=None, discovery=PROJECT_IMPORTS)
     # yet cloudpickle carries its captured business modules by name. Reach them
     # through cells + composite state and seed the SAME module BFS (unchanged).
     for function in by_value_udfs():
-        pending.extend(_by_value_business_modules(function))
+        pending.extend(_by_value_business_modules(function, discovery=discovery))
     # Source side of gap④: a native source's reducer/factory imports business
     # helpers through its own __globals__/captures, which describe(source) never
     # walks. Same roots, same by-reference split, same BFS and budgets.
@@ -944,7 +1046,7 @@ def business_dependency_modules(plan, *, source=None, discovery=PROJECT_IMPORTS)
         if _is_by_reference_udf(function):
             pending.extend(candidates(function.__globals__))
         else:
-            pending.extend(_by_value_business_modules(function))
+            pending.extend(_by_value_business_modules(function, discovery=discovery))
     visited, found = set(), {}
     while pending:
         item = pending.popleft()
@@ -954,7 +1056,7 @@ def business_dependency_modules(plan, *, source=None, discovery=PROJECT_IMPORTS)
                 continue
             visited.add(name)
             loaded = sys.modules.get(name)
-            if discovery == PROJECT_IMPORTS:
+            if discovery in (MODULE_IMPORTS, PROJECT_IMPORTS, HISTORY_IMPORTS):
                 # A static edge has the same transitive source closure in a
                 # fresh worker and a driver that already imported the helper.
                 path, module = raw_path, None
