@@ -298,15 +298,13 @@ class WorkspaceServer(ThreadingHTTPServer):
         self.analysis_stops = threading.BoundedSemaphore(1)
         from demiflow.workbench.analysis.media_tickets import MediaTickets
         self.media_tickets=MediaTickets(authorization_epoch=lambda:hashlib.sha256(self.token.encode()).hexdigest())
+        self.private_paths = tuple(Path(p).absolute() for p in (
+            self.registry, analysis_config, development_config, token_file,
+            Path(token_file).with_name('ready.json') if token_file else None,
+        ) if p is not None)
         if development_config is not None:
             from demiflow.workbench.conversations.service import connect
-            # Keep the Web authority and deployment files outside data lookup.
-            # A token file may live beside ordinary data, so do not exclude its
-            # entire parent (which could be the project root or /tmp).
-            input_denied = [p for p in (self.registry, analysis_config) if p is not None]
-            if token_file is not None:
-                input_denied.extend((Path(token_file), Path(token_file).with_name('ready.json')))
-            self.development = connect(development_config, input_denied_paths=input_denied)
+            self.development = connect(development_config, input_denied_paths=self.private_paths)
             try:
                 partition = self.development.deployment.validate_runtime(required=self.enable_runs or self.control_only)
                 if partition is not None:
@@ -329,6 +327,9 @@ class WorkspaceServer(ThreadingHTTPServer):
             if notebook_python:
                 from demiflow.workbench.notebooks.service import Notebooks
                 self.notebooks = Notebooks(self, notebook_python)
+                self.private_paths += (Path(self.notebooks.temp.name),)
+                if self.development is not None and not self.development.remote:
+                    self.development.input_denied_paths += (self.notebooks.temp.name,)
             super().__init__(("127.0.0.1", port), Handler)
         except BaseException:
             if self.notebooks is not None:
@@ -381,6 +382,20 @@ class WorkspaceServer(ThreadingHTTPServer):
 
     def inventory(self):
         return console.load_registry(self.registry) if self.registry is not None else self.single
+
+    def source_scope(self, workspace, root):
+        """Effective project source access for this host's previews, checks and kernels."""
+        service = self.development
+        if service is None:
+            from demiflow.forge.sandbox.policy import default_private_read_paths
+            return None, (*self.private_paths, *default_private_read_paths())
+        from demiflow.workbench.conversations.common import root_identity
+        deployment = service.deployment
+        extras = (service.policy_path, service.token_file) if service.remote else service.input_denied_paths
+        denied = deployment.private_paths(*self.private_paths, *extras)
+        project = deployment.explicit_project(workspace, root_identity(root))
+        from demiflow.forge.sandbox import development_read_scope
+        return development_read_scope(root, read_roots=(project or {}).get('read_roots'), denied_paths=denied), denied
 
     def analysis_execution_profile(self):
         reader=getattr(self.analysis,'execution_profile',None)
@@ -1206,6 +1221,7 @@ class Handler(BaseHTTPRequestHandler):
                             reuse_runs=request.get('reuse_runs'),
                             registry_path=self.server.registry,
                             registry_inventory=inv,
+                            source_scope=self.server.source_scope,
                             permission_ceiling=ceiling,
                         )
                     elif name == 'workflow-cancel':
@@ -1223,6 +1239,7 @@ class Handler(BaseHTTPRequestHandler):
                             reuse_runs=request.get('reuse_runs'),
                             registry_path=self.server.registry,
                             registry_inventory=inv,
+                            source_scope=self.server.source_scope,
                             permission_ceiling=ceiling,
                         )
                     else:

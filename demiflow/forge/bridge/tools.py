@@ -133,7 +133,7 @@ def _validate_tree_mutable(root: Path, rel: str, target: Path, *, allow_notebook
                     stack.append(child)
 
 
-def run_project_layout(project_root, arguments):
+def run_project_layout(project_root, arguments, *, allowed_roots=None, denied_paths=()):
     from demiflow.forge import project as forge_project
     from demiflow.forge.io import atomic_write_text, ensure_directory
     from demiflow.forge.project_io import control_lock
@@ -165,7 +165,7 @@ def run_project_layout(project_root, arguments):
             reject('register_flow requires entry (e.g. flows/demo.py:run)', 'invalid_request')
         if params is not None and not isinstance(params, str):
             reject('params must be a relative JSON path', 'invalid_request')
-        return forge_project.register_flow(root, entry, params=params)
+        return forge_project.register_flow(root, entry, params=params, allowed_roots=allowed_roots, denied_paths=denied_paths)
     if action == 'register_workflow':
         wf_path = arguments.get('path')
         if not isinstance(wf_path, str) or not wf_path:

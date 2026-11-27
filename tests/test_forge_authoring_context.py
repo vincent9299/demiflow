@@ -101,7 +101,10 @@ def test_restricted_context_uses_only_the_turns_dependency_read_scope(tmp_path, 
 
     no_grants = build_context(root, reference=reference, allowed_roots=())
     assert no_grants['project_dependencies']['packages'] == {}
-    assert assembled_version() == digest(no_grants)
+    assert assembled_version(allowed_roots=()) == digest(no_grants)
+    inherited = build_context(root, reference=reference)
+    assert set(inherited['project_dependencies']['packages']) == {allowed.name, private.name}
+    assert assembled_version() == digest(inherited)
     scope = dict(allowed_roots=(dependencies,), denied_paths=(private,))
     scoped = build_context(root, reference=reference, **scope)
     assert set(scoped['project_dependencies']['packages']) == {'approved_lib'}
@@ -120,7 +123,7 @@ def test_restricted_context_uses_only_the_turns_dependency_read_scope(tmp_path, 
     config.write_text(json.dumps(dict(root=str(root), execution_mode='restricted')))
     assert build_context(root, reference=reference)['project_dependencies']['packages'] == {}
     config.write_text(json.dumps(dict(root=str(tmp_path / 'another-project'), execution_mode='restricted')))
-    with pytest.raises(ForgeError, match='another project'):
+    with pytest.raises(ForgeError, match='another project.*list_registered_projects'):
         build_context(root, reference=reference)
 
 
@@ -130,6 +133,8 @@ def test_skill_and_guide_are_distinct_installable_resources():
     guide = forge.joinpath('standards', 'pipeline-authoring.md').read_text()
     for command in ('context', 'init', 'add', 'check'):
         assert 'demiflow forge ' + command in skill
+    for symbol in ('Dataset.fit', 'TrainingRecipe', 'PredictorSpec'):
+        assert f'--api demiflow.data:{symbol}' in skill
     assert 'DF-05' in guide and 'DF-05' not in skill
     assert '正反例' in guide
 

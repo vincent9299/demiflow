@@ -6,8 +6,10 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import time
 
+from demiflow.forge.platform import bounded_json
 from demiflow.forge.project import load_project
 from demiflow.forge.schema import ForgeError
 from demiflow.forge.workflow import (
@@ -264,18 +266,32 @@ def _validate_reuse_runs(spec: dict, resolved_map: dict[str, dict],
     return reused
 
 
-def _spawn_orchestrator(host_root: Path, wf_run_id: str, attempt: int) -> None:
+def _submission_bindings(manifest, source_scope):
+    """Bind each involved project's host authority for this workflow attempt."""
+    if source_scope is None:
+        return b''
+    bindings = {alias: build_target_authority(manifest, alias, 'run_submit', source_scope=source_scope).bootstrap()
+                for alias in manifest['resolved_projects']}
+    return bounded_json(bindings, store.MAX_MANIFEST_BYTES)
+
+
+def _spawn_orchestrator(host_root: Path, wf_run_id: str, attempt: int, bindings: bytes) -> None:
     run_dir = store.run_directory(host_root, wf_run_id)
     script = Path(__file__).resolve().with_name('orchestrator.py')
     log_file = store.log_path(run_dir, attempt)
     env = dict(os.environ)
     env['PYTHONDONTWRITEBYTECODE'] = '1'
-    with open(log_file, 'ab') as out:
+    command = [sys.executable, '-I', '-B', str(script), 'run', str(host_root), wf_run_id, str(attempt)]
+    with open(log_file, 'ab') as out, tempfile.TemporaryFile() as source:
+        if bindings:
+            source.write(bindings)
+            source.seek(0)
+            command.append('--host-bindings')
         subprocess.Popen(
-            [sys.executable, '-I', '-B', str(script), 'run', str(host_root), wf_run_id, str(attempt)],
+            command,
             cwd=str(host_root),
             env=env,
-            stdin=subprocess.DEVNULL,
+            stdin=source if bindings else subprocess.DEVNULL,
             stdout=out,
             stderr=out,
             start_new_session=True,
@@ -293,6 +309,7 @@ def start_workflow(
     registry_inventory: dict | None = None,
     project_map: dict[str, str | Path] | None = None,
     permission_ceiling: dict | None = None,
+    source_scope=None,
 ) -> dict:
     """Validate, verify cross-project permissions & reuse targets, seal manifest, and spawn detached orchestrator."""
     root = Path(host_root).absolute()
@@ -336,6 +353,7 @@ def start_workflow(
         'permission_ceiling': meta['permission_ceiling'],
         'created_at': now,
     }
+    bindings = _submission_bindings(manifest, source_scope)
     store.write_manifest(run_dir, manifest)
 
     nodes_init = []
@@ -372,7 +390,7 @@ def start_workflow(
     for nid, art in reused.items():
         store.append_event(run_dir, 1, 'node.reused', node_id=nid, detail={'child_run_id': art['run_id']})
 
-    _spawn_orchestrator(root, wf_run_id, 1)
+    _spawn_orchestrator(root, wf_run_id, 1, bindings)
     return show_workflow_run(root, wf_run_id)
 
 
@@ -671,6 +689,7 @@ def resume_workflow_run(
     registry_inventory: dict | None = None,
     project_map: dict[str, str | Path] | None = None,
     permission_ceiling: dict | None = None,
+    source_scope=None,
 ) -> dict:
     """Create a new workflow attempt skipping verified succeeded/reused nodes and spawn a fresh orchestrator."""
     root = Path(host_root).absolute()
@@ -780,6 +799,7 @@ def resume_workflow_run(
         else:
             next_nodes.append({**base, 'status': 'pending'})
 
+    bindings = _submission_bindings(manifest, source_scope)
     store.create_attempt(run_dir, attempt=new_attempt, from_node=from_node, nodes_init=next_nodes)
-    _spawn_orchestrator(root, wf_run_id, new_attempt)
+    _spawn_orchestrator(root, wf_run_id, new_attempt, bindings)
     return show_workflow_run(root, wf_run_id, attempt=new_attempt)

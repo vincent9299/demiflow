@@ -491,7 +491,8 @@ def render_context(result):
                     rows.append(f"- `{mod}`：" + '、'.join(syms))
         else:
             names = [item['id'] for item in sdk.get('apis') or ()]
-            rows.append('\n## SDK 索引（完整契约、实时原生流程速览与全部公开符号请用 `--topic sdk` 或 `--api <模块>:<符号>`）')
+            rows.append('\n## SDK 索引（完整契约、训练与预测等原生流程见 `--topic sdk`；'
+                        '可用 `--api demiflow.data:Dataset.fit` 查询训练入口）')
             if names:
                 rows.append('、'.join(names))
         rows.append(f"SDK 版本依据 {sdk['sdk_revision']} · API 目录 {sdk['catalog_id']}")

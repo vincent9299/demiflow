@@ -44,7 +44,9 @@ def read_runtime_config(root):
     except (OSError, ValueError) as exc:
         raise ForgeError('Cannot read the Forge runtime configuration', code='operation_rejected') from exc
     if not isinstance(config, dict) or config.get('root') != str(root):
-        raise ForgeError('Forge runtime configuration belongs to another project', code='operation_rejected')
+        raise ForgeError('Forge runtime configuration belongs to another project. Use the current project root. '
+                         'If list_registered_projects is available, it lists other registered projects and their Flows.',
+                         code='operation_rejected')
     read_policy = config.get('read_policy')
     if read_policy is not None and read_policy not in {'inherit_os', 'scoped'}:
         raise ForgeError('Invalid Forge runtime read policy', code='operation_rejected')

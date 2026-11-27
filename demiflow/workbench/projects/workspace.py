@@ -299,13 +299,13 @@ def audit_status(root):
                 watcher=dict(status='observed' if live else 'unavailable', heartbeat=heartbeat))
 
 
-def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_policy, allowed_roots=None):
+def _audit_check(root, *, table_resolver, kind, report_digest=None, expected_policy, allowed_roots=None, denied_paths=()):
     root, value = _audit_workspace(root, expected_policy)
     if kind == 'scope' and report_digest is None:
         result = _check_change_scope(root)
         result.pop('scope', None)
     elif kind == 'report' and report_digest in value['audit']['reports']:
-        checked = _report_status(root, report_digest, table_resolver=table_resolver, verify_dependencies=True, allowed_roots=allowed_roots)
+        checked = _report_status(root, report_digest, table_resolver=table_resolver, verify_dependencies=True, allowed_roots=allowed_roots, denied_paths=denied_paths)
         result = dict(status=checked['status'] if checked['verification']['complete'] else 'unverifiable',
                       complete=checked['verification']['complete'], changes=checked['changes'][:256],
                       entry=checked['report']['binding']['entry'],

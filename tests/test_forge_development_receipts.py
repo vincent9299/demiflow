@@ -17,6 +17,27 @@ def start(store, service, workspace, root, sid, revision=0, text='Keep the origi
                         service.policy_hash, forge_options=options)[0]
 
 
+def test_author_cleanup_preserves_empty_declarations_owned_or_saved_by_others(tmp_path):
+    from demiflow.forge.sandbox import writable_project_declaration
+
+    declaration = tmp_path / 'pyproject.toml'
+    declaration.touch()
+    with writable_project_declaration(tmp_path):
+        pass
+    assert declaration.exists()
+    declaration.unlink()
+    with writable_project_declaration(tmp_path):
+        replacement = tmp_path / 'replacement'
+        replacement.touch()
+        replacement.replace(declaration)
+    assert declaration.exists()
+    declaration.unlink()
+    with writable_project_declaration(tmp_path):
+        declaration.write_text('temporary content')
+        declaration.write_text('')
+    assert declaration.read_bytes() == b''
+
+
 def test_large_goal_and_diagnostics_commit_without_losing_terminal(tmp_path):
     with app(tmp_path) as (server, workspace, root):
         service = server.development; store = service.store

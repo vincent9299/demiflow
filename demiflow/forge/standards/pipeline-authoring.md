@@ -118,6 +118,8 @@ CLI、可选 Notebook 和后台使用同一入口、同一份实际参数。参�
 
 `projects` 将别名映射到宿主登记的逻辑项目名或工作区 ID。省略节点的 `project` 表示当前项目。跨项目前在工作台开发回合调用 `list_registered_projects`，核对目标和入口。独立 Forge 检查本地声明时会列出待宿主核实的外部项目。输入声明支持 `type`、`required`、`default`、`description`，类型可选 string、integer、number、boolean、object、array、any。用 `{"$input":"scale"}` 引用已声明输入，这个对象只放一个键。
 
+训练和预测优先按公开 Dataset 契约接线。`Dataset.fit(recipe=TrainingRecipe(...))` 把训练交给项目的 trainer，回调上报各步权重文件。图内用 `checkpoints.select(...).predict(on=holdout)` 选择模型并预测，业务推理由 `PredictorSpec` 描述。拆成多个 Flow 时，通过编排引用训练交付的模型及上游提交的表版本，保留模型身份和数据来源。
+
 `after` 是上游节点 ID 数组，用于表达控制顺序。`$from` 自动形成数据依赖。表引用为 `node.outputs.name` 或追加 `uri`、`version`、`row_count`、`schema_hash`、`dataset_id` 字段。模型文件引用为 `train.models.default.files.adapter.safetensors.uri`，指定步骤可写 `train.models.default.steps.1000.files.adapter.safetensors.sha256`，文件字段支持 `uri`、`sha256`、`size_bytes`。模型本身可取 `manifest_uri`、`manifest_digest`、`final_step`、`instance_id`、`fit_key`。并发组限制组内同时运行数，`policy.max_parallel` 限制整个编排。`on_failure` 取字符串 `fail_fast` 或 `continue_independent`。
 
 | 规则 | 触发示例及核验阶段 |

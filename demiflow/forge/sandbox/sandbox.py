@@ -62,6 +62,8 @@ class SandboxSpec:
     read_policy: str = 'scoped'
     write_policy: str = 'scoped'
     traversal_paths: tuple[str, ...] = ()
+    credential_read_path: str | None = None
+    host_state_root: str | None = None
 
 
 SPEC_BYTES = 2 * 1024 * 1024
@@ -128,21 +130,43 @@ def specification(spec, command, env, cwd):
                                sys.prefix, sys.base_prefix, '/usr', '/lib', '/lib64'])
     # These are fixed launcher dependencies, not additional child read grants.
     # In particular /usr owns unshare and /lib* own its loader/native libraries.
+    if len(spec.denied_paths) > 4096:
+        raise ValueError('Sandbox denied path inventory exceeds admission budget')
     denied = _paths(spec.denied_paths, existing=False)
+    # Preserve both names if a host-designated private path is a symlink.
+    # Its directory entry must stay private if the host later replaces it.
+    denied.extend(os.path.abspath(path) for path in spec.denied_paths)
+    credential = None
+    if spec.credential_read_path is not None:
+        credential = _paths([spec.credential_read_path])[0]
+        if not spec.direct_network or credential not in read or credential not in protected or not Path(credential).is_file():
+            raise ValueError('Direct model credential must be an explicitly bound read-only file')
     home = _paths([spec.private_home])[0]
     if not Path(home).is_dir() or Path(home).stat().st_mode & 0o077:
         raise ValueError('Sandbox HOME must be a private directory')
+    state = None
+    if spec.host_state_root is not None:
+        state = _paths([spec.host_state_root])[0]
+        if state not in denied or not Path(state).is_dir() or state == home or not _contains(state, home):
+            raise ValueError('Host-bound private HOME must be inside its denied state directory')
     if spec.role != 'developer' and write:
         raise ValueError('Read-only/reviewer and verifier roles cannot write source paths')
     write.append(home)
     denied.extend(['/proc', '/sys', '/run'])
-    checked_against_denied = (write + runtime) if spec.read_policy == 'inherit_os' else (read + write + runtime)
     for allowed in read + write + runtime + traversal:
         if _contains('/dev', allowed) or _contains(allowed, '/dev'):
             raise ValueError('Device paths cannot be supplied as sandbox scopes')
-    for allowed in checked_against_denied + traversal:
-        if any(_contains(allowed, forbidden) or _contains(forbidden, allowed) for forbidden in denied):
+    for allowed in write + traversal:
+        if any((_contains(allowed, forbidden) or _contains(forbidden, allowed))
+               and not (forbidden == state and _contains(home, allowed)) for forbidden in denied):
             raise ValueError('Sandbox allowlist overlaps a protected path')
+    for allowed in runtime + (read if spec.read_policy == 'scoped' else []):
+        if allowed != credential and any(_contains(forbidden, allowed)
+                                        and not (forbidden == state and _contains(home, allowed)) for forbidden in denied):
+            raise ValueError('Sandbox read scope enters a denied path')
+        if spec.read_policy == 'scoped' and any(_contains(allowed, forbidden) and not Path(forbidden).is_file()
+                                                  for forbidden in denied):
+            raise ValueError('Sandbox read scope includes a denied directory or unresolved private path')
     checked_protected = system_protected if spec.write_policy == 'project_root' else (protected + system_protected)
     for allowed in write:
         if any(_contains(allowed, dependency) or _contains(dependency, allowed) for dependency in runtime):
@@ -216,7 +240,9 @@ def specification(spec, command, env, cwd):
                 private_home=home, private_bytes=spec.private_bytes, source_roots=source_roots,
                 source_baseline_bytes=baseline_bytes, source_baseline_files=baseline_files,
                 direct_network=bool(spec.direct_network), read_policy=spec.read_policy,
-                write_policy=spec.write_policy, role=spec.role, traversal_paths=traversal)
+                write_policy=spec.write_policy, role=spec.role, traversal_paths=traversal,
+                denied_paths=sorted(set(denied)), credential_read_path=credential,
+                admission_seconds=15 if spec.read_policy == 'inherit_os' else 5)
 
 
 def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=None, model_socket=None,
@@ -271,7 +297,7 @@ def launch_sandbox(command, *, spec, env, cwd, lease_fd=None, control_socket=Non
         for host, child, target in pairs:
             child.close()
             start_host(host, target, spec.seconds)
-        if not select.select([status_read], [], [], 7)[0]:
+        if not select.select([status_read], [], [], value['admission_seconds'] + 2)[0]:
             raise RuntimeError('Sandbox admission timed out')
         response = os.read(status_read, 4096)
         if response != b'ready\n':

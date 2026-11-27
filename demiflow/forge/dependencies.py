@@ -24,7 +24,7 @@ from .development_state import physical_root
 from .io import atomic_write_text, ensure_directory, no_symlinks, publish_bytes
 from .platform import content_digest
 from .platform_environment import read_bounded
-from .project_io import control_lock
+from .project_io import SYSTEM_PRIVATE_PATHS, control_lock
 from .schema import ForgeError
 
 try:
@@ -53,10 +53,7 @@ _PRIVATE_SEGMENTS = frozenset({
     '.git', '.gnupg', '.netrc', '.npmrc', '.pypirc', '.git-credentials',
     '.env', 'access.token', 'auth.json', 'credentials.json',
 })
-_SYSTEM_DENIED = tuple(Path(p) for p in (
-    '/proc', '/sys', '/dev', '/run', '/etc/shadow', '/etc/gshadow',
-    '/etc/ssh', '/etc/ssl/private', '/etc/sudoers', '/etc/sudoers.d',
-))
+_SYSTEM_DENIED = (Path('/proc'), Path('/sys'), Path('/dev'), Path('/run'), *SYSTEM_PRIVATE_PATHS)
 _NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,63}\Z')
 _DEPENDENCY_URL_RE = re.compile(
     r"""(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*://)"""
@@ -105,9 +102,10 @@ def authorize_external_path(project_root: Path, target: Path, *, allowed_roots=N
         raise ForgeError('External dependency path must be a specific directory outside the project', code='operation_rejected')
     if _has_private_segment(target) or any(_is_within(target, sys_dir) for sys_dir in _SYSTEM_DENIED):
         raise ForgeError('External dependency path enters a private or system directory', code='operation_rejected')
-    for denied in _canonical_roots(denied_paths):
-        if _is_within(target, denied):
-            raise ForgeError('External dependency path enters a denied directory', code='operation_rejected')
+    private = _canonical_roots(denied_paths)
+    for denied in private:
+        if _is_within(target, denied) or _is_within(denied, target):
+            raise ForgeError('External dependency path overlaps a denied location', code='operation_rejected')
     if allowed_roots is not None:
         granted = _canonical_roots(allowed_roots)
         if not any(_is_within(target, allowed) for allowed in granted):
@@ -119,9 +117,9 @@ def authorize_external_path(project_root: Path, target: Path, *, allowed_roots=N
     physical = no_symlinks(target)
     if _has_private_segment(physical) or any(_is_within(physical, sys_dir) for sys_dir in _SYSTEM_DENIED):
         raise ForgeError('External dependency path resolves into a private or system directory', code='operation_rejected')
-    for denied in _canonical_roots(denied_paths):
-        if _is_within(physical, denied):
-            raise ForgeError('External dependency path resolves into a denied directory', code='operation_rejected')
+    for denied in private:
+        if _is_within(physical, denied) or _is_within(denied, physical):
+            raise ForgeError('External dependency path resolves to a denied location', code='operation_rejected')
     if allowed_roots is not None:
         granted = _canonical_roots(allowed_roots)
         if not any(_is_within(physical, allowed) for allowed in granted):

@@ -268,13 +268,13 @@ DEPENDENCIES_UNSET = object()
 
 
 def inspect_flow(root, entry, *, table_resolver, params, save=True, limits=None, shared_sources=None,
-                 dependencies=DEPENDENCIES_UNSET, allowed_roots=None):
+                 dependencies=DEPENDENCIES_UNSET, allowed_roots=None, denied_paths=()):
     from demiflow.forge.pipeline_check import inspect_variant
 
     root, value, snapshot = load_workspace(root)
     if dependencies is DEPENDENCIES_UNSET:
         from demiflow.forge.dependencies import binding as dependency_binding
-        dependencies = dependency_binding(root, allowed_roots=allowed_roots)
+        dependencies = dependency_binding(root, allowed_roots=allowed_roots, denied_paths=denied_paths)
     snapshot = current_platform_snapshot(snapshot)
     path = validate_parameter_path(root, params) if isinstance(params, str) else None
     parameters = read_control(path) if path else params
@@ -304,7 +304,7 @@ def verify_declared_entry(root, control, entry):
     return target, symbol
 
 
-def report_status(root, digest, *, table_resolver, platform_check=True, verify_dependencies=False, allowed_roots=None):
+def report_status(root, digest, *, table_resolver, platform_check=True, verify_dependencies=False, allowed_roots=None, denied_paths=()):
     from demiflow.errors import DemiflowError
     from demiflow.lance.preview import describe_table
 
@@ -333,7 +333,7 @@ def report_status(root, digest, *, table_resolver, platform_check=True, verify_d
         from demiflow.forge.dependencies import binding as dependency_binding
 
         def current_dependency_digest():
-            live = dependency_binding(root, allowed_roots=allowed_roots)
+            live = dependency_binding(root, allowed_roots=allowed_roots, denied_paths=denied_paths)
             return live['digest'] if live else None
 
         check('dependency', 'project_dependencies', current_dependency_digest, binding['project_dependencies'],

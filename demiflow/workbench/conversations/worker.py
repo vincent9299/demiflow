@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import array
 import ctypes
+from contextlib import ExitStack
 import fcntl
 from functools import partial
 import json
@@ -27,11 +28,13 @@ from demiflow.resources.process_observation import require_pidfds
 from demiflow.resources.process_observation import signal_owned
 from demiflow.workbench.conversations.common import digest
 from demiflow.workbench.conversations.common import directory_bytes
+from demiflow.forge.sandbox import development_read_scope
 from demiflow.forge.process import process_identity
 from demiflow.workbench.conversations.common import read_file
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import snapshot
 from demiflow.workbench.conversations.common import wire
+from demiflow.forge.sandbox.policy import declaration_identity, writable_project_declaration
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.policy import Deployment, turn_deadline
 from demiflow.workbench.conversations.store import Store
@@ -122,22 +125,8 @@ def _declared_readonly_locations(root: Path, denied: list[Path], private_home: P
     return extra
 
 
-def _authorized_read_roots(root, project, denied, private_home=None):
-    """Return explicit sandbox read scope if configured, else None (OS-inherited visibility)."""
-    configured = project.get('read_roots') or ()
-    if not configured:
-        return None
-    from demiflow.forge.sandbox import authorized_read_roots
-    return authorized_read_roots(
-        root,
-        read_roots=configured,
-        denied_paths=denied,
-        private_home=private_home,
-    )
-
-
 def sandbox_spec(deployment, project, session, turn, manifest, config, private_home, *, seconds=None,
-                 extra_read_paths=(), extra_runtime_paths=()):
+                 extra_read_paths=(), extra_runtime_paths=(), private_paths=()):
     """Assemble Workbench host facts and delegate sandbox policy directly to Forge."""
     from demiflow.forge.sandbox import build_development_sandbox_spec
     root = Path(project['root'])
@@ -156,19 +145,12 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         if cred_path.is_file():
             active_cred = cred_path
     extra_protected = [path for path in sources if path.name in {'AGENTS.md', 'PIPELINE_SPEC.md'}]
-    denied = [deployment.state / 'chat.sqlite3',
-              deployment.state / 'service.lock', deployment.state / 'control.reserve']
-    if deployment.value.get('runtime_domain'): denied.append(Path(deployment.value['runtime_domain']))
-    with os.scandir(deployment.state) as entries:
-        for index, entry in enumerate(entries):
-            if index > deployment.limits.sessions + 64: reject('Sandbox control inventory exceeds budget', 'resource_limit')
-            if entry.name == session['id']:
-                with os.scandir(entry.path) as owned:
-                    for count, item in enumerate(owned):
-                        if count > deployment.limits.turns * 8 + 32: reject('Sandbox session inventory exceeds budget', 'resource_limit')
-                        if Path(item.path) != private_home: denied.append(Path(item.path))
-            elif entry.is_dir(follow_symlinks=False) or entry.name.endswith('.json') or entry.name.startswith('ai-key-'):
-                denied.append(Path(entry.path))
+    # One stable host-state boundary protects future sessions and turns as well as
+    # existing ones. The backend exposes only this process's assigned private home.
+    state_root = Path(deployment.state).absolute()
+    denied = [*(p for p in private_paths if active_cred is None or p != active_cred), state_root]
+    if deployment.value.get('runtime_domain'):
+        denied.append(Path(deployment.value['runtime_domain']))
     for provider in deployment.providers.values():
         if provider.get('native_credentials'):
             cred = Path(provider['native_credentials'])
@@ -192,6 +174,7 @@ def sandbox_spec(deployment, project, session, turn, manifest, config, private_h
         runtime_paths=rt,
         denied_paths=denied,
         private_home=private_home,
+        host_state_root=state_root if Path(private_home).is_relative_to(state_root) else None,
         kind=project.get('kind', 'pipeline'),
         phase=project.get('phase', 'implementation'),
         readonly=readonly,
@@ -262,20 +245,24 @@ def _teardown_provider(process, transport, provider, model_broker, control_bridg
     return drained, reason
 
 
-def _sandbox_compatible(standby_spec, actual_spec):
-    if standby_spec is None or actual_spec is None:
-        return standby_spec is actual_spec
-    return (
-        standby_spec.read_paths == actual_spec.read_paths
-        and standby_spec.write_paths == actual_spec.write_paths
-        and standby_spec.runtime_paths == actual_spec.runtime_paths
-        and standby_spec.protected_paths == actual_spec.protected_paths
-        and standby_spec.private_home == actual_spec.private_home
-        and standby_spec.role == actual_spec.role
-        and standby_spec.direct_network == actual_spec.direct_network
-        and standby_spec.read_policy == actual_spec.read_policy
-        and standby_spec.write_policy == actual_spec.write_policy
-    )
+def _sandbox_compatible(bound, actual):
+    if bound is None or actual is None:
+        return bound is actual
+    from dataclasses import replace
+
+    # The existing process keeps its own checked deadline. All access and resource
+    # grants must still match before a new author request is sent.
+    if replace(bound, seconds=actual.seconds, denied_paths=actual.denied_paths) != actual:
+        return False
+    if bound.denied_paths == actual.denied_paths:
+        return True
+    changes = set(bound.denied_paths) ^ set(actual.denied_paths)
+    if actual.read_policy == 'inherit_os':
+        return not changes
+    visible = tuple(map(Path, (*actual.read_paths, *actual.runtime_paths, *actual.write_paths,
+                               *actual.traversal_paths, actual.private_home)))
+    return not any(root.is_relative_to(path) or Path(path).is_relative_to(root)
+                   for path in changes for root in visible)
 
 
 def _poll_parent_cmd(parent_sock, buf, fds, *, timeout=0.0):
@@ -347,7 +334,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     deployment = Deployment.load(config_path)
     store = Store(deployment.state, deployment.limits)
     limits = deployment.limits
-    denied_extra = json.loads(os.environ.pop('DEMIFLOW_INPUT_DENIED_PATHS', '[]'))
+    host_private = (Path(config_path), *(Path(p) for p in json.loads(os.environ.pop('DEMIFLOW_INPUT_DENIED_PATHS', '[]'))))
+    source_denied = deployment.private_paths(*host_private)
     workflow_registry = json.loads(os.environ.pop('DEMIFLOW_WORKFLOW_REGISTRY', 'null'))
     parent_is_sock = stat.S_ISSOCK(os.fstat(parent_fd).st_mode)
     parent_sock = socket.socket(fileno=parent_fd) if parent_is_sock else None
@@ -400,6 +388,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     process = transport = provider = model_broker = control_bridge = coding = shims = None
     effective_bound = None
     standby_spec = None
+    bound_declaration = None
     confined = None
     sandbox_deadline = 0.0
     warm_ready = False
@@ -422,6 +411,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             if st_notebook:
                 st_project = dict(st_project, writes=[])
             st_guided = (not st_notebook) and st_project['kind'] == 'pipeline'
+            if st_guided and deployment.mode == 'restricted':
+                bound_declaration = declaration_identity(st_project['root'])
             if st_guided and coding_fd is not None:
                 from demiflow.forge.api_reference import REFERENCE_BYTES
                 try:
@@ -453,17 +444,19 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             st_session = dict(id=standby_info['session_id'], workspace=standby_info['workspace'],
                               provider=standby_info['provider'], policy_hash=standby_info['policy_hash'])
             st_py = effective_project_python(st_project)
-            st_allowed = _authorized_read_roots(st_project['root'], st_project, [deployment.state], st_provider_home) if st_guided else None
+            st_allowed = (development_read_scope(st_project['root'], read_roots=st_project.get('read_roots'),
+                                                 denied_paths=source_denied, private_home=st_provider_home) if st_guided else None)
             if st_guided:
                 from demiflow.forge.sandbox import SandboxShims
                 shims = SandboxShims(st_project, execution_mode=deployment.mode,
                                      project_python=st_py, input_access=True,
-                                     allowed_read_roots=st_allowed, denied_paths=[deployment.state])
+                                     allowed_read_roots=st_allowed, denied_paths=source_denied)
             warm_sandbox_secs = (0 if limits.turn_seconds == 0
                                  else min(86400, max(limits.turn_seconds, WARM_SANDBOX_SECONDS)))
             standby_spec = (sandbox_spec(deployment, st_project, st_session,
                                          {'operation': st_operation, 'created': time.time()},
                                          st_manifest, st_config, st_provider_home, seconds=warm_sandbox_secs,
+                                         private_paths=host_private,
                                          extra_read_paths=shims.read_paths if shims is not None else (),
                                          extra_runtime_paths=shims.runtime_paths if shims is not None else ())
                             if deployment.mode == 'restricted' else None)
@@ -642,7 +635,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
             delivery_review = None
             if guided and project['phase'] == 'implementation':
                 from demiflow.workbench.conversations.pipeline_review import DeliveryReview
-                delivery_review = DeliveryReview(store, turn, project)
+                delivery_review = DeliveryReview(store, turn)
             watched = [] if notebook else project['watch']
             excluded = project.get('protected', ()) if guided else ()
             home = deployment.state / session['id']; scratch = home / turn['id']; scratch.mkdir(mode=0o700, exist_ok=True)
@@ -762,31 +755,16 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
 
             protected_snapshot = {}
             root_names_before = None
-            created_empty_pyproject = False
+            author_files = ExitStack()
+            untouched_placeholder = None
+            confined_developer = guided and not compact and deployment.mode == 'restricted'
             turn_allowed_roots = None
-            turn_denied_paths = [deployment.state, Path(config_path).resolve(), *(Path(p) for p in denied_extra)]
-            if deployment.value.get('runtime_domain'):
-                turn_denied_paths.append(Path(deployment.value['runtime_domain']))
-            turn_denied_paths.extend(
-                Path(value['native_credentials']) for value in deployment.providers.values()
-                if value.get('native_credentials')
-            )
             try:
                 tick()
                 if requested: raise InterruptedError(reason)
                 if guided:
-                    turn_allowed_roots = _authorized_read_roots(project['root'], project, turn_denied_paths)
-                    if (deployment.mode == 'restricted' and project.get('kind') == 'pipeline'
-                            and project.get('phase') == 'implementation'
-                            and 'pyproject.toml' not in (project.get('protected') or ())):
-                        pyproj = Path(project['root']) / 'pyproject.toml'
-                        if not pyproj.exists() and not pyproj.is_symlink():
-                            try:
-                                fd = os.open(pyproj, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-                                os.close(fd)
-                                created_empty_pyproject = True
-                            except FileExistsError:
-                                pass
+                    turn_allowed_roots = development_read_scope(project['root'], read_roots=project.get('read_roots'),
+                                                               denied_paths=source_denied)
                     from demiflow.forge.api_reference import REFERENCE_BYTES, sdk_identity
                     if coding is None:
                         if coding_fd is None:
@@ -825,7 +803,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if guided:
                         from demiflow.forge.bridge.inputs import InputAccess
                         denied_inputs = [deployment.state, Path(config_path).resolve()]
-                        denied_inputs.extend(Path(p) for p in denied_extra)
+                        denied_inputs.extend(host_private)
                         if deployment.value.get('runtime_domain'):
                             denied_inputs.append(Path(deployment.value['runtime_domain']))
                         denied_inputs.extend(Path(value['native_credentials']) for value in deployment.providers.values()
@@ -835,7 +813,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     from demiflow.workbench.conversations.pipeline_review import recent_review
                     manifest, prompt = assemble(project, turn['text'], limits,
                         execution_mode=deployment.mode, input_access=input_access is not None, coding=coding,
-                        allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths,
+                        allowed_roots=turn_allowed_roots, denied_paths=source_denied,
                         delivery_review=delivery_review is not None,
                         previous_review=recent_review(store, session['id']) if guided else None)
                     store.update(tid, context=wire(manifest).decode(), delivery='prepared')
@@ -850,11 +828,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     original = store.session(session['id'])
                     if not feedback_current(project['root'], forge_opts,
                             dict(provider=original['provider'], session=original['provider_session']),
-                            allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths):
+                            allowed_roots=turn_allowed_roots, denied_paths=source_denied):
                         reject('自动修正候选或原作者已变化，输入未发送。', 'inputs_changed')
 
                 turn_op = turn.get('operation', 'message')
-                if warm_ready and warm_operation != turn_op:
+                if (confined_developer and project['phase'] == 'implementation'
+                        and 'pyproject.toml' not in (project.get('protected') or ())):
+                    untouched_placeholder = author_files.enter_context(writable_project_declaration(project['root']))
+                current_declaration = declaration_identity(project['root']) if confined_developer else None
+                if warm_ready and (warm_operation != turn_op or current_declaration != bound_declaration):
                     _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
                     process = transport = provider = model_broker = control_bridge = shims = None
                     effective_bound = None
@@ -862,6 +844,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     warm_ready = False
                     provider_opened = False
 
+                bound_declaration = current_declaration
                 if warm_ready and provider_opened and guided and acp:
                     try:
                         wait(provider.close_request())
@@ -875,7 +858,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         effective_bound = standby_spec = None
                         warm_ready = provider_opened = False
 
-                if warm_ready and not provider_opened:
+                if warm_ready:
                     proj_py = effective_project_python(project)
                     shims_ok = ((shims is None and not guided) or (shims is not None and shims.project_python == proj_py
                                   and shims.allowed_read_roots == turn_allowed_roots))
@@ -885,6 +868,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         provider_home.mkdir(mode=0o700, exist_ok=True)
                         actual_spec = sandbox_spec(deployment, project, session, turn, manifest,
                             deployment.providers[session['provider']], provider_home,
+                            private_paths=host_private,
                             seconds=(None if sandbox_deadline == 0.0 else max(.1, sandbox_deadline - time.time())),
                             extra_read_paths=shims.read_paths if shims is not None else (),
                             extra_runtime_paths=shims.runtime_paths if shims is not None else ())
@@ -900,7 +884,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         process = transport = provider = model_broker = control_bridge = shims = None
                         effective_bound = None
                         standby_spec = None
-                        warm_ready = False
+                        warm_ready = provider_opened = False
 
                 if warm_ready:
                     if model_broker is not None:
@@ -913,7 +897,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         ) else None
                         control_bridge.set_turn(input_access, delivery_review=delivery_review, project_root=layout_root,
                             protected_snapshot=protected_snapshot, catalog=catalog,
-                            allowed_read_roots=turn_allowed_roots, denied_paths=turn_denied_paths)
+                            allowed_read_roots=turn_allowed_roots, denied_paths=source_denied)
                         if shims is not None:
                             shims.set_control_binding(control_bridge.token, tid, turn['epoch'])
                     transport.frame_count = 0
@@ -957,7 +941,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         ) else None
                         control_bridge = BridgeServer(input_access, delivery_review=delivery_review, project_root=layout_root,
                             protected_snapshot=protected_snapshot, catalog=catalog,
-                            allowed_read_roots=turn_allowed_roots, denied_paths=turn_denied_paths)
+                            allowed_read_roots=turn_allowed_roots, denied_paths=source_denied)
                     provider_home = home / 'provider' if deployment.mode == 'restricted' else home
                     provider_home.mkdir(mode=0o700, exist_ok=True)
                     if broker_home is not None:
@@ -967,14 +951,14 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         from demiflow.forge.sandbox import SandboxShims
                         shims = SandboxShims(project, execution_mode=deployment.mode,
                                              project_python=proj_py, input_access=input_access is not None,
-                                             allowed_read_roots=turn_allowed_roots, denied_paths=turn_denied_paths)
+                                             allowed_read_roots=turn_allowed_roots, denied_paths=source_denied)
                         if control_bridge is not None:
                             shims.set_control_binding(control_bridge.token, tid, turn['epoch'])
                     warm_sandbox_secs = ((0 if limits.turn_seconds == 0
                                           else min(86400, max(limits.turn_seconds, WARM_SANDBOX_SECONDS)))
                                          if (parent_sock is not None and not compact) else None)
                     confined = (sandbox_spec(deployment, project, session, turn, manifest, config, provider_home,
-                                             seconds=warm_sandbox_secs,
+                                             seconds=warm_sandbox_secs, private_paths=host_private,
                                              extra_read_paths=shims.read_paths if shims is not None else (),
                                              extra_runtime_paths=shims.runtime_paths if shims is not None else ())
                                 if deployment.mode == 'restricted' else None)
@@ -999,6 +983,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         config = {**config, '_project_python': proj_py}
                     if shims is not None:
                         config = {**config, '_shim_bin': str(shims.bin)}
+                    standby_spec = confined
                     process = launch_provider(mode=deployment.mode, adapter=adapter, config=config,
                         home=provider_home, root=provider_cwd, lease_fd=lease_fd, sandbox_spec=confined,
                         control_socket=control_bridge.path if control_bridge is not None else None,
@@ -1030,8 +1015,12 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     provider_opened = True
 
                 # Compare again after context preparation and handshake; no baseline reset.
-                if watched and capture(project['root'], watched, exclude=excluded, source_dir=scratch / 'sources') != baseline:
-                    reject('Watched sources changed during preparation; no model turn sent', 'conflict')
+                if watched:
+                    prepared = capture(project['root'], watched, exclude=excluded, source_dir=scratch / 'sources')
+                    if untouched_placeholder and untouched_placeholder() and 'pyproject.toml' in prepared:
+                        prepared['pyproject.toml'] = None
+                    if prepared != baseline:
+                        reject('Watched sources changed during preparation; no model turn sent', 'conflict')
                 tick(force=True)
                 if requested: raise InterruptedError(reason)
                 # Persist unknown BEFORE writing to the provider pipe: a crash cannot
@@ -1179,17 +1168,15 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 control_bridge.park_idle()
             elif guided and control_bridge is not None:
                 host_layout_paths = control_bridge.finish_turn()
-            if created_empty_pyproject:
-                pyproj = Path(project['root']) / 'pyproject.toml'
-                try:
-                    if pyproj.is_file() and not pyproj.is_symlink() and pyproj.stat().st_size == 0:
-                        pyproj.unlink()
-                except OSError:
-                    pass
+            try:
+                author_files.close()
+            except OSError as exc:
+                final, reason = 'failed', f'Cannot clean up the turn-owned project declaration: {exc}'
             review_requested = delivery_review is not None and delivery_review.selection is not None
             keep_warm = (
                 parent_sock is not None
                 and not compact and not review_requested
+                and (not confined_developer or bound_declaration == declaration_identity(project['root']))
                 and final == 'completed' and completed and not requested
                 and process is not None and process.poll() is None
                 and transport is not None and not transport.closed
@@ -1282,30 +1269,30 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     if requested or store.turn(tid)['stop_at']:
                         raise InterruptedError(reason or '工程检查已取消。')
 
-                try:
-                    dep_digest_after = dependency_candidate_digest(
-                        project['root'], allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths,
-                    )
-                    dep_digest_valid = True
-                except (OSError, ValueError):
-                    dep_digest_after = None
-                    dep_digest_valid = False
-
-                def source_current():
-                    if not ((not coding or sdk_identity(coding['catalog']) == coding['sdk_revision']) and (
-                        not watched or capture(project['root'], watched_after, exclude=excluded,
-                            source_dir=scratch / 'sources') == after)):
-                        return False
-                    if not dep_digest_valid:
-                        return False
+                if guided:
                     try:
-                        return dependency_candidate_digest(
-                            project['root'], allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths,
-                        ) == dep_digest_after
+                        dep_digest_after = dependency_candidate_digest(
+                            project['root'], allowed_roots=turn_allowed_roots, denied_paths=source_denied,
+                        )
+                        dep_digest_valid = True
                     except (OSError, ValueError):
-                        return False
+                        dep_digest_after = None
+                        dep_digest_valid = False
 
-                if guided and not compact and not notebook:
+                    def source_current():
+                        if not ((not coding or sdk_identity(coding['catalog']) == coding['sdk_revision']) and (
+                            not watched or capture(project['root'], watched_after, exclude=excluded,
+                                source_dir=scratch / 'sources') == after)):
+                            return False
+                        if not dep_digest_valid:
+                            return False
+                        try:
+                            return dependency_candidate_digest(
+                                project['root'], allowed_roots=turn_allowed_roots, denied_paths=source_denied,
+                            ) == dep_digest_after
+                        except (OSError, ValueError):
+                            return False
+
                     from dataclasses import replace
                     from demiflow.workbench.conversations.pipeline_review import run_deployment_reviewer
                     review_author_spec = (replace(confined, runtime_paths=tuple(p for p in confined.runtime_paths
@@ -1331,7 +1318,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                             check_cancel=check_forge_cancel, source_current=source_current,
                             protected_violations=protected_violations, project_python=effective_project_python(project),
                             on_review=started_review, inspect=coding is not None, observations=catalog_observations,
-                            allowed_roots=turn_allowed_roots, denied_paths=turn_denied_paths)
+                            allowed_roots=turn_allowed_roots, denied_paths=source_denied)
                         if receipt['checks'] is not None:
                             result['pipeline_checks'] = receipt['checks']
                         report = receipt['review']

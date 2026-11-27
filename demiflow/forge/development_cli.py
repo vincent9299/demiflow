@@ -296,7 +296,7 @@ def register(forge, output):
     @click.option('--python', 'project_python', default=None, type=click.Path(path_type=Path, dir_okay=False),
                   help='Explicit project Python interpreter for live B-class package imports and A-class checks.')
     @click.option('--read-root', 'read_roots', multiple=True, type=click.Path(path_type=Path, file_okay=False),
-                  help='Authorized external read directory for local_ref / vendor packages.')
+                  help='Restrict external reads to the specified directories and registered read-only locations.')
     @click.option('--model-config', type=click.Path(path_type=Path, dir_okay=False), envvar='DEMIFLOW_FORGE_MODEL_CONFIG',
                   help='Host provider settings for restricted inference. Credentials stay on the host.')
     @click.option('--mode', 'execution_mode', type=click.Choice(['restricted', 'trusted_local']), default='restricted', show_default=True,
@@ -315,10 +315,11 @@ def register(forge, output):
         from .review_deepseek import run_reviewer
         from .sandbox import (
             SandboxShims,
-            authorized_read_roots,
+            development_read_scope,
             backend_readiness,
             build_development_sandbox_spec,
             default_runtime_paths,
+            writable_project_declaration,
         )
 
         def perform():
@@ -332,7 +333,6 @@ def register(forge, output):
                 raw_read_roots = tuple(str(Path(p).resolve()) for p in read_roots)
                 shims = None
                 bridge = None
-                created_empty_pyproject = False
                 try:
                     if execution_mode == 'restricted':
                         if not backend_readiness().get('available'):
@@ -379,16 +379,17 @@ def register(forge, output):
                                 denied.append(Path(path).resolve())
                         # A native installation may live under DSH_HOME. Grant only the
                         # verified executable/runtime there, never that home as project input.
-                        forbidden_inputs = (*denied, native_home, priv_home)
+                        from .sandbox.policy import default_private_read_paths
+                        forbidden_inputs = (*denied, native_home, priv_home, *default_private_read_paths())
                         if any(root.resolve().is_relative_to(p) or p.is_relative_to(root.resolve()) for p in forbidden_inputs):
                             raise ForgeError('Project source overlaps private author or host settings', code='operation_rejected')
-                        allowed_roots = authorized_read_roots(root, read_roots=raw_read_roots,
-                                                              denied_paths=forbidden_inputs)
+                        allowed_roots = development_read_scope(root, read_roots=raw_read_roots, denied_paths=forbidden_inputs)
                         if agent == 'deepseek':
                             denied.extend((native_home / '.credentials.yaml', native_home / 'profiles'))
                         else:
                             denied.append(native_home)
-                        binding['execution'] = dict(mode='restricted', python=py_str, reads=list(allowed_roots),
+                        binding['execution'] = dict(mode='restricted', python=py_str,
+                                                    reads=list(allowed_roots) if allowed_roots is not None else None,
                                                     model_settings=content_digest(dict(providers=providers, review=review_settings)),
                                                     home=str(priv_home))
                         turn_id = 'cli-' + uuid4().hex[:16]
@@ -406,7 +407,7 @@ def register(forge, output):
                         def controls(snapshot):
                             active = ActiveTurn()
                             bridge.set_turn(active, project_root=root, protected_snapshot=snapshot,
-                                            allowed_read_roots=allowed_roots, denied_paths=denied)
+                                            allowed_read_roots=allowed_roots, denied_paths=forbidden_inputs)
                             shims.set_control_binding(bridge.token, active.tid, active.epoch)
                             paths = []
                             try:
@@ -429,14 +430,13 @@ def register(forge, output):
                             'writes': list(writables),
                             'protected': [],
                             'python': py_str,
-                            'read_roots': list(allowed_roots),
                         }
                         shims = SandboxShims(
                             project_view,
                             execution_mode='restricted',
                             project_python=py_str,
                             allowed_read_roots=allowed_roots,
-                            denied_paths=denied,
+                            denied_paths=forbidden_inputs,
                         )
                         rt_paths = default_runtime_paths(
                             executable=binding['executable'],
@@ -444,32 +444,30 @@ def register(forge, output):
                             extra_paths=(*shims.runtime_paths, *((settings['node'],) if agent == 'deepseek' and settings else ())),
                         )
                         extra_reads = list(shims.read_paths)
-                        pyproj = Path(root) / 'pyproject.toml'
-                        had_pyproject = pyproj.exists() or pyproj.is_symlink()
-                        dev_spec = build_development_sandbox_spec(
-                            root,
-                            writes=writables,
-                            protected=(),
-                            read_roots=allowed_roots,
-                            extra_read_paths=extra_reads,
-                            runtime_paths=rt_paths,
-                            denied_paths=denied,
-                            private_home=priv_home,
-                            kind='pipeline',
-                            phase='implementation',
-                            readonly=False,
-                            notebook_op=False,
-                            direct_network=False,
-                            seconds=min(86400, max(1, int(timeout))),
-                            ensure_pyproject_placeholder=True,
-                        )
-                        created_empty_pyproject = (not had_pyproject) and pyproj.is_file()
+
+                        def author_spec():
+                            return build_development_sandbox_spec(
+                                root,
+                                writes=writables,
+                                protected=(),
+                                read_roots=raw_read_roots,
+                                extra_read_paths=extra_reads,
+                                runtime_paths=rt_paths,
+                                denied_paths=denied,
+                                private_home=priv_home,
+                                kind='pipeline',
+                                phase='implementation',
+                                readonly=False,
+                                notebook_op=False,
+                                direct_network=False,
+                                seconds=min(86400, max(1, int(timeout))),
+                            )
 
                         def author_fn(*a, **kw):
                             connection = (model_connection(agent, settings, kw['deadline'], min(timeout, 3600))
                                           if settings else nullcontext())
-                            with connection as channel:
-                                return native_author(*a, extra_path=shims.bin, sandbox_spec=dev_spec,
+                            with writable_project_declaration(root), connection as channel:
+                                return native_author(*a, extra_path=shims.bin, sandbox_spec=author_spec(),
                                                      control_socket=bridge.path, channel=channel, **kw)
 
                         def reviewer_fn(prompt, *, timeout=review_timeout):
@@ -477,13 +475,13 @@ def register(forge, output):
                                 raise ForgeError('Configure the DeepSeek reviewer in host settings', code='inspection_incomplete')
                             with model_connection('deepseek', review_settings, time.time() + timeout, timeout) as channel:
                                 return run_reviewer(prompt, timeout=timeout, config=review_settings, channel=channel, restricted=True,
-                                                    author_spec=dev_spec, denied_paths=denied)
+                                                    author_spec=author_spec(), denied_paths=denied)
 
                         return run_development(
                             state, goal=goal, binding=binding, author=author_fn,
                             reviewer=reviewer_fn, auto_review=review, seconds=timeout,
                             review_seconds=review_timeout, resume=resume, project_python=py_str,
-                            allowed_roots=allowed_roots, denied_paths=denied, author_controls=controls,
+                            allowed_roots=allowed_roots, denied_paths=forbidden_inputs, author_controls=controls,
                         )
 
                     binding = agent_binding(agent, executable, profile, model)
@@ -498,16 +496,9 @@ def register(forge, output):
                         state, goal=goal, binding=binding, author=author_fn,
                         reviewer=run_reviewer, auto_review=review, seconds=timeout,
                         review_seconds=review_timeout, resume=resume, project_python=py_str,
-                        allowed_roots=authorized_read_roots(root, read_roots=raw_read_roots) if raw_read_roots else None,
+                        allowed_roots=development_read_scope(root, read_roots=raw_read_roots),
                     )
                 finally:
-                    if created_empty_pyproject:
-                        pyproj = Path(root) / 'pyproject.toml'
-                        try:
-                            if pyproj.is_file() and not pyproj.is_symlink() and pyproj.stat().st_size == 0:
-                                pyproj.unlink()
-                        except OSError:
-                            pass
                     if bridge is not None:
                         bridge.close()
                     if shims is not None:

@@ -36,6 +36,33 @@ def test_each_review_has_its_own_identity_and_bound_evidence(project):
     assert outcome['review_id'] != invoke(project, response())['review_id']
 
 
+@pytest.mark.parametrize(('before', 'after', 'side', 'expected'), [
+    (None, '', 'after', 'passed'),
+    ('', None, 'before', 'passed'),
+    ('', None, 'after', 'incomplete'),
+    (None, 'value = 2\n', 'after', 'incomplete'),
+    ('', 'value = 2\n', 'before', 'incomplete'),
+    ('value = 2\n', '', 'after', 'incomplete'),
+])
+def test_empty_file_citation_matches_the_present_side_and_only_empty_content(project, before, after, side, expected):
+    from hashlib import sha256
+    from demiflow.forge.review import render_review
+
+    name = 'operators/__init__.py'
+    if after is not None:
+        (project / name).write_text(after)
+    prior = {name: dict(before=before, after_sha256=sha256(after.encode()).hexdigest() if after is not None else None)}
+    candidate = response()
+    candidate['report']['checks'] = [dict(topic='wiring', path=name, side=side, empty_file=True,
+                                          reason='Checked presence of the package initializer.')]
+    result = review_project(project, paths=(name,), prior_sources=prior, goal='Check the initializer',
+                            reviewer=lambda prompt: candidate)
+    assert result['status'] == expected
+    if expected == 'passed':
+        assert result['checks'][0]['empty_file'] and 'line' not in result['checks'][0]
+        assert f'{name} ({side})' in render_review(result)
+
+
 def test_dependency_credentials_stay_out_of_provider_requests_and_still_invalidate_review(project):
     from hashlib import sha256
 

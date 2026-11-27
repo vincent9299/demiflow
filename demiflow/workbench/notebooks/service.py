@@ -254,15 +254,14 @@ class Notebooks:
             'write_paths': sandbox['write_paths'],
             'locations': locations,
         }
-        from demiflow.workbench.projects.registry import project_dependencies, project_python_and_scope
-        private = [self.temp.name]
-        if self.server.registry is not None:
-            private.append(self.server.registry)
-        _, allowed_roots = project_python_and_scope(root, project=item, private=private)
+        from demiflow.workbench.projects.registry import project_dependencies
+        allowed_roots, host_private = self.server.source_scope(project, root)
+        private = (*host_private, self.temp.name)
         payload['allowed_read_roots'] = list(allowed_roots) if allowed_roots is not None else None
         payload['denied_paths'] = [str(Path(p).resolve()) for p in private]
         try:
-            dependencies = project_dependencies(root, project=item, verify_files=False)
+            dependencies = project_dependencies(root, project=item, verify_files=False,
+                                                allowed_roots=allowed_roots, denied_paths=private)
         except (OSError, ValueError) as exc:
             # Existing kernels keep their frozen source. Only a future launch
             # consumes the new admission result.

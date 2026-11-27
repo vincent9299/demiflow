@@ -239,6 +239,27 @@ class Deployment:
             reject('Development host device differs from shared partition')
         return partition
 
+    def private_paths(self, *paths):
+        """Host-owned locations excluded from project source and dependency reads."""
+        from demiflow.forge.sandbox.policy import default_private_read_paths
+        private = [self.state, *paths, *default_private_read_paths()]
+        if self.value.get('runtime_domain'):
+            private.append(self.value['runtime_domain'])
+        private.extend(config['native_credentials'] for config in self.providers.values()
+                       if config.get('native_credentials'))
+        return tuple(dict.fromkeys(Path(path).absolute() for path in private))
+
+    def explicit_project(self, workspace, identity):
+        project = self.projects.get(workspace)
+        if project is not None and project['identity'] == identity:
+            return project
+        matches = [candidate for candidate in self.projects.values() if candidate['identity'] == identity]
+        if len(matches) > 1:
+            reject('项目存在多个开发范围，请保留原登记身份。', 'conflict')
+        if not matches and any(candidate['root'] == identity['path'] for candidate in self.projects.values()):
+            reject('Registered development root identity changed', 'conflict')
+        return matches[0] if matches else None
+
     def project(self, workspace, root):
         project = self.projects.get(workspace)
         if project is None:

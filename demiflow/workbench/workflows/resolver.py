@@ -346,7 +346,7 @@ def check_workflow_permissions(spec: dict, resolved_map: dict[str, dict], *,
     return issues
 
 
-def build_target_authority(manifest: dict, project_alias: str, action: str):
+def build_target_authority(manifest: dict, project_alias: str, action: str, *, source_scope=None):
     """Construct the exact LocalAuthority or WebAuthority for a target project in a workflow run."""
     proj = (manifest.get('resolved_projects') or {}).get(project_alias)
     if proj is None or not proj.get('root'):
@@ -363,6 +363,7 @@ def build_target_authority(manifest: dict, project_alias: str, action: str):
         inventory = console.load_registry(reg_path)
         item = (inventory.get('projects') or {}).get(ws_id)
         grant = action == 'read' or (item is not None and console.permissions(item).get(action) is True)
-        return WebAuthority(target_root, ws_id, reg_path, action, ceiling, grant)
-    single_grant = action == 'read' or bool((proj.get('permissions') or {}).get(action, False))
-    return WebAuthority(target_root, ws_id, None, action, ceiling, single_grant)
+    else:
+        grant = action == 'read' or bool((proj.get('permissions') or {}).get(action, False))
+    allowed, denied = source_scope(ws_id, Path(target_root)) if source_scope is not None else (None, ())
+    return WebAuthority(target_root, ws_id, reg_path, action, ceiling, grant, allowed, tuple(map(str, denied)))

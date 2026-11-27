@@ -229,9 +229,9 @@ def dispatch(request):
             from demiflow.workbench.projects import checks as project_check
             if args:
                 raise ForgeError('Project checks accept no rule overrides', code='invalid_request')
-            proj_py, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
+            proj_py, scope = project_python_and_scope(root, authority=request.get('bootstrap'))
             value = (project_check.check if op == 'project_check' else project_check.status)(
-                root, table_resolver=table_resolver, python=proj_py, allowed_roots=allowed_roots,
+                root, table_resolver=table_resolver, python=proj_py, **scope,
             )
         elif op == 'project_table':
             from demiflow.workbench.projects.discovery import table
@@ -241,8 +241,8 @@ def dispatch(request):
         elif op == "inspect":
             from demiflow.workbench.projects.workspace import _inspect_flow
 
-            _, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
-            value = _inspect_flow(root, table_resolver=table_resolver, allowed_roots=allowed_roots, **args)
+            _, scope = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = _inspect_flow(root, table_resolver=table_resolver, **scope, **args)
         elif op == 'plan_preview':
             from demiflow.workbench.graph.preview import preview as compile_preview
             value = compile_preview(root, table_resolver=table_resolver, source_modules=request.get('source_modules'), dependencies=request.get('dependencies'), **args)
@@ -299,8 +299,8 @@ def dispatch(request):
         elif op == "status":
             from demiflow.workbench.projects.workspace import _report_status
 
-            _, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
-            value = _report_status(root, table_resolver=table_resolver, verify_dependencies=True, allowed_roots=allowed_roots, **args)
+            _, scope = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = _report_status(root, table_resolver=table_resolver, verify_dependencies=True, **scope, **args)
         elif op == 'audit_capture':
             from demiflow.workbench.projects.workspace import _capture_change_baseline
             value = _capture_change_baseline(root, **args)
@@ -311,8 +311,8 @@ def dispatch(request):
             value = _check_change_scope(root)
         elif op == 'audit_check':
             from demiflow.workbench.projects.workspace import _audit_check
-            _, allowed_roots = project_python_and_scope(root, authority=request.get('bootstrap'))
-            value = _audit_check(root, table_resolver=table_resolver, allowed_roots=allowed_roots, **args)
+            _, scope = project_python_and_scope(root, authority=request.get('bootstrap'))
+            value = _audit_check(root, table_resolver=table_resolver, **scope, **args)
         elif op == 'audit_hint':
             from demiflow.workbench.projects.workspace import _audit_hint
             value = _audit_hint(root, **args)

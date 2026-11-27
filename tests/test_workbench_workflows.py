@@ -241,6 +241,46 @@ def _write_cross_project_workflow(proj_b: Path) -> str:
     return rel
 
 
+def test_http_workflow_checks_the_source_grant_of_the_child_project(tmp_path, monkeypatch):
+    import sys
+    import threading
+    from urllib.request import Request, urlopen
+    from demiflow.workbench.api import WorkspaceServer
+
+    monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
+    producer, host, registry, producer_id, host_id = _setup_two_projects(tmp_path)
+    workflow = _write_cross_project_workflow(host)
+    package = tmp_path / 'external' / 'samplelib'
+    package.mkdir(parents=True)
+    (package / '__init__.py').write_text('VALUE = 1\n')
+    (producer / 'pyproject.toml').write_text(
+        f'[tool.demiflow.packages]\nsamplelib = {{source = "local_ref", path = "{package}"}}\n')
+    digest = console.projects(console.load_registry(registry))['digest']
+    console.set_python(registry, producer_id, expected=digest, python=sys.executable)
+    server = WorkspaceServer(registry=registry, enable_runs=True)
+    calls = {}
+    def scope(workspace, root):
+        calls[workspace] = Path(root)
+        return ((str(producer),) if workspace == producer_id else None), ()
+    monkeypatch.setattr(server, 'source_scope', scope)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        body = json.dumps(dict(path=workflow, inputs=dict(multiplier=1))).encode()
+        request = Request(f'http://127.0.0.1:{server.server_port}/api/workspaces/{host_id}/workflow-start',
+                          data=body, headers={'Content-Type': 'application/json', 'X-Forge-Token': server.token})
+        with urlopen(request, timeout=30) as reply:
+            started = json.load(reply)
+        final = _wait_workflow(host, started['wf_run_id'])
+        assert calls == {producer_id: producer, host_id: host}
+        assert final['status'] == 'failed', final['status']
+        assert 'host-authorized read scope' in str(final['nodes']['gen_synth']['error'])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
+
+
 def test_cross_project_dag_fanout_fanin_multi_instance_and_rerun_reuse(tmp_path, monkeypatch):
     monkeypatch.setenv('DEMIFLOW_FORGE_DOMAIN', str(tmp_path / 'runtime-domain'))
     proj_a, proj_b, reg_path, ws_a, ws_b = _setup_two_projects(tmp_path)

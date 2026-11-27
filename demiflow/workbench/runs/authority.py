@@ -39,6 +39,8 @@ class WebAuthority:
     action: str
     ceiling: bool
     single_grant: bool
+    read_roots: tuple[str, ...] | None = None
+    denied_paths: tuple[str, ...] = ()
 
     def require(self, root, action):
         from demiflow.workbench.projects import registry as console
@@ -86,20 +88,34 @@ class WebAuthority:
         )
 
     def bootstrap(self):
-        return dict(format=VERSION, kind='web', root=self.root, workspace_id=self.workspace_id,
-                    registry=self.registry, action=self.action, ceiling=self.ceiling, single_grant=self.single_grant)
+        value = dict(format=VERSION, kind='web', root=self.root, workspace_id=self.workspace_id,
+                     registry=self.registry, action=self.action, ceiling=self.ceiling, single_grant=self.single_grant)
+        if self.read_roots is not None:
+            value['read_roots'] = list(self.read_roots)
+        if self.denied_paths:
+            value['denied_paths'] = list(self.denied_paths)
+        return value
 
 
 def _from_web_bootstrap(value, root):
     keys = {'format', 'kind', 'root', 'workspace_id', 'registry', 'action', 'ceiling', 'single_grant'}
-    if (set(value) != keys or value['kind'] != 'web' or value['action'] not in ACTIONS
+    paths = {}
+    for field in ('read_roots', 'denied_paths'):
+        if field not in value:
+            continue
+        entries = value[field]
+        if (type(entries) is not list or len(entries) > 1024 or any(type(p) is not str
+                or not Path(p).is_absolute() or '..' in Path(p).parts for p in entries)):
+            raise ForgeError('Invalid trusted project source scope', code='operation_rejected')
+        paths[field] = tuple(entries)
+    if (set(value) - paths.keys() != keys or value['kind'] != 'web' or value['action'] not in ACTIONS
             or type(value['ceiling']) is not bool or type(value['single_grant']) is not bool
             or type(value['workspace_id']) is not str
             or value['registry'] is not None and (type(value['registry']) is not str or not Path(value['registry']).is_absolute())):
         raise ForgeError('Invalid trusted run bootstrap', code='operation_rejected')
     from demiflow.workbench.projects.registry import identity
     identity(value['workspace_id'])
-    return WebAuthority(**{key: value[key] for key in keys - {'format', 'kind'}})
+    return WebAuthority(**{key: value[key] for key in keys - {'format', 'kind'}}, **paths)
 
 
 register_bootstrap_kind('web', _from_web_bootstrap)
@@ -116,5 +132,6 @@ def for_http(server, path, root, action):
     key = path.split('/')[3] if path.startswith('/api/workspaces/') else next(iter(server.single['projects']))
     ceiling = action == 'read' or server.permission_ceiling()[action]
     grant = action == 'read' or server.effective_permissions(server.inventory()['projects'][key])[action]
+    allowed, denied = server.source_scope(key, root)
     return WebAuthority(str(root), key, str(server.registry) if server.registry is not None else None,
-                        action, ceiling, grant)
+                        action, ceiling, grant, allowed, tuple(map(str, denied)))

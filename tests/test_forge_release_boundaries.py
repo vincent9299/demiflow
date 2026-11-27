@@ -78,30 +78,173 @@ def test_default_terminal_requires_the_restricted_backend(tmp_path, monkeypatch)
     assert result.exit_code != 0 and 'sandbox' in result.output.lower(), result.output
 
 
-def test_restricted_terminal_network_is_off_without_a_model_channel(tmp_path, monkeypatch):
-    from demiflow.forge import development, sandbox
+@pytest.mark.parametrize('limited', [False, True])
+def test_restricted_terminal_network_is_off_without_a_model_channel(tmp_path, monkeypatch, limited):
+    from demiflow.forge import development_cli, sandbox
     root = project(tmp_path)
+    declaration = root / 'pyproject.toml'
+    declaration.unlink()
+    reference = tmp_path / 'reference'
+    reference.mkdir()
     credential = tmp_path / 'private-account'
     credential.write_text('fixture')
     reviewer = tmp_path / 'review.json'
     reviewer.write_text(json.dumps({'native_credentials': str(credential)}))
     monkeypatch.setenv('DEMIFLOW_FORGE_REVIEW_CONFIG', str(reviewer))
     seen = []
-    original = sandbox.build_development_sandbox_spec
-    def build(*args, **kwargs):
-        spec = original(*args, **kwargs)
-        seen.append((spec.direct_network, spec.read_policy, set(spec.denied_paths)))
-        return spec
+    def author(*args, sandbox_spec, channel, **kwargs):
+        assert channel is None
+        assert declaration.is_file()
+        seen.append(sandbox_spec)
+        return dict(kwargs['binding'], completed=True, acknowledged=True, cleanup='complete', session='fixture')
+
     monkeypatch.setattr(sandbox, 'backend_readiness', lambda: {'available': True})
-    monkeypatch.setattr(sandbox, 'build_development_sandbox_spec', build)
-    monkeypatch.setattr(development, 'run_development', lambda *a, **kw: {'status':'checked'})
+    monkeypatch.setattr(development_cli, 'native_author', author)
     result = CliRunner().invoke(main, ['forge','develop','--root',str(root),'--state-dir',str(tmp_path/'state'),
-        '--executable',sys.executable,'--python',sys.executable,'--goal','check','--json'])
+        '--executable',sys.executable,'--python',sys.executable,'--goal','check','--json',
+        *(['--read-root', str(reference)] if limited else [])])
     assert result.exit_code == 0, result.output
-    assert len(seen) == 1
-    network, reads, denied = seen[0]
-    assert not network and reads == 'scoped'
-    assert {str(credential), str(reviewer)} <= denied
+    spec, = seen
+    assert not spec.direct_network and spec.read_policy == ('scoped' if limited else 'inherit_os')
+    assert {str(credential), str(reviewer)} <= set(spec.denied_paths)
+    if limited:
+        assert str(reference) in spec.read_paths
+    assert not declaration.exists()
+    receipt, = json.loads(result.output)['history']
+    assert receipt['review'] is None and receipt['author']['completed']
+
+
+@pytest.mark.parametrize('existing', [False, True])
+def test_readonly_planning_then_edit_in_same_restricted_conversation(tmp_path, monkeypatch, existing):
+    from demiflow.workbench.api import WorkspaceServer
+    from test_forge_development_chat import wait_turn
+    from test_forge_development_runtime import combined_configuration
+
+    root, host = tmp_path / 'orders', tmp_path / 'host'
+    root.mkdir()
+    host.mkdir()
+    path, registry, workspace, domain, _ = combined_configuration(host, root, monkeypatch)
+    config = json.loads(path.read_text())
+    config['mode'] = 'restricted'
+    config['projects'][workspace].update(kind='pipeline', phase='implementation', watch=['notes.py', 'pyproject.toml'])
+    domain.chmod(0o700)
+    monkeypatch.setenv('PLANNING_FIXTURE_KEY', 'offline-fixture-only')
+    config['providers']['codex'].update(base_url='http://127.0.0.1:1/v1', credential_env='PLANNING_FIXTURE_KEY')
+    path.write_text(json.dumps(config))
+    declaration = root / 'pyproject.toml'
+    original = '[project]\nname = "initial"\n'
+    if existing:
+        declaration.write_text(original)
+    server = WorkspaceServer(registry=registry, development_config=path)
+    try:
+        service = server.development
+        if not existing:
+            assert service.prewarm(workspace, root, provider_id='codex')['status'] == 'skipped'
+        sid = service.create_project(workspace, root, 'create', 'codex')['id']
+        assert service.capabilities(workspace, root)['start'], service.capabilities(workspace, root)
+        plan = service.start_project(workspace, root, sid, 'plan', 0, 'Plan the migration.', auto_review=True)
+        saved = wait_turn(service, plan['id'])
+        assert saved['state'] == 'completed', saved['result']
+        assert json.loads(saved['result'])['changed_files'] == 0
+        events = service.store.events(workspace, sid)['events']
+        assert not {event['type'] for event in events} & {'change.observed', 'review.requested', 'review.started'}
+        assert (declaration.read_text() if declaration.exists() else None) == (original if existing else None)
+        edit = service.start_project(workspace, root, sid, 'edit', 1, 'write project declaration fixture')
+        saved = wait_turn(service, edit['id'])
+        assert saved['state'] == 'completed', saved['result']
+        assert (root / 'pyproject.toml').read_text() == '[project]\nname = "demo"\n'
+        events = service.store.events(workspace, sid, events[-1]['sequence'], 50)['events']
+        changes = [item for e in events if e['turn_id'] == edit['id'] and e['type'] == 'change.observed'
+                   for item in e['data']['files']]
+        assert [item['path'] for item in changes] == ['pyproject.toml']
+        if existing:
+            assert changes[0]['before']['bytes'] == len(original)
+            assert any(e['data'].get('warm_reused') for e in events if e['type'] == 'provider.bound')
+        else:
+            assert changes[0]['before'] is None
+    finally:
+        server.server_close()
+
+
+@pytest.mark.parametrize('scoped', (False, True))
+def test_private_paths_and_public_project_commands(tmp_path, monkeypatch, scoped):
+    from demiflow.forge.sandbox.policy import build_development_sandbox_spec, default_runtime_paths
+    from demiflow.forge.sandbox.sandbox import backend_readiness, launch_sandbox
+
+    if sys.platform != 'linux' or not backend_readiness()['available']:
+        pytest.skip('Requires the Linux development sandbox')
+    project = tmp_path / 'project'
+    initialize_project(project)
+    (project / '.env').write_text('sample only')
+    (project / '.env.example').write_text('template')
+    reference = tmp_path / 'reference'
+    reference.mkdir()
+    (reference / 'model.py').write_text('example')
+    state = tmp_path / 'host-state'
+    state.mkdir()
+    (state / 'receipt').write_text('sample only')
+    account = tmp_path / 'account'
+    (account / '.ssh').mkdir(parents=True)
+    (account / '.ssh' / 'fixture').write_text('sample only')
+    monkeypatch.setenv('HOME', str(account))
+    monkeypatch.setenv('CODEX_HOME', str(account / '.codex'))
+    home = state / 'session' / 'author'
+    home.mkdir(mode=0o700, parents=True)
+    later = tmp_path / 'new-state'
+    source = Path(__file__).resolve().parents[1]
+    spec = build_development_sandbox_spec(
+        project, private_home=home, writes=('flows',),
+        runtime_paths=default_runtime_paths(project_python=sys.executable),
+        denied_paths=(state, later), host_state_root=state, read_roots=(reference,) if scoped else (), seconds=30,
+    )
+    script = '''
+import json, sys
+from pathlib import Path
+project, reference, state, account, later, source = map(Path, sys.argv[1:])
+sys.path.insert(0, str(source))
+sys.stdin.readline()
+(Path.home() / 'continued-session').write_text('scratch')
+assert 'workspace.json' in {p.name for p in project.iterdir()}
+assert {p.name for p in reference.iterdir()} == {'model.py'}
+assert (reference / 'model.py').read_text() == 'example'
+assert (project / '.env.example').read_text() == 'template'
+for private in (project / '.env', state / 'receipt', state / 'late-session' / 'receipt',
+                account / '.ssh' / 'fixture', later / 'receipt'):
+    try:
+        private.read_bytes()
+    except PermissionError:
+        continue
+    raise AssertionError('Private path was readable: ' + private.name)
+for private_dir in (state, state / 'late-session', account / '.ssh', later):
+    try:
+        list(private_dir.iterdir())
+    except PermissionError:
+        continue
+    raise AssertionError('Private directory was listable')
+from click.testing import CliRunner
+from demiflow.cli import main
+for command in ('context', 'check'):
+    result = CliRunner().invoke(main, ['forge', command, '--root', str(project)])
+    assert result.exit_code == 0, (command, str(result.exception), result.output[-256:])
+print(json.dumps(['context', 'check']))
+'''
+    proc = launch_sandbox(
+        [sys.executable, '-I', '-B', '-c', script, *map(str, (project, reference, state, account, later, source))],
+        spec=spec, env={'PATH': '/usr/bin:/bin', 'OPENBLAS_NUM_THREADS': '1'}, cwd=project,
+    )
+    try:
+        (state / 'late-session').mkdir()
+        (state / 'late-session' / 'receipt').write_text('sample only')
+        later.mkdir()
+        (later / 'receipt').write_text('sample only')
+        out, err = proc.communicate(input=b'go\n', timeout=35)
+        assert proc.returncode == 0, err.decode(errors='replace')
+        assert json.loads(out) == ['context', 'check']
+        assert (home / 'continued-session').read_text() == 'scratch'
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate(timeout=5)
 
 
 def test_partial_deletion_keeps_all_original_bytes(tmp_path, monkeypatch):

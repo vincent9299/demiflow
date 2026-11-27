@@ -570,7 +570,8 @@ def create_role_file(root, role, name, *, content=None, actor=False):
                 diagnostics=[], **result)
 
 
-def register_flow(root, entry, *, params=None, authorize=None, table_resolver=None):
+def register_flow(root, entry, *, params=None, authorize=None, table_resolver=None,
+                  python=None, allowed_roots=None, denied_paths=()):
     """Publish a checked binding only while its file and declaration evidence still matches."""
     from .pipeline_check import check_project, verify_check_inputs
     root, value = load_project(root)
@@ -590,7 +591,8 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
     if params is None and any(selected in items for items in value['entries'].values()):
         raise ForgeError('Default parameter path is bound to another entry', code='conflict')
 
-    check = check_project(root, entry=entry, params=params, table_resolver=table_resolver)
+    check = check_project(root, entry=entry, params=params, table_resolver=table_resolver,
+                          python=python, allowed_roots=allowed_roots, denied_paths=denied_paths)
     if (check['status'] != 'passed' or check['native_flow']['status'] != 'passed'
             or check['project_layout']['status'] != 'passed' or len(check['entries']) != 1
             or check['entries'][0]['entry'] != entry or check['entries'][0]['status'] != 'checked'):
@@ -602,7 +604,7 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
     with control_lock(root):
         if authorize is not None:
             authorize()
-        verify_check_inputs(root, check['basis'])
+        verify_check_inputs(root, check['basis'], allowed_roots=allowed_roots, denied_paths=denied_paths)
         if load_project(root)[1] != value:
             raise ForgeError('Project declaration changed before registration', code='inputs_changed')
         created = []
@@ -620,7 +622,7 @@ def register_flow(root, entry, *, params=None, authorize=None, table_resolver=No
                     created.append(selected)
                 # Publishing the default may involve a durable write. Confirm its bytes
                 # and all checked inputs before recording the binding.
-                verify_check_inputs(root, check['basis'])
+                verify_check_inputs(root, check['basis'], allowed_roots=allowed_roots, denied_paths=denied_paths)
                 if read_control(parameter_file, 65536) not in (_EMPTY_PARAMS, _LEGACY_EMPTY_PARAMS):
                     raise ForgeError('Default parameter file changed during registration', code='inputs_changed')
             save_project(root, value, expected=expected)
