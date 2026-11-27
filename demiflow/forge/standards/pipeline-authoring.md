@@ -24,7 +24,7 @@ Notebook 使用的可复用代码放在 `data_tools/`（连同配套查看模板
 
 ### DF-03
 
-在 Flow 内用原生 Dataset API 串联数据的来源、转换、模型节点和输出。普通函数或 Actor 只承担本地业务逻辑。模型调用和表写入在入口显式编排。跨 Flow 共用逻辑提取为算子，独立入口之间用明确的持久交付引用衔接。
+在 Flow 内用原生 Dataset API 串联数据的来源、转换、模型节点和输出。普通函数或 Actor 只承担本地业务逻辑。模型调用和表写入在入口显式编排。跨 Flow 共用逻辑提取为算子，独立入口之间用已提交的表版本与受管模型交付衔接：训练通过 `Dataset.fit` 交付受管模型，图内用 `checkpoints.select(...).predict(...)` 预测，拆成多条 Flow 时用 `workflows/*.json` 的 `$from` 传递上游 `outputs` 表版本与 `models` 交付（详见 `--topic workflow`），不要自建散落的临时 JSONL/清单文件做跨 Flow 协议，也不要手工拼接运行目录下的裸权重路径。
 
 **算子自包含与语义充血规范（`DF-02` 静态门禁强制校验，MECE 三维七条）**：
 1. **模块分层（Layering）**
