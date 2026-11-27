@@ -127,9 +127,19 @@ def lower_prompt_declaration(operation: LogicalOp, declaration, *, program_ref: 
     configuration = _json_config(model.configuration)
     configuration.update(concurrency=settings.get('concurrency', 1),
                          catch=[c.__module__ + '.' + c.__qualname__ for c in getattr(operation, 'catch', ())])
-    model = replace(model, configuration=configuration,
+    state = model.state
+    predicate = settings.get('when')
+    if predicate is not None and model.kind == 'prompt' and state == 'none':
+        from inspect import getattr_static
+        snapshot = callable(getattr_static(predicate, 'snapshot_state', None))
+        restore = callable(getattr_static(predicate, 'restore_state', None))
+        if snapshot != restore:
+            raise DataflowError('INVALID_CONTRACT', 'Prompt when requires both snapshot_state and restore_state')
+        if snapshot:
+            state = 'adapter'
+    model = replace(model, configuration=configuration, state=state,
         profile=_model_profile(model.resource_role, bounds, configuration["concurrency"],
-                               model.state, operation=operation))
+                               state, operation=operation))
 
     return service_kernel(model, settings)
 

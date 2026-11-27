@@ -784,7 +784,7 @@ class OperatorKernel:
     def can_snapshot_pending(self):
         # The native journal owns request effects for these row-local actors.
         # Arbitrary mutable UDFs/agents still drain before a state snapshot.
-        if self._spec.kind not in {'prompt', 'embedding'} or not self._instances:
+        if self._spec.state == 'adapter' or self._spec.kind not in {'prompt', 'embedding'} or not self._instances:
             return False
         for instance in self._instances:
             if instance is None:
@@ -1624,6 +1624,14 @@ class OperatorKernel:
             self._finish_cursor = dict(cursor)
             self._skip = cursor['emitted']
         self.aggregate_state = image["aggregate_state"]
+        if (self._spec.kind == 'prompt' and image["state"] is None
+                and (self._emitted or image.get('call_ordinal') or image.get('inflight_calls'))):
+            owner = self._state_owner(self._instance)
+            recovery = getattr(getattr(owner, '_runtime', None), 'native_recovery', None)
+            if any(callable(getattr(predicate, 'snapshot_state', None))
+                   for predicate in getattr(recovery, 'semantic_owners', ())):
+                raise _err('INCOMPATIBLE_HISTORY',
+                           'Original checkpoint lacks prompt predicate state. Start a new run.')
         if not self._worker_scope:
             self._restore_state(image["state"])
         if self._worker_scope:

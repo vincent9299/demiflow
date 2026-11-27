@@ -121,7 +121,7 @@ failed = [row for row in rows if row.get("error")]
 
 - `error_output="列名"`：这一行调用或校验失败时，保留原行并写入 `{category, type, detail, call}`，不写结果列。例如返回两次都不是合法 JSON 时，`category` 为 `invalid_response`。
 - `call_output="列名"`：每行附带这次调用的信息，包括耗时、HTTP 状态、模型名和请求标识。
-- `when=函数`：返回 `False` 的行不调用模型，原样通过。
+- `when=函数`：返回 `False` 的行不调用模型，原样通过。 单路 `map_prompt_async` 的 `when` 判断器可用成对的 `snapshot_state()` 和 `restore_state(value)` 保存跨行状态。引擎在检查点前收完该节点的在途调用，把判断器状态和输入进度一起恢复。旧检查点缺少已使用的判断器状态时，继续计算需要新开一次运行。
 - `catch=(异常类型, ...)`：命中的行被丢弃并计数。
 - 传输错误不会被悄悄重试。受管模型服务启动失败会终止整个节点，即使设置了 `error_output`。
 
