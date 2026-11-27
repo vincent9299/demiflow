@@ -190,9 +190,18 @@ def main():
     deadline = math.inf if spec['seconds'] == 0 else time.monotonic() + spec['seconds']
     last_disk = 0
     while time.monotonic() < deadline:
-        pid, state = os.waitpid(child, os.WNOHANG)
-        if pid:
-            return os.waitstatus_to_exitcode(state) if os.WIFEXITED(state) else 128 + os.WTERMSIG(state)
+        # Namespace PID 1 adopts orphaned grandchildren (e.g. shell pipelines).
+        # Reap every exited child before sampling so dead tasks do not consume
+        # the live process budget.
+        while True:
+            try:
+                pid, state = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return 125
+            if not pid:
+                break
+            if pid == child:
+                return os.waitstatus_to_exitcode(state) if os.WIFEXITED(state) else 128 + os.WTERMSIG(state)
         if relay_failed.is_set():
             sys.stderr.write('[sandbox] terminated (125): control/model channel relay failed\n')
             sys.stderr.flush()

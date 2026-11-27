@@ -94,7 +94,7 @@ def test_default_budget_runs_concurrent_model_calls_in_one_resident_layout(serve
     row, batch = bounds.max_row_bytes, bounds.max_batch_bytes
     assert kernel.configuration['concurrency'] == calls
     assert kernel.configuration['codec_min_bytes'] == 2 * row + batch
-    # A prompt's output has no bound below a row (retries, traces, typed results).
+    # Under the default 8 MiB response cap a prompt's bound exceeds a row.
     assert kernel.configuration['call_output_min_bytes'] == row
     selected = physical(graph, policy, bounds)
     # Every memory edge stays in memory: no stage is parked and restarted.
@@ -104,6 +104,42 @@ def test_default_budget_runs_concurrent_model_calls_in_one_resident_layout(serve
     assert stage.profile.requests['memory_bytes'] >= kernel.configuration['codec_min_bytes']
     assert selected.bounds == bounds                       # the caller's limits are not rewritten
 
+
+
+def test_a_plain_prompt_reserves_what_its_response_cap_bounds(server):
+    from demiflow.data.api import DataAPI
+    from demiflow.execution.compiler_support.dataflow_native import OUTPUT_FIELD_BYTES, TYPED_ROW_EXPANSION
+    from demiflow.operator_llm.http_options import response_record_bytes
+    capped = {'max_response_bytes': 65536, 'max_event_bytes': 65536}
+
+    def reserve(**kwargs):
+        dataset = prompt(DataAPI().from_items([{'item': 1}]), concurrency=16, **kwargs)
+        kernel, *_, bounds = _compiled(dataset, 'prompt')
+        return kernel.configuration['call_output_min_bytes'], bounds.max_row_bytes
+
+    reserved, row = reserve(options=capped)
+    # The one appended field comes from a response whose HTTP body is capped
+    # (or a journal record admitted under that cap plus its metadata).
+    assert reserved == TYPED_ROW_EXPANSION * response_record_bytes(capped) + OUTPUT_FIELD_BYTES < row
+    # A call trace or an error row adds content the response cap does not bound.
+    assert reserve(options=capped, call_output='trace')[0] == row
+    assert reserve(options=capped, error_output='error')[0] == row
+
+
+def test_a_capped_prompt_keeps_its_declared_concurrency_in_flight(server):
+    from demiflow.data.api import DataAPI
+    together = threading.Barrier(16, timeout=30)
+
+    def respond(body, index):
+        together.wait()  # only answers once sixteen calls are in flight at once
+        return {'result': 'ok'}
+
+    server['respond'] = respond
+    with data.local_execution(workers=2, worker_mode='thread'):
+        rows = prompt(DataAPI().from_items([{'item': i} for i in range(16)]), concurrency=16,
+                      options={'max_response_bytes': 65536, 'max_event_bytes': 65536}).take_all()
+    # With a full output row per call the default budget held about seven.
+    assert len(rows) == 16 and server['peak'] == 16
 
 # ---- what the kernel enforces -------------------------------------------------------------
 

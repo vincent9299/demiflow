@@ -120,6 +120,11 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
             attr = PathRule(access, fd)
             checked(LIBC.syscall(445, descriptor, 1, ctypes.byref(attr), 0), 'Landlock path rule')
 
+    fixed_reads = {'/dev/null', '/dev/zero', '/dev/urandom'}
+    if credential_read_path:
+        fixed_reads.add(credential_read_path)
+    inherited = read_policy == 'inherit_os'
+
     # A Landlock grant covers all descendants. Split only the ancestors of a
     # denied name, and grant their public siblings as whole subtrees. Nothing
     # is read from the denied targets. Directory FDs pin each lookup while
@@ -147,6 +152,36 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
                 split.add(path)
             if info is None or not stat.S_ISREG(info.st_mode):
                 private_dirs.add(path)
+
+    # Shared OS scratch directories (/tmp, /var/tmp) host unrelated services and
+    # may hold hundreds of thousands of transient entries. Under inherit_os keep
+    # them non-ambient and descend only into direct children explicitly required
+    # by the sandbox's read/runtime scope (TMPDIR is already private_home).
+    scratch_children = {}
+    if inherited:
+        for candidate in ('/tmp', '/var/tmp'):
+            for root in dict.fromkeys((candidate, os.path.realpath(candidate))):
+                if root != '/' and os.path.isdir(root):
+                    scratch_children.setdefault(root, set())
+        for bound in (*(p for p in read_paths if p not in fixed_reads), *runtime_paths):
+            for scratch, names in scratch_children.items():
+                prefix = scratch + '/'
+                if bound.startswith(prefix):
+                    child_name = bound[len(prefix):].split('/', 1)[0]
+                    if child_name:
+                        names.add(child_name)
+        for scratch in scratch_children:
+            path = scratch
+            while True:
+                if path not in split:
+                    split_path_bytes += len(os.fsencode(path))
+                    if len(split) >= 16384 or split_path_bytes > 8 * 1024**2:
+                        raise RuntimeError('Sandbox denied directory inventory exceeds admission budget')
+                    split.add(path)
+                private_dirs.add(path)
+                if path == '/':
+                    break
+                path = os.path.dirname(path)
     remaining = 262144
 
     def grant_read(fd, path, info, rights):
@@ -166,6 +201,26 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
             add(fd, rights & READ_DIR, True)
         scan_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=fd)
         try:
+            if path in scratch_children:
+                for name in sorted(scratch_children[path]):
+                    remaining -= 1
+                    if remaining < 0:
+                        raise RuntimeError('Sandbox visibility exceeds the 262144 directory-entry admission budget')
+                    child_path = os.path.join(path, name)
+                    if child_path in denied:
+                        continue
+                    try:
+                        child_fd = os.open(name, flags, dir_fd=scan_fd)
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    try:
+                        child_info = os.fstat(child_fd)
+                        if stat.S_ISLNK(child_info.st_mode):
+                            continue
+                        grant_read(child_fd, child_path, child_info, rights)
+                    finally:
+                        os.close(child_fd)
+                return
             with os.scandir(scan_fd) as entries:
                 for entry in entries:
                     remaining -= 1
@@ -185,10 +240,6 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
         finally:
             os.close(scan_fd)
 
-    fixed_reads = {'/dev/null', '/dev/zero', '/dev/urandom'}
-    if credential_read_path:
-        fixed_reads.add(credential_read_path)
-    inherited = read_policy == 'inherit_os'
     read_grants = [('/', READ | EXEC)] if inherited else [
         *((path, READ) for path in read_paths if path not in fixed_reads),
         *((path, READ | EXEC) for path in runtime_paths),

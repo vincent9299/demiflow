@@ -6,6 +6,15 @@ import re
 from demiflow.services.inference_options import CALL_OPTION_DEFAULTS, normalize_call_options
 
 
+DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+RESPONSE_RECORD_MARGIN = 64 * 1024
+
+
+def response_record_bytes(options):
+    """Admitted size of one journaled text response: the HTTP cap plus its call metadata."""
+    return (options or {}).get('max_response_bytes', DEFAULT_MAX_RESPONSE_BYTES) + RESPONSE_RECORD_MARGIN
+
+
 HTTP_OPTIONS = set(CALL_OPTION_DEFAULTS) | {
     'sqlite_journal', 'journal_dir', 'timeout_s', 'request_options', 'verify_model',
     'require_finish_reason_stop', 'trust_env', 'max_keepalive_connections', 'model_revision',

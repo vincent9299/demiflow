@@ -182,6 +182,11 @@ def declared_output_growth(operation, *, row_bytes):
         # search sink, which checks it with document(row, response_bytes(...)).
         from demiflow.collect.search_contract import response_bytes
         return TYPED_ROW_EXPANSION * response_bytes(row_bytes) + OUTPUT_FIELD_BYTES
+    from demiflow.operator_llm.runtime import PromptActor
+    if type(actor) is PromptActor:
+        # A plain text prompt bounds its one appended field by its response cap.
+        bound = actor.appended_bytes_bound()
+        return None if bound is None else TYPED_ROW_EXPANSION * bound + OUTPUT_FIELD_BYTES
     return None
 
 

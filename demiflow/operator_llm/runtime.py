@@ -592,6 +592,29 @@ class PromptActor(BoundOperatorLLMMap):
             from .errors import error_category
             return {**row,self.error_output:{'category':error_category(exc),'type':type(exc).__name__,'detail':str(exc),'call':self._delivery_trace(getattr(exc,'call',{}))}}
 
+    # Options whose responses do not pass through this node's HTTP response cap,
+    # or may replay a response recorded under another cap.
+    _UNCAPPED_OPTIONS = frozenset({'offline_dir', 'offline_store', 'codex_exec', 'codex_agent', 'cli',
+                                   'sqlite_journal', 'journal_dir', 'systemone_batch'})
+
+    def appended_bytes_bound(self):
+        """Canonical bytes a call can add to its row, when this node's own checks bound them; else None.
+
+        A plain text prompt appends one parsed field from a response whose HTTP
+        body is capped by max_response_bytes, or replayed from a journal record
+        admitted under that cap plus its metadata. A call trace, error row,
+        multi-turn environment, image reply or a transport that bypasses the
+        cap adds content without such a bound.
+        """
+        options = self._runtime.options or {}
+        model = self._prompt.model
+        if (self.environment is not None or self.call_output or self.error_output
+                or self._prompt.response_format == 'image' or model.provider
+                or model.transport != 'openai_compatible' or self._UNCAPPED_OPTIONS.intersection(options)):
+            return None
+        from .http_options import response_record_bytes
+        return response_record_bytes(options)
+
     def _delivery_trace(self, trace):
         # Single-completion native Prompt rows carry original call facts;
         # monitoring above retains this attempt's true reuse/token counts.
