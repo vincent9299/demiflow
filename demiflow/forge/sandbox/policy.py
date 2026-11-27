@@ -161,25 +161,26 @@ def writable_project_declaration(root):
         # Distinguish an intentional empty save even on filesystems with coarse timestamps.
         os.utime(fd, ns=(os.fstat(fd).st_atime_ns, 0))
         original = os.fstat(fd)
-
-        def untouched():
-            try:
-                current = path.lstat()
-            except FileNotFoundError:
-                return False
-            return (os.path.samestat(original, current) and current.st_size == 0 and current.st_mtime_ns == 0
-                    and current.st_ctime_ns == original.st_ctime_ns)
-
-        try:
-            yield untouched
-        finally:
-            if untouched():
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
     finally:
+        # dep remove takes a write lease on this inode during the author's turn.
         os.close(fd)
+
+    def untouched():
+        try:
+            current = path.lstat()
+        except FileNotFoundError:
+            return False
+        return (os.path.samestat(original, current) and current.st_size == 0 and current.st_mtime_ns == 0
+                and current.st_ctime_ns == original.st_ctime_ns)
+
+    try:
+        yield untouched
+    finally:
+        if untouched():
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def build_development_sandbox_spec(
