@@ -874,8 +874,6 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
         if not eligible or not candidates or bounds.max_spill_bytes <= 0:
             raise _error("RESOURCE_INFEASIBLE",
                          "memory group cannot fit and its source/state cannot safely park", **original.context) from original
-        reason = ("active_worker_budget" if original.context.get('resource') == 'max_active_workers'
-                  else "resident_budget")
         nodes = _node_map(graph)
         edges = {edge.edge_id: edge for edge in graph.edges}
         # For a finite, fully materialized action a shared actor can finish
@@ -888,11 +886,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
             kernel.kind == 'materialize' or (
                 kernel.kind == 'take_all' and kernel.configuration['arguments'].get('limit') is None)
             for kernel in terminals)
-        upgraded = []
-        for exchange in exchanges:
-            if exchange not in candidates:
-                upgraded.append(exchange)
-                continue
+        def park(exchange, reason):
             producer = nodes[edges[exchange.edge_id].producer].kernel
             # A finite kernel emits its complete result inside finish(). An
             # absent consumer cannot ACK a per-row durable window, and parking
@@ -907,18 +901,61 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                     owners[exchange.consumer_partitions[0]].stage_id)):
                 finite = True
             mode = "finite_sealed" if finite else "durable_incremental"
-            upgraded.append(replace(exchange, mode=mode,
+            return replace(exchange, mode=mode,
                 scope_id="scope-" + exchange.edge_id if finite else None,
                 credit_rows=min(256, bounds.max_pending_events, ceilings.get('inflight_rows', 256)),
                 storage_bytes=(bounds.max_spill_bytes if finite else
                                min(bounds.max_spill_bytes, exchange.credit_bytes * 8)),
                 reason=f"{mode}:{reason}_requires_" +
-                       ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason))
-        upgraded = tuple(upgraded)
-        upgraded = _share_exchange_storage(upgraded, bounds)
-        return upgraded, solve_residency(stages, upgraded, hosts=hosts, bounds=bounds,
-                                        max_active_workers=policy.max_active_workers, max_cpu_millis=cpu_ceiling,
-                                        publication_workspace_bytes=publication, publication_reservation=reservation)
+                       ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason)
+
+        # Park only the memory edges inside the group the solver could not
+        # place, then ask it again. A group that fits keeps its live memory
+        # transport: parking it would only add checkpointed handoffs of a
+        # bounded window between stages that could have run together.
+        current, failure = tuple(exchanges), original
+        while True:
+            reason = ("active_worker_budget" if failure.context.get('resource') == 'max_active_workers'
+                      else "resident_budget")
+            pending = [e for e in current if e in candidates]
+            local = [e for e in pending if {owners[e.producer_partitions[0]].stage_id,
+                     owners[e.consumer_partitions[0]].stage_id} <= _memory_group(
+                         stages, current, failure.context.get('group_first_stage'))]
+            parked = set(local or pending)
+            if not parked:
+                raise failure
+            current = _share_exchange_storage(tuple(park(e, reason) if e in parked else e
+                                                    for e in current), bounds)
+            try:
+                return current, solve_residency(stages, current, hosts=hosts, bounds=bounds,
+                                                max_active_workers=policy.max_active_workers,
+                                                max_cpu_millis=cpu_ceiling, publication_workspace_bytes=publication,
+                                                publication_reservation=reservation)
+            except DataflowError as exc:
+                if exc.code != "RESOURCE_INFEASIBLE":
+                    raise
+                failure = exc
+
+
+def _memory_group(stages, exchanges, first_stage):
+    """The stages joined to ``first_stage`` by memory edges (empty if unnamed)."""
+    if first_stage is None:
+        return set()
+    owners = _partition_owner(stages)
+    neighbours = {}
+    for exchange in exchanges:
+        if exchange.mode == _MEMORY_MODE:
+            a = owners[exchange.producer_partitions[0]].stage_id
+            b = owners[exchange.consumer_partitions[0]].stage_id
+            neighbours.setdefault(a, set()).add(b)
+            neighbours.setdefault(b, set()).add(a)
+    group, pending = set(), [first_stage]
+    while pending:
+        stage = pending.pop()
+        if stage not in group:
+            group.add(stage)
+            pending.extend(neighbours.get(stage, ()))
+    return group
 
 
 def _join_arrow_snapshots(graph, snapshots, splits, stages):
