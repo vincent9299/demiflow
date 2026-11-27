@@ -131,12 +131,15 @@ def test_skill_and_guide_are_distinct_installable_resources():
     forge = files('demiflow.forge')
     skill = forge.joinpath('skills', 'demiforge', 'SKILL.md').read_text()
     guide = forge.joinpath('standards', 'pipeline-authoring.md').read_text()
+    review = forge.joinpath('standards', 'pipeline-review.md').read_text()
     for command in ('context', 'init', 'add', 'check'):
         assert 'demiflow forge ' + command in skill
     for symbol in ('Dataset.fit', 'TrainingRecipe', 'PredictorSpec'):
         assert f'--api demiflow.data:{symbol}' in skill
     assert 'DF-05' in guide and 'DF-05' not in skill
     assert '正反例' in guide
+    for doc in (skill, guide, review):
+        assert '受管模型' in doc and '已提交' in doc and 'workflows/*.json' in doc
 
 
 def test_optional_and_required_source_failures_are_distinct(tmp_path, reference):
