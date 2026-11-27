@@ -809,6 +809,7 @@ def _refine_source_partitions(
     splits: tuple[SourceSplit, ...],
     policy: RuntimePolicy,
     bounds: Bounds,
+    width: int | None = None,
 ) -> tuple[StageSpec, ...]:
     sources = set(graph.sources)
     by_source: dict[str, int] = {}
@@ -824,7 +825,7 @@ def _refine_source_partitions(
         if count > bounds.max_partitions:
             raise _error("BUDGET_EXCEEDED", "source splits exceed max_partitions", source_id=source_occ)
         node = next(n for n in graph.nodes if n.occurrence_id == source_occ)
-        replica_min, replica_target, replica_max = _replica_bounds(node, count, policy)
+        replica_min, replica_target, replica_max = _replica_bounds(node, min(count, width or count), policy)
         refined.append(replace(
             stage,
             partitions=_partition_ids(stage.stage_id, replica_target),
@@ -906,7 +907,7 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                 credit_rows=min(256, bounds.max_pending_events, ceilings.get('inflight_rows', 256)),
                 storage_bytes=(bounds.max_spill_bytes if finite else
                                min(bounds.max_spill_bytes, exchange.credit_bytes * 8)),
-                reason=f"{mode}:{reason}_requires_" +
+                reason=f"{mode}:{reason}{_PARKED_TAG}" +
                        ("finite_completion;" if finite else "checkpointed_parking;") + exchange.reason)
 
         # Park only the memory edges inside the group the solver could not
@@ -935,6 +936,47 @@ def _select_budgeted_residency(graph, snapshots, stages, exchanges, *, hosts, bo
                 if exc.code != "RESOURCE_INFEASIBLE":
                     raise
                 failure = exc
+
+
+_PARKED_TAG = "_requires_"
+
+
+def _parked_edges(physical):
+    """Edges the selection parked because their memory group did not fit."""
+    return sum(1 for edge in physical.exchanges
+               if edge.reason.split(':', 1)[-1].startswith(('resident_budget' + _PARKED_TAG,
+                                                            'active_worker_budget' + _PARKED_TAG)))
+
+
+def _narrower_source_plan(graph, snapshots, splits, selected, arguments):
+    """Read a source with fewer partitions rather than park stages that could stream together.
+
+    Only consulted when the full-width selection parked an edge or found no
+    layout. Each narrower width (halving) is a fresh selection by the same
+    solver; the widest one that parks fewer edges than the best so far wins,
+    and a width that parks nothing ends the search. A parked window moves a
+    bounded number of rows per checkpoint, relaunching its stages each time.
+    """
+    policy = arguments['policy']
+    counts = {}
+    for split in splits:
+        counts[split.source_id] = counts.get(split.source_id, 0) + 1
+    width = min(max(counts.values(), default=1), policy.max_replicas,
+                policy.max_active_workers or policy.max_replicas)
+    best, parked = None, (_parked_edges(selected) if selected is not None else None)
+    while width > 1 and parked != 0:
+        width //= 2
+        try:
+            candidate = _compile_physical(graph, snapshots, splits, **arguments,
+                                          _measured_relational=False, _source_width=width)
+        except DataflowError as exc:
+            if exc.code != 'RESOURCE_INFEASIBLE':
+                raise
+            continue
+        count = _parked_edges(candidate)
+        if parked is None or count < parked:
+            best, parked = candidate, count
+    return best
 
 
 def _memory_group(stages, exchanges, first_stage):
@@ -994,21 +1036,31 @@ def compile_physical_dataflow(
 ) -> PhysicalDataflow:
     """Select and seal one physical layout.
 
-    Join and reducer kernels first get their maximum-row windows. Only when no
-    layout fits those does a second selection give the kernels that declared a
-    floor that floor (and then any slack); their grant then counts actual bytes.
-    If that also cannot fit, the original refusal stands.
+    Join and reducer kernels first get their maximum-row windows. When that
+    selection must park an edge (or finds no layout), sources are first read
+    with fewer partitions if that lets more stages stream together. Only when
+    no layout fits at all does a second selection give the kernels that
+    declared a floor that floor (and then any slack); their grant then counts
+    actual bytes. If that also cannot fit, the original refusal stands.
     """
     arguments = dict(policy=policy, hosts=hosts, bounds=bounds, constants_ref=constants_ref)
+    selected = refused = None
     try:
-        return _compile_physical(graph, snapshots, splits, **arguments, _measured_relational=False)
+        selected = _compile_physical(graph, snapshots, splits, **arguments, _measured_relational=False)
     except DataflowError as exc:
-        from demiflow.execution.contracts.relational_region import MEASURED_KINDS
-        if exc.code != 'RESOURCE_INFEASIBLE' or not any(
-                node.kernel.kind in MEASURED_KINDS and 'codec_min_bytes' in node.kernel.configuration
-                for node in graph.nodes):
+        if exc.code != 'RESOURCE_INFEASIBLE':
             raise
         refused = exc
+    if selected is None or _parked_edges(selected):
+        narrower = _narrower_source_plan(graph, snapshots, splits, selected, arguments)
+        if narrower is not None:
+            return narrower
+    if selected is not None:
+        return selected
+    from demiflow.execution.contracts.relational_region import MEASURED_KINDS
+    if not any(node.kernel.kind in MEASURED_KINDS and 'codec_min_bytes' in node.kernel.configuration
+               for node in graph.nodes):
+        raise refused
     try:
         physical = _compile_physical(graph, snapshots, splits, **arguments, _measured_relational=True)
     except DataflowError as exc:
@@ -1025,7 +1077,8 @@ def compile_physical_dataflow(
 
 
 def _compile_physical(graph, snapshots, splits, *, policy, hosts, bounds, constants_ref,
-                      _allow_offset_sql=True, _measured_relational=False) -> PhysicalDataflow:
+                      _allow_offset_sql=True, _measured_relational=False,
+                      _source_width=None) -> PhysicalDataflow:
     _check_bounds(bounds)
     snapshot_ids = {snapshot.source_id for snapshot in snapshots}
     if snapshot_ids != set(graph.sources):
@@ -1042,7 +1095,7 @@ def _compile_physical(graph, snapshots, splits, *, policy, hosts, bounds, consta
     refs = reference_only_sources(graph)
     splits = tuple(split for split in splits if split.source_id not in refs)
     stages = partition_stages(graph, policy=policy, bounds=bounds)
-    stages = _refine_source_partitions(graph, stages, splits, policy, bounds)
+    stages = _refine_source_partitions(graph, stages, splits, policy, bounds, _source_width)
     # Optional co-location must fit the same caller ceiling as the original
     # allocation scope. Project capacity only for planning; real providers keep
     # their original descriptors and admission authority.
@@ -1094,7 +1147,7 @@ def _compile_physical(graph, snapshots, splits, *, policy, hosts, bounds, consta
         # reservations. Retry only this fresh physical choice, before sealing.
         return _compile_physical(graph, snapshots, splits, policy=policy, hosts=hosts, bounds=bounds,
                                  constants_ref=constants_ref, _allow_offset_sql=False,
-                                 _measured_relational=_measured_relational)
+                                 _measured_relational=_measured_relational, _source_width=_source_width)
     from .dataflow_graph_adapter import pack_graph_residency
     exchanges, residency = pack_graph_residency(graph, stages, exchanges, residency,
         requested=graph_requested_exchanges, hosts=hosts, bounds=bounds, policy=policy)
