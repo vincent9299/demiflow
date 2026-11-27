@@ -16,9 +16,8 @@ from test_forge_development_runtime import combined_configuration
 def test_restricted_cli_reads_external_input_without_user_path_or_registration(tmp_path, monkeypatch):
     root = tmp_path / "orders"
     root.mkdir()
-    # Enable scoped reads on this project so native CLI cannot read host paths outside root
-    # while the trusted read_input bridge still grants scoped read-only access to external inputs.
-    (root / 'pyproject.toml').write_text('[tool.demiflow.packages]\n', encoding='utf-8')
+    scoped_placeholder = tmp_path / "empty-read-scope"
+    scoped_placeholder.mkdir()
     external = root.with_name(root.name + '-inputs')
     external.mkdir()
     try:
@@ -32,6 +31,9 @@ def test_restricted_cli_reads_external_input_without_user_path_or_registration(t
         path, registry, workspace, domain, _ = combined_configuration(host, root, monkeypatch)
         config = json.loads(path.read_text())
         config['projects'][workspace]['kind'] = 'pipeline'
+        # Explicitly exercise sandbox-level scoped reads (independent of pyproject.toml)
+        # so native CLI cannot read external inputs directly while the read_input bridge can.
+        config['projects'][workspace]['read_roots'] = [str(scoped_placeholder)]
         domain.chmod(0o700)
         executable = host / 'input-provider'
         fixture = Path(__file__).with_name('devchat_fake_input_provider.py')

@@ -123,11 +123,14 @@ def _declared_readonly_locations(root: Path, denied: list[Path], private_home: P
 
 
 def _authorized_read_roots(root, project, denied, private_home=None):
-    """Collect host-granted read directories via the shared Forge sandbox policy."""
+    """Return explicit sandbox read scope if configured, else None (OS-inherited visibility)."""
+    configured = project.get('read_roots') or ()
+    if not configured:
+        return None
     from demiflow.forge.sandbox import authorized_read_roots
     return authorized_read_roots(
         root,
-        read_roots=project.get('read_roots') or (),
+        read_roots=configured,
         denied_paths=denied,
         private_home=private_home,
     )

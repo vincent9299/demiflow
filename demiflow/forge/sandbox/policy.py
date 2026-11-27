@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import sys
 
-from demiflow.forge.dependencies import declaration as dependency_declaration
 from demiflow.forge.project_workspace import scoped_data_location
 from demiflow.forge.sandbox.sandbox import SandboxSpec
 
@@ -136,10 +135,12 @@ def build_development_sandbox_spec(
 ) -> SandboxSpec:
     """Build the single canonical Forge OS SandboxSpec for developer / readonly sessions.
 
-    Enforces:
+    Visibility (`read_policy`) and dependencies are strictly decoupled:
       - `packages/`, `.forge/`, `data_tools/` are ALWAYS protected against direct writes.
       - Pipeline implementation turns may create/edit/save `pyproject.toml` (single-file grant).
-      - External `local_ref` / vendor roots require explicit host authorization via `read_roots`.
+      - Read visibility is controlled solely by the sandbox (`readonly` turns or explicit
+        sandbox-level `read_roots` use `scoped`; normal developer sessions use `inherit_os`
+        regardless of whether `pyproject.toml` declares dependencies).
     """
     root_path = Path(root).absolute()
     read: list[Path] = []
@@ -163,13 +164,6 @@ def build_development_sandbox_spec(
             if cred_path.is_file():
                 active_cred = cred_path
                 read.append(cred_path)
-
-    has_deps = False
-    if not notebook_op:
-        try:
-            has_deps = dependency_declaration(root_path) is not None
-        except Exception:
-            has_deps = (root_path / 'pyproject.toml').is_file()
 
     write_list: list[Path] = []
     if not readonly:
@@ -214,7 +208,7 @@ def build_development_sandbox_spec(
             if granted_path.exists():
                 read.append(granted_path)
 
-    scoped_reads = bool(readonly or has_deps or read_roots)
+    scoped_reads = bool(readonly or read_roots)
     return SandboxSpec(
         read_paths=_unique_abs(read),
         write_paths=_unique_abs(write_list),

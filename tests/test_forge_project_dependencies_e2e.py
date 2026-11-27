@@ -498,7 +498,8 @@ def test_workbench_legacy_registry_preview_and_shared_sources_conflict(tmp_path,
     from _forge_project_fixtures import declare_existing_flow
     declare_existing_flow(proj, 'flows/demo.py:run', params='configs/demo.json')
 
-    # Register project & inject legacy `dependency_lock` field into registry.json to verify read compatibility
+    # Register project & inject legacy `dependency_lock` and `read_roots` fields into registry.json
+    # to verify backward-compatible loading; updating python strips both legacy fields cleanly.
     reg_path = tmp_path / 'console.json'
     created = registry.add(reg_path, proj)
     wid = created['workspace_id']
@@ -509,12 +510,14 @@ def test_workbench_legacy_registry_preview_and_shared_sources_conflict(tmp_path,
     reg_path.write_text(json.dumps(raw_reg), encoding='utf-8')
     loaded = registry.load_registry(reg_path)
     assert wid in loaded['projects']
-    # Updating read_roots strips legacy dependency_lock cleanly
-    updated = registry.set_read_roots(reg_path, wid, expected=registry.projects(loaded)['digest'], read_roots=[str(ext)])
-    assert 'dependency_lock' not in json.loads(reg_path.read_text(encoding='utf-8'))['projects'][wid]
-    assert updated['read_roots'] == [str(ext.resolve())]
+    projected = registry.projects(loaded)
+    assert 'read_roots' not in projected['projects'][0]
+    assert 'dependency_lock' not in projected['projects'][0]
+    registry.set_python(reg_path, wid, expected=projected['digest'], python=sys.executable)
+    persisted = json.loads(reg_path.read_text(encoding='utf-8'))['projects'][wid]
+    assert 'dependency_lock' not in persisted and 'read_roots' not in persisted
 
-    # Preview works with B-class package via WebAuthority
+    # Preview works with external B-class package via WebAuthority WITHOUT any Workbench read_roots config!
     from demiflow.workbench.runs.authority import WebAuthority
     auth = WebAuthority(str(proj.resolve()), wid, str(reg_path.resolve()), 'read', True, True)
     plan = preview(proj, entry='flows/demo.py:run', params='configs/demo.json', authority=auth)
@@ -587,8 +590,6 @@ def test_workbench_sealed_run_and_resume_preserve_original_package_bytes(tmp_pat
     wid = created['workspace_id']
     digest = registry.projects(registry.load_registry(reg_path))['digest']
     registry.set_python(reg_path, wid, expected=digest, python=sys.executable)
-    digest = registry.projects(registry.load_registry(reg_path))['digest']
-    registry.set_read_roots(reg_path, wid, expected=digest, read_roots=[str(ext)])
 
     submit_auth = WebAuthority(str(proj.resolve()), wid, str(reg_path.resolve()), 'run_submit', True, True)
     ctrl_auth = WebAuthority(str(proj.resolve()), wid, str(reg_path.resolve()), 'run_control', True, True)
@@ -1036,7 +1037,6 @@ def test_external_package_update_invalidates_review_and_queued_rework_feedback(t
     #       Service.start rejects with conflict, and queue drainer discards stale feedback without starting a turn.
     cfg_path, _, wid, _, _ = combined_configuration(tmp_path, proj, monkeypatch)
     cfg_val = json.loads(cfg_path.read_text(encoding='utf-8'))
-    cfg_val['projects'][wid]['read_roots'] = [str(ext.resolve())]
     cfg_val['projects'][wid]['writes'] = ['flows']
     cfg_val['projects'][wid]['watch'] = watched
     cfg_path.write_text(json.dumps(cfg_val), encoding='utf-8')
@@ -1058,7 +1058,7 @@ def test_external_package_update_invalidates_review_and_queued_rework_feedback(t
             'round': 1,
         }
         fb_allowed, fb_denied = svc._feedback_scope(wid, proj)
-        assert str(ext.resolve()) in fb_allowed
+        assert fb_allowed is None
 
         # (a) Paired POSITIVE check: restore external package to v1 -> both evidence & feedback are current,
         #     and the queue drainer invokes start_project to deliver the queued rework feedback!
@@ -1437,23 +1437,132 @@ def test_http_routing_owned_by_workbench_not_forge():
     assert decoded == {'run_id': 'r' + '0' * 24, 'include_report': True}
 
 
-def test_workbench_http_api_authorizes_project_read_roots(tmp_path):
-    """Workbench exposes a real user-facing HTTP endpoint to authorize external read_roots."""
+def test_visibility_decoupled_from_dependencies_and_no_workbench_read_roots_config(tmp_path):
+    """Visibility belongs strictly to the sandbox; Workbench needs no read_roots config and pyproject.toml never flips read_policy."""
     import threading
     from urllib import error as urlerror, request as urlreq
+    from demiflow.forge.bridge.server import BridgeServer
+    from demiflow.forge.sandbox import (
+        SandboxShims,
+        backend_readiness,
+        launch_sandbox,
+    )
     from demiflow.workbench.api import WorkspaceServer
+    from demiflow.workbench.conversations.worker import sandbox_spec as wb_sandbox_spec
     from demiflow.workbench.projects import registry
 
-    proj = _init_pipeline_project(tmp_path / 'http_rr_proj')
-    ext_a = tmp_path / 'ext_pkg_a'
-    ext_a.mkdir()
+    proj = _init_pipeline_project(tmp_path / 'decoupled_proj')
+    (proj / 'packages').mkdir(exist_ok=True)
+    ext_pkg = _make_pkg(tmp_path / 'visible_ext_lib', {'__init__.py': 'VERSION = "v1"\n'})
+    secret_state = tmp_path / 'wb_state'
+    secret_state.mkdir(mode=0o700)
+    secret_pkg = _make_pkg(secret_state / 'leaked_pkg', {'__init__.py': 'SECRET = 1\n'})
+    priv_home = secret_state / 's1' / 'provider'
+    priv_home.mkdir(parents=True, mode=0o700)
+
+    # 1. Workbench developer sandbox MUST stay read_policy='inherit_os' BOTH before AND after pyproject.toml!
+    deployment = type('Dep', (), {
+        'mode': 'restricted', 'direct_model': False, 'state': secret_state, 'value': {},
+        'providers': {'codex': {'executable': sys.executable}},
+        'limits': type('Lim', (), {
+            'sessions': 8, 'turns': 8, 'turn_seconds': 60,
+            'rss_bytes': 2 * 1024**3, 'processes': 32,
+            'provider_bytes': 64 * 1024**2, 'private_total_bytes': 128 * 1024**2,
+        })(),
+    })()
+    wb_project = {
+        'root': str(proj), 'kind': 'pipeline', 'phase': 'implementation',
+        'writes': ['flows'], 'protected': [], 'python': sys.executable,
+    }
+    spec_before = wb_sandbox_spec(
+        deployment, wb_project, {'id': 's1', 'provider': 'codex'},
+        {'operation': 'message', 'created': 10**12}, {'sources': []},
+        {'executable': sys.executable}, priv_home,
+    )
+    assert spec_before.read_policy == 'inherit_os' and spec_before.write_policy == 'scoped'
+
+    (proj / 'pyproject.toml').write_text(
+        f'[tool.demiflow.packages]\nvisible_ext_lib = {{source = "local_ref", path = "{ext_pkg}"}}\n',
+        encoding='utf-8',
+    )
+    spec_after = wb_sandbox_spec(
+        deployment, wb_project, {'id': 's1', 'provider': 'codex'},
+        {'operation': 'message', 'created': 10**12}, {'sources': []},
+        {'executable': sys.executable}, priv_home,
+    )
+    assert spec_after.read_policy == 'inherit_os', 'Declaring pyproject.toml must NOT flip sandbox read visibility!'
+    assert spec_after.write_policy == 'scoped'
+    assert str((proj / 'pyproject.toml').resolve()) in spec_after.write_paths
+    assert str((proj / 'packages').resolve()) in spec_after.protected_paths
+
+    # 2. Live OS Landlock developer sandbox (inherit_os + scoped writes, allowed_read_roots=None):
+    #    reads external pkg, imports local_ref & vendors external pkg via bridge, while OS blocks direct
+    #    writes to packages/.forge/external AND bridge rejects denied_paths!
+    if sys.platform == 'linux' and backend_readiness().get('available'):
+        class _Active:
+            tid = 't-decoupled'
+            epoch = 'e-1'
+            def require_active(self):
+                return None
+
+        bridge = BridgeServer(_Active(), project_root=proj, allowed_read_roots=None, denied_paths=(secret_state,))
+        shims = SandboxShims(
+            wb_project, execution_mode='restricted', project_python=sys.executable,
+            allowed_read_roots=None, denied_paths=(secret_state,),
+        )
+        shims.set_control_binding(bridge.token, 't-decoupled', 'e-1')
+        try:
+            live_spec = wb_sandbox_spec(
+                deployment, wb_project, {'id': 's1', 'provider': 'codex'},
+                {'operation': 'message', 'created': 10**12}, {'sources': []},
+                {'executable': sys.executable}, priv_home,
+                extra_read_paths=shims.read_paths, extra_runtime_paths=shims.runtime_paths,
+            )
+            assert live_spec.read_policy == 'inherit_os'
+            script = (
+                'import os, subprocess, sys\n'
+                'from pathlib import Path\n'
+                f'ext = Path({str(ext_pkg)!r})\n'
+                f'secret = Path({str(secret_pkg)!r})\n'
+                'root = Path.cwd()\n'
+                # External dir is readable under inherit_os, NOT writable under write_policy=scoped
+                'assert "v1" in (ext / "__init__.py").read_text()\n'
+                'for bad in (ext / "hack.py", root / "packages" / "hack.py", root / ".forge" / "hack.txt"):\n'
+                '    try:\n'
+                '        bad.write_text("nope")\n'
+                '    except PermissionError:\n'
+                '        pass\n'
+                '    else:\n'
+                '        raise AssertionError(f"Unexpected write succeeded: {bad}")\n'
+                # Python shim imports local_ref directly without any Workbench read_roots config
+                'r = subprocess.run(["python", "-c", "import visible_ext_lib; assert visible_ext_lib.VERSION == \'v1\'"], check=True)\n'
+                # `demiflow forge context` succeeds and sees visible_ext_lib
+                'ctx = subprocess.run(["demiflow", "forge", "context", "--root", str(root), "--json"], capture_output=True, text=True, check=True)\n'
+                'assert "visible_ext_lib" in ctx.stdout\n'
+                # `demiflow forge dep vendor` works for visible external pkg, rejects denied_paths
+                '(root / "pyproject.toml").write_text("[tool.demiflow.packages]\\nvend = {source = \\"vendored\\", path = \\"packages/vend\\"}\\n")\n'
+                'v_ok = subprocess.run(["demiflow", "forge", "dep", "vendor", "vend", str(ext), "--root", str(root), "--json"], capture_output=True, text=True)\n'
+                'assert v_ok.returncode == 0, (v_ok.stdout, v_ok.stderr)\n'
+                'v_bad = subprocess.run(["demiflow", "forge", "dep", "vendor", "leaked_pkg", str(secret), "--root", str(root), "--json"], capture_output=True, text=True)\n'
+                'assert v_bad.returncode != 0, (v_bad.stdout, v_bad.stderr)\n'
+            )
+            env = {'PATH': f'{shims.bin}:/usr/bin:/bin', 'LANG': 'C.UTF-8'}
+            proc = launch_sandbox([sys.executable, '-c', script], spec=live_spec, env=env, cwd=str(proj), control_socket=bridge.path)
+            out, err = proc.communicate(timeout=30)
+            assert proc.returncode == 0, (out.decode('utf-8', 'replace'), err.decode('utf-8', 'replace'))
+            assert (proj / 'packages' / 'vend' / '__init__.py').is_file()
+            assert not (proj / 'packages' / 'leaked_pkg').exists()
+        finally:
+            bridge.close()
+            shims.close()
+
+    # 3. Workbench HTTP API no longer exposes meaningless /api/project-read-roots
     reg_path = tmp_path / 'console.json'
     created = registry.add(reg_path, proj, allow_runs=True)
     wid = created['workspace_id']
     digest = registry.projects(registry.load_registry(reg_path))['digest']
-
     token_file = tmp_path / 'token'
-    token_file.write_text('test-read-roots-token-' + 'a' * 32, encoding='utf-8')
+    token_file.write_text('test-no-read-roots-token-' + 'a' * 32, encoding='utf-8')
     token_file.chmod(0o600)
     server = WorkspaceServer(registry=reg_path, token_file=token_file, port=0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1467,30 +1576,13 @@ def test_workbench_http_api_authorizes_project_read_roots(tmp_path):
         }
         req = urlreq.Request(
             base + '/api/project-read-roots',
-            data=json.dumps({'workspace_id': wid, 'expected': digest, 'read_roots': [str(ext_a)]}).encode('utf-8'),
-            headers=headers,
-            method='POST',
-        )
-        with urlreq.urlopen(req, timeout=5) as resp:
-            assert resp.status == 200
-            body = json.loads(resp.read().decode('utf-8'))
-        assert body['status'] == 'updated'
-        assert body['workspace_id'] == wid
-        assert body['read_roots'] == [str(ext_a.resolve())]
-        saved = registry.projects(registry.load_registry(reg_path))
-        proj_entry = next(p for p in saved['projects'] if p['workspace_id'] == wid)
-        assert proj_entry['read_roots'] == [str(ext_a.resolve())]
-
-        # Relative / nonexistent paths must be rejected cleanly with HTTP 400
-        bad_req = urlreq.Request(
-            base + '/api/project-read-roots',
-            data=json.dumps({'workspace_id': wid, 'expected': body['digest'], 'read_roots': ['relative/bad']}).encode('utf-8'),
+            data=json.dumps({'workspace_id': wid, 'expected': digest, 'read_roots': [str(ext_pkg)]}).encode('utf-8'),
             headers=headers,
             method='POST',
         )
         with pytest.raises(urlerror.HTTPError) as exc_info:
-            urlreq.urlopen(bad_req, timeout=5)
-        assert exc_info.value.code == 400
+            urlreq.urlopen(req, timeout=5)
+        assert exc_info.value.code in {400, 404}
     finally:
         server.shutdown()
         server.server_close()

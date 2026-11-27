@@ -85,37 +85,8 @@ def notebook_sandbox(item):
     return {'mode': 'off', 'write_paths': []}
 
 
-def validate_read_roots(value, *, project_root=None):
-    """Validate optional user-granted external read directories for local_ref / vendor sources."""
-    if value is None:
-        return []
-    if type(value) not in (list, tuple) or len(value) > 32:
-        raise ForgeError('授权只读目录最多 32 项。', code='invalid_request')
-    cleaned = []
-    proj = Path(project_root).resolve() if project_root else None
-    for item in value:
-        if type(item) is not str or not item.strip() or len(item.encode('utf-8')) > 2048 or any(ord(c) < 32 for c in item):
-            raise ForgeError('授权只读目录必须是规范绝对路径。', code='invalid_request')
-        raw = item.strip()
-        if len(raw) > 1:
-            raw = raw.rstrip('/')
-        p = Path(raw)
-        if not p.is_absolute() or str(p) != raw or '..' in p.parts or p == Path('/'):
-            raise ForgeError('授权只读目录必须是具体的绝对路径：' + raw, code='invalid_request')
-        if proj is not None and (p == proj or proj.is_relative_to(p)):
-            raise ForgeError('授权只读目录不能是项目本身或其祖先目录：' + raw, code='invalid_request')
-        if raw not in cleaned:
-            cleaned.append(raw)
-    return cleaned
-
-
 def dev_network(item):
     return bool(item.get('dev_network', False)) if isinstance(item, dict) else False
-
-
-def read_roots(item):
-    raw = item.get('read_roots') if isinstance(item, dict) else None
-    return list(raw) if isinstance(raw, list) else []
 
 
 def load_registry(path):
@@ -129,15 +100,16 @@ def load_registry(path):
     for key, item in value['projects'].items():
         identity(key)
         fields = {'root','name','allow_runs'} if value['format']==FORMAT else {'root','name','permissions'}
-        # Tolerate legacy `dependency_lock` field on read for backward compatibility.
+        # Tolerate legacy `dependency_lock` and `read_roots` fields on read for backward compatibility.
         if type(item) is not dict or set(item) - {'python', 'notebook_sandbox', 'dev_network', 'read_roots', 'dependency_lock'} != fields:
             raise ForgeError('Invalid console project')
         if 'python' in item:
             py = item['python']
             if py != '' and (type(py) is not str or not Path(py).is_absolute() or str(Path(py)) != py or '..' in Path(py).parts):
                 raise ForgeError('Invalid project python configuration')
-        if 'read_roots' in item:
-            validate_read_roots(item['read_roots'])
+        if 'read_roots' in item and (
+                type(item['read_roots']) is not list or any(type(v) is not str for v in item['read_roots'])):
+            raise ForgeError('Invalid legacy read_roots field')
         if 'dependency_lock' in item and (
                 type(item['dependency_lock']) is not str or not re.fullmatch(r'[0-9a-f]{64}', item['dependency_lock'])):
             raise ForgeError('Invalid legacy dependency lock digest')
@@ -258,7 +230,7 @@ def projects(value):
         row['python'] = item.get('python')
         row['notebook_sandbox'] = notebook_sandbox(item)
         row['dev_network'] = dev_network(item)
-        row['read_roots'] = read_roots(item)
+        row.pop('read_roots', None)
         row.pop('dependency_lock', None)
         try:
             resolve_workspace(value, key)
@@ -374,32 +346,20 @@ def set_python(path, workspace_id, *, expected, python):
             value['projects'][workspace_id].pop('python', None)
         else:
             value['projects'][workspace_id]['python'] = cleaned
+        value['projects'][workspace_id].pop('dependency_lock', None)
+        value['projects'][workspace_id].pop('read_roots', None)
         ws.write_control(path, value, expected=expected)
     return dict(status='updated', workspace_id=workspace_id, python=cleaned, digest=content_digest(value))
 
 
-def set_read_roots(path, workspace_id, *, expected, read_roots):
-    """Configure optional user-granted external read directories for a registered project."""
-    identity(workspace_id)
-    with _locked(path) as path:
-        value = load_registry(path)
-        if content_digest(value) != expected:
-            raise ForgeError('Registry changed before read_roots update', code='conflict')
-        if workspace_id not in value['projects']:
-            raise ForgeError('Workspace is not registered', code='not_found')
-        item = value['projects'][workspace_id]
-        cleaned = validate_read_roots(read_roots, project_root=item['root'])
-        item.pop('dependency_lock', None)
-        if cleaned:
-            item['read_roots'] = cleaned
-        else:
-            item.pop('read_roots', None)
-        ws.write_control(path, value, expected=expected)
-    return dict(status='updated', workspace_id=workspace_id, read_roots=cleaned, digest=content_digest(value))
-
-
 def project_python_and_scope(root, *, authority=None, project=None, extra_read_roots=(), private=()):
-    """Resolve explicit project Python and caller-granted external directory scope for Forge consumers."""
+    """Resolve explicit project Python and optional caller-supplied sandbox read scope.
+
+    Read visibility belongs exclusively to the active OS sandbox (not Workbench
+    project settings). Unless a caller explicitly narrows visibility via
+    `extra_read_roots`, return `allowed_roots = None` while dependency validation
+    continues to enforce denied/sensitive paths, symlinks, and B-class content rules.
+    """
     root_path = Path(root).absolute()
     resolved_project = project
     if authority is not None and authority.get('kind') == 'web':
@@ -415,25 +375,14 @@ def project_python_and_scope(root, *, authority=None, project=None, extra_read_r
         python = authority.get('python') or None
     if python == '':
         python = None
-    if resolved_project is None:
-        # Trusted local (non-registry) invocation: allow caller-provided extra roots or unrestricted local read.
-        allowed = tuple(str(Path(p).resolve()) for p in extra_read_roots if p) if extra_read_roots else None
-        return python, allowed
+    if not extra_read_roots:
+        return python, None
     granted: list[str] = [str(root_path.resolve())]
-    for raw in (*(resolved_project.get('read_roots') or ()), *extra_read_roots):
+    for raw in extra_read_roots:
         if raw:
             p = ws.scoped_data_location(root_path, raw, private=private)
             if p is not None and str(p) not in granted:
                 granted.append(str(p))
-    try:
-        _, workspace = ws.load_workspace_control(root_path)
-        for loc in (workspace.get('locations') or {}).values():
-            if isinstance(loc, dict) and not loc.get('writable', False) and loc.get('root'):
-                p = ws.scoped_data_location(root_path, loc['root'], private=private)
-                if p is not None and str(p) not in granted:
-                    granted.append(str(p))
-    except Exception:
-        pass
     return python, tuple(granted)
 
 
