@@ -1362,7 +1362,16 @@ def evidence(root, run_id, reference):
     path = path if path.is_absolute() else target / path
     ws.no_symlinks(path)
     allowed = next((r for r in value['manifest'].get('evidence', []) if target / r['path'] == path), None)
-    if allowed is None or not path.is_file() or path.stat().st_size > allowed['max_bytes']:
+    if allowed is None:
+        from demiflow.execution.host.inspection import read_run_call_evidence
+        from demiflow.forge.evidence import display_evidence
+        try:
+            document = read_run_call_evidence(target, run_id, reference, deadline=operation_budget.current_deadline())
+        except RunReadError as exc:
+            raise ForgeError(str(exc), code=exc.code or 'operation_rejected') from exc
+        return {'run_id': run_id, 'reference': reference, 'format': 'demiflow_prompt_sqlite_v1',
+                'document': display_evidence(document)}
+    if not path.is_file() or path.stat().st_size > allowed['max_bytes']:
         raise ForgeError('Evidence is not a declared bounded resource of this run')
     if allowed['format'] != 'demiflow_prompt_sqlite_v1':
         raise ForgeError('Native evidence format has no bounded reader')

@@ -27,7 +27,7 @@ import time
 
 from typing import TYPE_CHECKING, Mapping
 
-from demiflow.execution.contracts.dataflow import ArtifactCommand, ArtifactReply, CompletedControl, ControlReply, EffectCommand, EffectReply, NativeJournalCommand, NativeJournalReply, QueueCommand, QueueReply, WorkerEvent
+from demiflow.execution.contracts.dataflow import JOURNAL_EVENT_KINDS, ArtifactCommand, ArtifactReply, CompletedControl, ControlReply, EffectCommand, EffectReply, NativeJournalCommand, NativeJournalReply, QueueCommand, QueueReply, WorkerEvent
 from demiflow.execution.contracts.dataflow_errors import DataflowError
 from demiflow.execution.contracts.recovery_contract import RecoveryContractError, document, identifier, identity
 
@@ -40,8 +40,7 @@ _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown
 _QUEUE_OPS = frozenset({"poll", "acquire", "finalize", "status", "search"})
 _NATIVE_OPS = frozenset({"lookup", "reserve", "reserve_http_retry", "response", "failed",
                          "references", "media_references", "bind_membership", "stage_image", "offline_lookup", "stream_lance", "batch_membership"})
-_COMMAND_KINDS = frozenset({"effect", "reserve", "artifact", "queue", "native_request",
-                            "read_action", "read_configuration", "restrict_recovery", "check_grant"})
+
 
 _MAX_SERVICE_WORKERS = 4
 
@@ -241,7 +240,7 @@ class DriverJournalService:
             return False
         _lease_matches(self._action, event)
         _payload_bytes(event, self._bounds)
-        if event.kind not in _COMMAND_KINDS:
+        if event.kind not in JOURNAL_EVENT_KINDS:
             raise DataflowError("INVALID_CONTRACT", "event kind is not a journal command")
         with self._lock:
             if self._closed:
@@ -386,7 +385,7 @@ class DriverJournalService:
             raise DataflowError('FENCED', 'Journal service is closed')
         _lease_matches(self._action, event)
         _payload_bytes(event, self._bounds)
-        if event.kind not in _COMMAND_KINDS:
+        if event.kind not in JOURNAL_EVENT_KINDS:
             raise DataflowError("INVALID_CONTRACT", "event kind is not a journal command")
         from demiflow.execution.contracts.dataflow import thaw_record_value
         payload = thaw_record_value(event.payload) if event.payload is not None else {}

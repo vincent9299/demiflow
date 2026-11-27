@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections import deque
 import json
 from typing import TYPE_CHECKING
 
 from ..contracts.dataflow import (
-    FIXED_SCAN_BATCHES,
+    FIXED_SCAN_BATCHES, JOURNAL_EVENT_KINDS,
     ActionHandle, ActionRequest, ArtifactRef, Bounds, ControlReply, CutContribution,
     CutRequest, DriverServices, ExecutionStatus, PhysicalDataflow, ReadyWork,
     RecoveryImage, RuntimePolicy, SealedExecution, TerminalResult, WorkerAssignment,
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
 
 
 def execute_action(request: ActionRequest, *, policy: RuntimePolicy, bounds: Bounds, after_prepare=None) -> ActionHandle:
@@ -167,11 +169,13 @@ class DataflowExecution:
         self._sinks = {}
         self._restore_image: RecoveryImage | None = None
         self._verified_completed_image: RecoveryImage | None = None
+        self._unverified_business_import: str | None = None
         self._channels = None
         self._cut: CutRequest | None = None
         self._contributions: dict[str, CutContribution] = {}
         self._confirmed_rows = 0
         self._pending_events = 0
+        self._polled_events = deque()
         self._terminal_result: TerminalResult | None = None
         self._source_exhausted = False
         self._prepared = False
@@ -486,7 +490,7 @@ class DataflowExecution:
             validate_literal_schema_replay(self._request, graph, bounds=self._bounds)
             from demiflow.execution.seal.plan import validate_execution_binding
             validate_execution_binding(self._request, graph)
-            completed_live_nodes = verify_action_programs(
+            completed_live_nodes, self._unverified_business_import = verify_action_programs(
                 self._action, graph, physical, sealed, store=self._store, bounds=self._bounds)
         else:
             compiled = lower_action(self._request, bounds=self._bounds)
@@ -802,6 +806,10 @@ class DataflowExecution:
         # carrier. Continuing execution does: prepare retained the sealed
         # policy, while services/hosts were assembled for the current request.
         # Never start those hosts under another provider's physical contract.
+        if self._unverified_business_import is not None:
+            raise DataflowError('INCOMPATIBLE_HISTORY',
+                                'Original seal cannot verify a project import. Start a new run to compute more rows.',
+                                context={'import': self._unverified_business_import})
         providers = {host.provider for host in self._services.hosts}
         if providers != {self._physical.policy.provider}:
             raise DataflowError("INCOMPATIBLE_HISTORY",
@@ -1085,37 +1093,58 @@ class DataflowExecution:
                 except Exception:
                     if not draining:
                         raise
-        events: list[WorkerEvent] = []
-        for allocation_id, endpoint in self._endpoints.items():
-            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-            try:
-                batch = endpoint.poll(max_events=max_events, deadline_ms=remaining_ms)
-            except Exception:
-                if not draining:
-                    raise
-                continue
-            events.extend(batch)
-            if time.monotonic() >= deadline:
-                break
+        # A destructive endpoint poll transfers ownership to the driver. Keep
+        # unread RPCs through backpressure and a sibling failure in this batch.
+        events = self._polled_events
+        if not events:
+            for endpoint in self._endpoints.values():
+                remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+                try:
+                    events.extend(endpoint.poll(max_events=max_events, deadline_ms=remaining_ms))
+                except Exception:
+                    if not draining:
+                        raise
+                if time.monotonic() >= deadline:
+                    break
         self._pending_events = len(events)
         from demiflow.execution.hosts.endpoints import batch_business_commands
         from contextlib import nullcontext
         commands = nullcontext() if draining else batch_business_commands(self._endpoints.values())
         self._update_checkpoint_wait_clock()
         with commands:
-            for event in events:
+            while events:
+                event = events.popleft()
                 try:
                     self._validate_event(event)
-                    if event.kind in ("effect", "artifact", "reserve", "read_action", "read_configuration",
-                                      "check_grant", "restrict_recovery", "queue", "native_request"):
-                        self._services.journal_service.submit(event)
+                    if event.kind in JOURNAL_EVENT_KINDS:
+                        if not self._services.journal_service.submit(event):
+                            events.appendleft(event)
+                            break
                     else:
                         self._handle_event(event)
                 except BaseException:
                     if not draining:
                         raise
         self._update_checkpoint_wait_clock()
-        return events, replies
+        return self._pending_events - len(events), replies
+
+    def _settle_polled_controls(self):
+        # Model admission has closed. Return each outstanding journal RPC to
+        # its original waiter and retain final counters, without delivering rows.
+        first_error = None
+        while self._polled_events:
+            event = self._polled_events.popleft()
+            try:
+                self._validate_event(event)
+                if event.kind in JOURNAL_EVENT_KINDS:
+                    reply = self._services.journal_service.dispatch_reply(event)
+                    self._endpoints[event.allocation_id].deliver_reply(reply)
+                elif event.kind == 'progress':
+                    self._handle_event(event)
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+        return first_error
 
     def _checkpoint_frontiers(self):
         """Aggregate partitions of each original logical occurrence, not depth."""
@@ -1214,8 +1243,11 @@ class DataflowExecution:
             return
         if event.kind == "failure":
             from demiflow.execution.contracts.dataflow_failures import restore_failure
+            from demiflow.services.request_limits import COOPERATIVE_FAILURE_STOP_REASON
             self._failure = restore_failure(payload)
             self._state = "failed"
+            # An already-started publisher can still pump controls on unwind.
+            self._services.journal_service.stop_model_admission(COOPERATIVE_FAILURE_STOP_REASON)
             raise self._failure
         if event.kind == "progress":
             occ, partition = payload['occurrence_id'], payload['partition_id']
@@ -1799,16 +1831,28 @@ class DataflowExecution:
     def cancel(self, reason: str) -> None:
         if self._cancelled or self._closed:
             return
+        if self._state == "failed":
+            # This action failed in one of its own stages. Unless the caller gave a
+            # cooperative reason already, the remaining stages get the bounded
+            # wind-down: exchanges they already sent drain under their deadlines,
+            # within the cancel grace. An early close by the caller, a deadline or
+            # a driver-side error never set this state and still abort at once.
+            from demiflow.services.request_limits import COOPERATIVE_FAILURE_STOP_REASON, cooperative_stop_error
+            if cooperative_stop_error(reason) is None:
+                reason = COOPERATIVE_FAILURE_STOP_REASON
         self._cancelled = True
         self._state = "cancelled"
         if self._fit:
             self._fit.cancel()
         self._services.journal_service.stop_model_admission(reason)
+        pending_error = self._settle_polled_controls()
         self._drain_publication()
         if self._cut is not None:
             self._checkpoint.abort_pending(self._cut, reason=reason)
         for endpoint in self._endpoints.values():
             endpoint.cancel(reason, deadline_ms=self._cleanup_grace_ms())
+        if pending_error is not None:
+            raise pending_error
         # Unknown model requests are never replayed and committed results are
         # never deleted; physical owners are released only on confirmed exit.
 

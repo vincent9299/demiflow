@@ -31,7 +31,7 @@ from time import time_ns
 
 from ...data.datasink import Datasink
 from ...data.plan import CallableSpec, LogicalPlan, MapOp
-from .business_sources import stable_code_identity, plan_code_pin
+from .business_sources import EAGER_IMPORTS, LOADED_IMPORTS, MODULE_IMPORTS, PROJECT_IMPORTS, stable_code_identity, plan_code_pin
 from ..contracts.dataflow import (
     ArtifactRef, Bounds, CompiledDataflow, DataflowGraph, LoadedProgram,
     PhysicalDataflow, ProgramDeclaration, SealedExecution, thaw_json,
@@ -143,13 +143,13 @@ def _program_value(declaration: ProgramDeclaration):
     raise DataflowError("INVALID_CONTRACT", "ProgramDeclaration has no program body")
 
 
-def _base_code_identity_from_value(kind: str, value, *, lazy_absolute=False):
+def _base_code_identity_from_value(kind: str, value, *, discovery=PROJECT_IMPORTS):
     """Recompute the historical code-pin from an actually-loaded program value."""
     try:
         if kind == "callable":
-            return plan_code_pin(LogicalPlan((MapOp(callable=value),)), lazy_absolute=lazy_absolute)
+            return plan_code_pin(LogicalPlan((MapOp(callable=value),)), discovery=discovery)
         if kind == "source":
-            return plan_code_pin(LogicalPlan(()), source=value, lazy_absolute=lazy_absolute)
+            return plan_code_pin(LogicalPlan(()), source=value, discovery=discovery)
         if kind == "aggregate":
             from ...data.aggregate import AggregateFnV2
             aggregates = value if isinstance(value, tuple) else (value,)
@@ -157,7 +157,7 @@ def _base_code_identity_from_value(kind: str, value, *, lazy_absolute=False):
                 raise DataflowError("INVALID_CONTRACT", "aggregate program must declare AggregateFnV2")
             return {"aggregates": [
                 {"configuration": describe(vars(a)), "methods": [plan_code_pin(LogicalPlan((MapOp(
-                    callable=CallableSpec.create(getattr(type(a), method))),)), lazy_absolute=lazy_absolute)
+                    callable=CallableSpec.create(getattr(type(a), method))),)), discovery=discovery)
                     for method in ("aggregate_partial", "aggregate_block", "merge_states", "combine", "finalize_state", "finalize")]}
                 for a in aggregates]}
         if kind == "sink":
@@ -178,24 +178,29 @@ def _base_code_identity_from_value(kind: str, value, *, lazy_absolute=False):
     raise DataflowError("INVALID_CONTRACT", "Unknown program kind: " + str(kind))
 
 
-def _code_identity_from_value(kind, value, *, sources=None, lazy_absolute=False):
+def _code_identity_from_value(kind, value, *, sources=None, discovery=PROJECT_IMPORTS):
     from .business_sources import business_sources, source_identity
     if sources is None:
-        sources = business_sources(kind, value, lazy_absolute=lazy_absolute)
-    return {**_base_code_identity_from_value(kind, value, lazy_absolute=lazy_absolute),
+        sources = business_sources(kind, value, discovery=discovery)
+    policy = {'import_policy': discovery} if discovery in (MODULE_IMPORTS, PROJECT_IMPORTS) else {}
+    return {**policy, **_base_code_identity_from_value(kind, value, discovery=discovery),
             'imports': source_identity(sources)}
 
 
 def _matches_original_program(kind, value, expected):
-    """Whether the program this process holds is the one the sealed pin describes.
-
-    The pin is recomputed with the current dependency discovery. A seal written
-    from eafb549a until absolute imports inside function bodies stopped counting
-    may list such a module; that seal is authenticated with the discovery that
-    wrote it. New seals are only ever written with the current discovery.
-    """
-    return any(identity(_code_identity_from_value(kind, value, lazy_absolute=legacy)) == identity(expected)
-               for legacy in (False, True))
+    """Recompute exactly the discovery policy bound by the original pin."""
+    if 'import_policy' in expected:
+        policy = expected['import_policy']
+        return (policy in (MODULE_IMPORTS, PROJECT_IMPORTS)
+                and identity(_code_identity_from_value(kind, value, discovery=policy)) == identity(expected))
+    if any(identity(_code_identity_from_value(kind, value, discovery=policy)) == identity(expected)
+           for policy in (EAGER_IMPORTS, LOADED_IMPORTS)):
+        return True
+    # An older writer could pin a helper already loaded in its driver. A
+    # cold reader can authenticate precisely that same complete set by path.
+    cold = _code_identity_from_value(kind, value)
+    cold.pop('import_policy')
+    return identity(cold) == identity(expected)
 
 
 def _stage_one_program(declaration: ProgramDeclaration, *, store, bounds: Bounds,
@@ -747,6 +752,7 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
     """Verify programs from the journal-authenticated plan. Defer attempt-only code to final ACK proof."""
     pin = _verify_sealed_membership(sealed, action.action_id, graph, physical, store, bounds)
     pending = []
+    missing_import = None
     for node in (*graph.nodes, *graph.jobs):
         if node.program_ref is None:
             continue
@@ -758,9 +764,18 @@ def verify_action_programs(action, graph, physical, sealed, *, store, bounds):
                 continue
             from demiflow.execution.seal.thread_programs import owner
             live_binding = owner(action)
-        verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
-                                bounds=bounds, live_binding=live_binding)
-    return pending
+        program = verify_dataflow_program(node.program_ref, expected_pin=expected, store=store,
+                                          bounds=bounds, live_binding=live_binding)
+        if missing_import is None and expected.get('import_policy') != PROJECT_IMPORTS:
+            from .business_sources import HISTORY_IMPORTS, business_sources
+            # The historical pin above still authenticates the original record.
+            # Only continuing computation requires proof for its local imports.
+            try:
+                sources = business_sources(program.kind, program.value, discovery=HISTORY_IMPORTS)
+                missing_import = next((name for name in sources if name not in expected.get('imports', {})), None)
+            except (RecoveryContractError, DataflowError, OSError) as exc:
+                missing_import = str(exc)
+    return pending, missing_import
 
 
 def validate_graph_replay(action, declaration, credit):

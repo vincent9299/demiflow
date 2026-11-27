@@ -141,6 +141,26 @@ def read_run(directory, *, timeout=1.0, deadline=None, transaction=True):
             raise RunReadError('Run journal identity changed while reading')
 
 
+def read_run_call_evidence(directory, run_id, reference, *, deadline=None):
+    """Return one stored model document from the selected managed run."""
+    from demiflow.operator_llm.call_ref import PromptRecordRef
+
+    ref = PromptRecordRef.from_dict(reference)
+    if (type(ref.journal_path) is not str or not 1 <= len(ref.journal_path) <= 4096
+            or type(ref.request_id) is not str or not 1 <= len(ref.request_id) <= 4096
+            or ref.kind not in ('request', 'response', 'error')
+            or type(ref.attempt) is not int or not 1 <= ref.attempt <= 64):
+        raise RunReadError('Invalid call evidence reference', code='invalid_request')
+    root = Path(directory).absolute()
+    if root / ref.journal_path != root / 'run.sqlite':
+        raise RunReadError('Evidence is not a declared bounded resource of this run', code='invalid_request')
+    cutoff = time.monotonic() + 5
+    with read_run(root, deadline=cutoff if deadline is None else min(deadline, cutoff)) as reader:
+        if reader.manifest_identity()['run_id'] != run_id:
+            raise RunReadError('Evidence belongs to a different run', code='invalid_request')
+        return ref.stored_document(reader.db, max_bytes=1024**2)
+
+
 def fit_table_prefix(attempt, action_id):
     from demiflow.execution.contracts.recovery_contract import identity
     return 'fit-table-' + identity([attempt, action_id]) + '-'

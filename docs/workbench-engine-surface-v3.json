@@ -157,6 +157,10 @@
         "demiflow.execution.journal.sealed_plan_facts",
         "read_action_plan"
       ],
+      "read_run_call_evidence": [
+        "demiflow.execution.journal.run_reader",
+        "read_run_call_evidence"
+      ],
       "read_run": [
         "demiflow.execution.journal.run_reader",
         "read_run"
