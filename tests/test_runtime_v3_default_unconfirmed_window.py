@@ -65,6 +65,30 @@ def test_small_rows_are_not_read_one_per_checkpoint(tmp_path):
     assert sorted(r['text'] for r in rows) == sorted('line %d of %d' % (i, f) for f in range(8) for i in range(50))
     # 400 rows; an owner held to one row per checkpoint needed about 50.
     assert len(commits) <= 4
+    # The run records that its default window is a target.
+    assert RunJournal(tmp_path / 'run').recovery_identity()['unconfirmed_window'] == 'target'
+
+
+def test_a_run_recorded_before_window_targets_keeps_its_hard_window():
+    from types import SimpleNamespace as NS
+    from test_runtime_v3_checkpoint_progress import execution
+    row = 24 * MB
+
+    def authorized(window, explicit=frozenset()):
+        driver = execution({})
+        driver._endpoints = {'reader-%d' % i: NS(poll=lambda **kwargs: [], send_business=driver.sent.append,
+                                                 _assignment=NS(source_splits=('split-%d' % i,))) for i in range(4)}
+        driver._action = NS(context=NS(limits={'checkpoint_timeout_s': 30, 'checkpoint_unconfirmed_rows': 4096,
+                                               'checkpoint_unconfirmed_bytes': WINDOW},
+                                       explicit_limits=explicit, unconfirmed_window=window))
+        driver._bounds = NS(max_pending_events=16, max_row_bytes=row)
+        driver._resume_workers()
+        return sum(message['source_credit']['bytes'] for message in driver.sent if message['kind'] == 'resume')
+
+    assert authorized('target') == WINDOW + 4 * row
+    # A run created before targets resumes with the hard window it recorded.
+    assert authorized('hard') == WINDOW
+    assert authorized('target', frozenset({'checkpoint_unconfirmed_bytes'})) == WINDOW
 
 
 def test_a_declared_window_still_refuses_a_row_it_cannot_hold(tmp_path):
