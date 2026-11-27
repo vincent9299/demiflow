@@ -1,6 +1,6 @@
 # DemiFlow 架构规约
 
-版本 v1.8，2026-11-27。本规约以定版方案规定模块职责、调用方向和状态归属。代码入口供定位，实施与复审以本规约为准。
+版本 v1.8.1，2026-11-27。本规约以定版方案规定模块职责、调用方向和状态归属。代码入口供定位，实施与复审以本规约为准。
 
 [总体架构](#platform-overview) · [分模块架构](#platform-modules) · [Forge](#forge-module) · [Workbench（可选）](#workbench-module) · [计算底座（Engine / SDK）](#engine-sdk) · [实施要求](#implementation)
 
@@ -22,13 +22,16 @@ DemiFlow 支持开发、理解和运行 Pipeline，并分析、比较和评测�
 
 ```mermaid
 flowchart LR
-    CLI["终端 / Agent CLI"] --> Forge["Forge"]
-    WB["Workbench（可选）"] --> Forge
-    WB -->|运行、数据与结果合同| Engine["计算底座 · Engine / SDK"]
-    Forge -->|SDK、验证与执行合同| Engine
+    subgraph DF["DemiFlow 平台"]
+        WB["Workbench（可选）"] --> Forge["Forge"]
+        WB -->|运行、数据与结果合同| Engine["计算底座 · Engine / SDK"]
+        Forge -->|SDK、验证与执行合同| Engine
+    end
+    T["用户终端"] -. "forge develop" .-> Forge
+    A["第三方开发 Agent"] -. "工程命令与受控工具" .-> Forge
 ```
 
-箭头表示代码依赖方向。终端和 Agent 是平台的调用者。
+实线表示平台模块间的代码依赖，虚线表示外部调用者使用的开发入口。
 
 ### 架构约束
 
@@ -36,7 +39,7 @@ flowchart LR
 
 1. **三模块与项目归属。** 平台由 Forge、可选 Workbench、计算底座组成。三者可同仓、同包或同进程部署。业务项目是用户的独立资产，持有源码、配置、数据、Notebook、运行记录与结果，或指向相应存储。
 2. **依赖方向。** Workbench 调用 Forge 或计算底座的公开合同，Forge 可脱离工作台直接调用底座，禁止反向导入 Workbench。计算底座独立提供 SDK 与执行合同，禁止反向依赖 Forge 或 Workbench。宿主通过参数或回调提供授权与事实，各模块只依赖本职所需的合同。
-3. **Agent 与开发授权。** 工程上下文、工具以及开发和评审沙箱统一归 Forge。项目可见、已登记与允许执行是三个独立事实。开发与评审的实际读写边界归 Forge 沙箱，会话传输归宿主，工程验收归 Forge。用户授权真实运行后才进入执行路径。
+3. **第三方开发 Agent 与授权。** 用户选择的第三方开发 Agent（如 Codex CLI、DeepSeek CLI）是业务 Pipeline 的作者。它理解需求、自主选择工具，在授权范围内编写业务代码、运行项目测试并按反馈返工。终端可用 `demiflow forge develop` 发起开发，Workbench 可通过会话适配器（Provider）派发任务和接收事件。Forge 提供工程上下文和受控工具，限定开发与评审沙箱的读写范围，核验工程交付。项目可见、项目已登记、用户已授权真实运行各有独立依据。算子内 Agent 由计算底座在 Pipeline 执行时调用。
 4. **AR.3.1　运行记录与控制权。** 单项目受管 Run 只有一个控制方，应用封存、准入与恢复归 Forge。引擎持有原生计划、RunJournal、检查点与提交事实。终端或工作台可按本次权限读取同一 `run_id`。准备操作可按 `request_id` 去重，后续控制按操作核验运行身份、预期 attempt、适用的封存摘要及权限。受理、进程退出与资源清理分别记录。历史可按固定记录只读查询。[受管入口](../demiflow/forge/runs/cli.py)
 
 <a id="platform-modules"></a>
@@ -45,22 +48,28 @@ flowchart LR
 
 以下时序规定不同业务流程中的调用与交接。
 
-**业务 Pipeline Agent 开发的端到端时序**
+**第三方开发 Agent 编写业务 Pipeline 的端到端时序**
 
 ```mermaid
 sequenceDiagram
+    actor U as 用户
     participant W as Workbench（可选宿主）
     participant F as Forge
-    participant A as 业务 Pipeline Agent
+    participant A as 第三方开发 Agent
     participant E as 数据引擎 / SDK
     alt 从工作台发起
+        U->>W: 提交业务需求并选定项目
         W->>F: 提供用户任务、项目和已授予的权限
+        F-->>W: 返回工程上下文、可用工具与沙箱配置
+        W->>A: 经 Provider 在授权会话中投递任务
     else 从终端发起
-        A->>F: 通过 Forge CLI 提交任务与项目配置
+        U->>F: 通过 demiflow forge develop 提交任务与项目配置
+        F->>A: 按本轮权限启动或续接作者会话
     end
-    F->>E: 读取公开 SDK 和校验合同
-    E-->>F: 返回能力与约束
-    F-->>A: 提供工程上下文、工具和适用的隔离范围
+    A->>F: 按业务需要通过 forge context 查询公开 SDK
+    F->>E: 查阅所选接口的公开契约
+    E-->>F: 提供接口定义及来源
+    F-->>A: 返回签名与用法
     A->>F: 按需声明和取得依赖
     F-->>A: 返回依赖检查结果
     A->>A: 编写 Pipeline，按标准 import 使用依赖
@@ -75,7 +84,7 @@ sequenceDiagram
         F->>F: 在分离会话中评审同一候选
     end
     opt 有阻断且仍有预算
-        F-->>A: 将核实的反馈送回原会话
+        F-->>A: 经原开发入口向同一作者会话投递反馈
         A->>F: 交付修正后的新候选
         F->>F: 按原范围复核
     end
@@ -85,15 +94,16 @@ sequenceDiagram
     end
     opt 用户另行授权真实验证或运行
         alt Workbench 提交受管 Pipeline
+            U->>W: 提交获准的运行
             W->>F: 提交获准的项目操作、输入和预算
             F->>E: 以封存业务程序发起执行
             E-->>F: 返回执行、提交与资源事实
             F-->>W: 返回本次 Run 记录
         else Forge 终端
-            A->>F: 请求项目验证，或请求独立受管运行
+            U->>F: 从终端请求项目验证或受管运行
             F->>E: 按所选入口调用公开合同
             E-->>F: 返回实际结果及证据
-            F-->>A: 交还验证结果或运行记录
+            F-->>U: 交还验证结果或运行记录
         end
     end
 ```
@@ -127,24 +137,27 @@ Forge 定义业务项目的目录角色、Flow 入口与参数绑定，以及工
 
 ```mermaid
 sequenceDiagram
-    participant H as 终端或 Workbench 宿主
+    participant H as 终端 forge develop 或 Workbench
     participant C as Forge context
     participant S as Forge sandbox
-    participant A as 原生作者会话
-    H->>C: 提供用户任务、项目事实和可见材料
-    C-->>H: 返回 Skill、SDK 依据和查询入口
-    H->>S: 提供选定项目、角色、权限上限与宿主运行条件
+    participant A as 第三方开发 Agent（业务作者）
+    H->>S: 提供项目、作者角色和授权上限
     S-->>H: 返回受限启动配置
-    H->>A: 在受限进程中交付任务与工程材料
-    A->>C: 用 forge context 按符号查询
-    C-->>A: 当前 SDK 的签名、返回契约与来源
+    H->>A: 启动或续接受限会话，交付用户任务
+    A->>C: 调用 forge context 查询项目规范和 SDK 目录
+    C-->>A: 返回适用规范和公开符号索引
+    A->>C: 按任务选定符号，调用 forge context 查询接口
+    C-->>A: 返回接口签名、返回契约与来源
+    A->>A: 依据公开契约编写业务代码
 ```
+
+例如，开发 Agent 编写训练节点时，在项目根目录执行 `demiflow forge context --root . --api demiflow.data:Dataset.fit`，查阅 `Dataset.fit` 的实际签名和返回契约。
 
 ##### 获取受管依赖与同回合导入
 
 ```mermaid
 sequenceDiagram
-    participant A as 作者会话
+    participant A as 第三方开发 Agent
     participant S as sandbox 命令包装器
     participant B as bridge
     participant D as deps
@@ -178,10 +191,12 @@ Forge 开发回合负责组织工程交付。它向 `check` 请求静态诊断�
 
 ```mermaid
 sequenceDiagram
-    participant A as 原作者会话
+    participant A as 第三方开发 Agent（原作者）
+    participant H as 终端或 Workbench 宿主
     participant F as Forge 工程回合
     participant R as 独立评审会话
-    A-->>F: 返回候选、投递确认、完成及清理状态
+    A-->>H: 完成本轮编辑，返回答复
+    H->>F: 传递投递、作者完成和进程清理事实
     F->>F: 确认作者已清理，固定文件身份和检查范围
     opt 策略要求独立评审
         F->>R: 发送有界只读证据，沿用剩余预算
@@ -189,8 +204,10 @@ sequenceDiagram
     end
     F->>F: 核验候选和证据，持久化决定及发送身份
     alt 有已核实阻断且可返工
-        F-->>A: 向原会话发送反馈
-        A-->>F: 确认投递并交付新候选
+        F-->>H: 返回核实的反馈及原作者会话身份
+        H->>A: 向原会话投递反馈
+        A-->>H: 完成修正并返回答复
+        H->>F: 传递投递、完成和清理事实
         F->>F: 同范围重新检查，按策略复审
     else 完成或受阻
         F->>F: 记录交付结果、未覆盖项或待确认状态
@@ -263,16 +280,16 @@ Workbench 提供项目登记、交互界面、开发会话、运行编排和数�
 ```mermaid
 sequenceDiagram
     participant U as Web 界面
-    participant C as conversations
+    participant C as conversations（含 Provider 传输）
     participant DB as 会话存储与人工队列
-    participant A as Provider 与原作者会话
+    participant A as 第三方开发 Agent（原作者）
     participant F as Forge 工程回合
     U->>C: 提交本轮需求
     C->>DB: 按原会话登记并排队
     C->>F: 传入任务、项目及授权上限
     F-->>C: 返回工程上下文、可用工具和沙箱配置
-    C->>A: 在受限会话中派发
-    A-->>C: 返回内容、投递确认和回合状态
+    C->>A: 经 Provider 向受限作者会话派发任务
+    A-->>C: 经 Provider 返回答复和回合事件
     C->>F: 传递作者完成、清理与源码观察事实
     F-->>C: 候选回执及可选的返工反馈
     C->>DB: 保存回执和待投递的反馈身份
