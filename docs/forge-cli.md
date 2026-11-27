@@ -179,7 +179,7 @@ demiflow workbench run show ./experiment RUN_ID
 
 ## 独立受限开发
 
-`demiflow forge develop --root PROJECT --state-dir STATE --python PYTHON --goal TASK` 默认在 Forge 开发沙箱中启动原生作者。STATE 是项目外的私有回合目录，恢复时继续使用同一目录和配置。使用 `--read-root DIR` 显式开放第三方包来源。
+`demiflow forge develop --root PROJECT --state-dir STATE --python PYTHON --goal TASK` 默认在 Forge 开发沙箱中启动原生作者。STATE 是项目外的私有回合目录，恢复时继续使用同一目录和配置。普通外部参考目录默认按宿主账号的读权限访问，沙箱保护私密位置。需要收窄范围时可重复指定 `--read-root DIR`，允许读取项目、这些目录和已登记的只读位置。相同的读范围适用于外部包的声明核验和获取。
 
 有模型推理时，宿主通过 `--model-config FILE` 或 `DEMIFLOW_FORGE_MODEL_CONFIG` 提供固定模型与认证来源。下面是 Codex 的配置示例。
 

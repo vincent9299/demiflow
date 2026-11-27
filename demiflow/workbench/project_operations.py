@@ -135,15 +135,15 @@ def register_flow(root, entry, *, params=None, authorize, authority=None):
     from demiflow.forge.table_bindings import make_resolver
 
     authorize()
-    python, allowed_roots = project_python_and_scope(root, authority=authority)
+    python, scope = project_python_and_scope(root, authority=authority)
 
     def check_authority():
         authorize()
-        cur_py, cur_roots = project_python_and_scope(root, authority=authority)
-        if (cur_py, cur_roots) != (python, allowed_roots):
+        cur_py, current_scope = project_python_and_scope(root, authority=authority)
+        if (cur_py, current_scope) != (python, scope):
             raise ForgeError('Project scope changed during registration', code='conflict')
 
-    return register(root, entry, params=params, authorize=check_authority,
+    return register(root, entry, params=params, authorize=check_authority, python=python, **scope,
                     table_resolver=make_resolver(ws.table_binding, runs.result_table))
 
 

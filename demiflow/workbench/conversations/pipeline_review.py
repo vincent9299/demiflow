@@ -1,6 +1,5 @@
 """Submit delivery reviews from an author turn and run them after the author drains."""
 from contextlib import ExitStack
-from dataclasses import replace
 import json
 from pathlib import Path
 import subprocess
@@ -15,10 +14,9 @@ from .common import plain_path, reject, wire
 class DeliveryReview:
     """One idempotent request in the active worker, using its existing execution slot."""
 
-    def __init__(self, store, turn, project):
+    def __init__(self, store, turn):
         self.store = store
         self.turn = turn
-        self.project = project
         self.selection = None
 
     def request(self, arguments):
@@ -43,28 +41,6 @@ class DeliveryReview:
             reject('本轮已经提交了不同范围的评审。', 'conflict')
         return {'request_id': self.turn['id'], 'status': 'queued',
                 'detail': '评审将在本轮开发进程结束后开始，结果保存在当前会话。'}
-
-    def run(self, reviewer, checks, check_cancel):
-        from demiflow.forge.review import review_project
-        goal, prior = self.store.review_inputs(self.turn['session'], include_paths=not self.selection)
-        if not self.selection and not prior:
-            reject('当前会话没有记录到源码改动。请指定 Flow 入口评审当前实现。')
-        observations = []
-        if checks:
-            for key in ('native_flow', 'project_layout'):
-                item = checks.get(key)
-                if item:
-                    observations.append({'source': key, 'detail': wire({
-                        'turn_id': self.turn['id'], 'status': item.get('status'),
-                        'diagnostic_count': item.get('diagnostic_count')}).decode()})
-        check_cancel()
-        from demiflow.workbench.projects.registry import project_python_and_scope
-        _, allowed_roots = project_python_and_scope(self.project['root'], project=self.project)
-        review = review_project(self.project['root'], goal=goal, **self.selection,
-            paths=tuple(prior), prior_sources=prior or None, exclude=self.project.get('protected', ()),
-            observations=observations, reviewer=reviewer, allowed_roots=allowed_roots)
-        check_cancel()
-        return review
 
 
 def run_deployment_reviewer(prompt, *, deployment, turn, session, scratch, broker_home, author_spec,

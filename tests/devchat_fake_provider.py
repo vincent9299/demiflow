@@ -81,6 +81,8 @@ for line in sys.stdin:
             event('item/completed',{'threadId':thread,'turnId':turn,'item':{'id':'answer','type':'agentMessage','text':answer}})
             event('turn/completed',{'threadId':thread,'turn':{'id':turn,'status':'completed'}})
             continue
+        if message == 'write project declaration fixture':
+            (project_root / 'pyproject.toml').write_text('[project]\nname = "demo"\n')
         if message.startswith('guided fixture edit'):
             assert ('Dataset.map_prompt_async' in instructions and 'DF-02' in instructions) or (
                 '# DemiForge 项目开发' in instructions and 'demiflow forge check' in instructions)

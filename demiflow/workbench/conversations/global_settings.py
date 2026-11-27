@@ -200,11 +200,7 @@ class GlobalSettings:
             inventory=self.inventory()['projects']; row=inventory.get(workspace)
             if row is None or Path(row['root']).absolute()!=Path(root).absolute(): reject('项目不在当前工作台中。','not_found')
             identity=root_identity(root)
-            explicit=self.service.deployment.projects.get(workspace)
-            if not explicit or explicit['identity']!=identity:
-                matches=[p for p in self.service.deployment.projects.values() if p['identity']==identity]
-                if len(matches)>1: reject('项目存在多个开发范围，请保留原登记身份。','conflict')
-                explicit=matches[0] if matches else None
+            explicit=self.service.deployment.explicit_project(workspace, identity)
             configured_python = row.get('python')
             if configured_python and not (Path(configured_python).is_file() and os.access(configured_python, os.X_OK)):
                 configured_python = ''
@@ -226,7 +222,6 @@ class GlobalSettings:
                 else:
                     project.pop('python', None)
                 project.pop('dependency_lock', None)
-                project.pop('read_roots', None)
                 if configured_dev_network:
                     project['dev_network'] = True
                 else:

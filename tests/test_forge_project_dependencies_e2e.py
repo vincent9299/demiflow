@@ -1200,7 +1200,8 @@ def test_preview_and_first_probe_confine_untrusted_project_python_sitecustomize(
     assert not sentinel.exists(), 'Untrusted sitecustomize escaped sandbox during Workbench plan_preview!'
 
 
-def test_terminal_forge_develop_and_workbench_share_forge_restricted_sandbox_policy(tmp_path, monkeypatch):
+@pytest.mark.parametrize('scoped', [True, False], ids=['explicit', 'default'])
+def test_terminal_forge_develop_and_workbench_share_forge_restricted_sandbox_policy(tmp_path, monkeypatch, scoped):
     """Both terminal `demiflow forge develop --mode restricted` and Workbench share Forge's sandbox policy."""
     if sys.platform != 'linux':
         pytest.skip('Linux Landlock sandbox required')
@@ -1244,9 +1245,9 @@ assert Path({str(ext_allowed / '__init__.py')!r}).read_text(encoding='utf-8').st
 try:
     Path({str(ext_denied / 'secret.txt')!r}).read_text(encoding='utf-8')
 except PermissionError:
-    pass
+    assert {scoped!r}, "Default sandbox should read ordinary external files"
 else:
-    raise AssertionError('Unauthorized host path was readable inside forge develop restricted sandbox!')
+    assert not {scoped!r}, "Explicit scope should exclude this sibling"
 
 # 2. Direct writes to packages/ and .forge/ MUST be blocked by OS Landlock
 for forbidden in (root / 'packages' / 'rogue.py', root / '.forge' / 'rogue.txt'):
@@ -1301,7 +1302,7 @@ for ev in (
         '--agent', 'codex',
         '--executable', str(fake_author),
         '--python', sys.executable,
-        '--read-root', str(ext_allowed),
+        *(['--read-root', str(ext_allowed)] if scoped else []),
         '--mode', 'restricted',
         '--no-review',
         '--json',
@@ -1329,17 +1330,18 @@ for ev in (
     wb_project = {
         'root': str(proj), 'kind': 'pipeline', 'phase': 'implementation',
         'writes': ['flows', 'packages', '.forge'], 'protected': [],
-        'python': sys.executable, 'read_roots': [str(ext_allowed)],
+        'python': sys.executable, 'read_roots': [str(ext_allowed)] if scoped else [],
     }
     wb_spec = wb_sandbox_spec(
         deployment, wb_project, {'id': 's1', 'provider': 'codex'},
         {'operation': 'message', 'created': 10**12}, {'sources': []},
         {'executable': str(fake_author)}, priv_home,
     )
-    assert wb_spec.read_policy == 'scoped'
+    assert wb_spec.read_policy == ('scoped' if scoped else 'inherit_os')
     assert wb_spec.write_policy == 'scoped'
     assert str((proj / 'pyproject.toml').resolve()) in wb_spec.write_paths
-    assert str(ext_allowed.resolve()) in wb_spec.read_paths
+    if scoped:
+        assert str(ext_allowed.resolve()) in wb_spec.read_paths
     for forbidden_parts in FORBIDDEN_DIRECT_WRITE_ROOTS:
         assert str((proj / forbidden_parts[0]).resolve()) not in wb_spec.write_paths
         assert str((proj / forbidden_parts[0]).resolve()) in wb_spec.protected_paths
@@ -1588,3 +1590,53 @@ def test_visibility_decoupled_from_dependencies_and_no_workbench_read_roots_conf
         server.server_close()
         thread.join(timeout=5)
 
+
+
+def test_host_scope_survives_python_binding_and_reaches_preview_and_feedback(tmp_path, monkeypatch):
+    from test_forge_development_chat import configuration
+    from demiflow.workbench.api import WorkspaceServer
+    from demiflow.workbench.projects import registry
+    from demiflow.workbench.runs.authority import for_http, from_bootstrap
+    from demiflow.workbench.worker import operation
+
+    account_state = tmp_path / 'coding-account'
+    monkeypatch.setenv('CODEX_HOME', str(account_state))
+    project, config, deployment = configuration(tmp_path)
+    initialize_project(project, name='Scoped project', existing=True)
+    registry_path = tmp_path / 'registry.json'
+    added = registry.add(registry_path, project)
+    workspace = added['workspace_id']
+    reference = tmp_path / 'references'
+    allowed = _make_pkg(reference / 'ordinary', {'__init__.py': 'VALUE = 1\n'})
+    private = _make_pkg(reference / 'partial', {'__init__.py': '', 'host.py': '# fixture\n'})
+    denied = private / 'host.py'
+    denied.chmod(0o600)
+    policy = deployment['projects'].pop('wfixture')
+    deployment['projects'][workspace] = dict(policy, kind='pipeline', read_roots=[str(allowed), str(private)])
+    deployment['providers']['deepseek'] = dict(
+        executable=deployment['providers']['codex']['executable'], version='0.2.1-rc.2', model='fixture',
+        native_credentials=str(denied),
+    )
+    config.write_text(json.dumps(deployment))
+    with WorkspaceServer(registry=registry_path, development_config=config) as server:
+        service = server.development
+        before, private_before = service._feedback_scope(workspace, project)
+        assert str(allowed) in before and denied in private_before
+        registry.set_python(registry_path, workspace, expected=registry.projects(registry.load_registry(registry_path))['digest'],
+                            python=sys.executable)
+        allowed_after, protected_after = service._feedback_scope(workspace, project)
+        assert account_state in protected_after
+        assert service._worker_env(service.deployment)['CODEX_HOME'] == str(account_state)
+
+        assert before == allowed_after and denied in protected_after
+        http = for_http(server, '/api/workspaces/' + workspace + '/plan-preview', project, 'read')
+        restored = from_bootstrap(http.bootstrap(), project)
+        assert restored.read_roots == before and str(denied) in restored.denied_paths
+        for package, message in ((private, 'denied'), (_make_pkg(tmp_path / 'outside', {'__init__.py': ''}), 'scope')):
+            (project / 'pyproject.toml').write_text(
+                f'[tool.demiflow.packages]\n{package.name} = {{source="local_ref", path={json.dumps(str(package))}}}\n')
+            with pytest.raises(ForgeError, match=message):
+                operation('plan_preview', project, _authority=http.bootstrap(), entry='flows/example.py:run', params=None)
+        (project / 'pyproject.toml').write_text(
+            f'[tool.demiflow.packages]\nordinary = {{source="local_ref", path={json.dumps(str(allowed))}}}\n')
+        assert 'ordinary' in restored.resolve_dependencies(project)['packages']

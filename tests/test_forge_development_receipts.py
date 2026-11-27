@@ -17,6 +17,78 @@ def start(store, service, workspace, root, sid, revision=0, text='Keep the origi
                         service.policy_hash, forge_options=options)[0]
 
 
+@pytest.mark.parametrize('existing', [False, True])
+def test_readonly_planning_then_edit_in_same_restricted_conversation(tmp_path, monkeypatch, existing):
+    from demiflow.workbench.api import WorkspaceServer
+    from test_forge_development_runtime import combined_configuration
+
+    root, host = tmp_path / 'orders', tmp_path / 'host'
+    root.mkdir()
+    host.mkdir()
+    path, registry, workspace, domain, _ = combined_configuration(host, root, monkeypatch)
+    config = json.loads(path.read_text())
+    config['mode'] = 'restricted'
+    config['projects'][workspace].update(kind='pipeline', phase='implementation', watch=['notes.py', 'pyproject.toml'])
+    domain.chmod(0o700)
+    monkeypatch.setenv('PLANNING_FIXTURE_KEY', 'offline-fixture-only')
+    config['providers']['codex'].update(base_url='http://127.0.0.1:1/v1', credential_env='PLANNING_FIXTURE_KEY')
+    path.write_text(json.dumps(config))
+    declaration = root / 'pyproject.toml'
+    original = '[project]\nname = "initial"\n'
+    if existing:
+        declaration.write_text(original)
+    server = WorkspaceServer(registry=registry, development_config=path)
+    try:
+        service = server.development
+        if not existing:
+            assert service.prewarm(workspace, root, provider_id='codex')['status'] == 'skipped'
+        sid = service.create_project(workspace, root, 'create', 'codex')['id']
+        assert service.capabilities(workspace, root)['start'], service.capabilities(workspace, root)
+        plan = service.start_project(workspace, root, sid, 'plan', 0, 'Plan the migration.', auto_review=True)
+        saved = wait_turn(service, plan['id'])
+        assert saved['state'] == 'completed', saved['result']
+        assert json.loads(saved['result'])['changed_files'] == 0
+        events = service.store.events(workspace, sid)['events']
+        assert not {event['type'] for event in events} & {'change.observed', 'review.requested', 'review.started'}
+        assert (declaration.read_text() if declaration.exists() else None) == (original if existing else None)
+        edit = service.start_project(workspace, root, sid, 'edit', 1, 'write project declaration fixture')
+        saved = wait_turn(service, edit['id'])
+        assert saved['state'] == 'completed', saved['result']
+        assert (root / 'pyproject.toml').read_text() == '[project]\nname = "demo"\n'
+        events = service.store.events(workspace, sid, events[-1]['sequence'], 50)['events']
+        changes = [item for e in events if e['turn_id'] == edit['id'] and e['type'] == 'change.observed'
+                   for item in e['data']['files']]
+        assert [item['path'] for item in changes] == ['pyproject.toml']
+        if existing:
+            assert changes[0]['before']['bytes'] == len(original)
+            assert any(e['data'].get('warm_reused') for e in events if e['type'] == 'provider.bound')
+        else:
+            assert changes[0]['before'] is None
+    finally:
+        server.server_close()
+
+
+def test_author_cleanup_preserves_empty_declarations_owned_or_saved_by_others(tmp_path):
+    from demiflow.forge.sandbox import writable_project_declaration
+
+    declaration = tmp_path / 'pyproject.toml'
+    declaration.touch()
+    with writable_project_declaration(tmp_path):
+        pass
+    assert declaration.exists()
+    declaration.unlink()
+    with writable_project_declaration(tmp_path):
+        replacement = tmp_path / 'replacement'
+        replacement.touch()
+        replacement.replace(declaration)
+    assert declaration.exists()
+    declaration.unlink()
+    with writable_project_declaration(tmp_path):
+        declaration.write_text('temporary content')
+        declaration.write_text('')
+    assert declaration.read_bytes() == b''
+
+
 def test_large_goal_and_diagnostics_commit_without_losing_terminal(tmp_path):
     with app(tmp_path) as (server, workspace, root):
         service = server.development; store = service.store

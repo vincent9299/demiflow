@@ -47,6 +47,8 @@ def build_wsl_spec_payload(spec, command, env, cwd, *, validated: dict | None = 
         runtime_paths=[windows_to_wsl_path(p) for p in data['runtime_paths']],
         protected_paths=[windows_to_wsl_path(p) for p in data['protected_paths']],
         denied_paths=[windows_to_wsl_path(p) for p in data['denied_paths']],
+        credential_read_path=windows_to_wsl_path(data['credential_read_path']) if data['credential_read_path'] else None,
+        host_state_root=windows_to_wsl_path(data['host_state_root']) if data['host_state_root'] else None,
         private_home=windows_to_wsl_path(data['private_home']),
         role=spec.role,
         seconds=spec.seconds,
@@ -87,7 +89,9 @@ class WindowsWslBackend:
             'd = json.loads(sys.argv[1]); '
             's = SandboxSpec(read_paths=tuple(d["read_paths"]), write_paths=tuple(d["write_paths"]), '
             'runtime_paths=tuple(d["runtime_paths"]), protected_paths=tuple(d["protected_paths"]), '
-            'denied_paths=tuple(d["denied_paths"]), private_home=d["private_home"], role=d["role"], '
+            'denied_paths=tuple(d["denied_paths"]), credential_read_path=d["credential_read_path"], '
+            'host_state_root=d["host_state_root"], '
+            'private_home=d["private_home"], role=d["role"], '
             'seconds=d["seconds"], rss_bytes=d["rss_bytes"], processes=d["processes"], '
             'file_bytes=d["file_bytes"], private_bytes=d["private_bytes"], direct_network=d["direct_network"], '
             'read_policy=d.get("read_policy", "scoped"), write_policy=d.get("write_policy", "scoped")); '

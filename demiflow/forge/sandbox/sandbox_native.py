@@ -88,7 +88,8 @@ def prctl(option, *args):
     return checked(LIBC.prctl(option, *args), 'prctl failed')
 
 
-def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped', traversal_paths=()):
+def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy='scoped', traversal_paths=(),
+             denied_paths=(), credential_read_path=None):
     if platform.machine() != 'x86_64':
         raise RuntimeError('The development sandbox requires the qualified x86-64 ABI')
     if read_policy not in {'scoped', 'inherit_os'}:
@@ -108,36 +109,111 @@ def landlock(read_paths, write_paths, runtime_paths, identities, *, read_policy=
     # writable project directories support native truncate/ftruncate while
     # read-only paths still deny truncation in the kernel. On ABI 1-2 kernels
     # (e.g. Linux 5.15), truncate remains denied globally by seccomp.
-    # Under read_policy='inherit_os', Landlock handles write/mutation rights only
-    # so read/execute inherit the invoking OS user's native permissions while
-    # writes outside write_paths remain kernel-denied.
     truncate_bit = TRUNCATE if abi >= 3 else 0
-    if read_policy == 'inherit_os':
-        handled = (((1 << 13) - 1) & ~(EXEC | READ)) | truncate_bit
-        write_rights = (WRITE | truncate_bit) & handled
-        rule_groups = ((write_paths, write_rights),)
-        file_mask = ((1 << 1) | truncate_bit) & handled
-    else:
-        handled = ((1 << 13) - 1) | truncate_bit
-        write_rights = READ | WRITE | truncate_bit
-        rule_groups = ((read_paths, READ), (runtime_paths, READ | EXEC), (write_paths, write_rights),
-                       (traversal_paths, READ_DIR))
-        file_mask = EXEC | (1 << 1) | (1 << 2) | truncate_bit
-    rules = Rules(handled)
+    rules = Rules(((1 << 13) - 1) | truncate_bit)
+    file_mask = EXEC | (1 << 1) | (1 << 2) | truncate_bit
+    flags = os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW
+
+    def add(fd, rights, directory):
+        access = rights if directory else rights & file_mask
+        if access:
+            attr = PathRule(access, fd)
+            checked(LIBC.syscall(445, descriptor, 1, ctypes.byref(attr), 0), 'Landlock path rule')
+
+    # A Landlock grant covers all descendants. Split only the ancestors of a
+    # denied name, and grant their public siblings as whole subtrees. Nothing
+    # is read from the denied targets. Directory FDs pin each lookup while
+    # the rules are built. The kernel owns the resulting policy after exec.
+    denied = set(denied_paths) | {'/dev'}
+    split = set()
+    private_dirs = set()
+    private_inodes = set()
+    split_path_bytes = 0
+    for path in denied:
+        if path.count('/') > 256:
+            raise RuntimeError('Sandbox denied path exceeds the directory depth budget')
+        try:
+            info = os.stat(path, follow_symlinks=False)
+        except (FileNotFoundError, NotADirectoryError, PermissionError):
+            info = None
+        if info:
+            private_inodes.add((info.st_dev, info.st_ino))
+        while path != '/':
+            path = os.path.dirname(path)
+            if path not in split:
+                split_path_bytes += len(os.fsencode(path))
+                if len(split) >= 16384 or split_path_bytes > 8 * 1024**2:
+                    raise RuntimeError('Sandbox denied directory inventory exceeds admission budget')
+                split.add(path)
+            if info is None or not stat.S_ISREG(info.st_mode):
+                private_dirs.add(path)
+    remaining = 262144
+
+    def grant_read(fd, path, info, rights):
+        nonlocal remaining
+        if path in denied or (info.st_dev, info.st_ino) in private_inodes:
+            return
+        directory = stat.S_ISDIR(info.st_mode)
+        if path not in split:
+            if directory or stat.S_ISREG(info.st_mode):
+                add(fd, rights, directory)
+            return
+        if not directory:
+            return
+        if path not in private_dirs:
+            # File-only exclusions allow normal directory listing. Never
+            # grant recursive READ_DIR above a private or absent subtree.
+            add(fd, rights & READ_DIR, True)
+        scan_fd = os.open('.', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=fd)
+        try:
+            with os.scandir(scan_fd) as entries:
+                for entry in entries:
+                    remaining -= 1
+                    if remaining < 0:
+                        raise RuntimeError('Sandbox visibility exceeds the 262144 directory-entry admission budget')
+                    child_path = os.path.join(path, entry.name)
+                    if child_path in denied or entry.is_symlink():
+                        continue
+                    try:
+                        child_fd = os.open(entry.name, flags, dir_fd=scan_fd)
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    try:
+                        grant_read(child_fd, child_path, os.fstat(child_fd), rights)
+                    finally:
+                        os.close(child_fd)
+        finally:
+            os.close(scan_fd)
+
+    fixed_reads = {'/dev/null', '/dev/zero', '/dev/urandom'}
+    if credential_read_path:
+        fixed_reads.add(credential_read_path)
+    inherited = read_policy == 'inherit_os'
+    read_grants = [('/', READ | EXEC)] if inherited else [
+        *((path, READ) for path in read_paths if path not in fixed_reads),
+        *((path, READ | EXEC) for path in runtime_paths),
+    ]
     descriptor = checked(LIBC.syscall(444, ctypes.byref(rules), ctypes.sizeof(rules), 0), 'Landlock ruleset')
     try:
+        for path, rights in read_grants:
+            fd = os.open(path, flags)
+            try:
+                info = os.fstat(fd)
+                if path != '/' and [info.st_dev, info.st_ino] != identities[path]:
+                    raise RuntimeError('Sandbox scope identity changed before confinement')
+                grant_read(fd, path, info, rights)
+            finally:
+                os.close(fd)
+        rule_groups = (([p for p in read_paths if p in fixed_reads], READ),
+                       (write_paths, WRITE | truncate_bit | READ | (EXEC if inherited else 0)), (traversal_paths, READ_DIR))
         for paths, rights in rule_groups:
             for path in paths:
-                access = rights
-                if not os.path.isdir(path):
-                    access &= file_mask
-                fd = os.open(path, os.O_PATH | os.O_CLOEXEC | os.O_NOFOLLOW)
+                fd = os.open(path, flags)
                 try:
                     info = os.fstat(fd)
                     if [info.st_dev, info.st_ino] != identities[path]:
                         raise RuntimeError('Sandbox scope identity changed before confinement')
-                    attr = PathRule(access, fd)
-                    checked(LIBC.syscall(445, descriptor, 1, ctypes.byref(attr), 0), 'Landlock path rule')
+                    add(fd, rights, stat.S_ISDIR(info.st_mode))
                 finally:
                     os.close(fd)
         prctl(38, 1, 0, 0, 0)  # no_new_privs

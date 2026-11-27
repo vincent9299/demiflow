@@ -63,9 +63,15 @@ def build_oci_command(runtime: str, image: str, command, *, spec, env, cwd,
 
     # Mount read-only paths first, then writable paths, then read-only protected overlays.
     mounted = set()
+    denied = {Path(path).resolve() for path in data['denied_paths']}
+    credential = data['credential_read_path']
+
+    def private_mount(path):
+        return path != credential and any(Path(path).resolve().is_relative_to(root) for root in denied)
+
     for path in (*data['read_paths'], *data['runtime_paths']):
         clean = _safe_mount_path(path)
-        if clean not in mounted:
+        if clean not in mounted and not private_mount(clean):
             args.extend(['-v', f'{clean}:{clean}:ro'])
             mounted.add(clean)
     for path in (*data['write_paths'], data['private_home']):
@@ -74,8 +80,25 @@ def build_oci_command(runtime: str, image: str, command, *, spec, env, cwd,
         mounted.add(clean)
     for path in data['protected_paths']:
         clean = _safe_mount_path(path)
-        if Path(clean).exists():
+        if Path(clean).exists() and clean not in mounted and not private_mount(clean):
             args.extend(['-v', f'{clean}:{clean}:ro'])
+            mounted.add(clean)
+
+    # Only nested exclusions under an actual host mount need a mask. A
+    # missing destination cannot be created on the host during admission.
+    roots = tuple(Path(p).resolve() for p in mounted)
+    for path in sorted(denied):
+        if str(path) == credential or not any(path.is_relative_to(root) for root in roots):
+            continue
+        if any(ancestor in denied for ancestor in path.parents):
+            continue
+        target = _safe_mount_path(str(path))
+        if path.is_dir():
+            args.extend(['--tmpfs', f'{target}:ro,nodev,nosuid,noexec,mode=000'])
+        elif path.is_file():
+            args.extend(['-v', f'/dev/null:{target}:ro'])
+        else:
+            raise ValueError(f'OCI sandbox cannot mask missing or special host mount target: {path}')
 
     args.extend(['-w', _safe_mount_path(data['cwd'])])
     for key, val in sorted(data['env'].items()):

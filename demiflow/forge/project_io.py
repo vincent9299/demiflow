@@ -1,4 +1,4 @@
-"""Project control I/O shared by domain owners; no engineering policy."""
+"""Project control I/O and filesystem path definitions shared by Forge domains."""
 from contextlib import contextmanager
 import fcntl
 import json
@@ -12,6 +12,10 @@ from demiflow.forge.platform import bounded_json
 from demiflow.forge.platform import content_digest
 from demiflow.forge.platform_environment import read_bounded
 from demiflow.forge.schema import ForgeError
+
+SYSTEM_PRIVATE_PATHS = tuple(Path(path) for path in (
+    '/etc/shadow', '/etc/gshadow', '/etc/ssh', '/etc/ssl/private', '/etc/sudoers', '/etc/sudoers.d',
+))
 
 def identifier(value):
     if not isinstance(value, str) or not re.fullmatch(

@@ -352,61 +352,38 @@ def set_python(path, workspace_id, *, expected, python):
     return dict(status='updated', workspace_id=workspace_id, python=cleaned, digest=content_digest(value))
 
 
-def project_python_and_scope(root, *, authority=None, project=None, extra_read_roots=(), private=()):
-    """Resolve explicit project Python and optional caller-supplied sandbox read scope.
-
-    Read visibility belongs exclusively to the active OS sandbox (not Workbench
-    project settings). Unless a caller explicitly narrows visibility via
-    `extra_read_roots`, return `allowed_roots = None` while dependency validation
-    continues to enforce denied/sensitive paths, symlinks, and B-class content rules.
-    """
+def project_python_and_scope(root, *, authority=None, project=None, allowed_roots=None, denied_paths=()):
+    """Bind the project interpreter and the calling host's existing read scope."""
     root_path = Path(root).absolute()
-    resolved_project = project
-    if authority is not None and authority.get('kind') == 'web':
-        reg_path = authority.get('registry')
-        if reg_path:
-            resolved_project = load_registry(reg_path)['projects'].get(authority['workspace_id'], {})
-            private = (*private, reg_path)
-    if resolved_project is not None and resolved_project.get('root') is not None:
-        if Path(resolved_project['root']).absolute() != root_path:
-            raise ForgeError('Project scope belongs to another workspace', code='conflict')
-    python = (resolved_project or {}).get('python') or None
-    if python is None and authority is not None and authority.get('kind') == 'trusted_local':
-        python = authority.get('python') or None
-    if python == '':
-        python = None
-    if not extra_read_roots:
-        return python, None
-    granted: list[str] = [str(root_path.resolve())]
-    for raw in extra_read_roots:
-        if raw:
-            p = ws.scoped_data_location(root_path, raw, private=private)
-            if p is not None and str(p) not in granted:
-                granted.append(str(p))
-    return python, tuple(granted)
+    authority = authority or {}
+    if authority.get('root', str(root_path)) != str(root_path):
+        raise ForgeError('Project scope belongs to another workspace', code='conflict')
+    registry = authority.get('registry') if authority.get('kind') == 'web' else None
+    if registry is not None:
+        project = load_registry(registry)['projects'].get(authority['workspace_id'], {})
+    if project and project.get('root') is not None and Path(project['root']).absolute() != root_path:
+        raise ForgeError('Project scope belongs to another workspace', code='conflict')
+    python = (project or {}).get('python')
+    if not python and authority.get('kind') == 'trusted_local':
+        python = authority.get('python')
+    private = (*denied_paths, *authority.get('denied_paths', ()), *((registry,) if registry else ()))
+    return python or None, dict(allowed_roots=authority.get('read_roots', allowed_roots),
+                                denied_paths=tuple(dict.fromkeys(private)))
 
 
 def project_dependencies(root, *, authority=None, project=None, python=None, verify_files=True,
-                         require_environment=False, extra_read_roots=(), confined=None):
-    """Resolve live validated project dependencies directly from pyproject.toml (no lock/approval)."""
+                         require_environment=False, allowed_roots=None, denied_paths=(), confined=None):
+    """Resolve live validated project dependencies from pyproject.toml in the host's scope."""
     from demiflow.forge.dependencies import binding, declaration
-    resolved_py, allowed_roots = project_python_and_scope(
-        root, authority=authority, project=project, extra_read_roots=extra_read_roots,
-    )
-    effective_py = str(python) if python else resolved_py
+    configured, scope = project_python_and_scope(root, authority=authority, project=project,
+                                                 allowed_roots=allowed_roots, denied_paths=denied_paths)
     if declaration(root) is None:
         return None
-    if not effective_py:
+    effective_python = str(python) if python else configured
+    if not effective_python:
         raise ForgeError('Configure an explicit project Python before admitting dependencies', code='operation_rejected')
-    return binding(
-        root,
-        python=effective_py,
-        allowed_roots=allowed_roots,
-        verify_files=verify_files,
-        require_python=True,
-        require_environment=require_environment,
-        confined=confined,
-    )
+    return binding(root, python=effective_python, **scope, verify_files=verify_files, require_python=True,
+                   require_environment=require_environment, confined=confined)
 
 
 def set_notebook_sandbox(path, workspace_id, *, expected, mode, write_paths=()):

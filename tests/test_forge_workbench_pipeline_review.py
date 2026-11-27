@@ -84,7 +84,7 @@ def test_admission_failure_closes_broker_and_preserves_completed_turn_checks(tmp
         store = service.store
         turn, _ = store.submit(workspace, session, 'r', 0, 'Inspect entry', root_identity(root), service.policy_hash)
         (root/'flows/entry.py').write_text('def run(): return 1')
-        review = DeliveryReview(store, turn, {'root':root})
+        review = DeliveryReview(store, turn)
         review.request({'entry':'flows/entry.py:run'})
         closed = []
         broker = SimpleNamespace(socket_path='/unused', child_config={'model':'fake'}, close=lambda:closed.append(True))
@@ -101,7 +101,11 @@ def test_admission_failure_closes_broker_and_preserves_completed_turn_checks(tmp
                 scratch=tmp_path/'scratch', broker_home=tmp_path/'model', author_spec=spec,lease_fd=3,
                 deadline=time.time()+5,check_cancel=lambda:None)
         checks = {'native_flow':{'status':'passed','diagnostic_count':0}}
-        report = review.run(invoke,checks,lambda:None)
+        from demiflow.forge.development import assess_turn
+        receipt = assess_turn(root, author=dict(completed=True, cleanup='complete', acknowledged=True),
+                              selection=review.selection, goal=lambda: store.review_inputs(session, include_paths=False),
+                              reviewer=invoke, inspect=False)
+        report = receipt['review']
         assert closed == [True] and 'admission timed out' in str(report['diagnostics'])
         store.finish_provider(turn['id'], state='completed', cleanup='complete', result={'pipeline_checks':checks},
                               review=report)

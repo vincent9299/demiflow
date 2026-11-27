@@ -59,11 +59,13 @@ class Service:
     def __init__(self, config_path, *, input_denied_paths=()):
         # Host authority is not a user-maintained input allowlist. Pass these
         # paths only to the trusted worker, never to the provider environment.
-        self.input_denied_paths = tuple(dict.fromkeys(str(Path(p).absolute())
-            for p in (config_path, *input_denied_paths)))
         self.settings = None
         self.workflow_registry = None
         self.deployment = Deployment.load(config_path)
+        self.input_denied_paths = tuple(dict.fromkeys(str(Path(p).absolute()) for p in (
+            config_path, *input_denied_paths,
+            *(cfg['native_credentials'] for cfg in self.deployment.providers.values() if cfg.get('native_credentials')),
+        )))
         self.root = self.deployment.state
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink() or self.root.stat().st_mode & 0o077:
@@ -143,13 +145,11 @@ class Service:
         return self.binding(workspace, root)[0].project(workspace, root)
 
     def _feedback_scope(self, workspace, root):
-        from .worker import _authorized_read_roots
+        from demiflow.forge.sandbox import development_read_scope
         deployment, _, config_path = self.binding(workspace, root)
         project = deployment.project(workspace, root)
-        denied = [deployment.state, Path(config_path).resolve(), *(Path(p) for p in self.input_denied_paths)]
-        if deployment.value.get('runtime_domain'):
-            denied.append(Path(deployment.value['runtime_domain']))
-        allowed = _authorized_read_roots(project['root'], project, denied)
+        denied = deployment.private_paths(config_path, *self.input_denied_paths)
+        allowed = development_read_scope(root, read_roots=project.get('read_roots'), denied_paths=denied)
         return allowed, tuple(denied)
 
     def capabilities(self, workspace, root):
@@ -217,6 +217,14 @@ class Service:
 
     def _worker_env(self, policy):
         env = dict(PATH='/usr/bin:/bin', LANG='C.UTF-8', PYTHONDONTWRITEBYTECODE='1')
+        # The trusted worker resolves the same OS/account boundaries as the host.
+        # Provider launchers build their own environment and private HOME.
+        env['HOME'] = str(Path.home())
+        for key in ('CODEX_HOME', 'DSH_HOME'):
+            value = os.environ.get(key)
+            if value and Path(value).is_absolute():
+                env[key] = value
+
         if self.workflow_registry is not None:
             env['DEMIFLOW_WORKFLOW_REGISTRY'] = wire(self.workflow_registry, 8192).decode()
         env['DEMIFLOW_INPUT_DENIED_PATHS'] = wire(list(self.input_denied_paths), 65536).decode()
@@ -237,6 +245,12 @@ class Service:
             return dict(status='unsupported')
         project = self.project(workspace, root)
         deployment, revision, _ = self.binding(workspace, root, seal=True)
+        if (session_kind == 'development' and deployment.mode == 'restricted'
+                and project['kind'] == 'pipeline' and project['phase'] == 'implementation'
+                and 'pyproject.toml' not in project.get('protected', ())
+                and not os.path.lexists(Path(root) / 'pyproject.toml')):
+            # This standby would lack the single-file grant assigned when the author turn starts.
+            return dict(status='skipped')
         caps = self.capabilities(workspace, root)
         available_providers = [p['id'] for p in caps['providers'] if p['available']]
         if not caps['start'] or not available_providers:

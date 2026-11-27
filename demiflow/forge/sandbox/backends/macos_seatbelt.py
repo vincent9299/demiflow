@@ -91,6 +91,11 @@ def build_seatbelt_profile(spec, *, validated: dict | None = None) -> str:
     for path in data['denied_paths']:
         lines.append(_rule_for_path('file-read*', path, allow=False))
         lines.append(_rule_for_path('file-write*', path, allow=False))
+    if data.get('host_state_root'):
+        lines.append(_rule_for_path('file-read*', data['private_home'], allow=True))
+        lines.append(_rule_for_path('file-write*', data['private_home'], allow=True))
+    if data.get('credential_read_path'):
+        lines.append(f'(allow file-read* (literal {_sb_quote(data["credential_read_path"])}))')
 
     # Network confinement.
     if data['direct_network']:

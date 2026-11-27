@@ -166,7 +166,8 @@ class BridgeServer:
                 if action in ('register_workflow', 'register_flow', 'bind_params', 'slim_manifest'):
                     guard = guarded_control_writes(self.project_root, self.protected_snapshot, active.require_active)
                 with guard:
-                    answer = run_project_layout(self.project_root, arguments)
+                    answer = run_project_layout(self.project_root, arguments, allowed_roots=self.allowed_read_roots,
+                                                denied_paths=self.denied_paths)
                 self._record_layout_paths(action, answer)
             elif name == REVIEW_TOOL['name']:
                 answer = self.delivery_review.request(arguments)

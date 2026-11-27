@@ -1,6 +1,7 @@
 """Detached per-workflow DAG supervisor process (zero background daemon; exits on completion)."""
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import signal
@@ -14,6 +15,7 @@ from demiflow.forge.schema import ForgeError
 from demiflow.forge.workflow import resolve_node_overrides
 from demiflow.forge.process import process_identity
 from demiflow.forge.runs import manager as runs
+from demiflow.workbench.runs.authority import from_bootstrap
 from demiflow.workbench.workflows import store
 from demiflow.workbench.workflows.resolver import build_target_authority
 
@@ -64,7 +66,7 @@ def _cancel_active_children(manifest: dict, active: dict[str, dict], cancelled_s
                                detail={'child_run_id': child_run_id, 'message': str(exc)[:512]})
 
 
-def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int) -> int:
+def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int, *, bindings=None) -> int:
     run_dir = store.run_directory(host_root, wf_run_id)
     manifest = store.read_manifest(run_dir)
     spec = manifest['spec']
@@ -258,7 +260,8 @@ def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int) -> int:
 
                         # Try launching this node!
                         try:
-                            submit_auth = build_target_authority(manifest, proj_alias, 'run_submit')
+                            submit_auth = (from_bootstrap(bindings[proj_alias], target_root) if bindings is not None
+                                           else build_target_authority(manifest, proj_alias, 'run_submit'))
                             started = None
 
                             # Case A: resume an interrupted child run preserving P2/P4 checkpoints.
@@ -480,6 +483,15 @@ def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    bindings = None
+    if args[-1:] == ['--host-bindings']:
+        raw = sys.stdin.buffer.read(store.MAX_MANIFEST_BYTES + 1)
+        if len(raw) > store.MAX_MANIFEST_BYTES:
+            raise ForgeError('Workflow host bindings exceed their byte budget', code='resource_limit')
+        bindings = json.loads(raw)
+        if not isinstance(bindings, dict):
+            raise ForgeError('Invalid workflow host bindings', code='invalid_request')
+        args = args[:-1]
     if len(args) != 4 or args[0] != 'run':
         sys.stderr.write('usage: orchestrator.py run <host_root> <wf_run_id> <attempt>\n')
         return 2
@@ -489,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         sys.stderr.write('invalid attempt number\n')
         return 2
-    return run_attempt(host_root, wf_run_id, attempt)
+    return run_attempt(host_root, wf_run_id, attempt, bindings=bindings)
 
 
 if __name__ == '__main__':

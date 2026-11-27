@@ -5,7 +5,10 @@ from .policy import (
     authorized_read_roots,
     build_development_sandbox_spec,
     build_review_sandbox_spec,
+    declaration_identity,
     default_runtime_paths,
+    development_read_scope,
+    writable_project_declaration,
 )
 from .sandbox import (
     SPEC_BYTES,
@@ -28,10 +31,13 @@ __all__ = [
     'backend_readiness',
     'build_development_sandbox_spec',
     'build_review_sandbox_spec',
+    'declaration_identity',
     'default_runtime_paths',
+    'development_read_scope',
     'execution_identity',
     'implementation_digest',
     'launch_sandbox',
     'read_runtime_config',
     'specification',
+    'writable_project_declaration',
 ]

@@ -165,7 +165,8 @@ def main():
                 resource.setrlimit(kind, (cap, cap))
             close_except({0, 1, 2, write_error})
             landlock(spec['read_paths'], spec['write_paths'], spec['runtime_paths'], spec['identities'],
-                     read_policy=spec.get('read_policy', 'scoped'), traversal_paths=spec.get('traversal_paths', ()))
+                     read_policy=spec['read_policy'], traversal_paths=spec['traversal_paths'],
+                     denied_paths=spec['denied_paths'], credential_read_path=spec['credential_read_path'])
             drop_capabilities()
             seccomp(direct_network=bool(spec.get('direct_network', False)), verifier=spec.get('role') == 'verifier')
             os.execve(spec['command'][0], spec['command'], spec['env'])
@@ -173,7 +174,7 @@ def main():
             os.write(write_error, (type(error).__name__ + ': ' + str(error))[:2048].encode())
             os._exit(126)
     os.close(write_error)
-    if not select.select([read_error], [], [], 5)[0]:
+    if not select.select([read_error], [], [], spec['admission_seconds'])[0]:
         raise RuntimeError('Sandbox child confinement timed out')
     failure = os.read(read_error, 2049)
     os.close(read_error)

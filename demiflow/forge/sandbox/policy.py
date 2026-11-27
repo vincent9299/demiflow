@@ -7,11 +7,13 @@ Single source of truth for:
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 import os
 from pathlib import Path
 import sys
 
+from demiflow.forge.project_io import SYSTEM_PRIVATE_PATHS
 from demiflow.forge.project_workspace import scoped_data_location
 from demiflow.forge.sandbox.sandbox import SandboxSpec
 
@@ -22,8 +24,29 @@ PROTECTED_PROJECT_NAMES = (
 FORBIDDEN_DIRECT_WRITE_ROOTS = frozenset({('data_tools',), ('packages',), ('.forge',)})
 DIRECT_NETWORK_READ_PATHS = (
     '/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf', '/etc/gai.conf',
-    '/etc/ssl', '/etc/ca-certificates', '/usr/share/ca-certificates', '/etc/ld.so.cache',
+    '/etc/ssl/certs', '/etc/ssl/cert.pem', '/etc/ssl/openssl.cnf',
+    '/etc/ca-certificates', '/usr/share/ca-certificates', '/etc/ld.so.cache',
 )
+ACCOUNT_PRIVATE_PATHS = (
+    '.ssh', '.aws', '.azure', '.kube', '.gnupg', '.config/gcloud', '.docker/config.json',
+    '.netrc', '.npmrc', '.pypirc', '.git-credentials', '.codex',
+)
+
+
+def default_private_read_paths():
+    """Resolve private OS and account paths in the trusted host environment."""
+    paths = []
+    account = Path.home()
+    paths.extend(account / name for name in ACCOUNT_PRIVATE_PATHS)
+    codex_home = os.environ.get('CODEX_HOME')
+    if codex_home and Path(codex_home).is_absolute():
+        paths.append(Path(codex_home))
+    dsh_home = Path(os.environ.get('DSH_HOME') or account / '.dsh')
+    if dsh_home.is_absolute():
+        paths.extend((dsh_home / '.credentials.yaml', dsh_home / 'profiles'))
+    if os.name == 'posix':
+        paths.extend(SYSTEM_PRIVATE_PATHS)
+    return tuple(paths)
 
 
 def _declared_readonly_locations(root: Path, denied=(), private_home: Path | None = None) -> list[Path]:
@@ -65,6 +88,13 @@ def authorized_read_roots(
         if resolved not in granted:
             granted.append(resolved)
     return tuple(str(p) for p in granted)
+
+
+def development_read_scope(root, *, read_roots=(), denied_paths=(), private_home=None):
+    """Return the developer's explicit source scope, or None to inherit ordinary OS reads."""
+    if not read_roots:
+        return None
+    return authorized_read_roots(root, read_roots=read_roots, denied_paths=denied_paths, private_home=private_home)
 
 
 def default_runtime_paths(*, executable: str | Path | None = None, project_python: str | Path | None = None,
@@ -109,6 +139,49 @@ def _unique_abs(paths) -> tuple[str, ...]:
     return tuple(sorted({str(Path(path).absolute()) for path in paths}))
 
 
+def declaration_identity(root):
+    """Identify the directory entry to which the author's single-file grant was bound."""
+    try:
+        entry = (Path(root) / 'pyproject.toml').lstat()
+    except FileNotFoundError:
+        return None
+    return entry.st_dev, entry.st_ino
+
+
+@contextmanager
+def writable_project_declaration(root):
+    """Prepare the single-file grant only while an author is running, between source snapshots."""
+    path = Path(root) / 'pyproject.toml'
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    except FileExistsError:
+        yield
+        return
+    try:
+        # Distinguish an intentional empty save even on filesystems with coarse timestamps.
+        os.utime(fd, ns=(os.fstat(fd).st_atime_ns, 0))
+        original = os.fstat(fd)
+
+        def untouched():
+            try:
+                current = path.lstat()
+            except FileNotFoundError:
+                return False
+            return (os.path.samestat(original, current) and current.st_size == 0 and current.st_mtime_ns == 0
+                    and current.st_ctime_ns == original.st_ctime_ns)
+
+        try:
+            yield untouched
+        finally:
+            if untouched():
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+    finally:
+        os.close(fd)
+
+
 def build_development_sandbox_spec(
     root: str | Path,
     *,
@@ -119,6 +192,7 @@ def build_development_sandbox_spec(
     runtime_paths=(),
     denied_paths=(),
     private_home: str | Path,
+    host_state_root: str | Path | None = None,
     kind: str = 'pipeline',
     phase: str = 'implementation',
     readonly: bool = False,
@@ -131,7 +205,6 @@ def build_development_sandbox_spec(
     processes: int = 32,
     file_bytes: int = 64 * 1024**2,
     private_bytes: int = 256 * 1024**2,
-    ensure_pyproject_placeholder: bool = False,
 ) -> SandboxSpec:
     """Build the single canonical Forge OS SandboxSpec for developer / readonly sessions.
 
@@ -176,30 +249,36 @@ def build_development_sandbox_spec(
 
     if not readonly and not notebook_op and kind == 'pipeline' and phase == 'implementation':
         pyproject = root_path / 'pyproject.toml'
-        if ensure_pyproject_placeholder and not pyproject.exists() and not pyproject.is_symlink():
-            pyproject.write_text('', encoding='utf-8')
         if (pyproject.is_file() and not pyproject.is_symlink()
                 and 'pyproject.toml' not in (protected or ())
                 and pyproject not in write_list):
             write_list.append(pyproject)
 
     protected_list: list[Path] = []
+    private_files: list[Path] = []
     if not notebook_op:
         protected_list.extend(root_path / name for name in PROTECTED_PROJECT_NAMES)
         if root_path.is_dir():
             try:
                 with os.scandir(root_path) as root_entries:
                     for entry in root_entries:
-                        if entry.name.startswith('.env.') and entry.name not in {'.env.example', '.env.sample'}:
-                            protected_list.append(root_path / entry.name)
+                        if (entry.name == '.env' or entry.name.startswith('.env.')) and entry.name not in {'.env.example', '.env.sample'}:
+                            private_files.append(root_path / entry.name)
             except OSError:
                 pass
+        protected_list.extend(private_files)
         protected_list.extend(root_path / name for name in (protected or ()))
     protected_list.extend(Path(p) for p in (extra_protected or ()))
     if active_cred is not None:
         protected_list.append(active_cred)
 
     denied_list = [Path(p) for p in (denied_paths or ())]
+    if active_cred is not None and any(active_cred.is_relative_to(path.resolve()) and not (
+            host_state_root is not None and path.resolve() == Path(host_state_root).resolve()
+            and active_cred.is_relative_to(Path(private_home).resolve())) for path in denied_list):
+        raise ValueError('Selected model credential overlaps a host-denied path')
+    denied_list.extend(default_private_read_paths())
+    denied_list.extend(private_files)
     if not notebook_op:
         for granted_str in authorized_read_roots(
             root_path, read_roots=read_roots, denied_paths=denied_list, private_home=private_home,
@@ -215,6 +294,8 @@ def build_development_sandbox_spec(
         runtime_paths=tuple(sorted({str(Path(p).absolute()) for p in runtime_paths if Path(p).exists()})),
         protected_paths=_unique_abs(protected_list),
         denied_paths=_unique_abs(denied_list),
+        credential_read_path=str(active_cred) if active_cred is not None else None,
+        host_state_root=str(host_state_root) if host_state_root is not None else None,
         private_home=str(Path(private_home).absolute()),
         role='readonly' if readonly else 'developer',
         seconds=seconds,
@@ -266,6 +347,9 @@ def build_review_sandbox_spec(
             seconds=seconds,
             private_home=home_str,
             write_paths=(),
+            credential_read_path=None,
+            host_state_root=(author_spec.host_state_root if author_spec.host_state_root is not None
+                             and Path(home_str).is_relative_to(Path(author_spec.host_state_root)) else None),
             runtime_paths=tuple(p for p in review_runtime if Path(p).exists()),
             denied_paths=tuple(dict.fromkeys((*author_spec.denied_paths, author_spec.private_home,
                                               *(str(Path(p).absolute()) for p in denied_paths)))),

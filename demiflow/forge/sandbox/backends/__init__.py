@@ -106,6 +106,17 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
     runtime_paths = clean_list(spec.runtime_paths)
     protected_paths = clean_list(spec.protected_paths)
     denied_paths = clean_list(spec.denied_paths)
+    state = spec.host_state_root
+    if state is not None and (state not in denied_paths or spec.private_home == state
+                              or not _contains(state, spec.private_home)):
+        raise ValueError('Host-bound private HOME must be inside its denied state directory')
+    for private in denied_paths:
+        if private != state and (_contains(private, spec.private_home) or _contains(spec.private_home, private)):
+            raise ValueError('Sandbox HOME overlaps a denied path')
+    credential = spec.credential_read_path
+    if credential is not None and (not spec.direct_network or credential not in read_paths
+                                   or credential not in protected_paths):
+        raise ValueError('Direct model credential must be an explicitly bound read-only file')
 
     for allowed in write_paths:
         if any(_contains(allowed, dep) or _contains(dep, allowed) for dep in runtime_paths):
@@ -113,7 +124,8 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
         if spec.write_policy != 'project_root':
             if any(_contains(allowed, prot) or _contains(prot, allowed) for prot in protected_paths):
                 raise ValueError('Sandbox write scope overlaps a protected read-only path')
-        if any(_contains(allowed, den) or _contains(den, allowed) for den in denied_paths):
+        if any((_contains(allowed, den) or _contains(den, allowed))
+               and not (den == state and _contains(spec.private_home, allowed)) for den in denied_paths):
             raise ValueError('Sandbox write scope overlaps a denied path')
 
     environment = dict(env, HOME=spec.private_home, TMPDIR=spec.private_home)
@@ -127,6 +139,8 @@ def validate_spec_portable(spec, command, env, cwd) -> dict:
         runtime_paths=runtime_paths,
         protected_paths=protected_paths,
         denied_paths=denied_paths,
+        credential_read_path=credential,
+        host_state_root=state,
         private_home=spec.private_home,
         command=list(command),
         env=environment,
