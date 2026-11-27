@@ -37,6 +37,28 @@ def test_codex_approvals_no_expansion_and_foreign_events(tmp_path):
     assert provider.event({'method':'item/completed','params':{'threadId':'thread','turnId':'turn','item':{'type':'reasoning','id':'private','text':'DO NOT KEEP'}}})==[]
 
 
+def test_codex_writable_approves_empty_pipeline_project_and_rejects_protected(tmp_path):
+    impl = Codex(Wire(), {'model': 'fixture'}, {
+        'root': str(tmp_path), 'kind': 'pipeline', 'phase': 'implementation', 'writes': [], 'protected': ['docs/lock.md'],
+    })
+    assert impl.writable('flows/demo.py')
+    assert impl.writable('pyproject.toml')
+    assert impl.writable('.env.example')
+    assert impl.writable(str(tmp_path / 'operators' / 'ops.py'))
+    for bad in ('.env', '.env.local', '.env.prod', '.forge/state.json', 'workspace.json',
+                'AGENTS.md', 'PIPELINE_SPEC.md', 'packages/pkg/a.py', 'data_tools/a.py',
+                'docs/lock.md', '../escape.py', '/etc/passwd'):
+        assert not impl.writable(bad), bad
+    ro = Codex(Wire(), {'model': 'fixture'}, {
+        'root': str(tmp_path), 'kind': 'pipeline', 'phase': 'implementation', 'writes': [], 'readonly': True,
+    })
+    assert not ro.writable('flows/demo.py')
+    design = Codex(Wire(), {'model': 'fixture'}, {
+        'root': str(tmp_path), 'kind': 'pipeline', 'phase': 'design', 'writes': ['README.md'],
+    })
+    assert design.writable('README.md') and not design.writable('flows/demo.py')
+
+
 def test_acp_capabilities_explicit_intervals_and_permission_context():
     wire=Wire();provider=DeepSeek(wire,{'model':'fixture'},{'root':'/tmp/project'})
     provider.open('Required source text')

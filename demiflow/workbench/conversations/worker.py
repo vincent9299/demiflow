@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import array
 import ctypes
-from contextlib import ExitStack
 import fcntl
 from functools import partial
 import json
@@ -34,7 +33,6 @@ from demiflow.workbench.conversations.common import read_file
 from demiflow.workbench.conversations.common import reject
 from demiflow.workbench.conversations.common import snapshot
 from demiflow.workbench.conversations.common import wire
-from demiflow.forge.sandbox.policy import declaration_identity, writable_project_declaration
 from demiflow.forge.schema import ForgeError
 from demiflow.workbench.conversations.policy import Deployment, turn_deadline
 from demiflow.workbench.conversations.store import Store
@@ -388,7 +386,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
     process = transport = provider = model_broker = control_bridge = coding = shims = None
     effective_bound = None
     standby_spec = None
-    bound_declaration = None
     confined = None
     sandbox_deadline = 0.0
     warm_ready = False
@@ -409,10 +406,8 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 return
             st_project = deployment.project(standby_info['workspace'], standby_info['root_path'])
             if st_notebook:
-                st_project = dict(st_project, writes=[])
+                st_project = dict(st_project, writes=[], readonly=True)
             st_guided = (not st_notebook) and st_project['kind'] == 'pipeline'
-            if st_guided and deployment.mode == 'restricted':
-                bound_declaration = declaration_identity(st_project['root'])
             if st_guided and coding_fd is not None:
                 from demiflow.forge.api_reference import REFERENCE_BYTES
                 try:
@@ -755,9 +750,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
 
             protected_snapshot = {}
             root_names_before = None
-            author_files = ExitStack()
-            untouched_placeholder = None
-            confined_developer = guided and not compact and deployment.mode == 'restricted'
             turn_allowed_roots = None
             try:
                 tick()
@@ -790,7 +782,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 elif notebook:
                     if deployment.mode != 'restricted':
                         reject('Notebook generation requires a read-only project scope')
-                    project = dict(project, writes=[])
+                    project = dict(project, writes=[], readonly=True)
                     if cell_cli:
                         if not (warm_ready and warm_operation == turn.get('operation', 'message') and control_bridge is not None):
                             from demiflow.workbench.notebooks.cell_commands import CellCommands
@@ -832,11 +824,7 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                         reject('自动修正候选或原作者已变化，输入未发送。', 'inputs_changed')
 
                 turn_op = turn.get('operation', 'message')
-                if (confined_developer and project['phase'] == 'implementation'
-                        and 'pyproject.toml' not in (project.get('protected') or ())):
-                    untouched_placeholder = author_files.enter_context(writable_project_declaration(project['root']))
-                current_declaration = declaration_identity(project['root']) if confined_developer else None
-                if warm_ready and (warm_operation != turn_op or current_declaration != bound_declaration):
+                if warm_ready and warm_operation != turn_op:
                     _teardown_provider(process, transport, provider, model_broker, control_bridge, shims)
                     process = transport = provider = model_broker = control_bridge = shims = None
                     effective_bound = None
@@ -844,7 +832,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                     warm_ready = False
                     provider_opened = False
 
-                bound_declaration = current_declaration
                 if warm_ready and provider_opened and guided and acp:
                     try:
                         wait(provider.close_request())
@@ -1017,8 +1004,6 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 # Compare again after context preparation and handshake; no baseline reset.
                 if watched:
                     prepared = capture(project['root'], watched, exclude=excluded, source_dir=scratch / 'sources')
-                    if untouched_placeholder and untouched_placeholder() and 'pyproject.toml' in prepared:
-                        prepared['pyproject.toml'] = None
                     if prepared != baseline:
                         reject('Watched sources changed during preparation; no model turn sent', 'conflict')
                 tick(force=True)
@@ -1168,15 +1153,10 @@ def run(config_path, tid, lease_fd, parent_fd, coding_fd=None, *, standby=None):
                 control_bridge.park_idle()
             elif guided and control_bridge is not None:
                 host_layout_paths = control_bridge.finish_turn()
-            try:
-                author_files.close()
-            except OSError as exc:
-                final, reason = 'failed', f'Cannot clean up the turn-owned project declaration: {exc}'
             review_requested = delivery_review is not None and delivery_review.selection is not None
             keep_warm = (
                 parent_sock is not None
                 and not compact and not review_requested
-                and (not confined_developer or bound_declaration == declaration_identity(project['root']))
                 and final == 'completed' and completed and not requested
                 and process is not None and process.poll() is None
                 and transport is not None and not transport.closed

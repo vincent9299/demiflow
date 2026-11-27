@@ -306,9 +306,31 @@ class Codex:
         if p.is_absolute():
             try: path = str(p.relative_to(self.project['root']))
             except ValueError: return False
-        try: safe_path(self.project['root'], path, missing=True)
+        try: target = safe_path(self.project['root'], path, missing=True)
         except (ValueError, OSError): return False
-        return any(path == w or path.startswith(w + '/') for w in self.project['writes'])
+        if self.project.get('readonly'):
+            return False
+        root_resolved = Path(self.project['root']).resolve()
+        try:
+            rel_path = target.relative_to(root_resolved)
+        except ValueError:
+            return False
+        parts = rel_path.parts
+        if not parts:
+            return False
+        rel = rel_path.as_posix()
+        if self.project.get('kind') == 'pipeline' and self.project.get('phase') == 'implementation':
+            from demiflow.forge.sandbox.policy import FORBIDDEN_DIRECT_WRITE_ROOTS, PROTECTED_PROJECT_NAMES
+            if parts[:1] in FORBIDDEN_DIRECT_WRITE_ROOTS or parts[0] in PROTECTED_PROJECT_NAMES:
+                return False
+            if parts[0].startswith('.env.') and parts[0] not in {'.env.example', '.env.sample'}:
+                return False
+            for prot in self.project.get('protected', ()):
+                norm = str(prot).strip('/')
+                if norm and (rel == norm or rel.startswith(norm + '/')):
+                    return False
+            return True
+        return any(rel == w or rel.startswith(w + '/') for w in self.project['writes'])
 
     @staticmethod
     def answer(request, answer):

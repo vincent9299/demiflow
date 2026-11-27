@@ -18,11 +18,126 @@ def test_oci_masks_nested_private_paths_under_a_readable_project(tmp_path):
     state.mkdir()
     home = tmp_path / 'home'
     home.mkdir(mode=0o700)
-    spec = build_development_sandbox_spec(project, private_home=home, denied_paths=(state,))
+    spec = build_development_sandbox_spec(project, private_home=home, denied_paths=(state,), readonly=True)
     command = build_oci_command('docker', 'fixture', ['/bin/sh'], spec=spec, env={}, cwd=project)
     assert f'/dev/null:{private}:ro' in command
     assert f'{state}:ro,nodev,nosuid,noexec,mode=000' in command
     assert f'{private}:{private}:ro' not in command
+
+
+def test_oci_project_root_write_mounts_project_rw_and_protected_ro(tmp_path):
+    project = tmp_path / 'project'
+    project.mkdir()
+    private = project / '.env'
+    private.write_text('sample only')
+    (project / '.forge').mkdir()
+    (project / 'packages').mkdir()
+    state = tmp_path / 'host-state'
+    state.mkdir()
+    home = tmp_path / 'home'
+    home.mkdir(mode=0o700)
+    spec = build_development_sandbox_spec(project, private_home=home, denied_paths=(state,))
+    assert spec.write_policy == 'project_root'
+    assert spec.write_paths == (str(project.resolve()),)
+    command = build_oci_command('docker', 'fixture', ['/bin/sh'], spec=spec, env={}, cwd=project)
+    assert f'{project}:{project}:rw' in command
+    assert f'{private}:{private}:ro' in command
+    assert f'{project / ".forge"}:{project / ".forge"}:ro' in command
+    assert f'{project / "packages"}:{project / "packages"}:ro' in command
+    # A host-denied path nested inside a writable project_root must be rejected.
+    nested_state = project / 'host-state'
+    nested_state.mkdir()
+    bad_spec = build_development_sandbox_spec(project, private_home=home, denied_paths=(nested_state,))
+    with pytest.raises(ValueError, match='overlaps'):
+        build_oci_command('docker', 'fixture', ['/bin/sh'], spec=bad_spec, env={}, cwd=project)
+
+
+def test_empty_project_allows_mkdir_atomic_pyproject_and_blocks_external_writes(tmp_path, monkeypatch):
+    if sys.platform != 'linux' or not backend_readiness()['available']:
+        pytest.skip('Requires the Linux development sandbox')
+    from demiflow.forge.project_guard import capture_protected_files, enforce_protected_files
+
+    project = tmp_path / 'empty_project'
+    project.mkdir()
+    (project / '.env').write_text('API_KEY=keep-me\n')
+    external = tmp_path / 'external_dir'
+    external.mkdir()
+    (external / 'readme.txt').write_text('outside')
+    state = tmp_path / 'host-state'
+    state.mkdir(mode=0o700)
+    (state / 'secret.json').write_text('host-only')
+    home = state / 'session' / 'provider'
+    home.mkdir(parents=True, mode=0o700)
+    account = tmp_path / 'account'
+    (account / '.ssh').mkdir(parents=True)
+    (account / '.ssh' / 'id_ed25519').write_text('private-key')
+    monkeypatch.setenv('HOME', str(account))
+
+    # Empty project has writes=() and no pyproject.toml or flows/ directory at launch time.
+    spec = build_development_sandbox_spec(
+        project,
+        writes=(),
+        private_home=home,
+        host_state_root=state,
+        denied_paths=(state,),
+        runtime_paths=('/usr', '/lib', '/lib64'),
+        seconds=20,
+    )
+    assert spec.write_policy == 'project_root'
+    assert spec.write_paths == (str(project.resolve()),)
+    assert not (project / 'pyproject.toml').exists()
+    assert str((project / '.env').resolve()) in spec.protected_paths
+
+    before_guard = capture_protected_files(project)
+    script = """import os, sys
+from pathlib import Path
+root, external, state, account = map(Path, sys.argv[1:])
+# 1. Create a brand-new subdir in an empty project and read back newly created files.
+(root / 'flows').mkdir()
+(root / 'flows' / 'demo.py').write_text('X = 42\\n')
+assert (root / 'flows' / 'demo.py').read_text() == 'X = 42\\n'
+# 2. Staging subdir creation (like dsh write tool) & same-dir atomic replace of pyproject.toml in project_root.
+staging_dir = root / '.pyproject.toml.atomic.tmpdir'
+staging_dir.mkdir()
+(staging_dir / 'staging.tmp').write_text('staged')
+(staging_dir / 'staging.tmp').unlink()
+staging_dir.rmdir()
+staged = root / '.pyproject.toml.atomic.tmp'
+staged.write_text('[project]\\nname = "demo"\\n')
+os.replace(staged, root / 'pyproject.toml')
+assert 'name = "demo"' in (root / 'pyproject.toml').read_text()
+# 3. External writes outside project_root must stay kernel-denied.
+assert (external / 'readme.txt').read_text() == 'outside'
+try:
+    (external / 'escape.py').write_text('no')
+except PermissionError:
+    pass
+else:
+    raise AssertionError('External write unexpectedly succeeded')
+# 4. Host state & account private paths must stay kernel-denied.
+for secret in (state / 'secret.json', account / '.ssh' / 'id_ed25519'):
+    try:
+        secret.read_bytes()
+    except PermissionError:
+        continue
+    raise AssertionError(f'Private path unexpectedly readable: {secret}')
+# 5. Simulate an unauthorized in-project protected-file edit so Forge hook restores it.
+(root / '.env').write_text('CORRUPTED=1\\n')
+print('PROJECT_ROOT_OK')
+"""
+    proc = launch_sandbox(
+        ['/usr/bin/python3', '-I', '-B', '-c', script, str(project), str(external), str(state), str(account)],
+        spec=spec, env={'PATH': '/usr/bin:/bin'}, cwd=project,
+    )
+    out, err = proc.communicate(timeout=20)
+    assert proc.returncode == 0, (proc.returncode, err.decode(errors='replace'))
+    assert out.strip() == b'PROJECT_ROOT_OK'
+    assert (project / 'flows' / 'demo.py').read_text() == 'X = 42\n'
+    assert 'name = "demo"' in (project / 'pyproject.toml').read_text()
+    assert not (external / 'escape.py').exists()
+    violations = enforce_protected_files(project, before_guard)
+    assert '.env' in violations
+    assert (project / '.env').read_text() == 'API_KEY=keep-me\n'
 
 
 @pytest.mark.skipif(sys.platform != 'linux', reason='Linux launch specification')

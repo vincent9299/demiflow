@@ -267,21 +267,6 @@ def native_author(root, prompt, *, binding, session, lease_fd, deadline, notify,
     return outcome
 
 
-def _cli_writable_roots(root: Path) -> tuple[str, ...]:
-    from .sandbox import FORBIDDEN_DIRECT_WRITE_ROOTS, PROTECTED_PROJECT_NAMES
-    protected = set(PROTECTED_PROJECT_NAMES) | {p[0] for p in FORBIDDEN_DIRECT_WRITE_ROOTS}
-    names: list[str] = []
-    if root.is_dir():
-        for entry in sorted(os.scandir(root), key=lambda e: e.name):
-            if entry.name.startswith('.') or entry.name in protected:
-                continue
-            if entry.is_symlink():
-                continue
-            if entry.is_dir(follow_symlinks=False) or entry.is_file(follow_symlinks=False):
-                names.append(entry.name)
-    return tuple(names)
-
-
 def register(forge, output):
     @forge.command()
     @click.option('--root', required=True, type=click.Path(path_type=Path, file_okay=False))
@@ -319,7 +304,6 @@ def register(forge, output):
             backend_readiness,
             build_development_sandbox_spec,
             default_runtime_paths,
-            writable_project_declaration,
         )
 
         def perform():
@@ -422,12 +406,11 @@ def register(forge, output):
                                 with closing(local_channel(provider, config, state.directory, owner, home=home,
                                                            deadline=deadline, request_seconds=request_seconds)) as channel:
                                     yield channel
-                        writables = _cli_writable_roots(root)
                         project_view = {
                             'root': str(Path(root).absolute()),
                             'kind': 'pipeline',
                             'phase': 'implementation',
-                            'writes': list(writables),
+                            'writes': [],
                             'protected': [],
                             'python': py_str,
                         }
@@ -448,7 +431,7 @@ def register(forge, output):
                         def author_spec():
                             return build_development_sandbox_spec(
                                 root,
-                                writes=writables,
+                                writes=(),
                                 protected=(),
                                 read_roots=raw_read_roots,
                                 extra_read_paths=extra_reads,
@@ -466,7 +449,7 @@ def register(forge, output):
                         def author_fn(*a, **kw):
                             connection = (model_connection(agent, settings, kw['deadline'], min(timeout, 3600))
                                           if settings else nullcontext())
-                            with writable_project_declaration(root), connection as channel:
+                            with connection as channel:
                                 return native_author(*a, extra_path=shims.bin, sandbox_spec=author_spec(),
                                                      control_socket=bridge.path, channel=channel, **kw)
 

@@ -50,5 +50,5 @@ demiflow forge dep install --root /project --python /project-env/bin/python [--j
 
 在 Linux 上，普通项目和外部参考目录可以列举并读取。若某一父目录同时含整棵拒读子目录，Landlock 可按路径开放普通兄弟目录，但会限制列举该父目录。启动时仅枚举拒读路径沿途的同级条目，达到准入预算时明确报错。
 
-- **开发与评审沙箱**：开发 Agent 可直接新建、编辑和保存 `pyproject.toml`，可正常 `import` 已声明包，OS 拒绝其直接写入 `packages/` 和 `.forge/`。受限会话中的 `demiflow forge dep vendor/remove` 经受控宿主通道执行并同回合生效；在当前沙箱可读范围内直接修改 `local_ref` 路径，下一条 `python`/`pytest` 即自动加载新版本。独立评审保持只读，使用脱敏且保留行号的 `pyproject.toml` 及包摘要，不展开大包正文，并将原文哈希与包树哈希纳入 `evidence_id`。
+- **开发与评审沙箱**：开发沙箱写边界由 Forge 统一限定在项目根目录与 `$TMPDIR`（项目外不可写），开发 Agent 可直接新建、编辑、原子替换和保存 `pyproject.toml` 并正常 `import` 已声明包；`packages/` 与 `.forge/` 受 Forge 保护钩子守护（macOS/容器同时只读挂载），开发助手不得直接修改，受限会话中的 `demiflow forge dep vendor/remove` 经受控宿主通道执行并同回合生效；在当前沙箱可读范围内直接修改 `local_ref` 路径，下一条 `python`/`pytest` 即自动加载新版本。独立评审保持只读，使用脱敏且保留行号的 `pyproject.toml` 及包摘要，不展开大包正文，并将原文哈希与包树哈希纳入 `evidence_id`。
 - **预览、受管运行与 Notebook**：控制服务留在宿主 Python，业务子进程由 `demiflow.forge.runtime` 按显式项目 Python 与单包精确加载器启动（同级目录不可见）。正式运行首次启动核对当前声明与环境，中断后即使外部包升级，恢复也严格读取原封存字节并校验原 Python 环境。Notebook 新内核读取最新核验版本，已打开内核保持启动时固定的快照版本，只读内核写保护继续生效。

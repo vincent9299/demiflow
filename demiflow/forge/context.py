@@ -175,6 +175,8 @@ def _runtime_environment(data):
     env = {}
     if isinstance(data.get('execution_mode'), str):
         env['execution_mode'] = data['execution_mode']
+    if isinstance(data.get('write_policy'), str):
+        env['write_policy'] = data['write_policy']
     py = data.get('python')
     env['python'] = py if isinstance(py, str) and py else None
     writes = data.get('writes')
