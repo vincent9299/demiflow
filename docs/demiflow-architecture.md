@@ -110,13 +110,13 @@ Forge 定义业务项目的目录角色、Flow 入口与参数绑定，以及工
 
 | 子模块 | 职责 | 边界 | 代码入口 |
 |---|---|---|---|
-| 依赖管理 `deps` | 解析唯一依赖声明，生成单包文件清单、字节数和树哈希。管理 A 类包的核验与显式安装、B 类包的获取与移除。 | 枚举、读取和计算摘要均服从沙箱的有效读范围。`vendor` 先调用 `check` 的单包规则，再写入受管副本。`remove` 只能删除项目内受管副本，解除 `local_ref` 保留外部原目录。 | [依赖声明与操作](../demiflow/forge/dependencies.py) |
+| 依赖管理 `deps` | 解析唯一依赖声明，生成单包文件清单、字节数和树哈希。管理 A 类包的核验与显式安装、B 类包的获取与移除。 | 枚举、读取和计算摘要均服从有效读范围。依赖内容校验统一复用 `check` 的规则。`vendor` 先校验单包，再写入受管副本。`remove` 只能删除项目内受管副本，解除 `local_ref` 保留外部原目录。 | [依赖声明与操作](../demiflow/forge/dependencies.py) |
 | 静态检查 `check` | 统一定义并提供单包内容、导入边界和项目依赖校验规则，静态检查 Flow 接线、目录角色及导入。诊断定位到声明项或源码行，并标明覆盖范围。 | `deps` 的获取操作复用单包规则，整项目诊断归 `check`。检查静态读取候选。环境核验只用显式项目 Python，缺省时标明跳过项。业务验证归项目测试，运行准入归 `runs`。 | [项目检查](../demiflow/forge/pipeline_check.py)、[工程导入规则](../demiflow/forge/project_rules.py) |
 | 作者上下文 `context`（AR.2.1） | 将用户要求、项目事实、Skill、编写及评审规范与当前公开 SDK 交给作者。提供按主题和符号查询的工程入口。 | SDK 的签名、返回契约和版本来自计算底座。宿主传递任务与事实，Forge 选择和组织工程材料，原生 Agent 负责推理与工具循环。 | [上下文查询](../demiflow/forge/context.py)、[SDK 目录](../demiflow/forge/api_reference.py)、[作者上下文拼装](../demiflow/forge/bridge/agent_context.py) |
 | Agent 受控工具 `bridge`（AR.2.2） | 定义工具发现、参数、鉴权与分发，覆盖开发会话、Notebook 助手命令和 `run.*`。 | 开发与 Notebook 工具绑定当前授权回合，宿主注入输入、登记与 Cell 执行回调。`run.*` 按请求及 attempt 身份交给 `runs` 核验项目操作权限。 | [工程工具](../demiflow/forge/bridge/tools.py)、[控制桥](../demiflow/forge/bridge/server.py)、[Notebook 命令](../demiflow/forge/bridge/notebook_commands.py)、[Run 工具](../demiflow/forge/bridge/run_tools.py) |
 | 开发与评审沙箱 `sandbox` | 依项目契约、操作角色和显式授权上限推导并执行 OS 读写边界，负责命令包装器、隔离进程与回收。 | 项目内实际可写范围归 Forge 沙箱。终端及 Workbench 传入宿主事实和授权上限。文件观察清单与依赖声明都不能扩大写权限。受限作者与只读评审复用隔离能力，分别使用各自角色允许的范围。 | [沙箱策略](../demiflow/forge/sandbox/policy.py)、[执行后端](../demiflow/forge/sandbox/backends/)、[命令包装器](../demiflow/forge/sandbox/sandbox_shims.py) |
 | 独立评审 `review` | 对照需求和固定候选审查业务实现，核对引用、覆盖范围和阻断项，签发与候选绑定的评审回执。 | 只读评审会话独立于作者。补读由 Forge 在已授权材料与预算内执行。结论交给开发交付，反馈投递及返工归原开发回合。 | [评审](../demiflow/forge/review.py)、[评审证据](../demiflow/forge/review_evidence.py) |
-| 项目 Python `runtime` | 使用终端显式传入或 Workbench 已选定的同一个项目 Python，提供受限启动、精确源码加载及依赖快照。启用项目依赖且需要业务 Python 时，配置缺失或无效须报错。 | 解释器配置由调用方持有。加载范围限于所选包，外部父目录不加入 `sys.path`。实时或封存版本由调用场景指定。Run attempt 归 `runs`，预览和 Notebook 内核生命周期归 Workbench。 | [解释器与源码加载](../demiflow/forge/runtime.py) |
+| 项目 Python `runtime` | 使用终端显式传入或 Workbench 已选定的同一个项目 Python，提供受限启动、精确源码加载及依赖快照。业务操作需要 Python 时，解释器缺失或无效须在启动前报错。 | 解释器配置由调用方持有。加载范围限于所选包，外部父目录不加入 `sys.path`。实时或封存版本由调用场景指定。Run attempt 归 `runs`，预览和 Notebook 内核生命周期归 Workbench。 | [解释器与源码加载](../demiflow/forge/runtime.py) |
 | 单项目受管运行 `runs`（AR.2.4） | 独立管理单项目的应用封存、幂等请求、槽位租约与设备配额、启停、恢复及产物和训练对账。 | 应用级 `run_id`、attempt 和控制请求由本项目的受管运行机制持有。解释器及源码加载交给 `runtime`，原生执行、检查点和提交事实归计算底座。Workbench 注入项目授权与索引回调，复用同一控制机制和 Run 记录。 | [Run 生命周期](../demiflow/forge/runs/manager.py)、[运行授权](../demiflow/forge/runs/authority.py) |
 
 #### 子模块时序图
@@ -222,9 +222,9 @@ sequenceDiagram
 
 #### 架构约束
 
-1. **项目声明与依赖。** 依赖契约由 Forge 定义在用户项目的 `pyproject.toml` 上。该文件是唯一配置，日常操作直接读取声明与磁盘，无需维护 `.forge/deps.lock.json`、执行 `dep sync/link` 或创建隐藏环境。`[project].dependencies` 声明 A 类可安装包，`[tool.demiflow.packages]` 声明 B 类源码包（`local_ref` 或 `vendored`）。旧项目按原合同处理，只有 A 类包时可用空表启用。开发 Agent 可编辑声明。受信操作者用 `dep install` 在指定 Python 中显式安装，`list/verify` 展示或核验依赖。即使其他包缺失也可进入开发会话并逐包获取。失败或并发编辑时，须保全其他变更。[依赖用法](forge-project-dependencies.md)
+1. **项目声明与依赖。** 依赖契约由 Forge 定义在用户项目的 `pyproject.toml` 上。该文件是唯一配置，日常操作直接读取声明与磁盘，无需维护 `.forge/deps.lock.json`、执行 `dep sync/link` 或创建隐藏环境。`[project].dependencies` 声明 A 类可安装包，`[tool.demiflow.packages]` 声明 B 类源码包（`local_ref` 或 `vendored`）。无依赖表的旧项目沿用原有依赖声明与共享源码合同，只有 A 类包时可用空表启用。开发 Agent 可编辑声明。受信操作者用 `dep install` 在指定 Python 中显式安装，`list/verify` 展示或核验依赖。即使其他包缺失也可进入开发会话并逐包获取。失败或并发编辑时，须保全其他变更。[依赖用法](forge-project-dependencies.md)
 2. **源码包与静态检查。** `packages/` 按需创建。包须有合法顶层名和 `__init__.py`，只接纳普通 Python 源码，忽略正常的 `__pycache__`。拒绝链接、权重、数据、归档、Notebook、二进制及反向导入业务角色或 `demiflow`（含项目限定名）。单文件上限 512 KiB，单包 256 文件、8 MiB，单项目 16 包、512 文件、16 MiB。`check` 持有供全平台复用的单包及依赖规则，定位缺失、非法、孤立或撞名的包、明确缺失的子模块和业务导入。传入项目 Python 时核验 A 类版本及环境撞名，否则列出跳过项。`TYPE_CHECKING` 和 `ImportError` 只豁免相应的缺失诊断。
-3. **上下文、权限与受控修改。** 接口用法以当前 `forge context --topic sdk` 或 `--api 符号` 的返回为依据。运行或故障信息注明来源、版本、时间及范围。终端与 Workbench 的作者收到同一套工程规范和 `demiflow forge` 用法。开发工具包括 `manage_project_layout`、`request_pipeline_review`、`read_input`、`list_registered_projects`，按当轮实际能力开放。可见性统一由沙箱控制。普通开发默认继承 OS 读权限并排除敏感路径，只读或显式收窄的回合使用限定范围。`pyproject.toml` 可写，`packages/` 与 `.forge/` 对作者物理只读。受控依赖操作保持离线，复用进程前须核对其实际授权。终端默认受限。可信本地模式须显式选择。受限作者和评审只获本回合授予的模型通道，凭据由宿主持有。[编写规范](../demiflow/forge/standards/pipeline-authoring.md) · [模型通道](../demiflow/forge/bridge/model_channel.py)
+3. **上下文、权限与受控修改。** 接口用法以当前 `forge context --topic sdk` 或 `--api 符号` 的返回为依据。运行或故障信息注明来源、版本、时间及范围。终端与 Workbench 的作者收到同一套工程规范和 `demiflow forge` 用法。开发工具包括 `manage_project_layout`、`request_pipeline_review`、`read_input`、`list_registered_projects`，按当轮实际能力开放。可见性统一由沙箱控制。普通开发默认继承 OS 读权限并排除敏感路径，只读或显式收窄的回合使用限定范围。范围内变更 `local_ref` 后，当轮下一条 Python 命令即可导入。超出显式范围时，只有宿主另行授权并启动新沙箱才可读取。`pyproject.toml` 可写，`packages/` 与 `.forge/` 对作者物理只读。受控依赖操作保持离线，复用进程前须核对其实际授权。终端默认受限。可信本地模式须显式选择。受限作者和评审只获本回合授予的模型通道，凭据由宿主持有。[编写规范](../demiflow/forge/standards/pipeline-authoring.md) · [模型通道](../demiflow/forge/bridge/model_channel.py)
 4. **AR.2.3　按需求确认交付。** 用户补充要求是需求来源，评审和工具意见是反馈。无业务改动的讨论仅在显式要求下启动独立评审。实施任务须有与需求相符的候选或已验证的既有结果。自动触发与主动请求共用策略和去重规则，缩小范围写入回执。`watch` 用于观察变更，授权须另有依据。业务测试按项目指定命令、解释器及执行授权另行取证。
 5. **固定评审候选。** 开发回合须先确认作者完成、投递及清理。清理未确认时保留原所有权。免费静态检查和付费评审各有开关，文档按适用性触发。评审独立于作者，在只读、无工具的模型会话中进行。一批目标先固定，再按受影响的 Flow、共享依赖与未归属改动分片，保留删除项、无 Git 项目、参数和工作流消费者的依据。补读、格式修复和返工共用请求、时间及字节预算，未覆盖项单列。
 6. **证据与反馈。** 评审核对业务调用和引入依赖的理由。外部包的源码展开止于包边界，只提供脱敏且保留行号的 TOML 及包名、来源类型、文件数、字节数和树哈希。覆盖完整度与已核实的阻断项分别记录。声明原文与包树哈希纳入 `evidence_id`。引用须匹配文件、前后版本、行号和摘录，空文件使用相应版本的空文件依据。结论与反馈发送前复核候选。发送身份、投递、ACK 与完成分别记录，ACK 未知时等待核实，禁止自动重发。返工沿用剩余预算，新候选保留旧回执。人工消息保留原顺序，过期反馈记录被替代、取消或待核验。两入口对同一物理项目根及父子根使用同一写入准入，保留租约及清理证据。[候选取证](../demiflow/forge/source_snapshot.py)[评审指南](../demiflow/forge/standards/pipeline-review.md)
@@ -247,7 +247,7 @@ Workbench 提供项目登记、交互界面、开发会话、运行编排和数�
 | Web 界面（AR.1.3） | 提供 D1.9 导航、四个 tab、共享选择、响应式布局与错误提示。 | 算子图、源码、配置、历史和日志按用户选择的对象读取。 | [Web 入口](../demiflow/workbench/web/app.js) |
 | 通用展示组件（AR.1.4） | 依固定引用呈现表格、消息、文本、代码、JSON、HTML、图像和音视频，处理不可信内容、分页、缩放、展开与订阅。 | 答案、数据修改与运行控制由对应领域持有。 | [展示组件](../demiflow/workbench/web/workbench-presentation.js) |
 | 开发会话 `conversations`（AR.3.5） | 持有会话 HTTP、SQLite 记录、Provider 传输、人工队列和回合恢复，向 Forge 传递用户要求、投递、作者完成和清理事实。 | 工具与反馈返回原作者，重连按当前回合核权。工程上下文、工具契约、沙箱策略和交付回执归 Forge。会话、算子内 Agent 和 Pipeline attempt 各自使用原身份。 | [会话调度](../demiflow/workbench/conversations/worker.py)、[会话存储](../demiflow/workbench/conversations/store.py) |
-| 预览与算子图 `worker / graph` | 固定表输入，调度只读业务子进程构图，关联算子、参数与源码。 | 控制进程使用宿主 Python。启用依赖机制时由 `forge.runtime` 以指定的业务 Python 启动，在解释器启动配置生效前施加隔离。既有 `shared-sources.json` 与 `DEMIFLOW_WORKBENCH_SHARED_SOURCES` 沿原合同使用，包名冲突须报告。 | [预览调度](../demiflow/workbench/worker.py)、[算子图](../demiflow/workbench/graph/preview.py) |
+| 预览与算子图 `worker / graph` | 固定表输入，调度只读业务子进程构图，关联算子、参数与源码。 | 控制进程使用宿主 Python。业务预览统一通过 `forge.runtime` 使用显式项目 Python，在解释器启动配置生效前施加隔离。既有 `shared-sources.json` 与 `DEMIFLOW_WORKBENCH_SHARED_SOURCES` 沿原合同使用，包名冲突须报告。 | [预览调度](../demiflow/workbench/worker.py)、[算子图](../demiflow/workbench/graph/preview.py) |
 | 受管运行入口 `runs` | 持有多项目授权、历史索引接入、HTTP 与视图，展示单项目 Run 的状态、attempt、产物与历史。 | Web 和 `demiflow workbench run` 按入口核验调用方的当前授权，将单项目操作统一委托 `forge.runs`。运行 supervisor 使用宿主 Python。 | [运行授权](../demiflow/workbench/runs/authority.py)、[产品视图](../demiflow/workbench/runs/view.py) |
 | 工作流编排 `workflows` | 管理本项目或跨项目工作流的 `wf_run_id`、编排 attempt、节点依赖和子 Run 引用。 | 子 Run 按其项目授权提交，下游按上游实际提交的产物读取。查询、日志和停止各自核权。 | [工作流调度](../demiflow/workbench/workflows/manager.py)、[项目解析](../demiflow/workbench/workflows/resolver.py) |
 | Notebook `notebooks`（AR.3.3） | 持有文档与已存输出、内核连接、Cell 派发和中断。文档版本、内核代际及单格执行各有身份，历史输出可独立读取。 | 文档可脱离内核保存重开。Jupyter Server 使用宿主 Python。内核通过 `forge.runtime` 使用项目 Python 与固定包快照，调用 `forge.sandbox` 施加只读隔离。助手命令契约归 `forge.bridge`，实际 Cell 执行归 Workbench。 | [Notebook 服务](../demiflow/workbench/notebooks/service.py)、[内核启动](../demiflow/workbench/notebooks/kernel_launcher.py)、[Cell 操作](../demiflow/workbench/notebooks/cell_commands.py)、[分析会话](../demiflow/workbench/analysis/sessions.py) |
@@ -282,7 +282,7 @@ sequenceDiagram
     end
 ```
 
-##### 启用项目依赖的只读预览
+##### 只读预览与算子图
 
 ```mermaid
 sequenceDiagram
@@ -292,8 +292,8 @@ sequenceDiagram
     participant G as graph 只读业务子进程
     participant E as SDK 计划编译
     U->>W: 选择入口及参数，请求预览
-    W->>W: 固定表输入并绑定已核验的项目依赖
-    W->>R: 按显式项目 Python 和精确来源启动
+    W->>W: 固定表输入，按声明取得适用的依赖清单
+    W->>R: 使用显式项目 Python 和本次源码绑定
     R->>G: 在隔离范围内运行构图入口
     G->>E: 捕获首个 action 并编译
     E-->>G: 返回计划和算子信息
@@ -347,15 +347,19 @@ sequenceDiagram
     U->>N: 保存或重开 Notebook 文档
     N-->>U: 返回文档和已保存的输出
     opt 启动新内核
-        opt 已启用项目依赖
-            N->>R: 核验项目 Python 与依赖版本，固定 B 类字节
-            R-->>N: 返回解释器身份、源码快照和加载配置
+        N->>R: 核验显式项目 Python
+        R-->>N: 返回解释器身份和启动配置
+        opt 声明了 B 类源码包
+            N->>R: 核验依赖并固定本内核的 B 类字节
+            R-->>N: 返回源码快照和加载配置
         end
         opt 只读内核
             N->>S: 指定内核角色和允许的访问范围
             S-->>N: 返回内核隔离启动条件
         end
-        N->>K: 按本内核访问模式启动项目 Python，连接本次内核
+        N->>R: 按本内核访问模式请求启动
+        R->>K: 以显式项目 Python 加载本内核绑定
+        K-->>N: 建立当前内核连接
     end
     U->>N: 对当前内核派发 Cell 或请求中断
     N->>K: 按当前连接和请求身份执行或中断
@@ -389,7 +393,7 @@ sequenceDiagram
 
 1. **项目与授权。** 产品持有目录引用、解释器选择和操作授权。Web 入口按服务权限上限及当前项目授权核验，命令行的本机授权绑定显式项目根。开发沙箱的有效读写范围归 Forge，项目登记不引入额外只读白名单或摘要审批。
 2. **会话与交付。** Workbench 管理 UI、HTTP、Provider 传输和人工队列，按原作者、回合与授权投递反馈。工程上下文、Agent 工具契约及工程交付回执由 Forge 提供。会话是否结束、候选是否通过检查和需求是否交付分别记录。
-3. **预览、Run 与编排。** 预览在只读业务子进程构图，控制进程使用宿主 Python。声明启用项目依赖时，业务 Python 在其启动配置生效前接受隔离。既有 `shared-sources.json` 和 `DEMIFLOW_WORKBENCH_SHARED_SOURCES` 继续可用，名称冲突须报告。单项目 Run 的应用封存、请求回执与可重建的 `.forge/index.sqlite` 归 Forge，原生执行账本和提交归引擎。索引发布中断后可按项目记录重建。工作流独立持有编排 attempt 和节点对子 Run 的引用，严格运行准入须显式启用。[项目索引](../demiflow/forge/index.py)
+3. **预览、Run 与编排。** 预览在只读业务子进程构图，控制进程使用宿主 Python。所有业务子进程通过 `forge.runtime` 使用显式项目 Python，受限执行须在解释器启动配置生效前施加隔离。既有 `shared-sources.json` 和 `DEMIFLOW_WORKBENCH_SHARED_SOURCES` 继续可用，名称冲突须报告。单项目 Run 的应用封存、请求回执与可重建的 `.forge/index.sqlite` 归 Forge，原生执行账本和提交归引擎。索引发布中断后可按项目记录重建。工作流独立持有编排 attempt 和节点对子 Run 的引用，严格运行准入须显式启用。[项目索引](../demiflow/forge/index.py)
 4. **交互分析。** Notebook 文档可脱离内核保存重开，现有内核延迟导入仍取启动时快照。新内核核对当前环境与包。SQL、Case 与媒体分别核验自己的权限、预算和版本，读取既有结果服从对应数据或材料的访问授权。Cell 执行及媒体读取的实际退出由其所属领域确认。
 5. **共用宿主能力。** Notebook、媒体、开发会话可复用 Forge 的进程身份及宿主配置。各领域持有自己的事务、权限和生命周期。[进程身份](../demiflow/forge/process.py) · [宿主分配配置](../demiflow/forge/host_partition.py)
 
@@ -738,5 +742,5 @@ AR 编号标在对应职责的正文。以下索引用于按用户可见结果�
 - **项目依赖。** 在真实的受限终端开发回合与工作台回合分别验证从缺包开始编辑声明、逐包获取、直接切换已授权的 `local_ref`、下一条 `pytest` 导入，以及回合结束后的持久性。用同一项目核对静态检查、独立评审、预览和运行。已打开的只读 Notebook 内核在延迟导入时仍取启动时的源码，新内核读取最新核验版本。首次依赖主路径交付用 CPU 样本验证训练回调与 Predictor 都能导入 B 类包并读取封存权重。后续变更按实际受影响的消费路径选取回归。沿旧样本分别验证首次启动、原封存恢复、历史只读和应当拒绝的环境漂移。
 - **开发沙箱与上下文。** 从空项目分别启动受限终端作者与工作台作者。核对首轮能发现 `forge context` 并查询同一个公开接口。用作者实际使用的编辑操作，在当轮通过 Forge 建立的获准目录内写入源码，在根目录新建并原子保存 `pyproject.toml`，确认受保护文件仍只读。平台临时文件的清理不得制造变更或误触发评审，用户保存的空文件须保留。复用热进程时重新核验实际可写范围。
 - **Agent 工程闭环。** 对比只讨论、已验证现有实现、要求实施却未能交付的回合，分别核对回执、实际候选和评审调用。两个入口均覆盖原会话反馈与复核、取消、失联、重启、人工队列、候选变化和历史保护。用归属守卫核对开发 MCP、Notebook 助手及 `run.*` 契约、上下文和沙箱的调用方向。
-- **独立受管 Run。** 在没有 Workbench 的进程中从准备、启动走到非最终检查点，停止后升级外部包，再在新进程按原 `run_id` 续跑，核对原封存、已有提交和后续 attempt。工作台随后打开同一项目可查到该 Run，索引发布中断后可恢复。
+- **独立 Forge。** 在禁止导入 Workbench 的进程中走通依赖管理、静态检查、独立评审与开发沙箱。单项目受管 Run 从准备、启动走到非最终检查点，停止后升级外部包，再在新进程按原 `run_id` 续跑，核对原封存、已有提交和后续 attempt。工作台随后打开同一项目可查到该 Run，索引发布中断后可恢复。
 - **引擎与发布。** 按涉及的 D 条款、运行时序及历史兼容承诺选择固定提交的守卫和行为验证。记录具体调用点、用途、证据和裁定。源码交付、合流、发布和预览分别留存实际结果，遵循仓库发版规范。[发版规范](repository-rules.md)
