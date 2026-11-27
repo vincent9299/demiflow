@@ -79,9 +79,12 @@ _ROUTINGS = frozenset({"forward", "hash", "rebalance", "broadcast", "target"})
 _DURABILITIES = frozenset({"ephemeral", "durable"})
 _EFFECT_KINDS = frozenset({"lookup", "reserve", "mark_sent", "confirm", "unknown", "release_unsent"})
 _EFFECT_STATUSES = frozenset({"absent", "reserved", "sent", "confirmed", "unknown", "unsent"})
-_EVENT_KINDS = frozenset({
-    "ready", "progress", "cut", "effect", "artifact", "reserve", "read_action",
-    "read_configuration", "restrict_recovery", "check_grant", "queue", "native_request", "failure", "eoi", "closed", "data", "ack", "idle", "terminal", "checkpoint_wait",
+JOURNAL_EVENT_KINDS = frozenset({
+    "effect", "artifact", "reserve", "read_action", "read_configuration", "check_grant",
+    "restrict_recovery", "queue", "native_request",
+})
+_EVENT_KINDS = JOURNAL_EVENT_KINDS | frozenset({
+    "ready", "progress", "cut", "failure", "eoi", "closed", "data", "ack", "idle", "terminal", "checkpoint_wait",
 })
 _COMPLETIONS = frozenset({"source_exhausted", "terminal_satisfied", "cancelled", "incomplete"})
 _PRODUCER_STATUSES = frozenset({"succeeded", "failed", "cancelled", "unknown"})

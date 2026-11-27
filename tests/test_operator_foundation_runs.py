@@ -143,6 +143,12 @@ def test_managed_model_results_evidence_and_read_only_access(root, server):
     reference = values[0]['call']['request_ref']
     saved = runs.evidence(root, result['run_id'], reference)
     assert saved['document']['payload']['model'] == 'mock-model'
+    from demiflow.execution.host.inspection import RunReadError, read_run_call_evidence
+    target = runs.directory(root, result['run_id'])
+    with pytest.raises(RunReadError, match='different run'):
+        read_run_call_evidence(target, 'another-run', reference)
+    with pytest.raises(KeyError):
+        runs.evidence(root, result['run_id'], {**reference, 'attempt': 2})
     assert len(server['requests']) == 2  # reads cannot replay requests
     with pytest.raises(ValueError, match='declared'):
         runs.evidence(root, result['run_id'], {**reference, 'journal_path': str(root/'other.sqlite')})

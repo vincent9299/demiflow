@@ -121,11 +121,13 @@ failed = [row for row in rows if row.get("error")]
 
 - `error_output="column"`: when the call or the validation of a row fails, the original row is kept with `{category, type, detail, call}` in this column and no result column. For example, `category` is `invalid_response` when both attempts return invalid JSON.
 - `call_output="column"`: attaches information about the call to every row, including duration, HTTP status, model name and request identifier.
-- `when=function`: rows for which it returns `False` pass through unchanged without a model call.
+- `when=function`: rows for which it returns `False` pass through unchanged without a model call. For a single-route `map_prompt_async` node, a `when` predicate can provide `snapshot_state()` and `restore_state(value)` to preserve state across rows. The engine drains the node’s pending calls before a checkpoint and restores the predicate together with its input progress. Continuing from an older checkpoint that omitted an already-used predicate’s state requires a new run.
 - `catch=(ExceptionType, ...)`: matching rows are dropped and counted.
 - Transport errors are never retried silently. A managed model service that fails to start ends the whole node, even with `error_output`.
 
 ## Interruption and recovery
+
+When another stage fails, the engine closes admission for new model requests. Calls already sent may finish within their request deadline and the run’s cleanup grace period. Their responses are recorded in the original journal for replay. The action reports the original failure.
 
 Inside a `RunContext`, progress is committed in batches at the downstream `materialize()`: on resume, confirmed inputs are skipped and their committed results returned; a batch that was not confirmed may call the model again. See "Resume where you stopped" in the README.
 
