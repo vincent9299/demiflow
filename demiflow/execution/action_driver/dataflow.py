@@ -1640,11 +1640,13 @@ class DataflowExecution:
         shares = dict(getattr(self, '_source_credit_shares', {})) if publishing else {}
         if sources and not publishing:
             # An owner reserves max_row_bytes before reading its next record. A
-            # default window is a target: each share carries that reservation on
-            # top, so an owner reads until its actual bytes pass the share and any
-            # row within max_row_bytes fits. A declared window stays a hard bound.
-            headroom = (0 if 'checkpoint_unconfirmed_bytes' in self._action.context.explicit_limits
-                        else self._bounds.max_row_bytes)
+            # run created with a target default window gives each share that
+            # reservation on top, so an owner reads until its actual bytes pass
+            # the share and any row within max_row_bytes fits. A declared window,
+            # and the window of a run recorded before targets, stay hard bounds.
+            context = self._action.context
+            headroom = (0 if 'checkpoint_unconfirmed_bytes' in context.explicit_limits
+                        or context.unconfirmed_window != 'target' else self._bounds.max_row_bytes)
             count = min(len(sources), rows, size)
             offset = self._source_credit_rotation % len(sources)
             owners = (sources[offset:] + sources[:offset])[:count]
