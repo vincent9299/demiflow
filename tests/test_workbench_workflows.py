@@ -259,22 +259,35 @@ def test_http_workflow_checks_the_source_grant_of_the_child_project(tmp_path, mo
     console.set_python(registry, producer_id, expected=digest, python=sys.executable)
     server = WorkspaceServer(registry=registry, enable_runs=True)
     calls = {}
+    producer_grant = [str(producer)]
+
     def scope(workspace, root):
         calls[workspace] = Path(root)
-        return ((str(producer),) if workspace == producer_id else None), ()
+        return (tuple(producer_grant) if workspace == producer_id else None), ()
+
+    def submit(action, **fields):
+        request = Request(f'http://127.0.0.1:{server.server_port}/api/workspaces/{host_id}/workflow-{action}',
+                          data=json.dumps(fields).encode(),
+                          headers={'Content-Type': 'application/json', 'X-Forge-Token': server.token})
+        with urlopen(request, timeout=30) as reply:
+            return json.load(reply)
+
     monkeypatch.setattr(server, 'source_scope', scope)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        body = json.dumps(dict(path=workflow, inputs=dict(multiplier=1))).encode()
-        request = Request(f'http://127.0.0.1:{server.server_port}/api/workspaces/{host_id}/workflow-start',
-                          data=body, headers={'Content-Type': 'application/json', 'X-Forge-Token': server.token})
-        with urlopen(request, timeout=30) as reply:
-            started = json.load(reply)
+        started = submit('start', path=workflow, inputs=dict(multiplier=1))
         final = _wait_workflow(host, started['wf_run_id'])
         assert calls == {producer_id: producer, host_id: host}
         assert final['status'] == 'failed', final['status']
         assert 'host-authorized read scope' in str(final['nodes']['gen_synth']['error'])
+        producer_grant.append(str(package))
+        calls.clear()
+        submit('resume', wf_run_id=started['wf_run_id'])
+        resumed = _wait_workflow(host, started['wf_run_id'], attempt=2)
+        assert calls == {producer_id: producer, host_id: host}
+        assert resumed['status'] == 'succeeded', resumed['error']
+        assert all(node['status'] == 'succeeded' for node in resumed['nodes'].values())
     finally:
         server.shutdown()
         server.server_close()

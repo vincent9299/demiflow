@@ -66,7 +66,7 @@ def _cancel_active_children(manifest: dict, active: dict[str, dict], cancelled_s
                                detail={'child_run_id': child_run_id, 'message': str(exc)[:512]})
 
 
-def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int, *, bindings=None) -> int:
+def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int, *, host_bindings=None) -> int:
     run_dir = store.run_directory(host_root, wf_run_id)
     manifest = store.read_manifest(run_dir)
     spec = manifest['spec']
@@ -260,7 +260,7 @@ def run_attempt(host_root: Path | str, wf_run_id: str, attempt: int, *, bindings
 
                         # Try launching this node!
                         try:
-                            submit_auth = (from_bootstrap(bindings[proj_alias], target_root) if bindings is not None
+                            submit_auth = (from_bootstrap(host_bindings[proj_alias], target_root) if host_bindings is not None
                                            else build_target_authority(manifest, proj_alias, 'run_submit'))
                             started = None
 
@@ -501,7 +501,7 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         sys.stderr.write('invalid attempt number\n')
         return 2
-    return run_attempt(host_root, wf_run_id, attempt, bindings=bindings)
+    return run_attempt(host_root, wf_run_id, attempt, host_bindings=bindings)
 
 
 if __name__ == '__main__':
