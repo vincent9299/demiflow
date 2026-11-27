@@ -125,6 +125,8 @@ queue_depth × 单行输入大小 + concurrency × (单行输入 + 单行输出 
 
 平台的 `fetch` 节点是例外：它只往行里追加一份回执，回执在发出前已按 `max_receipt_bytes`（不超过 16KiB）检查过，对象本体留在对象存储里。所以每个 fetch 调用只预留这份回执可能占的大小（约 160KiB），默认额度下声明的并发都能同时进行。`search_web` 返回的整行在提交时按 1MiB（且不超过行上限）检查过，每个调用预留约 10MiB。输出超出预留时，节点报 `BUDGET_EXCEEDED`，不会多占内存。
 
+`map_prompt_async` 也可以这样缩小预留：没有设 `call_output`、`error_output`、多轮 environment，回复不是图片，且不经离线回放、codex、CLI 或私有缓存时，节点追加的只是一个解析结果，它来自受 `max_response_bytes` 限制的回复。每个调用预留约 10 ×（`max_response_bytes` + 64KiB）。默认 8MiB 时这超过一整行，预留不变；把 `max_response_bytes` 设小（例如 `65536`），默认额度下并发 32 的调用都能同时进行。
+
 默认 256MB 额度、16MB 行上限下，“读取 → 一个并发节点 → 输出”这样的管道最多同时进行 7 个调用，管道里同时运行的阶段越多，能同时进行的调用越少。想要更多，调大 `memory_bytes`，或者调小行上限 `max_row_bytes`。实际达到的并发见下面统计里的 `call_concurrency`。
 
 单行很大时，降低 `concurrency` 和 `queue_depth`，或者先投影出需要的字段。平台不会替任意 Python 对象设置内存硬上限。
