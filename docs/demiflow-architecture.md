@@ -85,12 +85,14 @@ sequenceDiagram
     end
     opt 有阻断且仍有预算
         F-->>A: 经原开发入口向同一作者会话投递反馈
-        A->>F: 交付修正后的新候选
+        A->>F: 经原入口交付修正后的候选
         F->>F: 按原范围复核
     end
-    F-->>A: 返回工程交付回执
-    opt 工作台承载本轮
-        F-->>W: 返回回执供展示
+    alt 工作台承载本轮
+        F-->>W: 返回工程交付回执
+        W-->>U: 展示候选结论与覆盖范围
+    else 终端开发
+        F-->>U: 向终端返回工程交付回执
     end
     opt 用户另行授权真实验证或运行
         alt Workbench 提交受管 Pipeline
@@ -144,6 +146,7 @@ sequenceDiagram
     H->>S: 提供项目、作者角色和授权上限
     S-->>H: 返回受限启动配置
     H->>A: 启动或续接受限会话，交付用户任务
+    Note over C,A: Forge 编写指引向作者提供首轮 forge context 查询入口
     A->>C: 调用 forge context 查询项目规范和 SDK 目录
     C-->>A: 返回适用规范和公开符号索引
     A->>C: 按任务选定符号，调用 forge context 查询接口
